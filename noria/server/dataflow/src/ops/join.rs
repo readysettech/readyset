@@ -400,11 +400,11 @@ impl Ingredient for Join {
         // two queries. We'll do this by sorting the batch by our join key.
         let mut rs: Vec<_> = rs.into();
         {
-            let cmp = |a: &Record, b: &Record| {
+            rs.sort_by(|a: &Record, b: &Record| {
                 a.indices(from_key.clone())
-                    .cmp(&b.indices(from_key.clone()))
-            };
-            rs.sort_by(cmp);
+                    .unwrap_or_default()
+                    .cmp(&b.indices(from_key.clone()).unwrap_or_default())
+            });
         }
 
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
@@ -412,7 +412,9 @@ impl Ingredient for Join {
         while at != rs.len() {
             let mut old_right_count = None;
             let mut new_right_count = None;
-            let prev_join_key = rs[at].indices(from_key.clone());
+            let prev_join_key = rs[at]
+                .indices(from_key.clone())
+                .map_err(|_| ReadySetError::InvalidRecordLength)?;
 
             if from == *self.right && self.kind == JoinType::Left {
                 let rc = self
@@ -455,7 +457,11 @@ impl Ingredient for Join {
                     // (possibly several times over for each a).
                     at = rs[at..]
                         .iter()
-                        .position(|r| r.indices(from_key.clone()) != prev_join_key)
+                        .position(|r| {
+                            r.indices(from_key.clone())
+                                .into_iter()
+                                .any(|k| k != prev_join_key)
+                        })
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
                     continue;
@@ -478,7 +484,11 @@ impl Ingredient for Join {
                 let from = at;
                 at = rs[at..]
                     .iter()
-                    .position(|r| r.indices(from_key.clone()) != prev_join_key)
+                    .position(|r| {
+                        r.indices(from_key.clone())
+                            .into_iter()
+                            .any(|k| k != prev_join_key)
+                    })
                     .map(|p| at + p)
                     .unwrap_or_else(|| rs.len());
 
@@ -523,7 +533,12 @@ impl Ingredient for Join {
                 // records that existed *before* this batch of records was processed so we know
                 // whether or not to generate +/- NULL rows.
                 if let Some(mut old_rc) = old_right_count {
-                    while at != rs.len() && rs[at].indices(from_key.clone()) == prev_join_key {
+                    while at != rs.len()
+                        && rs[at]
+                            .indices(from_key.clone())
+                            .map_err(|_| ReadySetError::InvalidRecordLength)?
+                            == prev_join_key
+                    {
                         if rs[at].is_positive() {
                             old_rc -= 1
                         } else {
@@ -546,7 +561,11 @@ impl Ingredient for Join {
                     let start = at;
                     at = rs[at..]
                         .iter()
-                        .position(|r| r.indices(from_key.clone()) != prev_join_key)
+                        .position(|r| {
+                            r.indices(from_key.clone())
+                                .into_iter()
+                                .any(|k| k != prev_join_key)
+                        })
                         .map(|p| at + p)
                         .unwrap_or_else(|| rs.len());
 
@@ -575,7 +594,11 @@ impl Ingredient for Join {
                 // we didn't find the end above, so find it now
                 at = rs[at..]
                     .iter()
-                    .position(|r| r.indices(from_key.clone()) != prev_join_key)
+                    .position(|r| {
+                        r.indices(from_key.clone())
+                            .into_iter()
+                            .any(|k| k != prev_join_key)
+                    })
                     .map(|p| at + p)
                     .unwrap_or_else(|| rs.len());
             }
