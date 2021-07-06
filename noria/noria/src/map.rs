@@ -69,25 +69,13 @@ impl<'a, V> Entry<'a, V> {
 impl<'a, V> VacantEntry<'a, V> {
     pub fn insert(self, value: V) -> &'a mut V {
         self.map.insert(self.index, value);
-        &mut self.map[self.index]
+        self.map.get_mut(self.index).unwrap()
     }
 }
 
 impl<'a, V> OccupiedEntry<'a, V> {
-    pub fn get(&self) -> &V {
-        &self.map[self.index]
-    }
-    pub fn get_mut(&mut self) -> &mut V {
-        &mut self.map[self.index]
-    }
     pub fn into_mut(self) -> &'a mut V {
-        &mut self.map[self.index]
-    }
-    pub fn insert(&mut self, value: V) -> V {
-        self.map.insert(self.index, value).unwrap()
-    }
-    pub fn remove(self) -> V {
-        self.map.remove(self.index).unwrap()
+        self.map.get_mut(self.index).unwrap()
     }
 }
 
@@ -107,7 +95,9 @@ impl<T> Map<T> {
             }
         }
 
-        let old = self.things[i].take();
+        let old = self.things.get_mut(i).and_then(|e| e.take());
+        // This is safe since we are already checking that `i` is less that the length of `self.things`.
+        #[allow(clippy::indexing_slicing)]
         self.things[i] = Some(value);
         if old.is_none() {
             self.n += 1;
@@ -136,7 +126,7 @@ impl<T> Map<T> {
             return None;
         }
 
-        let ret = self.things[i].take();
+        let ret = self.things.get_mut(i).and_then(|e| e.take());
         if ret.is_some() {
             self.n -= 1;
         }
@@ -223,13 +213,12 @@ impl<T> FromIterator<(LocalNodeIndex, T)> for Map<T> {
         // we therefore sort them first
         let sorted: BTreeMap<_, _> = iter.into_iter().map(|(ni, v)| (ni.id(), v)).collect();
 
-        // no entries -- fine
-        if sorted.is_empty() {
-            return Map::default();
-        }
-
         let n = sorted.len();
-        let end = sorted.keys().last().unwrap() + 1;
+        let end = match sorted.keys().last() {
+            Some(k) => k + 1,
+            // no entries -- fine
+            None => return Map::default(),
+        };
         let mut vs = Vec::with_capacity(end);
         for (i, v) in sorted {
             for _ in vs.len()..i {
