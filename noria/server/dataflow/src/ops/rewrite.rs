@@ -228,7 +228,13 @@ mod tests {
         let src = g.add_base("src", &["id", "rw_col"]);
         let signal = g.add_base("signal", &["id"]);
 
-        let rw = Rewrite::new(src.as_global(), signal.as_global(), 1, "NONE".into(), 0);
+        let rw = Rewrite::new(
+            src.as_global(),
+            signal.as_global(),
+            1,
+            "NONE".try_into().unwrap(),
+            0,
+        );
 
         g.set_op("rewrite", &["rw0", "rw1"], rw, false);
         (g, src, signal)
@@ -238,13 +244,13 @@ mod tests {
     fn it_works() {
         let (mut rw, src, should_rw) = setup();
 
-        let src_a1 = vec![1.into(), "a".into()];
-        let src_b2 = vec![2.into(), "b".into()];
+        let src_a1 = vec![1.into(), "a".try_into().unwrap()];
+        let src_b2 = vec![2.into(), "b".try_into().unwrap()];
 
         let rw1 = vec![1.into()];
         let rw2 = vec![2.into()];
 
-        let result = vec![(vec![1.into(), "a".into()], true)].into();
+        let result = vec![(vec![1.into(), "a".try_into().unwrap()], true)].into();
         rw.seed(src, src_a1.clone());
         let rs = rw.one_row(src, src_a1, false);
         assert_eq!(rs, result);
@@ -253,15 +259,15 @@ mod tests {
         rw.one_row(should_rw, rw2, false);
 
         // forward [2, b] to src; should be rewritten and produce [2, "NONE"].
-        let result = vec![(vec![2.into(), "NONE".into()], true)].into();
+        let result = vec![(vec![2.into(), "NONE".try_into().unwrap()], true)].into();
         rw.seed(src, src_b2.clone());
         let rs = rw.one_row(src, src_b2, false);
         assert_eq!(rs, result);
 
         // forward 1 to signal; should produce Positive([1, "NONE"]) and Negative([1, "a"]).
         let result = vec![
-            (vec![1.into(), "a".into()], false),
-            (vec![1.into(), "NONE".into()], true),
+            (vec![1.into(), "a".try_into().unwrap()], false),
+            (vec![1.into(), "NONE".try_into().unwrap()], true),
         ]
         .into();
         rw.seed(should_rw, rw1.clone());

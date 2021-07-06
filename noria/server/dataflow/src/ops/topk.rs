@@ -419,13 +419,13 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
-        let r10b: Vec<DataType> = vec![6.into(), "z".into(), 10.into()];
-        let r10c: Vec<DataType> = vec![7.into(), "z".into(), 10.into()];
+        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        let r10b: Vec<DataType> = vec![6.into(), "z".try_into().unwrap(), 10.into()];
+        let r10c: Vec<DataType> = vec![7.into(), "z".try_into().unwrap(), 10.into()];
 
         g.narrow_one_row(r12, true);
         g.narrow_one_row(r11, true);
@@ -443,11 +443,11 @@ mod tests {
     fn it_forwards() {
         let (mut g, _) = setup(false);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
+        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12].into());
@@ -471,11 +471,11 @@ mod tests {
     fn it_caches_when_full() {
         let (mut g, _) = setup(false);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
+        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         // fill topk
         g.narrow_one_row(r12, true);
@@ -504,11 +504,11 @@ mod tests {
     fn it_caches_when_full_reversed() {
         let (mut g, _) = setup(true);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), 15.into()];
+        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
         // fill topk
         g.narrow_one_row(r12.clone(), true);
@@ -539,11 +539,31 @@ mod tests {
 
         let (mut g, _) = setup(true);
 
-        let r12: Vec<DataType> = vec![1.into(), "z".into(), DataType::try_from(-12.123).unwrap()];
-        let r10: Vec<DataType> = vec![2.into(), "z".into(), DataType::try_from(0.0431).unwrap()];
-        let r11: Vec<DataType> = vec![3.into(), "z".into(), DataType::try_from(-0.082).unwrap()];
-        let r5: Vec<DataType> = vec![4.into(), "z".into(), DataType::try_from(5.601).unwrap()];
-        let r15: Vec<DataType> = vec![5.into(), "z".into(), DataType::try_from(-15.9).unwrap()];
+        let r12: Vec<DataType> = vec![
+            1.into(),
+            "z".try_into().unwrap(),
+            DataType::try_from(-12.123).unwrap(),
+        ];
+        let r10: Vec<DataType> = vec![
+            2.into(),
+            "z".try_into().unwrap(),
+            DataType::try_from(0.0431).unwrap(),
+        ];
+        let r11: Vec<DataType> = vec![
+            3.into(),
+            "z".try_into().unwrap(),
+            DataType::try_from(-0.082).unwrap(),
+        ];
+        let r5: Vec<DataType> = vec![
+            4.into(),
+            "z".try_into().unwrap(),
+            DataType::try_from(5.601).unwrap(),
+        ];
+        let r15: Vec<DataType> = vec![
+            5.into(),
+            "z".try_into().unwrap(),
+            DataType::try_from(-15.9).unwrap(),
+        ];
 
         let a = g.narrow_one_row(r12.clone(), true);
         assert_eq!(a, vec![r12].into());
@@ -614,12 +634,12 @@ mod tests {
         let (mut g, _) = setup(false);
         let ni = g.node().local_addr();
 
-        let r1: Vec<DataType> = vec![1.into(), "z".into(), 10.into()];
-        let r2: Vec<DataType> = vec![2.into(), "z".into(), 10.into()];
-        let r3: Vec<DataType> = vec![3.into(), "z".into(), 10.into()];
-        let r4: Vec<DataType> = vec![4.into(), "z".into(), 5.into()];
-        let r4a: Vec<DataType> = vec![4.into(), "z".into(), 10.into()];
-        let r4b: Vec<DataType> = vec![4.into(), "z".into(), 11.into()];
+        let r1: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 10.into()];
+        let r2: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r3: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 10.into()];
+        let r4: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r4a: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 10.into()];
+        let r4b: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 11.into()];
 
         g.narrow_one_row(r1, true);
         g.narrow_one_row(r2, true);

@@ -75,7 +75,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::Hash;
 use std::iter::{self, FromIterator};
@@ -114,7 +114,11 @@ fn value_of_type(typ: &SqlType) -> DataType {
         | SqlType::Longtext
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::Varbinary(_) => "a".into(),
+        | SqlType::Varbinary(_) => {
+            // It is safe to transform an "a" String into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a").unwrap()
+        }
         SqlType::Int(_) => 1i32.into(),
         SqlType::Bigint(_) => 1i64.into(),
         SqlType::UnsignedInt(_) => 1u32.into(),
@@ -149,34 +153,46 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
     match typ {
         SqlType::Char(x) | SqlType::Varchar(x) => {
             let length: usize = rng.gen_range(1..*x).into();
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Tinyblob | SqlType::Tinytext => {
             // 2^8 bytes
             let length: usize = rng.gen_range(1..256);
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Blob | SqlType::Text => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Mediumblob | SqlType::Mediumtext => {
             // 2^24 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Longblob | SqlType::Longtext => {
             // 2^32 bytes
             // Currently capped at 65536 as these are generated in memory.
             let length: usize = rng.gen_range(1..65536);
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Binary(x) | SqlType::Varbinary(x) => {
             // Convert to bytes and generate string data to match.
             let length: usize = rng.gen_range(1..*x / 8).into();
-            "a".repeat(length).into()
+            // It is safe to transform an String of consecutive a's into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from("a".repeat(length)).unwrap()
         }
         SqlType::Int(_) => rng.gen::<i32>().into(),
         SqlType::Bigint(_) => rng.gen::<i64>().into(),
@@ -241,7 +257,11 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         | SqlType::Longtext
         | SqlType::Text
         | SqlType::Binary(_)
-        | SqlType::Varbinary(_) => format!("{}", idx).into(),
+        | SqlType::Varbinary(_) => {
+            // It is safe to transform an u32 String representation into a DataType.
+            #[allow(clippy::unwrap_used)]
+            DataType::try_from(format!("{}", idx)).unwrap()
+        }
         SqlType::Int(_) => (idx as i32).into(),
         SqlType::Bigint(_) => (idx as i64).into(),
         SqlType::UnsignedInt(_) => (idx as u32).into(),

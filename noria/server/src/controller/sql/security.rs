@@ -7,6 +7,7 @@ use nom_sql::parser as sql_parser;
 use nom_sql::SqlQuery;
 use noria::ReadySetError;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 #[derive(Clone, Debug)]
 pub(super) struct Universe {
@@ -20,7 +21,9 @@ pub(super) struct Universe {
 impl Default for Universe {
     fn default() -> Universe {
         Universe {
-            id: "".into(),
+            // It is safe to transform an empty String into a DataType.
+            #[allow(clippy::unwrap_used)]
+            id: DataType::try_from("").unwrap(),
             from_group: None,
             member_of: HashMap::default(),
             row_policies: HashMap::default(),

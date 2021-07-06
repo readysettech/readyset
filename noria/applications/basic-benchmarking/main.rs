@@ -5,6 +5,7 @@ use mysql::*;
 use noria::consensus::LocalAuthority;
 use noria::{Builder, DataType, Handle};
 use rand::Rng;
+use std::convert::TryFrom;
 use std::result;
 use std::time;
 use vec1::vec1;
@@ -332,7 +333,11 @@ impl BenchmarkApplication {
                 1 => "F",
                 _ => "G",
             };
-            employees.push(vec![i.into(), age.into(), gender.into()]);
+            employees.push(vec![
+                i.into(),
+                age.into(),
+                DataType::try_from(gender).unwrap(),
+            ]);
             employees_mysql.push(Employee {
                 emp_no: i,
                 age,

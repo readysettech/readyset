@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn process_when_nothing_matches_returns_nothing() {
         let mut g = setup(Like);
-        let res = g.narrow_one_row(vec!["abc".into(), 2.into()], false);
+        let res = g.narrow_one_row(vec!["abc".try_into().unwrap(), 2.into()], false);
         assert!(res.is_empty());
     }
 }

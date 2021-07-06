@@ -209,6 +209,7 @@ mod test {
     use crate::prelude::LocalNodeIndex;
     use common::Link;
     use common::Tag;
+    use std::convert::TryInto;
     use vec1::vec1;
 
     #[test]
@@ -245,22 +246,25 @@ mod test {
             let mut records = Vec::new();
             records.push(Record::Positive(vec![
                 11.into(),
-                "text1-1".into(),
-                "text1-2".into(),
+                "text1-1".try_into().unwrap(),
+                "text1-2".try_into().unwrap(),
                 12.into(),
-                "text1-3".into(),
+                "text1-3".try_into().unwrap(),
             ]));
             records.push(Record::Positive(vec![
                 21.into(),
-                "text2-1".into(),
-                "text2-2".into(),
+                "text2-1".try_into().unwrap(),
+                "text2-2".try_into().unwrap(),
                 22.into(),
-                "text2-3".into(),
+                "text2-3".try_into().unwrap(),
             ]));
             let mut packet = create_packet(records);
             let ni = NodeIndex::new(3);
 
-            let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
+            let key = KeyComparison::Equal(vec1![
+                "not_present_in_any_record".try_into().unwrap(),
+                12.into()
+            ]);
             let mut keys = HashSet::new();
             keys.insert(key);
 
@@ -282,25 +286,28 @@ mod test {
             let mut records = Vec::new();
             let record = Record::Positive(vec![
                 11.into(),
-                "text1-1".into(),
-                "text1-2".into(),
+                "text1-1".try_into().unwrap(),
+                "text1-2".try_into().unwrap(),
                 12.into(),
-                "text1-3".into(),
+                "text1-3".try_into().unwrap(),
             ]);
             records.push(record);
             records.push(Record::Positive(vec![
                 21.into(),
-                "text2-1".into(),
-                "text2-2".into(),
+                "text2-1".try_into().unwrap(),
+                "text2-2".try_into().unwrap(),
                 22.into(),
-                "text2-3".into(),
+                "text2-3".try_into().unwrap(),
             ]));
             let mut packet = create_packet(records);
             let column_indexes = vec![1usize, 3usize];
 
             let ni = NodeIndex::new(3);
 
-            let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
+            let key = KeyComparison::Equal(vec1![
+                "not_present_in_any_record".try_into().unwrap(),
+                12.into()
+            ]);
             let mut keys = HashSet::new();
             keys.insert(key);
 
@@ -330,18 +337,18 @@ mod test {
             let mut records = Vec::new();
             let record = Record::Positive(vec![
                 11.into(),
-                "text1-1".into(),
-                "text1-2".into(),
+                "text1-1".try_into().unwrap(),
+                "text1-2".try_into().unwrap(),
                 12.into(),
-                "text1-3".into(),
+                "text1-3".try_into().unwrap(),
             ]);
             records.push(record.clone());
             records.push(Record::Positive(vec![
                 21.into(),
-                "text2-1".into(),
-                "text2-2".into(),
+                "text2-1".try_into().unwrap(),
+                "text2-2".try_into().unwrap(),
                 22.into(),
-                "text2-3".into(),
+                "text2-3".try_into().unwrap(),
             ]));
             let mut packet = create_packet(records);
             let link = *packet.link_mut();
@@ -349,7 +356,7 @@ mod test {
 
             let ni = NodeIndex::new(3);
 
-            let key = KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]);
+            let key = KeyComparison::Equal(vec1!["text1-1".try_into().unwrap(), 12.into()]);
             let mut keys = HashSet::new();
             keys.insert(key);
 
@@ -388,18 +395,18 @@ mod test {
             let mut records = Vec::new();
             let record = Record::Positive(vec![
                 11.into(),
-                "text1-1".into(),
-                "text1-2".into(),
+                "text1-1".try_into().unwrap(),
+                "text1-2".try_into().unwrap(),
                 12.into(),
-                "text1-3".into(),
+                "text1-3".try_into().unwrap(),
             ]);
             records.push(record.clone());
             records.push(Record::Positive(vec![
                 21.into(),
-                "text2-1".into(),
-                "text2-2".into(),
+                "text2-1".try_into().unwrap(),
+                "text2-2".try_into().unwrap(),
                 22.into(),
-                "text2-3".into(),
+                "text2-3".try_into().unwrap(),
             ]));
             let mut packet = create_packet(records);
             let link = *packet.link_mut();
@@ -458,7 +465,10 @@ mod test {
         #[test]
         fn process_replay_no_keyed_by() {
             let mut keys = HashSet::new();
-            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            keys.insert(KeyComparison::Equal(vec1![
+                "text1-1".try_into().unwrap(),
+                12.into()
+            ]));
             let mut packet = create_packet(Some(keys));
             let ni = NodeIndex::new(3);
 
@@ -500,7 +510,10 @@ mod test {
         #[test]
         fn process_partial_equal_keys() {
             let mut keys = HashSet::new();
-            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            keys.insert(KeyComparison::Equal(vec1![
+                "text1-1".try_into().unwrap(),
+                12.into()
+            ]));
 
             let col_indexes = vec![1usize, 3usize];
 
@@ -561,7 +574,10 @@ mod test {
         #[test]
         fn process_evict_all_keys() {
             let mut keys = HashSet::new();
-            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            keys.insert(KeyComparison::Equal(vec1![
+                "text1-1".try_into().unwrap(),
+                12.into()
+            ]));
 
             let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
@@ -604,11 +620,14 @@ mod test {
         #[test]
         fn process_evict_some_keys() {
             let mut keys = HashSet::new();
-            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            keys.insert(KeyComparison::Equal(vec1![
+                "text1-1".try_into().unwrap(),
+                12.into()
+            ]));
 
             let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
-            let key = KeyComparison::Equal(vec1!["text2-2".into(), 22.into()]);
+            let key = KeyComparison::Equal(vec1!["text2-2".try_into().unwrap(), 22.into()]);
             keys.insert(key.clone());
 
             let column_indexes = vec![1usize, 3usize];
@@ -663,7 +682,10 @@ mod test {
         #[test]
         fn process_evict_no_keys() {
             let mut keys = HashSet::new();
-            keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
+            keys.insert(KeyComparison::Equal(vec1![
+                "text1-1".try_into().unwrap(),
+                12.into()
+            ]));
 
             let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();

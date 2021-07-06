@@ -860,11 +860,6 @@ impl ControllerInner {
         Ok(r)
     }
 
-    #[cfg(test)]
-    pub(crate) fn graph(&self) -> &Graph {
-        &self.ingredients
-    }
-
     /// Get a map of all known input nodes, mapping the name of the node to that node's
     /// [index](NodeIndex)
     ///

@@ -129,7 +129,7 @@ mod tests {
                 filters.unwrap_or_else(|| Expression::Op {
                     left: Box::new(Expression::Column(1)),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal("a".into())),
+                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
                 }),
             ),
             materialized,
@@ -143,13 +143,13 @@ mod tests {
 
         let mut left: Vec<DataType>;
 
-        left = vec![1.into(), "a".into()];
+        left = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".into()];
+        left = vec![1.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![2.into(), "a".into()];
+        left = vec![2.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
@@ -159,13 +159,13 @@ mod tests {
 
         let mut left: Vec<DataType>;
 
-        left = vec![1.into(), "a".into()];
+        left = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".into()];
+        left = vec![1.into(), "b".try_into().unwrap()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "a".into()];
+        left = vec![2.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
@@ -183,23 +183,23 @@ mod tests {
                 right: Box::new(Expression::Op {
                     left: Box::new(Expression::Column(1)),
                     op: BinaryOperator::Equal,
-                    right: Box::new(Expression::Literal("a".into())),
+                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
                 }),
             }),
         );
 
         let mut left: Vec<DataType>;
 
-        left = vec![1.into(), "a".into()];
+        left = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
-        left = vec![1.into(), "b".into()];
+        left = vec![1.into(), "b".try_into().unwrap()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "a".into()];
+        left = vec![2.into(), "a".try_into().unwrap()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
-        left = vec![2.into(), "b".into()];
+        left = vec![2.into(), "b".try_into().unwrap()];
         assert!(g.narrow_one_row(left, false).is_empty());
     }
 
@@ -231,7 +231,7 @@ mod tests {
         let mut many = Vec::new();
 
         for i in 0..10 {
-            many.push(vec![i.into(), "a".into()]);
+            many.push(vec![i.into(), "a".try_into().unwrap()]);
         }
 
         assert_eq!(g.narrow_one(many.clone(), false), many.into());
@@ -251,7 +251,7 @@ mod tests {
                 right: Box::new(Expression::Op {
                     left: Box::new(Expression::Column(1)),
                     op: BinaryOperator::NotEqual,
-                    right: Box::new(Expression::Literal("a".into())),
+                    right: Box::new(Expression::Literal("a".try_into().unwrap())),
                 }),
             }),
         );
@@ -259,19 +259,19 @@ mod tests {
         let mut left: Vec<DataType>;
 
         // both conditions match (2 <= 2, "b" != "a")
-        left = vec![2.into(), "b".into()];
+        left = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
 
         // second condition fails ("a" != "a")
-        left = vec![2.into(), "a".into()];
+        left = vec![2.into(), "a".try_into().unwrap()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         // first condition fails (3 <= 2)
-        left = vec![3.into(), "b".into()];
+        left = vec![3.into(), "b".try_into().unwrap()];
         assert!(g.narrow_one_row(left.clone(), false).is_empty());
 
         // both conditions match (1 <= 2, "b" != "a")
-        left = vec![1.into(), "b".into()];
+        left = vec![1.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 
@@ -289,7 +289,7 @@ mod tests {
         let mut left: Vec<DataType>;
         left = vec![2.into(), 2.into()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
-        left = vec![2.into(), "b".into()];
+        left = vec![2.into(), "b".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left, false), Records::default());
     }
 }

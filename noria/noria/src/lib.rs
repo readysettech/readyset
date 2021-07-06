@@ -26,6 +26,8 @@
 //!
 //! ```no_run
 //! # use noria::*;
+//! # use std::convert::TryInto;
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     let zookeeper_addr = "127.0.0.1:2181";
@@ -46,7 +48,7 @@
 //!     let title = "I love Soup";
 //!     let url = "https://pdos.csail.mit.edu";
 //!     article
-//!         .insert(vec![aid.into(), title.into(), url.into()])
+//!         .insert(vec![aid.into(), title.try_into().unwrap(), url.try_into().unwrap()])
 //!         .await
 //!         .unwrap();
 //!
@@ -68,7 +70,7 @@
 //!     // looking up article 42 should yield the article we inserted with a vote count of 1
 //!     assert_eq!(
 //!         awvc.lookup(&[aid.into()], true).await.unwrap(),
-//!         vec![vec![DataType::from(aid), title.into(), url.into(), 1.into()]]
+//!         vec![vec![DataType::from(aid), title.try_into().unwrap(), url.try_into().unwrap(), 1.into()]]
 //!     );
 //! }
 //! ```

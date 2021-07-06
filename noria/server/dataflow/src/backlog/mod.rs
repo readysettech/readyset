@@ -463,10 +463,11 @@ impl SingleReadHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryInto;
 
     #[test]
     fn store_works() {
-        let a = vec![1.into(), "a".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
 
@@ -524,8 +525,8 @@ mod tests {
 
     #[test]
     fn minimal_query() {
-        let a = vec![1.into(), "a".into()];
-        let b = vec![1.into(), "b".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
+        let b = vec![1.into(), "b".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
@@ -544,9 +545,9 @@ mod tests {
 
     #[test]
     fn non_minimal_query() {
-        let a = vec![1.into(), "a".into()];
-        let b = vec![1.into(), "b".into()];
-        let c = vec![1.into(), "c".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
+        let b = vec![1.into(), "b".try_into().unwrap()];
+        let c = vec![1.into(), "c".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
@@ -573,8 +574,8 @@ mod tests {
 
     #[test]
     fn absorb_negative_immediate() {
-        let a = vec![1.into(), "a".into()];
-        let b = vec![1.into(), "b".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
+        let b = vec![1.into(), "b".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
@@ -594,8 +595,8 @@ mod tests {
 
     #[test]
     fn absorb_negative_later() {
-        let a = vec![1.into(), "a".into()];
-        let b = vec![1.into(), "b".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
+        let b = vec![1.into(), "b".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
         w.add(vec![Record::Positive(a.clone())]);
@@ -616,9 +617,9 @@ mod tests {
 
     #[test]
     fn absorb_multi() {
-        let a = vec![1.into(), "a".into()];
-        let b = vec![1.into(), "b".into()];
-        let c = vec![1.into(), "c".into()];
+        let a = vec![1.into(), "a".try_into().unwrap()];
+        let b = vec![1.into(), "b".try_into().unwrap()];
+        let c = vec![1.into(), "c".try_into().unwrap()];
 
         let (r, mut w) = new(2, &[0]);
         w.add(vec![

@@ -1,4 +1,5 @@
 use noria::ControllerHandle;
+use std::convert::TryInto;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
@@ -35,7 +36,11 @@ async fn main() {
         let url = "http://pdos.csail.mit.edu";
         let mut articles = srv.table("Article").await.unwrap();
         articles
-            .insert(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![
+                aid.try_into().unwrap(),
+                title.try_into().unwrap(),
+                url.try_into().unwrap(),
+            ])
             .await
             .unwrap();
     }

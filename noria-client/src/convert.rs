@@ -1,6 +1,6 @@
 use msql_srv::{Value, ValueInner};
 use nom_sql::{Literal, Real};
-use noria::{DataType, ReadySetError};
+use noria::{DataType, ReadySetError, ReadySetResult};
 
 use arccstr::ArcCStr;
 use std::convert::TryFrom;
@@ -13,10 +13,10 @@ pub(crate) trait ToDataType {
 const TINYTEXT_WIDTH: usize = 15;
 
 impl ToDataType for Literal {
-    fn into_datatype(self) -> Result<DataType, ReadySetError> {
+    fn into_datatype(self) -> ReadySetResult<DataType> {
         Ok(match self {
             Literal::Null => DataType::None,
-            Literal::String(b) => b.into(),
+            Literal::String(b) => DataType::try_from(b)?,
             Literal::Blob(b) => {
                 let len = b.len();
                 if len <= TINYTEXT_WIDTH {

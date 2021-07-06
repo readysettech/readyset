@@ -561,6 +561,7 @@ fn addtime_times(time1: &MysqlTime, time2: &MysqlTime) -> MysqlTime {
 mod tests {
     use super::*;
     use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+    use std::convert::TryInto;
     use std::sync::Arc;
     use test_strategy::proptest;
     use Expression::*;
@@ -569,8 +570,8 @@ mod tests {
     fn eval_column() {
         let expr = Column(1);
         assert_eq!(
-            expr.eval(&[1.into(), "two".into()]).unwrap(),
-            Cow::Owned("two".into())
+            expr.eval(&[1.into(), "two".try_into().unwrap()]).unwrap(),
+            Cow::Owned("two".try_into().unwrap())
         )
     }
 
@@ -578,7 +579,7 @@ mod tests {
     fn eval_literal() {
         let expr = Literal(1.into());
         assert_eq!(
-            expr.eval(&[1.into(), "two".into()]).unwrap(),
+            expr.eval(&[1.into(), "two".try_into().unwrap()]).unwrap(),
             Cow::Owned(1.into())
         )
     }
@@ -604,7 +605,8 @@ mod tests {
     fn eval_cast() {
         let expr = Cast(Box::new(Column(0)), SqlType::Int(32));
         assert_eq!(
-            expr.eval(&["1".into(), "2".into()]).unwrap(),
+            expr.eval(&["1".try_into().unwrap(), "2".try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(1i32.into())
         );
     }
@@ -627,42 +629,58 @@ mod tests {
         let src = "Atlantic/Cape_Verde";
         let target = "Asia/Kathmandu";
         assert_eq!(
-            expr.eval(&[datetime.into(), src.into(), target.into()])
-                .unwrap(),
+            expr.eval(&[
+                datetime.into(),
+                src.try_into().unwrap(),
+                target.try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(expected.into())
         );
-        assert_eq!(
-            expr.eval(&[datetime.into(), "invalid timezone".into(), target.into()])
-                .unwrap(),
-            Cow::Owned(DataType::None)
-        );
-        assert_eq!(
-            expr.eval(&[datetime.into(), src.into(), "invalid timezone".into()])
-                .unwrap(),
-            Cow::Owned(DataType::None)
-        );
-
-        let string_datetime = datetime.to_string();
-        assert_eq!(
-            expr.eval(&[string_datetime.clone().into(), src.into(), target.into()])
-                .unwrap(),
-            Cow::Owned(expected.into())
-        );
-
         assert_eq!(
             expr.eval(&[
-                string_datetime.clone().into(),
-                "invalid timezone".into(),
-                target.into()
+                datetime.into(),
+                "invalid timezone".try_into().unwrap(),
+                target.try_into().unwrap()
             ])
             .unwrap(),
             Cow::Owned(DataType::None)
         );
         assert_eq!(
             expr.eval(&[
-                string_datetime.into(),
-                src.into(),
-                "invalid timezone".into()
+                datetime.into(),
+                src.try_into().unwrap(),
+                "invalid timezone".try_into().unwrap()
+            ])
+            .unwrap(),
+            Cow::Owned(DataType::None)
+        );
+
+        let string_datetime = datetime.to_string();
+        assert_eq!(
+            expr.eval(&[
+                string_datetime.clone().try_into().unwrap(),
+                src.try_into().unwrap(),
+                target.try_into().unwrap()
+            ])
+            .unwrap(),
+            Cow::Owned(expected.into())
+        );
+
+        assert_eq!(
+            expr.eval(&[
+                string_datetime.clone().try_into().unwrap(),
+                "invalid timezone".try_into().unwrap(),
+                target.try_into().unwrap()
+            ])
+            .unwrap(),
+            Cow::Owned(DataType::None)
+        );
+        assert_eq!(
+            expr.eval(&[
+                string_datetime.try_into().unwrap(),
+                src.try_into().unwrap(),
+                "invalid timezone".try_into().unwrap()
             ])
             .unwrap(),
             Cow::Owned(DataType::None)
@@ -677,14 +695,21 @@ mod tests {
         let date = NaiveDate::from_ymd(2021, 3, 22); // Monday
 
         assert_eq!(expr.eval(&[date.into()]).unwrap(), expected);
-        assert_eq!(expr.eval(&[date.to_string().into()]).unwrap(), expected);
+        assert_eq!(
+            expr.eval(&[date.to_string().try_into().unwrap()]).unwrap(),
+            expected
+        );
 
         let datetime = NaiveDateTime::new(
             date, // Monday
             NaiveTime::from_hms(18, 8, 00),
         );
         assert_eq!(expr.eval(&[datetime.into()]).unwrap(), expected);
-        assert_eq!(expr.eval(&[datetime.to_string().into()]).unwrap(), expected);
+        assert_eq!(
+            expr.eval(&[datetime.to_string().try_into().unwrap()])
+                .unwrap(),
+            expected
+        );
     }
 
     #[test]
@@ -724,7 +749,8 @@ mod tests {
             Cow::Owned(expected.into())
         );
         assert_eq!(
-            expr.eval(&[datetime.to_string().into()]).unwrap(),
+            expr.eval(&[datetime.to_string().try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(expected.into())
         );
         assert_eq!(
@@ -732,11 +758,12 @@ mod tests {
             Cow::Owned(expected.into())
         );
         assert_eq!(
-            expr.eval(&[datetime.date().to_string().into()]).unwrap(),
+            expr.eval(&[datetime.date().to_string().try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(expected.into())
         );
         assert_eq!(
-            expr.eval(&["invalid date".into()]).unwrap(),
+            expr.eval(&["invalid date".try_into().unwrap()]).unwrap(),
             Cow::Owned(DataType::None)
         );
     }
@@ -762,8 +789,11 @@ mod tests {
             ))))
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 false, 47, 0, 0, 0
             ))))
@@ -783,8 +813,11 @@ mod tests {
             ))))
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 49, 0, 0, 0
             ))))
@@ -795,8 +828,11 @@ mod tests {
             Cow::Owned(DataType::None)
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::None)
         );
         let param1 = NaiveTime::from_hms(5, 13, 33);
@@ -807,8 +843,11 @@ mod tests {
             ))))
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 0
             ))))
@@ -816,13 +855,15 @@ mod tests {
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 false, 1, 0, 0, 400_000
             ))))
         );
         assert_eq!(
-            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
@@ -830,13 +871,15 @@ mod tests {
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 false, 1, 0, 0, 400_000
             ))))
         );
         assert_eq!(
-            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
@@ -874,8 +917,11 @@ mod tests {
             Cow::Owned(DataType::None)
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::None)
         );
         let param2 = NaiveTime::from_hms(4, 13, 33);
@@ -887,8 +933,11 @@ mod tests {
             )))
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
                 NaiveDate::from_ymd(2003, 10, 12),
                 NaiveTime::from_hms(9, 27, 6),
@@ -903,8 +952,11 @@ mod tests {
             )))
         );
         assert_eq!(
-            expr.eval(&[param1.to_string().into(), param2.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param1.to_string().try_into().unwrap(),
+                param2.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Timestamp(NaiveDateTime::new(
                 NaiveDate::from_ymd(2003, 10, 12),
                 NaiveTime::from_hms(2, 1, 58),
@@ -918,8 +970,11 @@ mod tests {
             ))))
         );
         assert_eq!(
-            expr.eval(&[param2.to_string().into(), param1.to_string().into()])
-                .unwrap(),
+            expr.eval(&[
+                param2.to_string().try_into().unwrap(),
+                param1.to_string().try_into().unwrap()
+            ])
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 7, 1, 9, 123_000
             ))))
@@ -927,13 +982,15 @@ mod tests {
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
         );
         assert_eq!(
-            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
@@ -941,13 +998,15 @@ mod tests {
 
         let param2 = "10000.4";
         assert_eq!(
-            expr.eval(&[param1.into(), param2.into()]).unwrap(),
+            expr.eval(&[param1.try_into().unwrap(), param2.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
         );
         assert_eq!(
-            expr.eval(&[param2.into(), param1.into()]).unwrap(),
+            expr.eval(&[param2.try_into().unwrap(), param1.try_into().unwrap()])
+                .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_hmsus(
                 true, 1, 0, 0, 400_000
             ))))
@@ -955,7 +1014,11 @@ mod tests {
 
         let param2 = 3.57;
         assert_eq!(
-            dbg!(expr.eval(&[param1.into(), DataType::try_from(param2).unwrap()])).unwrap(),
+            dbg!(expr.eval(&[
+                param1.try_into().unwrap(),
+                DataType::try_from(param2).unwrap()
+            ]))
+            .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64
             ))))
@@ -1068,18 +1131,18 @@ mod tests {
                 op: BinaryOperator::Equal,
                 right: Box::new(Expression::Literal(1.into())),
             }),
-            then_expr: Box::new(Expression::Literal("yes".into())),
-            else_expr: Box::new(Expression::Literal("no".into())),
+            then_expr: Box::new(Expression::Literal("yes".try_into().unwrap())),
+            else_expr: Box::new(Expression::Literal("no".try_into().unwrap())),
         };
 
         assert_eq!(
             expr.eval(&[1.into()]).unwrap().as_ref(),
-            &DataType::from("yes")
+            &DataType::try_from("yes").unwrap()
         );
 
         assert_eq!(
             expr.eval(&[8.into()]).unwrap().as_ref(),
-            &DataType::from("no")
+            &DataType::try_from("no").unwrap()
         );
     }
 

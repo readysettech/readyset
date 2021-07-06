@@ -295,6 +295,7 @@ mod tests {
     use Expression::{Column, Literal, Op};
 
     use crate::ops;
+    use std::convert::TryFrom;
 
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -302,7 +303,10 @@ mod tests {
 
         let permutation = if all { vec![0, 1, 2] } else { vec![2, 0] };
         let additional = if add {
-            Some(vec![DataType::from("hello"), DataType::Int(42)])
+            Some(vec![
+                DataType::try_from("hello").unwrap(),
+                DataType::Int(42),
+            ])
         } else {
             None
         };
@@ -378,10 +382,20 @@ mod tests {
     fn it_forwards_some() {
         let mut p = setup(false, false, true);
 
-        let rec = vec!["a".into(), "b".into(), "c".into()];
+        let rec = vec![
+            "a".try_into().unwrap(),
+            "b".try_into().unwrap(),
+            "c".try_into().unwrap(),
+        ];
         assert_eq!(
             p.narrow_one_row(rec, false),
-            vec![vec!["c".into(), "a".into(), "hello".into(), 42.into()]].into()
+            vec![vec![
+                "c".try_into().unwrap(),
+                "a".try_into().unwrap(),
+                "hello".try_into().unwrap(),
+                42.into()
+            ]]
+            .into()
         );
     }
 
@@ -389,10 +403,19 @@ mod tests {
     fn it_forwards_all() {
         let mut p = setup(false, true, false);
 
-        let rec = vec!["a".into(), "b".into(), "c".into()];
+        let rec = vec![
+            "a".try_into().unwrap(),
+            "b".try_into().unwrap(),
+            "c".try_into().unwrap(),
+        ];
         assert_eq!(
             p.narrow_one_row(rec, false),
-            vec![vec!["a".into(), "b".into(), "c".into()]].into()
+            vec![vec![
+                "a".try_into().unwrap(),
+                "b".try_into().unwrap(),
+                "c".try_into().unwrap()
+            ]]
+            .into()
         );
     }
 
@@ -400,14 +423,18 @@ mod tests {
     fn it_forwards_all_w_literals() {
         let mut p = setup(false, true, true);
 
-        let rec = vec!["a".into(), "b".into(), "c".into()];
+        let rec = vec![
+            "a".try_into().unwrap(),
+            "b".try_into().unwrap(),
+            "c".try_into().unwrap(),
+        ];
         assert_eq!(
             p.narrow_one_row(rec, false),
             vec![vec![
-                "a".into(),
-                "b".into(),
-                "c".into(),
-                "hello".into(),
+                "a".try_into().unwrap(),
+                "b".try_into().unwrap(),
+                "c".try_into().unwrap(),
+                "hello".try_into().unwrap(),
                 42.into(),
             ]]
             .into()

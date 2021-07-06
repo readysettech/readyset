@@ -76,11 +76,11 @@ pub async fn populate_addresses(backend: &mut Backend, data_location: &str) -> u
             let addr_co_id = i32::from_str(fields[6]).unwrap();
             records.push(vec![
                 addr_id.into(),
-                addr_street1.into(),
-                addr_street2.into(),
-                addr_city.into(),
-                addr_state.into(),
-                addr_zip.into(),
+                DataType::try_from(addr_street1).unwrap(),
+                DataType::try_from(addr_street2).unwrap(),
+                DataType::try_from(addr_city).unwrap(),
+                DataType::try_from(addr_state).unwrap(),
+                DataType::try_from(addr_zip).unwrap(),
                 addr_co_id.into(),
             ]);
         }
@@ -116,11 +116,11 @@ pub async fn populate_authors(
             let a_bio = fields[5];
             records.push(vec![
                 a_id.into(),
-                a_fname.into(),
-                a_lname.into(),
-                a_mname.into(),
+                DataType::try_from(a_fname).unwrap(),
+                DataType::try_from(a_lname).unwrap(),
+                DataType::try_from(a_mname).unwrap(),
                 a_dob.into(),
-                a_bio.into(),
+                DataType::try_from(a_bio).unwrap(),
             ]);
         }
         s.clear();
@@ -157,11 +157,11 @@ pub async fn populate_cc_xacts(
             let cx_co_id = i32::from_str(fields[8]).unwrap();
             records.push(vec![
                 cx_o_id.into(),
-                cx_type.into(),
-                cx_num.into(),
-                cx_name.into(),
+                DataType::try_from(cx_type)?,
+                DataType::try_from(cx_num)?,
+                DataType::try_from(cx_name)?,
                 cx_expire.into(),
-                cx_auth_id.into(),
+                DataType::try_from(cx_auth_id)?,
                 DataType::try_from(cx_amt)?,
                 cx_xact_date.into(),
                 cx_co_id.into(),
@@ -193,9 +193,9 @@ pub async fn populate_countries(
             let co_currency = fields[3];
             records.push(vec![
                 co_id.into(),
-                co_name.into(),
+                DataType::try_from(co_name)?,
                 DataType::try_from(co_exchange)?,
-                co_currency.into(),
+                DataType::try_from(co_currency)?,
             ]);
         }
         s.clear();
@@ -239,22 +239,22 @@ pub async fn populate_customers(
             let c_data = fields[16];
             records.push(vec![
                 c_id.into(),
-                c_uname.into(),
-                c_passwd.into(),
-                c_fname.into(),
-                c_lname.into(),
+                DataType::try_from(c_uname)?,
+                DataType::try_from(c_passwd)?,
+                DataType::try_from(c_fname)?,
+                DataType::try_from(c_lname)?,
                 c_addr_id.into(),
-                c_phone.into(),
-                c_email.into(),
+                DataType::try_from(c_phone)?,
+                DataType::try_from(c_email)?,
                 c_since.into(),
                 c_last_login.into(),
-                c_login.into(),
-                c_expiration.into(),
+                DataType::try_from(c_login)?,
+                DataType::try_from(c_expiration)?,
                 DataType::try_from(c_discount)?,
                 DataType::try_from(c_balance)?,
                 DataType::try_from(c_ytd_pmt)?,
                 c_birthdate.into(),
-                c_data.into(),
+                DataType::try_from(c_data)?,
             ]);
         }
         s.clear();
@@ -303,27 +303,27 @@ pub async fn populate_items(
             let i_dimensions = fields[21];
             records.push(vec![
                 i_id.into(),
-                i_title.into(),
+                DataType::try_from(i_title)?,
                 i_a_id.into(),
                 i_pub_date.into(),
-                i_publisher.into(),
-                i_subject.into(),
-                i_desc.into(),
+                DataType::try_from(i_publisher)?,
+                DataType::try_from(i_subject)?,
+                DataType::try_from(i_desc)?,
                 i_related1.into(),
                 i_related2.into(),
                 i_related3.into(),
                 i_related4.into(),
                 i_related5.into(),
-                i_thumbnail.into(),
-                i_image.into(),
+                DataType::try_from(i_thumbnail)?,
+                DataType::try_from(i_image)?,
                 DataType::try_from(i_srp)?,
-                i_cost.into(),
+                DataType::try_from(i_cost)?,
                 i_avail.into(),
                 i_stock.into(),
-                i_isbn.into(),
+                DataType::try_from(i_isbn)?,
                 i_page.into(),
-                i_backing.into(),
-                i_dimensions.into(),
+                DataType::try_from(i_backing)?,
+                DataType::try_from(i_dimensions)?,
             ]);
         }
         s.clear();
@@ -368,11 +368,11 @@ pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> Read
                 DataType::try_from(o_sub_total)?,
                 DataType::try_from(o_tax)?,
                 DataType::try_from(o_total)?,
-                o_ship_type.into(),
+                DataType::try_from(o_ship_type)?,
                 o_ship_date.into(),
                 o_bill_addr_id.into(),
                 o_ship_addr_id.into(),
-                o_status.into(),
+                DataType::try_from(o_status)?,
             ]);
         }
         s.clear();
@@ -410,7 +410,7 @@ pub async fn populate_order_line(
                 ol_i_id.into(),
                 ol_qty.into(),
                 DataType::try_from(ol_discount)?,
-                ol_comments.into(),
+                DataType::try_from(ol_comments)?,
             ]);
         }
         s.clear();

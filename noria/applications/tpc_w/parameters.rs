@@ -1,6 +1,7 @@
 use noria::DataType;
 use rand::prelude::*;
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
@@ -182,7 +183,8 @@ impl SampleKeys {
                 let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let i_id = i32::from_str(fields[0]).unwrap();
                 let i_subject = fields[5];
-                self.item.push(vec![i_id.into(), i_subject.into()]);
+                self.item
+                    .push(vec![i_id.into(), DataType::try_from(i_subject).unwrap()]);
             }
             s.clear();
         }
@@ -198,7 +200,8 @@ impl SampleKeys {
                 let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let c_id = i32::from_str(fields[0]).unwrap();
                 let c_uname = fields[1];
-                self.customer.push(vec![c_id.into(), c_uname.into()]);
+                self.customer
+                    .push(vec![c_id.into(), DataType::try_from(c_uname).unwrap()]);
             }
             s.clear();
         }
@@ -229,7 +232,8 @@ impl SampleKeys {
             {
                 let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
                 let co_name = fields[1];
-                self.country.push(vec![co_name.into()]);
+                self.country
+                    .push(vec![DataType::try_from(co_name).unwrap()]);
             }
             s.clear();
         }

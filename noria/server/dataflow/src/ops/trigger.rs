@@ -49,24 +49,25 @@ impl Trigger {
         }
     }
 
-    fn trigger(&self, executor: &mut dyn Executor, ids: Vec<DataType>) {
+    fn trigger(&self, executor: &mut dyn Executor, ids: Vec<DataType>) -> ReadySetResult<()> {
         if ids.is_empty() {
-            return;
+            return Ok(());
         }
 
         match self.trigger {
             TriggerEvent::GroupCreation { ref group } => {
-                self.create_universes(
-                    executor,
-                    ids.iter().map(|gid| {
-                        let mut group_context: HashMap<String, DataType> = HashMap::new();
-                        group_context.insert(String::from("id"), gid.clone());
-                        group_context.insert(String::from("group"), group.clone().into());
-                        group_context
-                    }),
-                );
+                let mut requests = Vec::new();
+                for gid in ids.iter() {
+                    let mut group_context: HashMap<String, DataType> = HashMap::new();
+                    group_context.insert(String::from("id"), gid.clone());
+                    group_context.insert(String::from("group"), group.clone().try_into()?);
+                    requests.push(group_context);
+                }
+
+                self.create_universes(executor, requests);
             }
         }
+        Ok(())
     }
 }
 
@@ -119,7 +120,7 @@ impl Ingredient for Trigger {
             .cloned()
             .collect();
 
-        self.trigger(executor, keys);
+        self.trigger(executor, keys)?;
 
         Ok(ProcessingResult {
             results: rs,
@@ -180,7 +181,7 @@ mod tests {
     fn it_forwards() {
         let mut g = setup(true);
 
-        let left: Vec<DataType> = vec![1.into(), "a".into()];
+        let left: Vec<DataType> = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(g.narrow_one_row(left.clone(), false), vec![left].into());
     }
 

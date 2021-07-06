@@ -3,7 +3,8 @@
 
 use clap::{value_t_or_exit, App, Arg};
 use hdrhistogram::Histogram;
-use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters};
+use noria::{Builder, DataType, DurabilityMode, FrontierStrategy, PersistenceParameters};
+use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 
 const RECIPE: &str = "# base tables
@@ -20,6 +21,7 @@ QUERY ArticleWithVoteCount: SELECT Article.id, title, VoteCount.votes AS votes \
             ON (Article.id = VoteCount.article_id) WHERE Article.id = ?;";
 
 #[tokio::main]
+#[allow(clippy::unwrap_used)]
 async fn main() {
     let args = App::new("purge-stress")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
@@ -92,19 +94,35 @@ async fn main() {
         let mut r = g.view("ArticleWithVoteCount").await.unwrap();
 
         // seed articles
-        a.insert(vec![1.into(), "Hello world #1".into()])
-            .await
-            .unwrap();
-        a.insert(vec![2.into(), "Hello world #2".into()])
-            .await
-            .unwrap();
+        a.insert(vec![
+            1.into(),
+            DataType::try_from("Hello world #1").unwrap(),
+        ])
+        .await
+        .unwrap();
+        a.insert(vec![
+            2.into(),
+            DataType::try_from("Hello world #2").unwrap(),
+        ])
+        .await
+        .unwrap();
 
         // seed votes
-        v.insert(vec![1.into(), "a".into()]).await.unwrap();
-        v.insert(vec![2.into(), "a".into()]).await.unwrap();
-        v.insert(vec![1.into(), "b".into()]).await.unwrap();
-        v.insert(vec![2.into(), "c".into()]).await.unwrap();
-        v.insert(vec![2.into(), "d".into()]).await.unwrap();
+        v.insert(vec![1.into(), DataType::try_from("a").unwrap()])
+            .await
+            .unwrap();
+        v.insert(vec![2.into(), DataType::try_from("a").unwrap()])
+            .await
+            .unwrap();
+        v.insert(vec![1.into(), DataType::try_from("b").unwrap()])
+            .await
+            .unwrap();
+        v.insert(vec![2.into(), DataType::try_from("c").unwrap()])
+            .await
+            .unwrap();
+        v.insert(vec![2.into(), DataType::try_from("d").unwrap()])
+            .await
+            .unwrap();
 
         // now for the benchmark itself.
         // we want to alternately read article 1 and 2, knowing that reading one will purge the other.
@@ -113,11 +131,19 @@ async fn main() {
         let two = 2.into();
         assert_eq!(
             r.lookup(&[one], true).await.unwrap(),
-            vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
+            vec![vec![
+                1.into(),
+                DataType::try_from("Hello world #1").unwrap(),
+                2.into()
+            ]]
         );
         assert_eq!(
             r.lookup(&[two], true).await.unwrap(),
-            vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
+            vec![vec![
+                2.into(),
+                DataType::try_from("Hello world #2").unwrap(),
+                3.into()
+            ]]
         );
 
         // now time to alternate and measure

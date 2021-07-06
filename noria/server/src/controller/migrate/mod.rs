@@ -43,6 +43,7 @@ use std::time::{Duration, Instant};
 
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{ControllerInner, WorkerIdentifier};
+use std::convert::TryFrom;
 
 pub(crate) mod assignment;
 mod augmentation;
@@ -462,7 +463,11 @@ impl Migration {
     pub(super) fn universe(&self) -> (DataType, Option<DataType>) {
         let id = match self.context.get("id") {
             Some(id) => id.clone(),
-            None => "global".into(),
+            None => {
+                // It is safe to transform the String "global" into a DataType.
+                #[allow(clippy::unwrap_used)]
+                DataType::try_from("global").unwrap()
+            }
         };
 
         let group = self.context.get("group").cloned();

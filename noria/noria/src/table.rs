@@ -34,182 +34,6 @@ type Transport = AsyncBincodeStream<
     AsyncDestination,
 >;
 
-/// Create a new row for insertion into a [`Table`] using column names.
-///
-/// If the schema of the given table is known, column defaults and `NOT NULL` restrictions will
-/// also be respected. In the future, this method will also check that the provided `DataType`
-/// matches the expected data type for each column.
-///
-/// Values are automatically converted to `DataType` as necessary.
-///
-///
-/// ```rust
-/// use noria::errors::ReadySetResult;
-/// async fn add_user(users: &mut noria::Table) -> ReadySetResult<()> {
-///   let user: ReadySetResult<_> = noria::row!(users,
-///     "username" => "jonhoo",
-///     "password" => "hunter2",
-///     "created_at" => chrono::Local::now().naive_local(),
-///     "logins" => 0,
-///   );
-///   users.insert(user?).await
-/// }
-/// ```
-#[macro_export]
-macro_rules! row {
-    // https://danielkeep.github.io/tlborm/book/pat-trailing-separators.html
-    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => {
-        $crate::row!(@step $tbl, $($k => $v),+)
-    };
-
-    // macros for counting:
-    // https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length
-    // these can't be moved into the macro case below because of
-    // https://github.com/rust-lang/rust/issues/35853
-    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
-    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::row!(@replace_expr ($e, ()))),*])};
-
-    // we want to allow the caller to move values into row. but, since we loop over the colums, the
-    // compiler will think that we might be moving each $v multiple times (once each time through
-    // the loop), even though that can't happen as long as the field names are distinct. we're
-    // going to work around that by constructing an array that holds an Option<DataType> of each
-    // $v, and then `take()` them when we actually use them for a column value. to do so though, we
-    // also need each $k/$v pair's index so we can refer to the appropriate element of the array.
-    // the ugliness below recursively expands one $k => $v at a time into @$idx; $k => $v using the
-    // counting trick from https://danielkeep.github.io/tlborm/book/blk-counting.html#slice-length.
-    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
-        $crate::row!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::row!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
-    };
-
-    // ultimately, the call will end up here with all the indices set
-    // the indices will not technically be numbers, they'll be something like
-    //
-    //     <[()]>::len(&[(), ()])
-    //
-    // but those expressions can crucially be computed at compile time.
-    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
-        let mut row = vec![$crate::DataType::None; $tbl.columns().len()];
-        let mut vals = [$(Some(Into::<$crate::DataType>::into($v))),+];
-        let schema = $tbl.schema();
-        for (coli, col) in $tbl.columns().iter().enumerate() {
-            match &**col {
-                $($k => {
-                    // TODO: check row[coli] against schema.fields[coli].sql_type ?
-                    row[coli] = vals[$idx].take()
-                        .ok_or_else(|| $crate::errors::internal_err("field name appears twice -- should be caught by match"))?;
-                    if let Some(ref schema) = schema {
-                        if schema.fields[coli].constraints.iter().any(|c| c == &$crate::ColumnConstraint::NotNull) {
-                            return Err($crate::errors::ReadySetError::TableError {
-                                 name: $tbl.table_name().into(),
-                                 source: Box::new($crate::errors::ReadySetError::NonNullable { col: col.into() })
-                            }.into())
-                        }
-                    }
-                },)|+
-                cname if schema.is_some() => {
-                    let schema = schema.as_ref().unwrap();
-
-                    // Maybe we have a default value?
-                    let mut allow_null = true;
-                    let spec = &schema.fields[coli];
-                    for c in &spec.constraints {
-                        use $crate::ColumnConstraint;
-                        match c {
-                            ColumnConstraint::NotNull => {
-                                allow_null = false;
-                            }
-                            ColumnConstraint::DefaultValue(ref literal) => {
-                                row[coli] = ::std::convert::TryInto::<$crate::DataType>::try_into(literal)?;
-                            }
-                            ColumnConstraint::AutoIncrement => {
-                                // TODO
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if !allow_null && row[coli].is_none() {
-                       return Err($crate::errors::ReadySetError::TableError {
-                            name: $tbl.table_name().into(),
-                            source: Box::new($crate::errors::ReadySetError::ColumnRequired { col: cname.into() })
-                       }.into())
-                    }
-                }
-                _ => { /* leave column value as None */ }
-            }
-        }
-        Ok(row)
-    }};
-}
-
-// this is here just to get better compiler errors for row!
-// the doc test will not show the source of the error _inside_ the macro since it's cross-crate.
-#[cfg(test)]
-#[allow(dead_code)]
-async fn add_user(users: &mut Table) -> ReadySetResult<()> {
-    let s = String::from("non copy");
-    let user: ReadySetResult<_> = row!(users,
-      "username" => "jonhoo",
-      "password" => "hunter2",
-      "created_at" => chrono::Local::now().naive_local(),
-      "not an ident" => s,
-      "logins" => 0,
-    );
-    users.insert(user?).await
-}
-
-/// Create an update for a given [`Table`] using column names.
-///
-/// In the future, this method will also check that the provided `DataType`
-/// matches the expected data type for each column if the schema is known.
-///
-/// Values are automatically converted to `DataType` as necessary.
-///
-///
-/// ```rust
-/// async fn update_user(users: &mut noria::Table) -> Result<(), noria::errors::ReadySetError> {
-///   let user = noria::update!(users,
-///     "password" => "hunter3",
-///     "logins" => noria::Modification::Apply(noria::Operation::Add, 1.into()),
-///   );
-///   users.update(vec!["jonhoo".into()], user).await
-/// }
-/// ```
-#[macro_export]
-macro_rules! update {
-    // these are identical as for row! see comments there.
-    ($tbl:ident, $($k:expr => $v:expr),+ $(,)*) => { $crate::update!(@step $tbl, $($k => $v),+) };
-    (@replace_expr ($_t:expr, $sub:expr)) => {$sub};
-    (@count_tts ($($e:expr),*)) => {<[()]>::len(&[$($crate::update!(@replace_expr ($e, ()))),*])};
-    (@step $tbl:ident, $(@$idx:expr; $ik:expr => $iv:expr,)* $ck:expr => $cv:expr $(, $k:expr => $v:expr)*) => {
-        $crate::update!(@step $tbl, $(@$idx; $ik => $iv,)* @$crate::update!(@count_tts ($($ik),*)); $ck => $cv $(, $k => $v)*)
-    };
-
-    (@step $tbl:ident, $(@$idx:expr; $k:expr => $v:expr),+) => {{
-        let mut set = vec![$((0, Into::<$crate::Modification>::into($v))),+];
-        for (coli, col) in $tbl.columns().iter().enumerate() {
-            match &**col {
-                $($k => {
-                    // TODO: check set[$idx].1 against schema.fields[coli].sql_type ?
-                    set[$idx].0 = coli;
-                },)|+
-                _ => { /* column value not updated */ }
-            }
-        }
-        set
-    }};
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn update_user(users: &mut Table) -> ReadySetResult<()> {
-    let user = update!(users,
-      "password" => "hunter3",
-      "logins" => crate::Modification::Apply(crate::Operation::Add, 1.into()),
-    );
-    users.update(vec!["jonhoo".into()], user).await
-}
-
 #[derive(Debug)]
 struct Endpoint(SocketAddr);
 
@@ -493,7 +317,7 @@ impl Table {
         };
 
         if let Err(e) = immediate_err() {
-            return future::Either::Left(async move { Err(e) });
+            return future::Either::Left(future::Either::Left(async move { Err(e) }));
         }
 
         if self.shards.len() == 1 {
@@ -521,8 +345,15 @@ impl Table {
             let mut shard_writes = vec![Vec::new(); self.shards.len()];
             let ops: &mut Vec<TableOperation> = (&mut i.data).try_into().unwrap();
             for r in ops.drain(..) {
-                for shard in r.shards(key_col, self.shards.len()) {
-                    shard_writes[shard].push(r.clone())
+                match r.shards(key_col, self.shards.len()) {
+                    Ok(iter) => {
+                        for shard in iter {
+                            shard_writes[shard].push(r.clone())
+                        }
+                    }
+                    Err(e) => {
+                        return future::Either::Left(future::Either::Right(async move { Err(e) }))
+                    }
                 }
             }
 

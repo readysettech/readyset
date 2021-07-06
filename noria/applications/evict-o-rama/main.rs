@@ -1,10 +1,12 @@
 #![warn(clippy::dbg_macro)]
-use noria::Builder;
+use noria::{Builder, DataType};
+use std::convert::TryFrom;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NUM_ARTICLES: usize = 10_000;
 
 #[tokio::main]
+#[allow(clippy::unwrap_used)]
 async fn main() {
     // inline recipe definition
     let sql = "# base tables
@@ -52,7 +54,11 @@ async fn main() {
         let title = format!("Article {}", aid);
         let url = "http://pdos.csail.mit.edu";
         article
-            .insert(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![
+                aid.into(),
+                DataType::try_from(title).unwrap(),
+                DataType::try_from(url).unwrap(),
+            ])
             .await
             .unwrap();
         vote.insert(vec![aid.into(), 1.into()]).await.unwrap();

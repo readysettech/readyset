@@ -91,6 +91,7 @@ impl OptColumnRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryInto;
 
     #[test]
     fn data_type_mem_size() {
@@ -104,7 +105,11 @@ mod tests {
         let long = DataType::BigInt(5);
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
 
-        let rec = vec![DataType::Int(5), "asdfasdfasdfasdf".into(), "asdf".into()];
+        let rec = vec![
+            DataType::Int(5),
+            "asdfasdfasdfasdf".try_into().unwrap(),
+            "asdf".try_into().unwrap(),
+        ];
 
         // DataType should always use 16 bytes itself
         assert_eq!(size_of::<DataType>(), 16);

@@ -372,6 +372,7 @@ mod tests {
 
     mod process {
         use super::*;
+        use std::convert::TryInto;
 
         fn test_lots_of_changes_in_same_batch(mut state: Box<dyn State>) {
             use crate::node;
@@ -423,37 +424,37 @@ mod tests {
 
             assert_eq!(
                 one(vec![
-                    TableOperation::Insert(vec![1.into(), "a".into(), 1.into()]),
-                    TableOperation::Insert(vec![2.into(), "2a".into(), 1.into()]),
-                    TableOperation::Insert(vec![3.into(), "3a".into(), 1.into()]),
+                    TableOperation::Insert(vec![1.into(), "a".try_into().unwrap(), 1.into()]),
+                    TableOperation::Insert(vec![2.into(), "2a".try_into().unwrap(), 1.into()]),
+                    TableOperation::Insert(vec![3.into(), "3a".try_into().unwrap(), 1.into()]),
                     TableOperation::DeleteByKey {
                         key: vec![1.into(), 1.into()],
                     },
-                    TableOperation::Insert(vec![1.into(), "b".into(), 1.into()]),
+                    TableOperation::Insert(vec![1.into(), "b".try_into().unwrap(), 1.into()]),
                     TableOperation::InsertOrUpdate {
-                        row: vec![1.into(), "c".into(), 1.into()],
+                        row: vec![1.into(), "c".try_into().unwrap(), 1.into()],
                         update: vec![
                             Modification::None,
-                            Modification::Set("never".into()),
+                            Modification::Set("never".try_into().unwrap()),
                             Modification::None,
                         ],
                     },
                     TableOperation::InsertOrUpdate {
-                        row: vec![1.into(), "also never".into(), 1.into()],
+                        row: vec![1.into(), "also never".try_into().unwrap(), 1.into()],
                         update: vec![
                             Modification::None,
-                            Modification::Set("d".into()),
+                            Modification::Set("d".try_into().unwrap()),
                             Modification::None,
                         ],
                     },
                     TableOperation::DeleteRow {
-                        row: vec![3.into(), "3a".into(), 1.into()]
+                        row: vec![3.into(), "3a".try_into().unwrap(), 1.into()]
                     },
                     TableOperation::Update {
                         key: vec![1.into(), 1.into()],
                         update: vec![
                             Modification::None,
-                            Modification::Set("e".into()),
+                            Modification::Set("e".try_into().unwrap()),
                             Modification::None,
                         ],
                     },
@@ -461,7 +462,7 @@ mod tests {
                         key: vec![2.into(), 1.into()],
                         update: vec![
                             Modification::None,
-                            Modification::Set("2x".into()),
+                            Modification::Set("2x".try_into().unwrap()),
                             Modification::None,
                         ],
                     },
