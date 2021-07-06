@@ -37,8 +37,8 @@ impl serde::ser::Serialize for DataType {
                 serializer.serialize_newtype_variant("DataType", 3, "Text", v.to_bytes())
             }
             DataType::TinyText(v) => {
-                let vu8 = match v.iter().position(|&i| i == 0) {
-                    Some(null) => &v[0..null],
+                let vu8 = match v.split(|&i| i == 0).next() {
+                    Some(slice) => slice,
                     None => v,
                 };
                 serializer.serialize_newtype_variant("DataType", 3, "Text", &vu8)
