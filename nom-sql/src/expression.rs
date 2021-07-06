@@ -373,7 +373,7 @@ enum TokenTree {
     Group(Vec<TokenTree>),
 }
 
-// no_and variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in the
+// no_and_or variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in the
 // right-hand side of a BETWEEN, eg:
 //     foo between (1 + 2) and 3 + 5
 // should parse the same as:
@@ -383,8 +383,7 @@ enum TokenTree {
 // should parse the same as:
 //     (foo between (1 + 2) and 8) and bar
 
-named!(infix_no_and(&[u8]) -> TokenTree, complete!(map!(alt!(
-    terminated!(tag_no_case!("or"), multispace1) => { |_| BinaryOperator::Or } |
+named!(infix_no_and_or(&[u8]) -> TokenTree, complete!(map!(alt!(
     terminated!(tag_no_case!("like"), multispace1) => { |_| BinaryOperator::Like } |
     do_parse!(
         tag_no_case!("not")
@@ -421,7 +420,8 @@ named!(infix_no_and(&[u8]) -> TokenTree, complete!(map!(alt!(
 
 named!(infix(&[u8]) -> TokenTree, complete!(alt!(
     terminated!(tag_no_case!("and"), multispace1) => { |_| TokenTree::Infix(BinaryOperator::And) } |
-    infix_no_and
+    terminated!(tag_no_case!("or"), multispace1) => { |_| TokenTree::Infix(BinaryOperator::Or) } |
+    infix_no_and_or
 )));
 
 named!(prefix(&[u8]) -> TokenTree, map!(alt!(
@@ -463,16 +463,16 @@ named!(token_tree(&[u8]) -> Vec<TokenTree>, do_parse!(
         })
 ));
 
-named!(rest_no_and(&[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
-    preceded!(multispace0, infix_no_and),
+named!(rest_no_and_or(&[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
+    preceded!(multispace0, infix_no_and_or),
     delimited!(multispace0, many0!(prefix), multispace0),
     primary
 )));
 
-named!(token_tree_no_and(&[u8]) -> Vec<TokenTree>, do_parse!(
+named!(token_tree_no_and_or(&[u8]) -> Vec<TokenTree>, do_parse!(
     prefix: many0!(prefix)
         >> primary: primary
-        >> rest: rest_no_and
+        >> rest: rest_no_and_or
         >> ({
             let mut res = prefix;
             res.push(primary);
@@ -619,7 +619,7 @@ named!(pub(crate) between_operand(&[u8]) -> Expression, alt!(
 ));
 
 named!(pub(crate) between_max(&[u8]) -> Expression, alt!(
-    map!(token_tree_no_and, |tt| {
+    map!(token_tree_no_and_or, |tt| {
         ExprParser.parse(&mut tt.into_iter()).unwrap()
     }) |
     simple_expr
@@ -717,6 +717,19 @@ mod tests {
         #[test]
         fn plus_times() {
             parses_same("1 + 2 * 3", "(1 + (2 * 3))");
+        }
+
+        #[test]
+        fn between_and_or() {
+            parses_same("x between y and z or w", "(x between y and z) or w");
+        }
+
+        #[test]
+        fn not_between_or() {
+            parses_same(
+                "(table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5)",
+                "(table_1.column_2 NOT BETWEEN 1 AND 5) OR (table_1.column_2 NOT BETWEEN 1 AND 5)",
+            )
         }
     }
 
