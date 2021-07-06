@@ -26,6 +26,7 @@ pub struct Builder {
 
 impl Default for Builder {
     fn default() -> Self {
+        #[allow(clippy::unwrap_used)] // hardcoded literals
         Self {
             config: Config::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
@@ -108,12 +109,6 @@ impl Builder {
     /// Set the reuse policy for all subsequent migrations
     pub fn set_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.config.reuse = reuse_type;
-    }
-
-    /// Set the number of pool threads to use (default is #cores)
-    pub fn set_threads(&mut self, threads: usize) {
-        self.config.threads = Some(threads);
-        unimplemented!();
     }
 
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation

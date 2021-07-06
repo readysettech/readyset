@@ -315,6 +315,21 @@ pub enum ReadySetError {
     #[error("This instance is not the leader")]
     NotLeader,
 
+    /// An RPC request was made to a controller that doesn't have quorum.
+    #[error("A quorum of workers is not yet available")]
+    NoQuorum,
+
+    /// A request was made to an API endpoint not known to the controller.
+    #[error("API endpoint not found")]
+    UnknownEndpoint,
+
+    /// A node index passed to the controller was invalid.
+    #[error("Node {index} not found in controller")]
+    NodeNotFound {
+        /// The erroneous node index.
+        index: usize,
+    },
+
     /// An RPC operation couldn't be completed because the message epoch didn't match.
     #[error("Epoch mismatch: supplied {supplied:?}, but current is {current:?}")]
     EpochMismatch {
@@ -375,6 +390,22 @@ pub enum ReadySetError {
     /// A request was sent to a domain with a nonexistent or unknown replay path
     #[error("Replay path identified by Tag({0}) not found")]
     NoSuchReplayPath(u32),
+
+    /// Some of the controller's internal structures are missing state (like read addresses) for
+    /// a given domain.
+    #[error("Internal state is missing for domain {domain_index}")]
+    UnmappableDomain {
+        /// The index of the domain.
+        domain_index: usize,
+    },
+
+    /// A `DomainHandle` was passed a `workers` hashmap that couldn't spit out a `Worker`
+    /// for a given `WorkerIdentifier`.
+    #[error("Could not find RPC handle for worker identifier {ident}")]
+    UnmappableWorkerIdentifier {
+        /// The worker identifier we don't have a `Worker` RPC handle for.
+        ident: String,
+    },
 
     /// A migration tried to reference a domain that doesn't exist.
     #[error("Migration tried to reference domain {domain_index}.{shard:?}")]

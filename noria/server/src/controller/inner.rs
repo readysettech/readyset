@@ -1,3 +1,13 @@
+#![deny(
+    clippy::dbg_macro,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::unreachable
+)]
+
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::recipe::Schema;
@@ -12,7 +22,7 @@ use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequ
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use hyper::{self, Method, StatusCode};
+use hyper::Method;
 use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema};
@@ -120,6 +130,7 @@ pub(super) fn graphviz(
 
     // node descriptions.
     for index in graph.node_indices() {
+        #[allow(clippy::indexing_slicing)] // just got this out of the graph
         let node = &graph[index];
         let materialization_status = materializations.get_status(index, node);
         indentln(&mut s);
@@ -134,6 +145,7 @@ pub(super) fn graphviz(
             "n{} -> n{} [ {} ]",
             edge.source().index(),
             edge.target().index(),
+            #[allow(clippy::indexing_slicing)] // just got it out of the graph
             if graph[edge.source()].is_egress() {
                 "color=\"#CCCCCC\""
             } else if graph[edge.source()].is_source() {
@@ -159,75 +171,79 @@ impl ControllerInner {
         query: Option<String>,
         body: hyper::body::Bytes,
         authority: &Arc<A>,
-    ) -> Result<Result<Vec<u8>, ReadySetError>, StatusCode> {
-        // TODO(eta): the error handling / general serialization inside this function is really
-        //            confusing, and has been the source of at least 1 hard-to-track-down bug
+    ) -> ReadySetResult<Vec<u8>> {
+        macro_rules! return_serialized {
+            ($expr:expr) => {{
+                return Ok(::bincode::serialize(&$expr)?);
+            }};
+        }
+
+        // *** Methods that don't require a quorum ***
+
         match (&method, path.as_ref()) {
-            (&Method::GET, "/simple_graph") => return Ok(Ok(self.graphviz(false).into_bytes())),
+            (&Method::GET, "/simple_graph") => return Ok(self.graphviz(false).into_bytes()),
             (&Method::POST, "/simple_graphviz") => {
-                return Ok(Ok(bincode::serialize(&self.graphviz(false)).unwrap()));
+                return_serialized!(self.graphviz(false));
             }
-            (&Method::GET, "/graph") => return Ok(Ok(self.graphviz(true).into_bytes())),
+            (&Method::GET, "/graph") => return Ok(self.graphviz(true).into_bytes()),
             (&Method::POST, "/graphviz") => {
-                return Ok(Ok(bincode::serialize(&self.graphviz(true)).unwrap()));
+                return_serialized!(self.graphviz(true));
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
-                return Ok(Ok(bincode::serialize(&self.get_statistics()).unwrap()));
+                return_serialized!(self.get_statistics()?);
             }
             (&Method::POST, "/worker_rx/register") => {
-                return bincode::deserialize(&body)
-                    .map_err(|_| StatusCode::BAD_REQUEST)
-                    .map(|args| Ok(bincode::serialize(&self.handle_register(args)?).unwrap()));
+                let body = bincode::deserialize(&body)?;
+                let ret = self.handle_register(body)?;
+                return_serialized!(ret);
             }
             (&Method::POST, "/worker_rx/heartbeat") => {
-                return bincode::deserialize(&body)
-                    .map_err(|_| StatusCode::BAD_REQUEST)
-                    .map(|args| Ok(bincode::serialize(&self.handle_heartbeat(args)?).unwrap()))
+                let body = bincode::deserialize(&body)?;
+                let ret = self.handle_heartbeat(body)?;
+                return_serialized!(ret);
             }
             _ => {}
         }
 
         if self.pending_recovery.is_some() || self.workers.len() < self.quorum {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
+            return Err(ReadySetError::NoQuorum);
         }
+
+        // *** Methods that do require quorum ***
 
         match (method, path.as_ref()) {
             (Method::GET, "/flush_partial") => {
-                Ok(Ok(bincode::serialize(&self.flush_partial()).unwrap()))
+                return_serialized!(self.flush_partial()?);
             }
-            (Method::POST, "/inputs") => Ok(Ok(bincode::serialize(&self.inputs()).unwrap())),
-            (Method::POST, "/outputs") => Ok(Ok(bincode::serialize(&self.outputs()).unwrap())),
+            (Method::POST, "/inputs") => return_serialized!(self.inputs()),
+            (Method::POST, "/outputs") => return_serialized!(self.outputs()),
             (Method::GET | Method::POST, "/instances") => {
-                Ok(Ok(bincode::serialize(&self.get_instances()).unwrap()))
+                return_serialized!(self.get_instances());
             }
             (Method::GET | Method::POST, "/controller_uri") => {
-                Ok(Ok(bincode::serialize(&self.controller_uri).unwrap()))
+                return_serialized!(self.controller_uri);
             }
-            (Method::GET, "/workers") | (Method::POST, "/workers") => Ok(Ok(bincode::serialize(
-                &self.workers.keys().collect::<Vec<_>>(),
-            )
-            .unwrap())),
+            (Method::GET, "/workers") | (Method::POST, "/workers") => {
+                return_serialized!(&self.workers.keys().collect::<Vec<_>>())
+            }
             (Method::GET, "/healthy_workers") | (Method::POST, "/healthy_workers") => {
-                Ok(Ok(bincode::serialize(
-                    &self
-                        .workers
-                        .iter()
-                        .filter(|w| w.1.healthy)
-                        .map(|w| w.0)
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap()))
+                return_serialized!(&self
+                    .workers
+                    .iter()
+                    .filter(|w| w.1.healthy)
+                    .map(|w| w.0)
+                    .collect::<Vec<_>>());
             }
+            #[cfg(debug_assertions)] // don't include this hacky code in prod ~eta
             (Method::GET, "/nodes") => {
                 // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
                 // to individual query variables unfortunately. We'll probably want to factor this
                 // out into a helper method.
                 let nodes = if let Some(query) = query {
-                    if let Some(n) = &query
-                        .split('&')
-                        .map(String::from)
-                        .find(|v| v.starts_with("w="))
-                    {
+                    let mut vars = query.split('&').map(String::from);
+                    #[allow(clippy::indexing_slicing)]
+                    #[allow(clippy::unwrap_used)]
+                    if let Some(n) = &vars.find(|v| v.starts_with("w=")) {
                         self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
                     } else {
                         self.nodes_on_worker(None)
@@ -236,80 +252,81 @@ impl ControllerInner {
                     // all data-flow nodes
                     self.nodes_on_worker(None)
                 };
-                Ok(Ok(bincode::serialize(
-                    &nodes
-                        .into_iter()
-                        .filter_map(|ni| {
-                            let n = &self.ingredients[ni];
-                            if n.is_internal() {
-                                Some((ni, n.name(), n.description(true)))
-                            } else if n.is_base() {
-                                Some((ni, n.name(), "Base table".to_owned()))
-                            } else if n.is_reader() {
-                                Some((ni, n.name(), "Leaf view".to_owned()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap()))
+                return_serialized!(&nodes
+                    .into_iter()
+                    .filter_map(|ni| {
+                        #[allow(clippy::indexing_slicing)]
+                        let n = &self.ingredients[ni];
+                        if n.is_internal() {
+                            Some((ni, n.name(), n.description(true)))
+                        } else if n.is_base() {
+                            Some((ni, n.name(), "Base table".to_owned()))
+                        } else if n.is_reader() {
+                            Some((ni, n.name(), "Leaf view".to_owned()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>())
             }
-            (Method::POST, "/table_builder") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| Ok(bincode::serialize(&self.table_builder(args)).unwrap())),
-            (Method::POST, "/view_builder") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| self.view_builder(args))
-                .map(|view| Ok(bincode::serialize(&view).unwrap())),
-            (Method::POST, "/extend_recipe") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.extend_recipe(authority, args)
-                        .map(|r| bincode::serialize(&r).unwrap())
-                }),
-            (Method::POST, "/install_recipe") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.install_recipe(authority, args)
-                        .map(|r| bincode::serialize(&r).unwrap())
-                }),
-            (Method::POST, "/set_replication_offset") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.set_replication_offset(authority, args)
-                        .map(|r| bincode::serialize(&r).unwrap())
-                }),
-            (Method::POST, "/set_security_config") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.set_security_config(args)
-                        .map(|r| bincode::serialize(&r).unwrap())
-                }),
-            (Method::POST, "/create_universe") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| self.create_universe(args))
-                .map(|universe| Ok(bincode::serialize(&universe).unwrap())),
-            (Method::POST, "/replicate_readers") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.replicate_readers(args)
-                        .map(|readers| bincode::serialize(&readers).unwrap())
-                }),
-            (Method::POST, "/get_info") => Ok(Ok(bincode::serialize(&self.get_info()).unwrap())),
-            (Method::POST, "/remove_node") => bincode::deserialize(&body)
-                .map_err(|_| StatusCode::BAD_REQUEST)
-                .map(|args| {
-                    self.remove_nodes(vec![args].as_slice())
-                        .map(|r| bincode::serialize(&r).unwrap())
-                }),
+            (Method::POST, "/table_builder") => {
+                // NOTE(eta): there is DELIBERATELY no `?` after the `table_builder` call, because
+                //            the receiving end expects a `ReadySetResult` to be serialized.
+                let body = bincode::deserialize(&body)?;
+                let ret = self.table_builder(body);
+                return_serialized!(ret);
+            }
+            (Method::POST, "/view_builder") => {
+                // NOTE(eta): same as above applies
+                let body = bincode::deserialize(&body)?;
+                let ret = self.view_builder(body);
+                return_serialized!(ret);
+            }
+            (Method::POST, "/extend_recipe") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.extend_recipe(authority, body)?;
+                return_serialized!(ret);
+            }
+            (Method::POST, "/install_recipe") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.install_recipe(authority, body)?;
+                return_serialized!(ret);
+            }
+            (Method::POST, "/set_replication_offset") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.set_replication_offset(authority, body)?;
+                return_serialized!(ret);
+            }
+            #[cfg(debug_assertions)] // not shipping universes in prod ~eta
+            (Method::POST, "/set_security_config") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.set_security_config(body)?;
+                return_serialized!(ret);
+            }
+            #[cfg(debug_assertions)] // not shipping universes in prod ~eta
+            (Method::POST, "/create_universe") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.create_universe(body)?;
+                return_serialized!(ret);
+            }
+            (Method::POST, "/replicate_readers") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.replicate_readers(body)?;
+                return_serialized!(ret);
+            }
+            (Method::POST, "/get_info") => return_serialized!(self.get_info()?),
+            (Method::POST, "/remove_node") => {
+                let body = bincode::deserialize(&body)?;
+                let ret = self.remove_nodes(vec![body].as_slice())?;
+                return_serialized!(ret);
+            }
             (Method::POST, "/replication_offset") => {
                 // this method can't be `async` since `ControllerInner` isn't Send because `Graph`
                 // isn't Send :(
-                let res = futures_executor::block_on(self.replication_offset());
-                Ok(res.map(|r| bincode::serialize(&r).unwrap()))
+                let res = futures_executor::block_on(self.replication_offset())?;
+                return_serialized!(res);
             }
-            _ => Err(StatusCode::NOT_FOUND),
+            _ => Err(ReadySetError::UnknownEndpoint),
         }
     }
 
@@ -395,7 +412,13 @@ impl ControllerInner {
                     Some(self.log.clone()),
                 );
                 for r in recipes {
-                    if let Err(e) = self.apply_recipe(self.recipe.clone().extend(&r).unwrap()) {
+                    if let Err(e) = self
+                        .recipe
+                        .clone()
+                        .extend(&r)
+                        .map_err(|(_, e)| e)
+                        .and_then(|r| self.apply_recipe(r))
+                    {
                         // TODO(eta): is this the best thing to do?
                         crit!(self.log, "Failed to restore recipe: {}", e);
                     }
@@ -490,7 +513,7 @@ impl ControllerInner {
         Ok(())
     }
 
-    pub(super) fn get_info(&self) -> GraphInfo {
+    pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
         let mut worker_info = HashMap::new();
         for (di, dh) in self.domains.iter() {
             for (i, shard) in dh.shards.iter().enumerate() {
@@ -499,12 +522,19 @@ impl ControllerInner {
                     .or_insert_with(HashMap::new)
                     .entry(DomainKey(*di, i))
                     .or_insert_with(Vec::new)
-                    .extend(self.domain_nodes[di].iter())
+                    .extend(
+                        self.domain_nodes
+                            .get(di)
+                            .ok_or_else(|| {
+                                internal_err(format!("{:?} in domains but not in domain_nodes", di))
+                            })?
+                            .iter(),
+                    )
             }
         }
-        GraphInfo {
+        Ok(GraphInfo {
             workers: worker_info,
-        }
+        })
     }
 
     pub(super) fn replicate_readers(
@@ -545,9 +575,11 @@ impl ControllerInner {
         for (query_name, node_index) in node_indexes {
             // The logic to find the reader nodes is the same as [`self::find_view_for(NodeIndex,&str)`],
             // but we perform some extra operations here.
-            // TODO(Fran): In the future we should try to find a good abstraction to avoid duplicating the logic.
+            // TODO(Fran): In the future we should try to find a good abstraction to avoid
+            // duplicating the logic.
             let mut bfs = Bfs::new(&self.ingredients, node_index);
             while let Some(child_index) = bfs.next(&self.ingredients) {
+                #[allow(clippy::indexing_slicing)] // just came out of self.ingredients
                 let child: &Node = &self.ingredients[child_index];
                 if let Some(r) = child.as_reader() {
                     if r.is_for() == node_index && child.name() == query_name {
@@ -555,6 +587,7 @@ impl ControllerInner {
                         // Here, we extract its [`PostLookup`] and use it to create a new
                         // mirror node.
                         let post_lookup = r.post_lookup().clone();
+                        #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                         let mut reader_node = self.ingredients[node_index].named_mirror(
                             node::special::Reader::new(node_index, post_lookup),
                             child.name().to_string(),
@@ -563,6 +596,7 @@ impl ControllerInner {
                         let keys_opt = child.as_reader().and_then(|r| r.key());
                         if let Some(keys) = keys_opt {
                             // And set the keys to the replicated reader.
+                            #[allow(clippy::unwrap_used)] // it must be a reader if it has a key
                             reader_node.as_mut_reader().unwrap().set_key(keys);
                         }
                         // We add the replicated reader to the graph.
@@ -600,6 +634,7 @@ impl ControllerInner {
         for (query_name, reader_indexes) in new_readers {
             let mut domain_mappings = HashMap::new();
             for reader_index in reader_indexes {
+                #[allow(clippy::indexing_slicing)] // we just got the index from self
                 let reader = &self.ingredients[reader_index];
                 domain_mappings
                     .entry(reader.domain())
@@ -709,17 +744,26 @@ impl ControllerInner {
         // if any of its nodes is a reader.
         // We check for *any* node (and not *all*) since a reader domain has a reader node and an
         // ingress node.
+
+        // check all nodes actually exist
+        for (n, _) in nodes.iter() {
+            if self.ingredients.node_weight(*n).is_none() {
+                return Err(ReadySetError::NodeNotFound { index: n.index() });
+            }
+        }
+
+        #[allow(clippy::indexing_slicing)] // checked above
         let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
-        let mut nodes = Some(
-            nodes
-                .into_iter()
-                .map(|(ni, _)| {
-                    let node = self.ingredients.node_weight_mut(ni).unwrap().take();
-                    node.finalize(&self.ingredients)
-                })
-                .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
-                .collect(),
-        );
+
+        let nodes: DomainNodes = nodes
+            .into_iter()
+            .map(|(ni, _)| {
+                #[allow(clippy::unwrap_used)] // checked above
+                let node = self.ingredients.node_weight_mut(ni).unwrap().take();
+                node.finalize(&self.ingredients)
+            })
+            .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
+            .collect();
 
         let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
             (worker_id_opt.is_none())
@@ -740,18 +784,12 @@ impl ControllerInner {
         let mut assignments = vec![];
         // Send `AssignDomain` to each shard of the given domain
         for i in 0..num_shards.unwrap_or(1) {
-            let nodes = if i == num_shards.unwrap_or(1) - 1 {
-                nodes.take().unwrap()
-            } else {
-                nodes.clone().unwrap()
-            };
-
             let domain = DomainBuilder {
                 index: idx,
                 shard: if num_shards.is_some() { Some(i) } else { None },
                 nshards: num_shards.unwrap_or(1),
                 config: self.domain_config.clone(),
-                nodes,
+                nodes: nodes.clone(),
                 persistence_parameters: self.persistence.clone(),
             };
 
@@ -903,6 +941,7 @@ impl ControllerInner {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
             .map(|n| {
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let base = &self.ingredients[n];
                 assert!(base.is_base());
                 (base.name().to_owned(), n)
@@ -919,7 +958,9 @@ impl ControllerInner {
         self.ingredients
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let name = self.ingredients[n].name().to_owned();
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 self.ingredients[n].as_reader().map(|r| {
                     // we want to give the the node address that is being materialized not that of
                     // the reader node itself.
@@ -943,11 +984,13 @@ impl ControllerInner {
         let mut nodes: Vec<NodeIndex> = Vec::new();
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
+            #[allow(clippy::indexing_slicing)] // just came from self.ingredients
             if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
             {
                 // Check for any filter requirements we can satisfy when
                 // traversing the data flow graph, `filter`.
                 if let Some(ViewFilter::Workers(w)) = filter {
+                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                     let domain = self.ingredients[child].domain();
                     for worker in w {
                         if self
@@ -998,17 +1041,37 @@ impl ControllerInner {
 
         let mut replicas: Vec<ViewReplica> = Vec::new();
         for r in readers {
-            let domain = self.ingredients[r].domain();
+            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+            let domain_index = self.ingredients[r].domain();
+            #[allow(clippy::indexing_slicing)] // just came from self
             let columns = self.ingredients[r].fields().to_vec();
             let schema = self.view_schema(r)?;
-            let shards = (0..self.domains[&domain].shards())
-                .map(|i| ReplicaShard {
-                    addr: self.read_addrs[&self.domains[&domain].assignment(i)],
-                    region: self.workers[&self.domains[&domain].assignment(i)]
-                        .region
-                        .clone(),
+            let domain =
+                self.domains
+                    .get(&domain_index)
+                    .ok_or_else(|| ReadySetError::NoSuchDomain {
+                        domain_index: domain_index.index(),
+                        shard: 0,
+                    })?;
+            let shards = (0..domain.shards())
+                .map(|i| {
+                    Ok(ReplicaShard {
+                        addr: *self.read_addrs.get(&domain.assignment(i)?).ok_or_else(|| {
+                            ReadySetError::UnmappableDomain {
+                                domain_index: domain_index.index(),
+                            }
+                        })?,
+                        region: self
+                            .workers
+                            .get(&domain.assignment(i)?)
+                            .ok_or_else(|| ReadySetError::UnmappableDomain {
+                                domain_index: domain_index.index(),
+                            })?
+                            .region
+                            .clone(),
+                    })
                 })
-                .collect();
+                .collect::<ReadySetResult<Vec<_>>>()?;
             replicas.push(ViewReplica {
                 node: r,
                 columns,
@@ -1024,8 +1087,12 @@ impl ControllerInner {
     }
 
     fn view_schema(&self, view_ni: NodeIndex) -> Result<Option<ViewSchema>, ReadySetError> {
-        let n = &self.ingredients[view_ni];
-
+        let n =
+            self.ingredients
+                .node_weight(view_ni)
+                .ok_or_else(|| ReadySetError::NodeNotFound {
+                    index: view_ni.index(),
+                })?;
         let schema: Vec<_> = (0..n.fields().len())
             .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
             .collect::<Result<Vec<_>, ReadySetError>>()?;
@@ -1046,25 +1113,35 @@ impl ControllerInner {
                 .get(base)
                 .ok_or_else(|| ReadySetError::TableNotFound(base.into()))?,
         };
-        let node = &self.ingredients[ni];
+        let node = self
+            .ingredients
+            .node_weight(ni)
+            .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
 
         trace!(self.log, "creating table"; "for" => base);
 
-        let mut key = self.ingredients[ni]
+        let mut key = node
             .suggest_indexes(ni)
             .remove(&ni)
             .map(|index| index.columns)
             .unwrap_or_else(Vec::new);
         let mut is_primary = false;
         if key.is_empty() {
-            if let Sharding::ByColumn(col, _) = self.ingredients[ni].sharded_by() {
+            if let Sharding::ByColumn(col, _) = node.sharded_by() {
                 key = vec![col];
             }
         } else {
             is_primary = true;
         }
 
-        let txs = (0..self.domains[&node.domain()].shards())
+        let txs = (0..self
+            .domains
+            .get(&node.domain())
+            .ok_or_else(|| ReadySetError::NoSuchDomain {
+                domain_index: node.domain().index(),
+                shard: 0,
+            })?
+            .shards())
             .map(|i| {
                 self.channel_coordinator
                     .get_addr(&(node.domain(), i))
@@ -1117,7 +1194,7 @@ impl ControllerInner {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    fn get_statistics(&mut self) -> GraphStats {
+    fn get_statistics(&mut self) -> ReadySetResult<GraphStats> {
         trace!(self.log, "asked to get statistics");
         let log = &self.log;
         let workers = &self.workers;
@@ -1125,17 +1202,22 @@ impl ControllerInner {
         let domains = self
             .domains
             .iter_mut()
-            .flat_map(|(&di, s)| {
+            // TODO(eta): error handling impl adds overhead
+            .map(|(&di, s)| {
                 trace!(log, "requesting stats from domain"; "di" => di.index());
-                s.send_to_healthy_blocking(DomainRequest::GetStatistics, workers)
-                    .unwrap()
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(i, s)| ((di, i), s))
+                Ok(
+                    s.send_to_healthy_blocking(DomainRequest::GetStatistics, workers)?
+                        .into_iter()
+                        .enumerate()
+                        .map(move |(i, s)| ((di, i), s)),
+                )
             })
+            .collect::<ReadySetResult<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect();
 
-        GraphStats { domains }
+        Ok(GraphStats { domains })
     }
 
     fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
@@ -1145,7 +1227,7 @@ impl ControllerInner {
             .collect()
     }
 
-    fn flush_partial(&mut self) -> u64 {
+    fn flush_partial(&mut self) -> ReadySetResult<u64> {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
@@ -1157,8 +1239,7 @@ impl ControllerInner {
                     .send_to_healthy_blocking::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
                         DomainRequest::GetStatistics,
                         workers,
-                    )
-                    .unwrap()
+                    )?
                     .into_iter()
                     .flat_map(move |(_, node_stats)| {
                         node_stats
@@ -1169,14 +1250,19 @@ impl ControllerInner {
                             })
                     })
                     .collect();
-                (*di, to_evict)
+                Ok((*di, to_evict))
             })
-            .collect();
+            .collect::<ReadySetResult<_>>()?;
 
         let mut total_evicted = 0;
         for (di, nodes) in to_evict {
             for (ni, bytes) in nodes {
-                let na = self.ingredients[ni].local_addr();
+                let na = self
+                    .ingredients
+                    .node_weight(ni)
+                    .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?
+                    .local_addr();
+                #[allow(clippy::unwrap_used)] // literally got the `di` from iterating `domains`
                 self.domains
                     .get_mut(&di)
                     .unwrap()
@@ -1186,8 +1272,7 @@ impl ControllerInner {
                             num_bytes: bytes as usize,
                         }),
                         workers,
-                    )
-                    .expect("failed to send domain flush message");
+                    )?;
                 total_evicted += bytes;
             }
         }
@@ -1197,9 +1282,10 @@ impl ControllerInner {
             "flushed {} bytes of partial domain state", total_evicted
         );
 
-        total_evicted
+        Ok(total_evicted)
     }
 
+    #[cfg(debug_assertions)] // not shipping universes in prod ~eta
     pub(super) fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
@@ -1227,7 +1313,10 @@ impl ControllerInner {
                 let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
+                #[allow(clippy::unwrap_used)]
                 let mut view = rgb.map(|rgb| rgb.build(None, x.clone())).unwrap()?;
+                #[allow(clippy::unwrap_used)]
+                #[allow(clippy::indexing_slicing)]
                 let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
                     .unwrap()
                     .iter()
@@ -1249,6 +1338,7 @@ impl ControllerInner {
         Ok(())
     }
 
+    #[cfg(debug_assertions)] // not shipping universes in prod ~eta
     fn set_security_config(&mut self, p: String) -> Result<(), ReadySetError> {
         self.recipe.set_security_config(&p);
         Ok(())
@@ -1260,11 +1350,13 @@ impl ControllerInner {
 
         match r {
             Ok(ref ra) => {
-                let (removed_bases, removed_other): (Vec<_>, Vec<_>) = ra
-                    .removed_leaves
-                    .iter()
-                    .cloned()
-                    .partition(|ni| self.ingredients[*ni].is_base());
+                let (removed_bases, removed_other): (Vec<_>, Vec<_>) =
+                    ra.removed_leaves.iter().cloned().partition(|ni| {
+                        self.ingredients
+                            .node_weight(*ni)
+                            .map(|x| x.is_base())
+                            .unwrap_or(false)
+                    });
 
                 // first remove query nodes in reverse topological order
                 let mut topo_removals = Vec::with_capacity(removed_other.len());
@@ -1295,7 +1387,7 @@ impl ControllerInner {
                     debug!(
                         self.log,
                         "Removing base \"{}\"",
-                        self.ingredients[base].name();
+                        self.ingredients.node_weight(base).ok_or_else(|| ReadySetError::NodeNotFound { index: base.index() })?.name();
                         "node" => base.index(),
                     );
                     // now drop the (orphaned) base
@@ -1336,7 +1428,7 @@ impl ControllerInner {
                         .read_modify_write(
                             STATE_KEY,
                             |state: Option<ControllerState>| match state {
-                                None => unreachable!(),
+                                None => Err(()),
                                 Some(ref state) if state.epoch > self.epoch => Err(()),
                                 Some(mut state) => {
                                     state.recipe_version = self.recipe.version();
@@ -1381,7 +1473,9 @@ impl ControllerInner {
             Ok(r) => {
                 let _old = self.recipe.clone();
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));
-                let new = old.replace(r).unwrap();
+                let new = old
+                    .replace(r)
+                    .map_err(|e| internal_err(format!("recipe replace failed: {}", e)))?;
                 match self.apply_recipe(new) {
                     Ok(x) => {
                         self.replication_offset = r_txt_spec.replication_offset.clone();
@@ -1390,7 +1484,7 @@ impl ControllerInner {
                             STATE_KEY,
                             |state: Option<ControllerState>| {
                                 match state {
-                                    None => unreachable!(),
+                                    None => Err(()),
                                     Some(ref state) if state.epoch > self.epoch => Err(()),
                                     Some(mut state) => {
                                         state.recipe_version = self.recipe.version();
@@ -1449,7 +1543,15 @@ impl ControllerInner {
     fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), ReadySetError> {
         let mut removals = vec![];
         let start = leaf;
-        assert!(!self.ingredients[leaf].is_source());
+        if self.ingredients.node_weight(leaf).is_none() {
+            return Err(ReadySetError::NodeNotFound {
+                index: leaf.index(),
+            });
+        }
+        #[allow(clippy::indexing_slicing)] // checked above
+        {
+            invariant!(!self.ingredients[leaf].is_source());
+        }
 
         info!(
             self.log,
@@ -1466,17 +1568,16 @@ impl ControllerInner {
             // include egress nodes or other, dependent queries. We need to find the actual reader,
             // and remove that.
             if nchildren != 1 {
-                crit!(
-                    self.log,
+                internal!(
                     "cannot remove node {}, as it still has multiple children",
                     leaf.index()
                 );
-                unreachable!();
             }
 
             let mut readers = Vec::new();
             let mut bfs = Bfs::new(&self.ingredients, leaf);
             while let Some(child) = bfs.next(&self.ingredients) {
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let n = &self.ingredients[child];
                 if n.is_reader_for(leaf) {
                     readers.push(child);
@@ -1484,14 +1585,18 @@ impl ControllerInner {
             }
 
             // nodes can have only one reader attached
-            assert_eq!(readers.len(), 1);
+            invariant_eq!(readers.len(), 1);
+            #[allow(clippy::indexing_slicing)]
             let reader = readers[0];
-            debug!(
-                self.log,
-                "Removing query leaf \"{}\"", self.ingredients[leaf].name();
-                "node" => leaf.index(),
-                "really" => reader.index(),
-            );
+            #[allow(clippy::indexing_slicing)]
+            {
+                debug!(
+                    self.log,
+                    "Removing query leaf \"{}\"", self.ingredients[leaf].name();
+                    "node" => leaf.index(),
+                    "really" => reader.index(),
+                );
+            }
             removals.push(reader);
             leaf = reader;
         }
@@ -1511,9 +1616,13 @@ impl ControllerInner {
                 .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
                 .detach();
             while let Some(parent) = parents.next_node(&self.ingredients) {
-                let edge = self.ingredients.find_edge(parent, node).unwrap();
+                #[allow(clippy::expect_used)]
+                let edge = self.ingredients.find_edge(parent, node).expect(
+                    "unreachable: neighbors_directed returned something that wasn't a neighbour",
+                );
                 self.ingredients.remove_edge(edge);
 
+                #[allow(clippy::indexing_slicing)]
                 if !self.ingredients[parent].is_source()
                     && !self.ingredients[parent].is_base()
                     // ok to remove original start leaf
@@ -1537,12 +1646,16 @@ impl ControllerInner {
         // Remove node from controller local state
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
         for ni in removals {
-            self.ingredients[*ni].remove();
+            let node = self
+                .ingredients
+                .node_weight_mut(*ni)
+                .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
+            node.remove();
             debug!(self.log, "Removed node {}", ni.index());
             domain_removals
-                .entry(self.ingredients[*ni].domain())
+                .entry(node.domain())
                 .or_insert_with(Vec::new)
-                .push(self.ingredients[*ni].local_addr())
+                .push(node.local_addr())
         }
 
         // Send messages to domains
@@ -1555,7 +1668,10 @@ impl ControllerInner {
 
             self.domains
                 .get_mut(&domain)
-                .unwrap()
+                .ok_or_else(|| ReadySetError::NoSuchDomain {
+                    domain_index: domain.index(),
+                    shard: 0,
+                })?
                 .send_to_healthy_blocking::<()>(
                     DomainRequest::RemoveNodes { nodes },
                     &self.workers,
@@ -1592,6 +1708,7 @@ impl ControllerInner {
         // could become a performance bottleneck in the future (e.g., when recovering large
         // graphs).
         let domain_nodes = |i: DomainIndex| -> Vec<NodeIndex> {
+            #[allow(clippy::indexing_slicing)] // indices come from graph
             self.ingredients
                 .node_indices()
                 .filter(|&ni| ni != self.source)
@@ -1624,14 +1741,28 @@ impl ControllerInner {
     async fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
         // Collect a *unique* list of domains that might contain base tables, to avoid sending
         // multiple requests to a domain that happens to contain multiple base tables
+        #[allow(clippy::indexing_slicing)] // inputs returns valid node indices
         let domains = self
             .inputs()
             .values()
             .map(|ni| self.ingredients[*ni].domain())
             .collect::<HashSet<_>>();
 
+        // HACK(eta): validate that all of the domains exist. Doing this inside the future
+        // combinator hellscape below is unwieldy enough to merit maybe introducing a TOCTOU bug :P
+
+        for di in domains.iter() {
+            if !self.domains.contains_key(di) {
+                return Err(ReadySetError::NoSuchDomain {
+                    domain_index: di.index(),
+                    shard: 0,
+                });
+            }
+        }
+
         stream::iter(domains)
             .map(|domain| {
+                #[allow(clippy::indexing_slicing)] // validated above
                 self.domains[&domain].send_to_healthy::<Option<ReplicationOffset>>(
                     DomainRequest::RequestReplicationOffset,
                     &self.workers,

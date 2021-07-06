@@ -1,4 +1,15 @@
-#![warn(clippy::dbg_macro)]
+/*
+ * Left commented while noria-server error handling refactor is still in progress ~eta
+#![warn(
+    clippy::dbg_macro,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::unreachable
+)]
+ */
 
 //! # Note to engineers
 //!
@@ -353,7 +364,14 @@
 //! - [id=1, title=Hello world, votes=42]
 //! + [id=1, title=Hello world, votes=43]
 //! ```
-#![feature(min_type_alias_impl_trait, box_patterns, try_find, result_flattening)]
+#![feature(
+    min_type_alias_impl_trait,
+    box_patterns,
+    try_find,
+    stmt_expr_attributes,
+    result_cloned,
+    result_flattening
+)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 //#![deny(unreachable_pub)]
@@ -422,7 +440,6 @@ pub(crate) struct Config {
     pub(crate) healthcheck_every: time::Duration,
     pub(crate) quorum: usize,
     pub(crate) reuse: ReuseConfigType,
-    pub(crate) threads: Option<usize>,
     pub(crate) primary_region: Option<String>,
 }
 
@@ -445,10 +462,6 @@ impl Default for Config {
             healthcheck_every: time::Duration::from_secs(10),
             quorum: 1,
             reuse: ReuseConfigType::NoReuse,
-            #[cfg(any(debug_assertions, test))]
-            threads: Some(2),
-            #[cfg(not(any(debug_assertions, test)))]
-            threads: None,
             primary_region: None,
         }
     }

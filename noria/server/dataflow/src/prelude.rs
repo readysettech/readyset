@@ -22,7 +22,7 @@ pub(crate) use crate::state::{
     LookupResult, MemoryState, PersistentState, RecordResult, Row, Rows, State,
 };
 pub(crate) type StateMap = Map<Box<dyn State>>;
-pub(crate) type DomainNodes = Map<cell::RefCell<Node>>;
+pub type DomainNodes = Map<cell::RefCell<Node>>;
 pub(crate) type ReplicaAddr = (DomainIndex, usize);
 
 // public exports

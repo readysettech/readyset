@@ -23,8 +23,14 @@ impl DomainHandle {
         self.shards.len()
     }
 
-    pub(super) fn assignment(&self, shard: usize) -> WorkerIdentifier {
-        self.shards[shard].clone()
+    pub(super) fn assignment(&self, shard: usize) -> ReadySetResult<WorkerIdentifier> {
+        self.shards
+            .get(shard)
+            .ok_or_else(|| ReadySetError::NoSuchDomain {
+                domain_index: self.idx.index(),
+                shard,
+            })
+            .cloned()
     }
 
     pub(super) fn assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
@@ -37,9 +43,15 @@ impl DomainHandle {
         req: DomainRequest,
         workers: &HashMap<WorkerIdentifier, Worker>,
     ) -> ReadySetResult<T> {
-        let addr = &self.shards[i];
-        if workers[addr].healthy {
-            Ok(workers[addr]
+        let addr = self.assignment(i)?;
+        let worker =
+            workers
+                .get(&addr)
+                .ok_or_else(|| ReadySetError::UnmappableWorkerIdentifier {
+                    ident: addr.to_string(),
+                })?;
+        if worker.healthy {
+            Ok(worker
                 .rpc(WorkerRequestKind::DomainRequest {
                     target_idx: self.idx,
                     target_shard: i,
