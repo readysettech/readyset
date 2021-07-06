@@ -6,7 +6,8 @@ use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult};
 use futures_util::StreamExt;
-use hyper::{self, Method, StatusCode};
+use hyper::http::{Method, StatusCode};
+use hyper::{self};
 use noria::ControllerDescriptor;
 use noria::{
     consensus::{Authority, Epoch, STATE_KEY},
@@ -201,13 +202,14 @@ where
                 })
                 .await;
             match resp {
-                // ok ok ok
-                Ok(Ok(Ok(r))) => Ok(Ok(r)),
-                Ok(Ok(Err(e))) => Ok(Err(bincode::serialize(&e)?)),
-                // HACK(eta): clients retry on 503, but not on `NotLeader`, so fudge the gap here.
+                // returned from `ControllerInner::external_request`:
+                Ok(Ok(r)) => Ok(Ok(r)),
+                Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
+                Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
+                Ok(Err(e)) => Ok(Err(bincode::serialize(&e)?)),
+                // errors returned by `with_controller_blocking`:
                 Err(ReadySetError::NotLeader) => Err(StatusCode::SERVICE_UNAVAILABLE),
                 Err(e) => Ok(Err(bincode::serialize(&e)?)),
-                Ok(Err(s)) => Err(s),
             }
         };
 
