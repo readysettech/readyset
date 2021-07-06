@@ -5,6 +5,7 @@ use std::time;
 
 use super::Backend;
 use noria::{DataType, Table};
+use std::convert::TryFrom;
 
 async fn do_put(mutator: &mut Table, tx: bool, v: Vec<DataType>) {
     if tx {
@@ -35,7 +36,7 @@ async fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> us
                 .into_iter()
                 .map(|s| match i64::from_str(s) {
                     Ok(v) => v.into(),
-                    Err(_) => s.into(),
+                    Err(_) => DataType::try_from(s).unwrap(),
                 })
                 .collect();
             do_put(&mut putter, use_txn, rec).await;

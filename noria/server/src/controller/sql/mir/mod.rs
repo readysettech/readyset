@@ -1546,7 +1546,9 @@ impl SqlToMirConverter {
 
         let (uid, _) = universe.clone();
 
-        let uformat = if uid == "global".into() {
+        // It is safe to transform the String "global" into a DataType.
+        #[allow(clippy::unwrap_used)]
+        let uformat = if uid == DataType::try_from("global").unwrap() {
             String::from("")
         } else {
             format!("_u{}", uid.to_string())
@@ -1867,7 +1869,9 @@ impl SqlToMirConverter {
             let mut final_node = if ancestors.len() > 1 {
                 // If we have multiple queries, reconcile them.
                 sec_round = true;
-                if uid != "global".into() {
+                // It is safe to transform the String "global" into a DataType.
+                #[allow(clippy::unwrap_used)]
+                if uid != DataType::try_from("global").unwrap() {
                     sec_round = true;
                 }
 

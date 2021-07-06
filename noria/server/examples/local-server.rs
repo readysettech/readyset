@@ -1,4 +1,5 @@
 use noria_server::Builder;
+use std::convert::TryInto;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[tokio::main]
@@ -48,7 +49,11 @@ async fn main() {
         let title = "test title";
         let url = "http://pdos.csail.mit.edu";
         article
-            .insert(vec![aid.into(), title.into(), url.into()])
+            .insert(vec![
+                aid.into(),
+                title.try_into().unwrap(),
+                url.try_into().unwrap(),
+            ])
             .await
             .unwrap();
     }

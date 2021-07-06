@@ -221,10 +221,11 @@
 //! # extern crate noria;
 //! # #[tokio::main]
 //! # async fn main() {
-//! # let zookeeper_addr = "";
+//! # use std::convert::TryInto;
+//! let zookeeper_addr = "";
 //! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
 //! let mut article = db.table("article").await.unwrap();
-//! article.insert(vec![noria::DataType::from(1), "Hello world".into()]).await.unwrap();
+//! article.insert(vec![noria::DataType::from(1), "Hello world".try_into().unwrap()]).await.unwrap();
 //! # }
 //! ```
 //!

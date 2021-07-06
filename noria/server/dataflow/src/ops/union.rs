@@ -1004,14 +1004,18 @@ mod tests {
         let (mut u, l, r) = setup(DuplicateMode::UnionAll);
 
         // forward from left should emit original record
-        let left = vec![1.into(), "a".into()];
+        let left = vec![1.into(), "a".try_into().unwrap()];
         assert_eq!(u.one_row(l, left.clone(), false), vec![left].into());
 
         // forward from right should emit subset record
-        let right = vec![1.into(), "skipped".into(), "x".into()];
+        let right = vec![
+            1.into(),
+            "skipped".try_into().unwrap(),
+            "x".try_into().unwrap(),
+        ];
         assert_eq!(
             u.one_row(r, right, false),
-            vec![vec![1.into(), "x".into()]].into()
+            vec![vec![1.into(), "x".try_into().unwrap()]].into()
         );
     }
 
@@ -1072,7 +1076,7 @@ mod tests {
             // point-key replay on the left
             let res = g.input_raw(
                 left,
-                vec![vec![DataType::from(1), DataType::from("a")]],
+                vec![vec![DataType::from(1), DataType::try_from("a").unwrap()]],
                 replay_ctx(),
                 false,
             );
@@ -1090,8 +1094,8 @@ mod tests {
                 right,
                 vec![vec![
                     DataType::from(1),
-                    DataType::from("skipped"),
-                    DataType::from("b"),
+                    DataType::try_from("skipped").unwrap(),
+                    DataType::try_from("b").unwrap(),
                 ]],
                 replay_ctx(),
                 false,
@@ -1106,8 +1110,12 @@ mod tests {
                 } => {
                     // we should emit both the originally captured record from the left and the one
                     // from the right
-                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
-                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
+                    assert!(
+                        rows.contains(&Record::Positive(vec![1.into(), "a".try_into().unwrap()]))
+                    );
+                    assert!(
+                        rows.contains(&Record::Positive(vec![1.into(), "b".try_into().unwrap()]))
+                    );
 
                     assert!(captured.is_empty());
                     assert_eq!(keys, hashset![key]);
@@ -1134,8 +1142,8 @@ mod tests {
             let res = g.input_raw(
                 left,
                 vec![
-                    vec![DataType::from(1), DataType::from("a")],
-                    vec![DataType::from(1), DataType::from("c")],
+                    vec![DataType::from(1), DataType::try_from("a").unwrap()],
+                    vec![DataType::from(1), DataType::try_from("c").unwrap()],
                 ],
                 replay_ctx(),
                 false,
@@ -1153,8 +1161,14 @@ mod tests {
             let res = g.input_raw(
                 left,
                 vec![
-                    (vec![DataType::from(1), DataType::from("d")], true),
-                    (vec![DataType::from(1), DataType::from("c")], false),
+                    (
+                        vec![DataType::from(1), DataType::try_from("d").unwrap()],
+                        true,
+                    ),
+                    (
+                        vec![DataType::from(1), DataType::try_from("c").unwrap()],
+                        false,
+                    ),
                 ],
                 ReplayContext::None,
                 false,
@@ -1166,8 +1180,8 @@ mod tests {
                 right,
                 vec![vec![
                     DataType::from(1),
-                    DataType::from("skipped"),
-                    DataType::from("b"),
+                    DataType::try_from("skipped").unwrap(),
+                    DataType::try_from("b").unwrap(),
                 ]],
                 replay_ctx(),
                 false,
@@ -1183,10 +1197,16 @@ mod tests {
                     dbg!(&rows);
                     // we should emit both the captured record from the left with the updates
                     // applied, and the records from the right
-                    assert!(rows.contains(&Record::Positive(vec![1.into(), "a".into()])));
-                    assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
-                    // assert!(!rows.contains(&Record::Positive(vec![1.into(), "c".into()])));
-                    assert!(rows.contains(&Record::Positive(vec![1.into(), "d".into()])));
+                    assert!(
+                        rows.contains(&Record::Positive(vec![1.into(), "a".try_into().unwrap()]))
+                    );
+                    assert!(
+                        rows.contains(&Record::Positive(vec![1.into(), "b".try_into().unwrap()]))
+                    );
+                    // assert!(!rows.contains(&Record::Positive(vec![1.into(), "c".try_into().unwrap()])));
+                    assert!(
+                        rows.contains(&Record::Positive(vec![1.into(), "d".try_into().unwrap()]))
+                    );
 
                     assert!(captured.is_empty());
                     assert_eq!(keys, hashset![key]);
@@ -1253,8 +1273,12 @@ mod tests {
         fn bag_union_ingredient_returns_correct_results() {
             let (mut u, l, r) = setup(DuplicateMode::BagUnion);
 
-            let left_row = vec![1.into(), "a".into()];
-            let right_row = vec![1.into(), "skipped".into(), "a".into()];
+            let left_row = vec![1.into(), "a".try_into().unwrap()];
+            let right_row = vec![
+                1.into(),
+                "skipped".try_into().unwrap(),
+                "a".try_into().unwrap(),
+            ];
             assert_eq!(
                 u.one_row(l, left_row.clone(), false),
                 vec![left_row.clone()].into()

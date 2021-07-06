@@ -3,6 +3,7 @@ mod test_populate;
 
 use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Write;
 use std::time;
@@ -83,7 +84,7 @@ impl Backend {
 
 fn make_user(name: &str) -> HashMap<String, DataType> {
     let mut user = HashMap::new();
-    user.insert(String::from("id"), name.into());
+    user.insert(String::from("id"), DataType::try_from(name).unwrap());
 
     user
 }

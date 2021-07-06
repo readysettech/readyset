@@ -1,5 +1,6 @@
 use crate::Backend;
 use noria::DataType;
+use std::convert::TryFrom;
 
 pub async fn create_users(backend: &mut Backend) {
     // username varchar(1024),
@@ -44,7 +45,11 @@ pub async fn create_users(backend: &mut Backend) {
     ];
     let users: Vec<Vec<DataType>> = data
         .into_iter()
-        .map(|v| v.into_iter().map(|e| e.into()).collect::<Vec<DataType>>())
+        .map(|v| {
+            v.into_iter()
+                .map(|e| DataType::try_from(e).unwrap())
+                .collect::<Vec<DataType>>()
+        })
         .collect();
 
     backend
@@ -63,9 +68,21 @@ pub async fn create_papers(backend: &mut Backend) {
     // author varchar(1024),
     // accepted tinyint(1),
     let papers: Vec<Vec<DataType>> = vec![
-        vec![1.into(), "malte".into(), "0".into()],
-        vec![2.into(), "lara".into(), "0".into()],
-        vec![3.into(), "malte".into(), "0".into()],
+        vec![
+            1.into(),
+            DataType::try_from("malte").unwrap(),
+            DataType::try_from("0").unwrap(),
+        ],
+        vec![
+            2.into(),
+            DataType::try_from("lara").unwrap(),
+            DataType::try_from("0").unwrap(),
+        ],
+        vec![
+            3.into(),
+            DataType::try_from("malte").unwrap(),
+            DataType::try_from("0").unwrap(),
+        ],
     ];
 
     // PaperVersion
@@ -77,24 +94,24 @@ pub async fn create_papers(backend: &mut Backend) {
     let paper_versions: Vec<Vec<DataType>> = vec![
         vec![
             1.into(),
-            "Why Soup is Awesome".into(),
-            "Text".into(),
-            "Soup is tasty.".into(),
-            "0".into(),
+            DataType::try_from("Why Soup is Awesome").unwrap(),
+            DataType::try_from("Text").unwrap(),
+            DataType::try_from("Soup is tasty.").unwrap(),
+            DataType::try_from("0").unwrap(),
         ],
         vec![
             2.into(),
-            "Is Soup Tasty?".into(),
-            "Text".into(),
-            "Maybe.".into(),
-            "0".into(),
+            DataType::try_from("Is Soup Tasty?").unwrap(),
+            DataType::try_from("Text").unwrap(),
+            DataType::try_from("Maybe.").unwrap(),
+            DataType::try_from("0").unwrap(),
         ],
         vec![
             3.into(),
-            "How To Cook Soup".into(),
-            "Text".into(),
-            "Make it tasty.".into(),
-            "0".into(),
+            DataType::try_from("How To Cook Soup").unwrap(),
+            DataType::try_from("Text").unwrap(),
+            DataType::try_from("Make it tasty.").unwrap(),
+            DataType::try_from("0").unwrap(),
         ],
     ];
 

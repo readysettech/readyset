@@ -409,12 +409,13 @@ mod tests {
         SelectStatement, SqlQuery, Table,
     };
     use std::collections::HashMap;
+    use std::convert::TryInto;
 
     macro_rules! rewrites_to {
         ($before: expr, $after: expr) => {{
             let mut res = parse_query($before).unwrap();
             let expected = parse_query($after).unwrap();
-            let context = hashmap! {"t1".to_owned() => "global".into()};
+            let context = hashmap! {"t1".to_owned() => "global".try_into().unwrap()};
             res.rewrite_table_aliases("query", &context);
             assert_eq!(
                 res, expected,
@@ -445,7 +446,7 @@ mod tests {
             ..Default::default()
         };
         let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".into());
+        context.insert(String::from("id"), "global".try_into().unwrap());
         let mut res = SqlQuery::Select(q);
         let rewrites = res.rewrite_table_aliases("query", &context);
         // Table alias removed in field list
@@ -492,12 +493,12 @@ mod tests {
         use nom_sql::{BinaryOperator, Expression, FunctionExpression};
 
         let col_small = Column {
-            name: "count(t.id)".into(),
+            name: "count(t.id)".try_into().unwrap(),
             table: None,
             function: Some(Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column {
-                    name: "id".into(),
-                    table: Some("t".into()),
+                    name: "id".try_into().unwrap(),
+                    table: Some("t".try_into().unwrap()),
                     function: None,
                 })),
                 distinct: true,
@@ -505,12 +506,12 @@ mod tests {
             })),
         };
         let col_full = Column {
-            name: "count(t.id)".into(),
+            name: "count(t.id)".try_into().unwrap(),
             table: None,
             function: Some(Box::new(FunctionExpression::Count {
                 expr: Box::new(Expression::Column(Column {
-                    name: "id".into(),
-                    table: Some("PaperTag".into()),
+                    name: "id".try_into().unwrap(),
+                    table: Some("PaperTag".try_into().unwrap()),
                     function: None,
                 })),
                 distinct: true,
@@ -534,7 +535,7 @@ mod tests {
             ..Default::default()
         };
         let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".into());
+        context.insert(String::from("id"), "global".try_into().unwrap());
         let mut res = SqlQuery::Select(q);
         let rewrites = res.rewrite_table_aliases("query", &context);
         // Table alias removed in field list
@@ -583,7 +584,7 @@ mod tests {
         )
         .unwrap();
         let mut context = HashMap::new();
-        context.insert(String::from("id"), "global".into());
+        context.insert(String::from("id"), "global".try_into().unwrap());
         let rewrites = res.rewrite_table_aliases("query_name", &context);
         match res {
             SqlQuery::Select(tq) => {

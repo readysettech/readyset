@@ -6,6 +6,7 @@ use dataflow::prelude::DataType;
 use nom_sql::Table;
 use noria::ReadySetError;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::vec::Vec;
 
 mod finkelstein;
@@ -60,7 +61,9 @@ impl ReuseConfig {
         universe: UniverseId,
         universes: &HashMap<Option<DataType>, Vec<UniverseId>>,
     ) -> Vec<UniverseId> {
-        let global = ("global".into(), None);
+        // It is safe to transform the String "global" into a DataType.
+        #[allow(clippy::unwrap_used)]
+        let global = (DataType::try_from("global").unwrap(), None);
         let mut reuse_universes = vec![global, universe.clone()];
         let (_, group) = universe;
 

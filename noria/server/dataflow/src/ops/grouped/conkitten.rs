@@ -10,7 +10,7 @@ use noria::{internal, invariant_eq};
 use serde_derive::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
 
 /// The last stored state for a given group.
@@ -26,7 +26,7 @@ impl LastState {
     /// Set up a `LastState` for a group, making an empty vector for each source column.
     fn make(num_source_cols: usize) -> Self {
         Self {
-            string_repr: "".into(),
+            string_repr: "".try_into().unwrap(),
             data_for_source_cols: std::iter::repeat(vec![]).take(num_source_cols).collect(),
         }
     }
@@ -196,12 +196,12 @@ impl GroupedOperation for GroupConkitten {
         }
         prev_state.string_repr = out_str.clone();
         self.last_state.borrow_mut().insert(group, prev_state);
-        Ok(DataType::from(out_str))
+        DataType::try_from(out_str)
     }
 
     fn description(&self, detailed: bool) -> String {
         if !detailed {
-            return "CONCAT2".into();
+            return "CONCAT2".try_into().unwrap();
         }
 
         format!(
@@ -219,7 +219,10 @@ impl GroupedOperation for GroupConkitten {
     }
 
     fn empty_value(&self) -> Option<DataType> {
-        Some("".into())
+        // It is safe to convert an empty String into a DataType, so it's
+        // safe to unwrap.
+        #[allow(clippy::unwrap_used)]
+        Some(DataType::try_from("").unwrap())
     }
 }
 
@@ -228,6 +231,7 @@ mod tests {
     use super::*;
 
     use crate::ops;
+    use std::convert::TryInto;
 
     fn setup(mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -260,7 +264,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1".into());
+                assert_eq!(r[1], "1".try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -275,7 +279,7 @@ mod tests {
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 2.into());
-                assert_eq!(r[1], "2".into());
+                assert_eq!(r[1], "2".try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -291,14 +295,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1".into());
+                assert_eq!(r[1], "1".try_into().unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1#2".into());
+                assert_eq!(r[1], "1#2".try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -313,14 +317,14 @@ mod tests {
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "1#2".into());
+                assert_eq!(r[1], "1#2".try_into().unwrap());
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], 1.into());
-                assert_eq!(r[1], "2".into());
+                assert_eq!(r[1], "2".try_into().unwrap());
             }
             _ => unreachable!(),
         }
@@ -346,7 +350,7 @@ mod tests {
                                  // group 1 had [2], now has [1,2]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 1.into() {
-                assert_eq!(r[1], "2".into());
+                assert_eq!(r[1], "2".try_into().unwrap());
                 true
             } else {
                 false
@@ -356,7 +360,7 @@ mod tests {
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 1.into() {
-                assert_eq!(r[1], "2#1#2".into());
+                assert_eq!(r[1], "2#1#2".try_into().unwrap());
                 true
             } else {
                 false
@@ -367,7 +371,7 @@ mod tests {
         // group 2 was [2], is now [1,2,3]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 2.into() {
-                assert_eq!(r[1], "2".into());
+                assert_eq!(r[1], "2".try_into().unwrap());
                 true
             } else {
                 false
@@ -377,7 +381,7 @@ mod tests {
         }));
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 2.into() {
-                assert_eq!(r[1], "3#2#1".into());
+                assert_eq!(r[1], "3#2#1".try_into().unwrap());
                 true
             } else {
                 false
@@ -388,7 +392,7 @@ mod tests {
         // group 3 was [], is now [3]
         assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
             if r[0] == 3.into() {
-                assert_eq!(r[1], "3".into());
+                assert_eq!(r[1], "3".try_into().unwrap());
                 true
             } else {
                 false

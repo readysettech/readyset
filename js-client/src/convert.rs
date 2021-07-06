@@ -235,9 +235,8 @@ where
     if js_param.is_a::<JsNull, _>(cx) {
         Ok(DataType::None)
     } else if js_param.is_a::<JsString, _>(cx) {
-        Ok(DataType::from(
-            js_param.downcast_or_throw::<JsString, _>(cx)?.value(cx),
-        ))
+        DataType::try_from(js_param.downcast_or_throw::<JsString, _>(cx)?.value(cx))
+            .or_else(|e| cx.throw_error(e.to_string()))
     } else if js_param.is_a::<JsNumber, _>(cx) {
         DataType::try_from(js_param.downcast_or_throw::<JsNumber, _>(cx)?.value(cx))
             .or_else(|e| cx.throw_error(e.to_string()))

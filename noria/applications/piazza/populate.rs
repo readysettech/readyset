@@ -1,6 +1,7 @@
 use noria::DataType;
 use rand::prelude::*;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 const CLASSES_PER_STUDENT: usize = 5;
 pub const TAS_PER_CLASS: usize = 5;
@@ -107,7 +108,9 @@ impl Populate {
             let pid = i.into();
             let author = self.uid();
             let cid = self.cid_for(&author);
-            let content = "".into();
+            // It is safe to transform an empty String into a DataType.
+            #[allow(clippy::unwrap_used)]
+            let content = DataType::try_from("").unwrap();
             let private = self.private();
             let anon = 1.into();
             records.push(vec![pid, cid, author, content, private, anon]);

@@ -207,7 +207,7 @@ impl GroupedOperation for GroupConcat {
         // we pushed one separator too many above
         let real_len = new.len() - self.separator.len();
         new.truncate(real_len);
-        Ok(DataType::from(new))
+        DataType::try_from(new)
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -252,6 +252,8 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn empty_value(&self) -> Option<DataType> {
-        Some("".into())
+        // It is safe to create a DataType from an empty string.
+        #[allow(clippy::unwrap_used)]
+        Some(DataType::try_from("").unwrap())
     }
 }

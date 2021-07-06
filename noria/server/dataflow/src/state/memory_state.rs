@@ -306,6 +306,7 @@ impl MemoryState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryInto;
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
@@ -316,10 +317,10 @@ mod tests {
     fn memory_state_process_records() {
         let mut state = MemoryState::default();
         let records: Records = vec![
-            (vec![1.into(), "A".into()], true),
-            (vec![2.into(), "B".into()], true),
-            (vec![3.into(), "C".into()], true),
-            (vec![1.into(), "A".into()], false),
+            (vec![1.into(), "A".try_into().unwrap()], true),
+            (vec![2.into(), "B".try_into().unwrap()], true),
+            (vec![3.into(), "C".try_into().unwrap()], true),
+            (vec![1.into(), "A".try_into().unwrap()], false),
         ]
         .into();
 
@@ -347,7 +348,7 @@ mod tests {
     #[test]
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
-        let row: Vec<DataType> = vec![10.into(), "Cat".into()];
+        let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         insert(&mut state, row.clone());
         state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);

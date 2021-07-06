@@ -211,6 +211,8 @@ impl DataType {
             DataType::UnsignedBigInt(x) => x != 0,
             DataType::Real(f, _) => f != 0.0,
             DataType::Text(_) | DataType::TinyText(_) => {
+                // Use of TryFrom for these DataTypes always yields an Ok(..) result.
+                #[allow(clippy::unwrap_used)]
                 !<&str>::try_from(self).unwrap().is_empty()
             }
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
@@ -298,8 +300,9 @@ impl DataType {
     /// use nom_sql::SqlType;
     /// use chrono::NaiveDate;
     /// use std::borrow::Borrow;
+    /// use std::convert::TryFrom;
     ///
-    /// let text = DataType::from("2021-01-26 10:20:37");
+    /// let text = DataType::try_from("2021-01-26 10:20:37").unwrap();
     /// let timestamp = text.coerce_to(&SqlType::Timestamp).unwrap();
     /// assert_eq!(
     ///   timestamp.into_owned(),
@@ -431,10 +434,12 @@ impl DataType {
                     .map(Cow::Owned)
             }
             (Self::Timestamp(ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.format(TIMESTAMP_FORMAT).to_string().into()))
+                Ok(Cow::Owned(DataType::try_from(
+                    ts.format(TIMESTAMP_FORMAT).to_string(),
+                )?))
             }
             (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(ts.to_string().into()))
+                Ok(Cow::Owned(DataType::try_from(ts.to_string())?))
             }
             (Self::Timestamp(ts), Some(Timestamp), Date) => {
                 Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
@@ -586,8 +591,10 @@ impl PartialEq for DataType {
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
                 let b: &str = <&str>::try_from(other).unwrap();
                 a == b
             }
@@ -608,8 +615,10 @@ impl PartialEq for DataType {
             | (&DataType::Int(..), &DataType::UnsignedBigInt(..))
             | (&DataType::Int(..), &DataType::BigInt(..)) => {
                 // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
                 // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a == b
             }
@@ -627,6 +636,7 @@ impl PartialEq for DataType {
     }
 }
 
+use crate::errors::internal_err;
 use msql_srv::MysqlTime;
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -645,8 +655,10 @@ impl Ord for DataType {
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
                 let a: &str = <&str>::try_from(self).unwrap();
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
                 let b: &str = <&str>::try_from(other).unwrap();
                 a.cmp(&b)
             }
@@ -667,8 +679,10 @@ impl Ord for DataType {
             | (&DataType::UnsignedInt(..), &DataType::Int(..))
             | (&DataType::Int(..), &DataType::UnsignedInt(..)) => {
                 // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
                 let a: i128 = <i128>::try_from(self).unwrap();
                 // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
                 let b: i128 = <i128>::try_from(other).unwrap();
                 a.cmp(&b)
             }
@@ -699,11 +713,13 @@ impl Hash for DataType {
             DataType::None => {}
             DataType::Int(..) | DataType::BigInt(..) => {
                 // this unwrap should be safe because no error path in try_from for i64 (&i64) on Int and BigInt
+                #[allow(clippy::unwrap_used)]
                 let n: i64 = <i64>::try_from(self).unwrap();
                 n.hash(state)
             }
             DataType::UnsignedInt(..) | DataType::UnsignedBigInt(..) => {
                 // this unwrap should be safe because no error path in try_from for u64 (&u64) on UnsignedInt and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
                 let n: u64 = <u64>::try_from(self).unwrap();
                 n.hash(state)
             }
@@ -713,6 +729,7 @@ impl Hash for DataType {
             }
             DataType::Text(..) | DataType::TinyText(..) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
                 let t: &str = <&str>::try_from(self).unwrap();
                 t.hash(state)
             }
@@ -856,7 +873,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
         match l {
             Literal::Null => Ok(DataType::None),
             Literal::Integer(i) => Ok((*i as i64).into()),
-            Literal::String(s) => Ok(s.as_str().into()),
+            Literal::String(s) => s.as_str().try_into(),
             Literal::CurrentTimestamp | Literal::CurrentTime => {
                 let ts = chrono::Local::now().naive_local();
                 Ok(DataType::Timestamp(ts))
@@ -983,19 +1000,32 @@ impl<'a> TryFrom<&'a DataType> for &'a str {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Text(ref s) => Ok(s.to_str().unwrap()),
+            DataType::Text(ref s) => Ok(s
+                .to_str()
+                .map_err(|e| internal_err(format!("unable to create str from &ArcCStr: {}", e)))?),
             DataType::TinyText(ref bts) => {
                 if bts[TINYTEXT_WIDTH - 1] == 0 {
                     // NULL terminated CStr
                     use std::ffi::CStr;
+                    // this is safe, since we are checking that bts[TINYTEXT_WIDTH - 1] == 0
+                    // (so there is at least one 0 element in bts)
+                    #[allow(clippy::unwrap_used)]
                     let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
-                    Ok(CStr::from_bytes_with_nul(&bts[0..null])
-                        .unwrap()
-                        .to_str()
-                        .unwrap())
+                    // CStr::from_bytes_with_nul only fails if there is no 0 char or if the 0 char
+                    // is not at the end of the byte array, which is not the case for bts[0..null]
+                    // since we already found the first 0 (null) char position.
+                    // So it's safe to use unwrap and to use index slicing.
+                    #[allow(clippy::unwrap_used)]
+                    #[allow(clippy::indexing_slicing)]
+                    let cstr = CStr::from_bytes_with_nul(&bts[0..null]).unwrap();
+                    Ok(cstr.to_str().map_err(|e| {
+                        internal_err(format!("unable to create str from CStr: {}", e))
+                    })?)
                 } else {
                     // String is exactly eight bytes
-                    Ok(std::str::from_utf8(bts).unwrap())
+                    Ok(std::str::from_utf8(bts).map_err(|e| {
+                        internal_err(format!("unable to create str from bytes: {}", e))
+                    })?)
                 }
             }
             _ => Err(Self::Error::DataTypeConversionError {
@@ -1269,9 +1299,11 @@ impl TryFrom<&'_ DataType> for f64 {
     }
 }
 
-impl From<String> for DataType {
-    fn from(s: String) -> Self {
-        DataType::try_from(s.as_bytes()).unwrap()
+impl TryFrom<String> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        DataType::try_from(s.as_bytes())
     }
 }
 
@@ -1292,9 +1324,11 @@ impl TryFrom<DataType> for String {
     }
 }
 
-impl<'a> From<&'a str> for DataType {
-    fn from(s: &'a str) -> Self {
-        DataType::try_from(s.as_bytes()).unwrap()
+impl<'a> TryFrom<&'a str> for DataType {
+    type Error = ReadySetError;
+
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
+        DataType::try_from(s.as_bytes())
     }
 }
 
@@ -1306,6 +1340,9 @@ impl<'a> TryFrom<&'a [u8]> for DataType {
         if len <= TINYTEXT_WIDTH {
             let mut bytes = [0; TINYTEXT_WIDTH];
             if len != 0 {
+                // We know at this point that `len` is less or equal to `TINYTEXT_WIDTH`,
+                // which is the size of the `bytes` array.
+                #[allow(clippy::indexing_slicing)]
                 let bts = &mut bytes[0..len];
                 bts.copy_from_slice(b);
             }
@@ -1580,22 +1617,31 @@ impl TableOperation {
 
     #[doc(hidden)]
     #[inline]
-    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
+    pub fn shards(
+        &self,
+        key_col: usize,
+        num_shards: usize,
+    ) -> ReadySetResult<impl Iterator<Item = usize>> {
+        macro_rules! get_or_err {
+            ($vect:expr, $key:expr) => {
+                $vect.get($key).ok_or(internal_err("index out of bounds"))?
+            };
+        }
         let key = match self {
-            TableOperation::Insert(r) => Some(&r[key_col]),
-            TableOperation::DeleteByKey { key } => Some(&key[0]),
-            TableOperation::DeleteRow { row } => Some(&row[key_col]),
-            TableOperation::Update { key, .. } => Some(&key[0]),
-            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
+            TableOperation::Insert(r) => Some(get_or_err!(&r, key_col)),
+            TableOperation::DeleteByKey { key } => Some(get_or_err!(&key, 0)),
+            TableOperation::DeleteRow { row } => Some(get_or_err!(&row, key_col)),
+            TableOperation::Update { key, .. } => Some(get_or_err!(&key, 0)),
+            TableOperation::InsertOrUpdate { row, .. } => Some(get_or_err!(&row, key_col)),
             TableOperation::SetReplicationOffset(_) => None,
         };
 
-        if let Some(key) = key {
+        Ok(if let Some(key) = key {
             Either::Left(iter::once(crate::shard_by(key, num_shards)))
         } else {
             // updates to replication offsets should hit all shards
             Either::Right(0..num_shards)
-        }
+        })
     }
 }
 
@@ -1622,7 +1668,12 @@ impl Arbitrary for DataType {
             any::<i64>().prop_map(BigInt),
             any::<u64>().prop_map(UnsignedBigInt),
             any::<(f64, u8)>().prop_map(|(f, p)| Real(f, p)),
-            any::<String>().prop_map(DataType::from),
+            any::<String>().prop_map(|s| {
+                // As long as the string does not have nulls, it should be safe to
+                // transform it into a DataType.
+                #[allow(clippy::unwrap_used)]
+                DataType::try_from(s.replace("\0", "")).unwrap()
+            }),
             arbitrary_naive_date_time().prop_map(Timestamp),
             arbitrary_duration()
                 .prop_map(MysqlTime::new)
@@ -1845,15 +1896,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "can't + a TinyText(\"hi\") and Int(5)")]
     fn add_invalid_types() {
-        let a: DataType = "hi".into();
+        let a: DataType = "hi".try_into().unwrap();
         let b: DataType = 5.into();
         let _ = &a + &b;
     }
 
     #[test]
     fn data_type_debug() {
-        let tiny_text: DataType = "hi".into();
-        let text: DataType = "I contain ' and \"".into();
+        let tiny_text: DataType = "hi".try_into().unwrap();
+        let text: DataType = "I contain ' and \"".try_into().unwrap();
         let real: DataType = DataType::try_from(-0.05).unwrap();
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
@@ -1871,8 +1922,8 @@ mod tests {
 
     #[test]
     fn data_type_display() {
-        let tiny_text: DataType = "hi".into();
-        let text: DataType = "this is a very long text indeed".into();
+        let tiny_text: DataType = "hi".try_into().unwrap();
+        let text: DataType = "this is a very long text indeed".try_into().unwrap();
         let real: DataType = DataType::try_from(-0.05).unwrap();
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
@@ -1889,11 +1940,11 @@ mod tests {
     where
         T: PartialEq + fmt::Debug,
     {
-        let txt1: DataType = "hi".into();
-        let txt12: DataType = "no".into();
+        let txt1: DataType = "hi".try_into().unwrap();
+        let txt12: DataType = "no".try_into().unwrap();
         let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
-        let text: DataType = "this is a very long text indeed".into();
-        let text2: DataType = "this is another long text".into();
+        let text: DataType = "this is a very long text indeed".try_into().unwrap();
+        let text2: DataType = "this is another long text".try_into().unwrap();
         let real: DataType = DataType::try_from(-0.05).unwrap();
         let real2: DataType = DataType::try_from(-0.06).unwrap();
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
@@ -2180,7 +2231,10 @@ mod tests {
 
     #[proptest]
     fn data_type_string_conversion_roundtrip(s: String) {
-        assert_eq!(String::try_from(&DataType::from(s.clone())).unwrap(), s)
+        assert_eq!(
+            String::try_from(&DataType::try_from(s.clone()).unwrap()).unwrap(),
+            s
+        )
     }
 
     #[test]
@@ -2202,11 +2256,11 @@ mod tests {
 
         use std::convert::TryFrom;
 
-        let txt1: DataType = "hi".into();
-        let txt12: DataType = "no".into();
+        let txt1: DataType = "hi".try_into().unwrap();
+        let txt12: DataType = "no".try_into().unwrap();
         let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
-        let text: DataType = "this is a very long text indeed".into();
-        let text2: DataType = "this is another long text".into();
+        let text: DataType = "this is a very long text indeed".try_into().unwrap();
+        let text2: DataType = "this is another long text".try_into().unwrap();
         let real: DataType = DataType::try_from(-0.05).unwrap();
         let real2: DataType = DataType::try_from(-0.06).unwrap();
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
@@ -2382,7 +2436,7 @@ mod tests {
         #[proptest]
         fn parse_timestamps(#[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime) {
             let expected = DataType::from(ndt);
-            let input = DataType::from(ndt.format(TIMESTAMP_FORMAT).to_string());
+            let input = DataType::try_from(ndt.format(TIMESTAMP_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Timestamp).unwrap();
             assert_eq!(*result, expected);
         }
@@ -2390,7 +2444,7 @@ mod tests {
         #[proptest]
         fn parse_times(#[strategy(arbitrary_naive_time())] nt: NaiveTime) {
             let expected = DataType::from(nt);
-            let input = DataType::from(nt.format(TIME_FORMAT).to_string());
+            let input = DataType::try_from(nt.format(TIME_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Time).unwrap();
             assert_eq!(*result, expected);
         }
@@ -2398,7 +2452,7 @@ mod tests {
         #[proptest]
         fn parse_dates(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
             let expected = DataType::from(NaiveDateTime::new(nd, NaiveTime::from_hms(0, 0, 0)));
-            let input = DataType::from(nd.format(DATE_FORMAT).to_string());
+            let input = DataType::try_from(nd.format(DATE_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Date).unwrap();
             assert_eq!(*result, expected);
         }
@@ -2472,7 +2526,7 @@ mod tests {
         #[proptest]
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             use SqlType::*;
-            let input = DataType::from(text.as_str());
+            let input = DataType::try_from(text.as_str()).unwrap();
             let intermediate = Char(u16::try_from(text.len()).unwrap());
             let result = input.coerce_to(&intermediate).unwrap();
             assert_eq!(

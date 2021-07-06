@@ -7,8 +7,9 @@ use crate::errors::internal_err;
 use crate::ReadySetResult;
 use dataflow::ops::union;
 use mir::MirNodeRef;
-use noria::{internal, invariant, ReadySetError};
+use noria::{internal, invariant, DataType, ReadySetError};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 pub trait SecurityBoundary {
     fn reconcile(
@@ -111,7 +112,7 @@ impl SecurityBoundary for SqlToMirConverter {
         let mut last_security_nodes: Vec<MirNodeRef> = Vec::new();
         let mut prev_node = prev_node.unwrap();
 
-        if universe.0 == "global".into() {
+        if universe.0 == DataType::try_from("global")? {
             return Ok((vec![prev_node], security_nodes));
         }
 
