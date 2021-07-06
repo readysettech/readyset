@@ -9,7 +9,6 @@ use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::ops::Index;
 
 use crate::prelude::*;
 
@@ -104,28 +103,24 @@ impl TopK {
     }
 
     /// Project the columns we are grouping by out of the given record
-    fn project_group<'rec, R>(&self, rec: &'rec R) -> Vec<&'rec DataType>
+
+    fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DataType>>
     where
-        R: Index<usize, Output = DataType> + ?Sized,
+        R: Indices<'static, usize, Output = DataType> + ?Sized,
     {
         rec.indices(self.group_by.clone())
+            .map_err(|_| ReadySetError::InvalidRecordLength)
     }
 
     /// Calculate a hash for the columns we are grouping by out of the given record, for use in
     /// `self.extra_records`
-    fn group_hash<R>(&self, rec: &R) -> GroupHash
+    fn group_hash<R>(&self, rec: &R) -> ReadySetResult<GroupHash>
     where
-        R: Index<usize, Output = DataType> + ?Sized,
+        R: Indices<'static, usize, Output = DataType> + ?Sized,
     {
         let mut hasher = DefaultHasher::new();
-        self.project_group(rec).hash(&mut hasher);
-        hasher.finish()
-    }
-
-    /// Compare two records based on the columns we're grouping by
-    fn group_cmp(&self, rec_a: &Record, rec_b: &Record) -> Ordering {
-        self.project_group(rec_a.rec())
-            .cmp(&self.project_group(rec_b.rec()))
+        self.project_group(rec)?.hash(&mut hasher);
+        Ok(hasher.finish())
     }
 }
 
@@ -174,7 +169,11 @@ impl Ingredient for TopK {
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries. We'll do this by sorting the batch by our group by.
         let mut rs: Vec<_> = rs.into();
-        rs.sort_by(|l, r| self.group_cmp(l, r));
+        rs.sort_by(|a: &Record, b: &Record| {
+            self.project_group(&***a)
+                .unwrap_or_default()
+                .cmp(&self.project_group(&***b).unwrap_or_default())
+        });
 
         let us = self.us.unwrap();
         let db: &dyn State = state
@@ -273,7 +272,7 @@ impl Ingredient for TopK {
                         // If we're fully materialized, save records beyond k into `extra_records`
                         // so we can use them if we ever receive a negative.
                         let mut extra_records = self.extra_records.borrow_mut();
-                        let entry = extra_records.entry(self.group_hash(&(*r))).or_default();
+                        let entry = extra_records.entry(self.group_hash(&(*r))?).or_default();
                         entry.push(r.into());
                         // TODO(grfn): Sorting here every step of the way is not optimal, we should
                         // make some sort of btree here wrapping a type with an (unsafe) reference
@@ -287,7 +286,7 @@ impl Ingredient for TopK {
 
         // records are now chunked by group
         for r in &rs {
-            if grp.iter().cmp(self.project_group(r.rec())) != Ordering::Equal {
+            if grp.iter().cmp(self.project_group(r.rec())?) != Ordering::Equal {
                 // new group!
 
                 // first, tidy up the old one
@@ -299,7 +298,7 @@ impl Ingredient for TopK {
                 // make ready for the new one
                 // NOTE(grfn): Is this the most optimal way of doing this?
                 grp.clear();
-                grp.extend(self.project_group(r.rec()).into_iter().cloned());
+                grp.extend(self.project_group(r.rec())?.into_iter().cloned());
 
                 // check out current state
                 match db.lookup(&self.group_by[..], &KeyType::from(&grp[..])) {

@@ -116,9 +116,13 @@ impl GroupedOperation for GroupConkitten {
     }
 
     fn to_diff(&self, record: &[DataType], is_positive: bool) -> ReadySetResult<Self::Diff> {
-        let data = record.cloned_indices(self.source_cols.iter().copied());
+        let data = record
+            .cloned_indices(self.source_cols.iter().copied())
+            .map_err(|_| ReadySetError::InvalidRecordLength)?;
         // We need this to figure out which state to use.
-        let group_by = record.cloned_indices(self.group_by.iter().cloned());
+        let group_by = record
+            .cloned_indices(self.group_by.iter().cloned())
+            .map_err(|_| ReadySetError::InvalidRecordLength)?;
         Ok(KittenDiff {
             record: if is_positive {
                 Record::Positive(data)

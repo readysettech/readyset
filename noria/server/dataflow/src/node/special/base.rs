@@ -314,7 +314,8 @@ impl Base {
                 if let Some(row) = value {
                     // Second store the new value, if any
                     touched_keys.insert(
-                        row.cloned_indices(key_cols.to_vec()),
+                        row.cloned_indices(key_cols.to_vec())
+                            .map_err(|_| ReadySetError::InvalidRecordLength)?,
                         TouchedKey::Inserted(row.clone()),
                     );
                     results.push(Record::Positive(row.into_owned()));

@@ -371,6 +371,10 @@ pub enum ReadySetError {
     /// of its state replayed through it to continue.
     #[error("Grouped operation lost state")]
     GroupedStateLost,
+
+    /// A dataflow ingredient received a record of the wrong length
+    #[error("Record of invalid length received")]
+    InvalidRecordLength,
 }
 
 impl ReadySetError {
