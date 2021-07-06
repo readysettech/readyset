@@ -243,26 +243,19 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
             .iter()
             .all(|expr| matches!(expr, Expression::Literal(Literal::Placeholder(_)))) =>
         {
-            // the weird extra closure above is due to
-            // https://github.com/rust-lang/rfcs/issues/1006
             vec![(c, BinaryOperator::Equal); exprs.len()]
         }
-        Expression::BinaryOp {
-            lhs: box Expression::Column(_),
-            rhs: box Expression::Literal(_),
-            op: _,
+        Expression::In {
+            lhs: box Expression::Column(ref c),
+            rhs: nom_sql::InValue::List(ref exprs),
+            negated: true,
+        } if exprs
+            .iter()
+            .all(|expr| matches!(expr, Expression::Literal(Literal::Placeholder(_)))) =>
+        {
+            vec![(c, BinaryOperator::NotEqual); exprs.len()]
         }
-        | Expression::BinaryOp {
-            lhs: box Expression::Literal(_),
-            rhs: box Expression::Column(_),
-            op: _,
-        } => vec![],
-        // comma joins and column equality comparisons
-        Expression::BinaryOp {
-            lhs: box Expression::Column(_),
-            rhs: box Expression::Column(_),
-            op: _,
-        } => vec![],
+        Expression::In { .. } => vec![],
         Expression::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
@@ -278,8 +271,64 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
             l.append(&mut r);
             l
         }
+        Expression::BinaryOp { .. } => vec![],
         Expression::UnaryOp { ref rhs, .. } => get_parameter_columns_recurse(rhs),
-        _ => unimplemented!(),
+        Expression::Call(ref f) => f
+            .arguments()
+            .flat_map(|expr| get_parameter_columns_recurse(expr))
+            .collect(),
+        Expression::Literal(_) => vec![],
+        Expression::CaseWhen {
+            ref condition,
+            ref then_expr,
+            ref else_expr,
+        } => get_parameter_columns_recurse(condition)
+            .into_iter()
+            .chain(get_parameter_columns_recurse(then_expr))
+            .chain(
+                else_expr
+                    .iter()
+                    .flat_map(|expr| get_parameter_columns_recurse(expr)),
+            )
+            .collect(),
+        Expression::Column(_) => vec![],
+        Expression::Exists(_) => vec![],
+        Expression::Between {
+            operand: box Expression::Column(ref col),
+            min: box Expression::Literal(Literal::Placeholder(_)),
+            max: box Expression::Literal(Literal::Placeholder(_)),
+            ..
+        } => vec![
+            (col, BinaryOperator::GreaterOrEqual),
+            (col, BinaryOperator::LessOrEqual),
+        ],
+
+        Expression::Between {
+            operand: box Expression::Column(ref col),
+            min: box Expression::Literal(Literal::Placeholder(_)),
+            negated: false,
+            ..
+        }
+        | Expression::Between {
+            operand: box Expression::Column(ref col),
+            max: box Expression::Literal(Literal::Placeholder(_)),
+            negated: true,
+            ..
+        } => vec![(col, BinaryOperator::GreaterOrEqual)],
+        Expression::Between {
+            operand: box Expression::Column(ref col),
+            max: box Expression::Literal(Literal::Placeholder(_)),
+            negated: false,
+            ..
+        }
+        | Expression::Between {
+            operand: box Expression::Column(ref col),
+            min: box Expression::Literal(Literal::Placeholder(_)),
+            negated: true,
+            ..
+        } => vec![(col, BinaryOperator::LessOrEqual)],
+        Expression::Between { .. } => vec![],
+        Expression::NestedSelect(_) => vec![],
     }
 }
 
