@@ -1,17 +1,16 @@
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::{internal, KeyComparison};
 use std::collections::{HashMap, HashSet};
-
 use std::convert::{TryFrom, TryInto};
 use std::mem;
-use vec1::vec1;
+use vec1::{vec1, Vec1};
 
+use super::Side;
 use crate::prelude::*;
 use crate::processing::{ColumnMiss, ColumnRef, ColumnSource};
 use noria::errors::{internal_err, ReadySetResult};
-use vec1::Vec1;
+use noria::{internal, KeyComparison};
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,18 +41,17 @@ pub struct Join {
     /// Key columns in the left and right parents respectively
     on: Vec<(usize, usize)>,
 
-    // Which columns to emit. True means the column is from the left parent, false means from the
-    // right
-    emit: Vec<(bool, usize)>,
+    // Which columns to emit
+    emit: Vec<(Side, usize)>,
 
     // Which columns to emit when the left/right row is being modified in place. True means the
     // column is from the left parent, false means from the right
-    in_place_left_emit: Vec<(bool, usize)>,
-    in_place_right_emit: Vec<(bool, usize)>,
+    in_place_left_emit: Vec<(Side, usize)>,
+    in_place_right_emit: Vec<(Side, usize)>,
 
     /// Buffered records from one half of a remapped upquery. The key is (column index,
-    /// is from left side).
-    generated_column_buffer: HashMap<(Vec<usize>, bool), Records>,
+    /// side).
+    generated_column_buffer: HashMap<(Vec<usize>, Side), Records>,
 
     kind: JoinType,
 }
@@ -76,20 +74,20 @@ impl Join {
         let emit: Vec<_> = emit
             .into_iter()
             .map(|join_source| match join_source {
-                JoinSource::L(c) => (true, c),
-                JoinSource::R(c) => (false, c),
+                JoinSource::L(c) => (Side::Left, c),
+                JoinSource::R(c) => (Side::Right, c),
                 JoinSource::B(lc, rc) => {
                     join_columns.push((lc, rc));
-                    (true, lc)
+                    (Side::Left, lc)
                 }
             })
             .collect();
 
         let (in_place_left_emit, in_place_right_emit) = {
-            let compute_in_place_emit = |left| {
+            let compute_in_place_emit = |side| {
                 let num_columns = emit
                     .iter()
-                    .filter(|&&(from_left, _)| from_left == left)
+                    .filter(|&&(from_side, _)| from_side == side)
                     .map(|&(_, c)| c + 1)
                     .max()
                     .unwrap_or(0);
@@ -99,28 +97,31 @@ impl Join {
                 let mut remap: Vec<_> = (0..num_columns).collect();
                 emit.iter()
                     .enumerate()
-                    .map(|(i, &(from_left, c))| {
-                        if from_left == left {
+                    .map(|(i, &(from_side, c))| {
+                        if from_side == side {
                             let remapped = remap[c];
                             let other = remap.iter().position(|&c| c == i);
 
                             // Columns can't appear multiple times in join output!
-                            assert!((remapped >= i) || (emit[remapped].0 != left));
+                            assert!((remapped >= i) || (emit[remapped].0 != side));
 
                             remap[c] = i;
                             if let Some(other) = other {
                                 remap[other] = remapped;
                             }
 
-                            (from_left, remapped)
+                            (from_side, remapped)
                         } else {
-                            (from_left, c)
+                            (from_side, c)
                         }
                     })
                     .collect::<Vec<_>>()
             };
 
-            (compute_in_place_emit(true), compute_in_place_emit(false))
+            (
+                compute_in_place_emit(Side::Left),
+                compute_in_place_emit(Side::Right),
+            )
         };
 
         Self {
@@ -152,17 +153,20 @@ impl Join {
         self.emit
             .iter()
             .enumerate()
-            .map(|(i, &(from_left, col))| {
-                if from_left {
+            .map(|(i, &(side, col))| match side {
+                Side::Left => {
                     if let Preprocessed::Left = reusing {
                         left[i].clone()
                     } else {
                         left[col].clone()
                     }
-                } else if let Preprocessed::Right = reusing {
-                    right[i].clone()
-                } else {
-                    right[col].clone()
+                }
+                Side::Right => {
+                    if let Preprocessed::Right = reusing {
+                        right[i].clone()
+                    } else {
+                        right[col].clone()
+                    }
                 }
             })
             .collect()
@@ -181,12 +185,14 @@ impl Join {
             &self.in_place_right_emit
         };
         reuse.resize(emit.len(), DataType::None);
-        for (i, &(from_left, c)) in emit.iter().enumerate() {
+        for (i, &(side, c)) in emit.iter().enumerate() {
+            let from_left = side == Side::Left;
             if (from_left == reusing_left) && i != c {
                 reuse.swap(i, c);
             }
         }
-        for (i, &(from_left, c)) in emit.iter().enumerate() {
+        for (i, &(side, c)) in emit.iter().enumerate() {
+            let from_left = side == Side::Left;
             if from_left != reusing_left {
                 if other_prepreprocessed {
                     reuse[i] = other[i].clone();
@@ -232,8 +238,8 @@ impl Join {
     fn generate_null(&self, left: &[DataType]) -> Vec<DataType> {
         self.emit
             .iter()
-            .map(|&(from_left, col)| {
-                if from_left {
+            .map(|&(side, col)| {
+                if side == Side::Left {
                     left[col].clone()
                 } else {
                     DataType::None
@@ -243,21 +249,25 @@ impl Join {
     }
 
     fn resolve_col(&self, col: usize) -> (Option<usize>, Option<usize>) {
-        let (is_left, pcol) = self.emit[col];
+        let (side, pcol) = self.emit[col];
 
         if let Some((on_l, on_r)) = self
             .on
             .iter()
             // if the column comes from the left and is in the join, find the corresponding right
             // column
-            .find(|(l, _)| is_left && *l == pcol)
+            .find(|(l, _)| side == Side::Left && *l == pcol)
             // otherwise, if the column comes from the right and is in the join, find the
             // corresponding left column
-            .or_else(|| self.on.iter().find(|(_, r)| !is_left && *r == pcol))
+            .or_else(|| {
+                self.on
+                    .iter()
+                    .find(|(_, r)| side == Side::Right && *r == pcol)
+            })
         {
             // Join column comes from both parents
             (Some(*on_l), Some(*on_r))
-        } else if is_left {
+        } else if side == Side::Left {
             (Some(pcol), None)
         } else {
             (None, Some(pcol))
@@ -328,9 +338,9 @@ impl Ingredient for Join {
                     cols.iter()
                         .map(|&col| -> Result<usize, ()> {
                             match self.emit[col] {
-                                (true, l) if from == *self.left => return Ok(l),
-                                (false, r) if from == *self.right => return Ok(r),
-                                (true, l) => {
+                                (Side::Left, l) if from == *self.left => return Ok(l),
+                                (Side::Right, r) if from == *self.right => return Ok(r),
+                                (Side::Left, l) => {
                                     if let Some(r) = self.on.iter().find_map(|(on_l, r)| {
                                         if *on_l == l {
                                             Some(r)
@@ -343,7 +353,7 @@ impl Ingredient for Join {
                                         return Ok(*r);
                                     }
                                 }
-                                (false, r) => {
+                                (Side::Right, r) => {
                                     if let Some(l) = self.on.iter().find_map(|(l, on_r)| {
                                         if *on_r == r {
                                             Some(l)
@@ -368,10 +378,10 @@ impl Ingredient for Join {
                 // columns generated!
                 let orkc = orkc.unwrap();
                 let is_left = from == *self.left;
-                return if let Some(other) = self
-                    .generated_column_buffer
-                    .remove(&(orkc.to_vec(), !is_left))
-                {
+                return if let Some(other) = self.generated_column_buffer.remove(&(
+                    orkc.to_vec(),
+                    if is_left { Side::Right } else { Side::Left },
+                )) {
                     // we have both sides now
                     let (left, right) = if is_left { (rs, other) } else { (other, rs) };
                     let ret = self.handle_replay_for_generated(left, right)?;
@@ -381,8 +391,13 @@ impl Ingredient for Join {
                     })
                 } else {
                     // store the records for when we get the other upquery response
-                    self.generated_column_buffer
-                        .insert((orkc.to_vec(), is_left), rs);
+                    self.generated_column_buffer.insert(
+                        (
+                            orkc.to_vec(),
+                            if is_left { Side::Left } else { Side::Right },
+                        ),
+                        rs,
+                    );
                     Ok(Default::default())
                 };
             }
@@ -733,8 +748,11 @@ impl Ingredient for Join {
         let emit = self
             .emit
             .iter()
-            .map(|&(from_left, col)| {
-                let src = if from_left { self.left } else { self.right };
+            .map(|&(side, col)| {
+                let src = match side {
+                    Side::Left => self.left,
+                    Side::Right => self.right,
+                };
                 format!("{}:{}", src.as_global().index(), col)
             })
             .collect::<Vec<_>>()
