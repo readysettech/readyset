@@ -23,6 +23,22 @@ use crate::ops::grouped::conkitten::GroupConkitten;
 use crate::processing::{ColumnMiss, ColumnSource};
 pub use msql_srv::MysqlTime;
 
+/// Enum for distinguishing between the two parents of a union or join
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Serialize, Deserialize)]
+pub(self) enum Side {
+    Left,
+    Right,
+}
+
+impl Side {
+    fn other_side(&self) -> Self {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, From)]
 #[allow(clippy::large_enum_variant)]
 pub enum NodeOperator {
