@@ -192,35 +192,33 @@ impl Authority for ZookeeperAuthority {
                 Ok((data, stat)) => {
                     let p = serde_json::from_slice(&data)?;
                     let result = f(Some(p));
-                    if result.is_err() {
-                        return Ok(result);
+                    if let Ok(r) = &result {
+                        match self
+                            .zk
+                            .set_data(path, serde_json::to_vec(r)?, Some(stat.version))
+                        {
+                            Err(ZkError::NoNode) | Err(ZkError::BadVersion) => continue,
+                            Ok(_) => (),
+                            Err(e) => bail!(e),
+                        }
                     }
-
-                    match self.zk.set_data(
-                        path,
-                        serde_json::to_vec(result.as_ref().ok().unwrap())?,
-                        Some(stat.version),
-                    ) {
-                        Err(ZkError::NoNode) | Err(ZkError::BadVersion) => continue,
-                        Ok(_) => return Ok(result),
-                        Err(e) => bail!(e),
-                    };
+                    return Ok(result);
                 }
                 Err(ZkError::NoNode) => {
                     let result = f(None);
-                    if result.is_err() {
-                        return Ok(result);
+                    if let Ok(r) = &result {
+                        match self.zk.create(
+                            path,
+                            serde_json::to_vec(r)?,
+                            Acl::open_unsafe().clone(),
+                            CreateMode::Persistent,
+                        ) {
+                            Err(ZkError::NodeExists) => continue,
+                            Ok(_) => (),
+                            Err(e) => bail!(e),
+                        }
                     }
-                    match self.zk.create(
-                        path,
-                        serde_json::to_vec(result.as_ref().ok().unwrap())?,
-                        Acl::open_unsafe().clone(),
-                        CreateMode::Persistent,
-                    ) {
-                        Err(ZkError::NodeExists) => continue,
-                        Ok(_) => return Ok(result),
-                        Err(e) => bail!(e),
-                    }
+                    return Ok(result);
                 }
                 Err(e) => bail!(e),
             }
