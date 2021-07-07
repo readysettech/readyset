@@ -407,8 +407,10 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             // this unwrap should be safe because there are no error paths with a Text, TinyText, nor Timestamp converting to Text
+            #[allow(clippy::unwrap_used)]
             let str_dt = dt.coerce_to(&SqlType::Text).unwrap();
             // this unwrap should be safe because we just coerced dt to a text
+            #[allow(clippy::unwrap_used)]
             let s: &str = <&str>::try_from(str_dt.as_ref()).unwrap();
             hasher.write(s.as_bytes());
             hasher.finish() as usize % shards
