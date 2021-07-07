@@ -54,6 +54,6 @@ impl std::ops::Index<usize> for Index {
     type Output = usize;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.columns[index]
+        self.columns.get(index).unwrap()
     }
 }
