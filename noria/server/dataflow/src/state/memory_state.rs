@@ -140,7 +140,7 @@ impl State for MemoryState {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[&tag];
         let freed_bytes = self.state[index].mark_hole(key);
-        self.mem_size = self.mem_size.checked_sub(freed_bytes).unwrap();
+        self.mem_size = self.mem_size.saturating_sub(freed_bytes);
     }
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
@@ -294,7 +294,7 @@ impl MemoryState {
         for s in &mut self.state {
             if let Some(row) = s.remove_row(r, &mut hit) {
                 if Rc::strong_count(&row.0) == 1 {
-                    self.mem_size = self.mem_size.checked_sub(row.deep_size_of()).unwrap();
+                    self.mem_size = self.mem_size.saturating_sub(row.deep_size_of());
                 }
             }
         }
