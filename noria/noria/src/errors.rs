@@ -9,6 +9,7 @@ use std::error::Error;
 use std::io;
 use thiserror::Error;
 use url::Url;
+use vec1::Size0Error;
 
 /// Wraps a boxed `std::error::Error` to make it implement, um, `std::error::Error`.
 /// Yes, I'm as disappointed as you are.
@@ -459,6 +460,10 @@ pub enum ReadySetError {
     /// Wrapper for [`io::Error`]
     #[error("{0}")]
     IOError(String),
+
+    /// A `Vec1` was constructed from a 0-length vector.
+    #[error("Vector length was unexpectedly zero")]
+    Size0Error,
 }
 
 impl ReadySetError {
@@ -745,6 +750,12 @@ impl From<tokio_postgres::Error> for ReadySetError {
 impl From<io::Error> for ReadySetError {
     fn from(e: io::Error) -> ReadySetError {
         ReadySetError::IOError(e.to_string())
+    }
+}
+
+impl From<Size0Error> for ReadySetError {
+    fn from(_: Size0Error) -> Self {
+        ReadySetError::Size0Error
     }
 }
 
