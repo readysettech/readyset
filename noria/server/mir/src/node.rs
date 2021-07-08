@@ -196,9 +196,9 @@ impl MirNode {
                     // New projected columns go before all literals and expressions
                     Some(emit.len())
                 }
-                MirNodeInner::Filter { .. } => {
-                    // Filters follow the column positioning rules of their parents
-                    // unwrap: filters must have a parent
+                MirNodeInner::Filter { .. } | MirNodeInner::TopK { .. } => {
+                    // Filters and topk follow the column positioning rules of their parents
+                    #[allow(clippy::unwrap_used)] // filters and topk both must have a parent
                     column_pos(&node.ancestors().first().unwrap().borrow())
                 }
                 _ => None,
@@ -702,6 +702,45 @@ mod tests {
                 }
                 _ => unreachable!(),
             };
+        }
+
+        #[test]
+        fn topk_follows_parent_ordering() {
+            // count(z) group by (x)
+            let parent = MirNode::new(
+                "parent",
+                0,
+                vec!["x".into(), "agg".into()],
+                MirNodeInner::Aggregation {
+                    on: "z".into(),
+                    group_by: vec!["x".into()],
+                    kind: AggregationKind::Count { count_nulls: false },
+                },
+                vec![],
+                vec![],
+            );
+
+            // TopK γ[x]
+            let node = MirNode::new(
+                "topk",
+                0,
+                vec!["x".into(), "agg".into()],
+                MirNodeInner::TopK {
+                    order: None,
+                    group_by: vec!["x".into()],
+                    k: 3,
+                    offset: 0,
+                },
+                vec![parent],
+                vec![],
+            );
+
+            node.borrow_mut().add_column("y".into());
+
+            assert_eq!(
+                node.borrow().columns(),
+                vec![Column::from("x"), Column::from("y"), Column::from("agg")]
+            );
         }
     }
 }
