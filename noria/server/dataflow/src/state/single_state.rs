@@ -148,7 +148,7 @@ impl SingleState {
             };
 
             if rm.is_some() {
-                *self_rows = self_rows.checked_sub(1).unwrap();
+                *self_rows = self_rows.saturating_sub(1);
             }
             rm
         };

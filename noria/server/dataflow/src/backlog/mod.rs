@@ -182,7 +182,7 @@ impl<'a> MutWriteHandleEntry<'a> {
             .meta_get_and(&self.key, |rs| rs.iter().map(SizeOf::deep_size_of).sum())
             .map(|(size, _)| size)
             .unwrap_or(0);
-        self.handle.mem_size = self.handle.mem_size.checked_sub(size as usize).unwrap();
+        self.handle.mem_size = self.handle.mem_size.saturating_sub(size as usize);
         self.handle.handle.empty(self.key)
     }
 }
@@ -280,10 +280,7 @@ impl WriteHandle {
                 self.mem_size += mem_delta as usize;
             }
             Ordering::Less => {
-                self.mem_size = self
-                    .mem_size
-                    .checked_sub(mem_delta.checked_abs().unwrap() as usize)
-                    .unwrap();
+                self.mem_size = self.mem_size.saturating_sub(-mem_delta as usize);
             }
             _ => {}
         }
@@ -312,10 +309,7 @@ impl WriteHandle {
             });
         }
 
-        self.mem_size = self
-            .mem_size
-            .checked_sub(bytes_to_be_freed as usize)
-            .unwrap();
+        self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
         bytes_to_be_freed
     }
 
@@ -332,7 +326,7 @@ impl WriteHandle {
                     })
                     .map(|(sizes, _)| sizes.iter().sum())
                     .unwrap_or(0);
-                self.mem_size = self.mem_size.checked_sub(size as usize).unwrap();
+                self.mem_size = self.mem_size.saturating_sub(size as usize);
                 self.handle.empty_range(range)
             }
         }
