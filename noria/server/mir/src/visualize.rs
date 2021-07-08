@@ -4,6 +4,7 @@ use std::fmt::{self, Write};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
+use dataflow::ops::union;
 
 use crate::node::node_inner::MirNodeInner;
 use crate::node::MirNode;
@@ -257,7 +258,14 @@ impl GraphViz for MirNodeInner {
                         .unwrap_or_else(|| "".into())
                 )?;
             }
-            MirNodeInner::Union { ref emit } => {
+            MirNodeInner::Union {
+                ref emit,
+                ref duplicate_mode,
+            } => {
+                let symbol = match duplicate_mode {
+                    union::DuplicateMode::BagUnion => '⊎',
+                    union::DuplicateMode::UnionAll => '⋃',
+                };
                 let cols = emit
                     .iter()
                     .map(|c| {
@@ -266,8 +274,7 @@ impl GraphViz for MirNodeInner {
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .collect::<Vec<_>>()
-                    .join(" ⋃ ");
+                    .join(&format!(" {} ", symbol));
 
                 write!(out, "{}", cols)?;
             }

@@ -1,12 +1,37 @@
+use itertools::Itertools;
+use launchpad::hash::hash;
 use noria::{invariant, KeyComparison};
 use slog::Logger;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use vec1::Vec1;
 
 use crate::prelude::*;
 use crate::processing::{ColumnRef, ColumnSource};
 use noria::errors::ReadySetResult;
+
+use super::Side;
+
+/// Specification for how the union operator should operate with respect to rows that exist in both
+/// the left and right parents.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum DuplicateMode {
+    /// "Bag" (aka multi-set) union mode.
+    ///
+    /// For each distinct row in either parent this returns a number of duplicates of that row equal
+    /// to the maximum number of duplicates of that row per parent.
+    ///
+    /// For example, a bag union of the bags `{1, 2, 3, 3, 3}` and `{3, 4, 5}` is equal to `{1, 2,
+    /// 3, 3, 3, 4, 5}`
+    ///
+    /// Because it makes the implementation of the algorithm significantly simpler, BagUnion is
+    /// currently only supported for Union nodes with exactly two parents
+    BagUnion,
+
+    /// "All" union mode - no duplicate removal is done. Each row in each parent is passed through
+    /// unchanged
+    UnionAll,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
@@ -37,10 +62,75 @@ struct ReplayPieces {
     evict: bool,
 }
 
+/// State for [`DuplicateMode::BagUnion`]
+///
+/// Internally, this is a map from the hash of unique rows (so we don't retain the whole row) to the
+/// parent with the most duplicates of that row, and the difference between number of copies of that
+/// row stored in that parent and the number of copies stored in the other parent
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+struct BagUnionState(HashMap<u64, (Side, usize)>);
+
+impl BagUnionState {
+    /// Process a single record through the bag union state, and return whether that record should
+    /// be emitted
+    fn process(&mut self, from_side: Side, record: &Record) -> bool {
+        let row_hash = hash(record.row());
+        match self.0.entry(row_hash) {
+            hash_map::Entry::Occupied(mut entry) => {
+                // If we already have state for this row, just update the size accordingly
+                let (row_side, size) = entry.get_mut();
+                let res = if *row_side == from_side {
+                    if record.is_positive() {
+                        *size += 1;
+                    } else {
+                        *size = size.saturating_sub(1);
+                    }
+                    true
+                } else {
+                    // deltas on a *different* side than the current maximum should be *subtracted*
+                    // from the count
+                    if record.is_positive() {
+                        *size = size.saturating_sub(1);
+                    } else {
+                        *size += 1;
+                    }
+                    false
+                };
+
+                // If we end up with a size of 0, that means the row has been deleted from both
+                // sides or has reached the same number of duplicates on both sides - either way, we
+                // can remove it from the map
+                if *size == 0 {
+                    entry.remove();
+                }
+                res
+            }
+
+            hash_map::Entry::Vacant(entry) => {
+                // If we don't have any state for this row, either we've never seen it before or
+                // we've seen exactly the same number of duplicates of this row on both sides
+                if record.is_positive() {
+                    entry.insert((from_side, 1));
+                    true
+                } else {
+                    // If the record is negative, then as a result the *other* side has one more
+                    // duplicate than us
+                    entry.insert((from_side.other_side(), 1));
+                    false
+                }
+            }
+        }
+    }
+}
+
 /// A union of a set of views.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
     emit: Emit,
+
+    /// State for implementing [`DuplicateMode::BagUnion`]. If this is None, then the duplicate mode
+    /// is [`DuplicateMode::UnionAll`]
+    bag_union_state: Option<BagUnionState>,
 
     /// This is a map from (Tag, LocalNodeIndex) to ColumnList
     replay_key: HashMap<(Tag, usize), Vec<usize>>,
@@ -67,6 +157,7 @@ impl Clone for Union {
     fn clone(&self) -> Self {
         Union {
             emit: self.emit.clone(),
+            bag_union_state: self.bag_union_state.clone(),
             required: self.required,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
@@ -82,7 +173,10 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
-    pub fn new(emit: HashMap<NodeIndex, Vec<usize>>) -> Union {
+    pub fn new(
+        emit: HashMap<NodeIndex, Vec<usize>>,
+        duplicate_mode: DuplicateMode,
+    ) -> ReadySetResult<Union> {
         assert!(!emit.is_empty());
         for emit in emit.values() {
             let mut last = &emit[0];
@@ -98,19 +192,23 @@ impl Union {
         }
         let emit: HashMap<_, _> = emit.into_iter().map(|(k, v)| (k.into(), v)).collect();
         let parents = emit.len();
-        Union {
+        Ok(Union {
             emit: Emit::Project {
                 emit,
                 emit_l: BTreeMap::new(),
                 cols: HashMap::new(),
                 cols_l: BTreeMap::new(),
             },
+            bag_union_state: match duplicate_mode {
+                DuplicateMode::BagUnion => Some(BagUnionState::default()),
+                DuplicateMode::UnionAll => None,
+            },
             required: parents,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
             full_wait_state: FullWait::None,
             me: None,
-        }
+        })
     }
 
     /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
@@ -118,6 +216,7 @@ impl Union {
         let shards = sharding.shards().unwrap();
         Union {
             emit: Emit::AllFrom(parent.into(), sharding),
+            bag_union_state: None,
             required: shards,
             replay_key: Default::default(),
             replay_pieces: Default::default(),
@@ -202,14 +301,10 @@ impl Ingredient for Union {
         _: &DomainNodes,
         _: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        Ok(match self.emit {
-            Emit::AllFrom(..) => ProcessingResult {
-                results: rs,
-                ..Default::default()
-            },
+        let mut results = match self.emit {
+            Emit::AllFrom(..) => rs,
             Emit::Project { ref emit_l, .. } => {
-                let rs = rs
-                    .into_iter()
+                rs.into_iter()
                     .map(move |rec| {
                         let (r, pos) = rec.extract();
 
@@ -224,12 +319,33 @@ impl Ingredient for Union {
                             Record::Negative(res)
                         }
                     })
-                    .collect();
-                ProcessingResult {
-                    results: rs,
-                    ..Default::default()
-                }
+                    .collect()
             }
+        };
+
+        if let Some(bus) = &mut self.bag_union_state {
+            if let Some(parent) = match self.emit {
+                Emit::Project { ref cols_l, .. } => {
+                    let first_parent = cols_l.keys().next().ok_or_else(|| {
+                        internal_err(
+                            "Union node with DuplicateMode::BagUnion must have exactly 2 parents",
+                        )
+                    })?;
+                    if from == *first_parent {
+                        Some(Side::Left)
+                    } else {
+                        Some(Side::Right)
+                    }
+                }
+                _ => None,
+            } {
+                results.retain(|rec| bus.process(parent, rec));
+            }
+        }
+
+        Ok(ProcessingResult {
+            results,
+            ..Default::default()
         })
     }
 
@@ -826,19 +942,26 @@ impl Ingredient for Union {
             Emit::AllFrom(..) => "⊍".to_string(),
             Emit::Project { .. } if !detailed => String::from("⋃"),
             Emit::Project { ref emit, .. } => {
-                let mut emit = emit.iter().collect::<Vec<_>>();
-                emit.sort();
-                emit.iter()
-                    .map(|&(src, emit)| {
-                        let cols = emit
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("{}:[{}]", src.as_global().index(), cols)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ⋃ ")
+                let symbol = if self.bag_union_state.is_none() {
+                    '⋃' // DuplicateMode::UnionAll
+                } else {
+                    '⊎' // DuplicateMode::BagUnion
+                };
+                if detailed {
+                    emit.iter()
+                        .sorted()
+                        .map(|(src, emit)| {
+                            let cols = emit
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("{}:[{}]", src.as_global().index(), cols)
+                        })
+                        .join(&format!(" {} ", symbol))
+                } else {
+                    String::from(symbol)
+                }
             }
         }
     }
@@ -850,7 +973,7 @@ mod tests {
 
     use crate::ops;
 
-    fn setup() -> (ops::test::MockGraph, IndexPair, IndexPair) {
+    fn setup(duplicate_mode: DuplicateMode) -> (ops::test::MockGraph, IndexPair, IndexPair) {
         let mut g = ops::test::MockGraph::new();
         let l = g.add_base("left", &["l0", "l1"]);
         let r = g.add_base("right", &["r0", "r1", "r2"]);
@@ -858,13 +981,18 @@ mod tests {
         let mut emits = HashMap::new();
         emits.insert(l.as_global(), vec![0, 1]);
         emits.insert(r.as_global(), vec![0, 2]);
-        g.set_op("union", &["u0", "u1"], Union::new(emits), false);
+        g.set_op(
+            "union",
+            &["u0", "u1"],
+            Union::new(emits, duplicate_mode).unwrap(),
+            false,
+        );
         (g, l, r)
     }
 
     #[test]
     fn it_describes() {
-        let (u, l, r) = setup();
+        let (u, l, r) = setup(DuplicateMode::UnionAll);
         assert_eq!(
             u.node().description(true),
             format!("{}:[0, 1] ⋃ {}:[0, 2]", l, r)
@@ -873,7 +1001,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let (mut u, l, r) = setup();
+        let (mut u, l, r) = setup(DuplicateMode::UnionAll);
 
         // forward from left should emit original record
         let left = vec![1.into(), "a".into()];
@@ -890,14 +1018,14 @@ mod tests {
     #[test]
     fn it_suggests_indices() {
         use std::collections::HashMap;
-        let (u, _, _) = setup();
+        let (u, _, _) = setup(DuplicateMode::UnionAll);
         let me = 1.into();
         assert_eq!(u.node().suggest_indexes(me), HashMap::new());
     }
 
     #[test]
     fn it_resolves() {
-        let (u, l, r) = setup();
+        let (u, l, r) = setup(DuplicateMode::UnionAll);
         let r0 = u.node().resolve(0).unwrap();
         assert!(r0
             .as_ref()
@@ -929,7 +1057,7 @@ mod tests {
 
         #[test]
         fn left_then_right() {
-            let (mut g, left, right) = setup();
+            let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
             let keys = hashset![key.clone()];
@@ -990,7 +1118,7 @@ mod tests {
 
         #[test]
         fn left_then_update_then_right() {
-            let (mut g, left, right) = setup();
+            let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
             let keys = hashset![key.clone()];
@@ -1065,6 +1193,79 @@ mod tests {
                 }
                 _ => unreachable!("Expected replay piece, got: {:?}", res),
             }
+        }
+    }
+
+    /// An oracle implementation of the "bag union" algorithm that unions implement for
+    /// [`DuplicateMode::BagUnion`], and a property test showing its theoretical correctness
+    mod bag_union {
+        use super::*;
+        use std::cmp::max;
+        use test_strategy::{proptest, Arbitrary};
+
+        #[derive(Debug, Arbitrary, PartialEq, Eq, Clone, Copy)]
+        enum Input {
+            PosLeft,
+            NegLeft,
+            PosRight,
+            NegRight,
+        }
+
+        #[proptest]
+        fn bag_union_state_returns_correct_state_size(inputs: Vec<Input>) {
+            let (total_lefts, total_rights) =
+                inputs
+                    .iter()
+                    .fold((0_isize, 0_isize), |(l, r), input| match input {
+                        Input::PosLeft => (l + 1, r),
+                        Input::NegLeft => (l - 1, r),
+                        Input::PosRight => (l, r + 1),
+                        Input::NegRight => (l, r - 1),
+                    });
+            let expected = max(total_lefts, total_rights);
+            let row = vec![DataType::from(1i32)];
+            let mut bag_union_state = BagUnionState::default();
+
+            let state_size = inputs
+                .into_iter()
+                .map(|input| match input {
+                    Input::PosLeft => (Side::Left, Record::Positive(row.clone())),
+                    Input::NegLeft => (Side::Left, Record::Negative(row.clone())),
+                    Input::PosRight => (Side::Right, Record::Positive(row.clone())),
+                    Input::NegRight => (Side::Right, Record::Negative(row.clone())),
+                })
+                .filter(|(side, rec)| bag_union_state.process(*side, rec))
+                .map(|(_, rec)| rec)
+                .fold(
+                    0_isize,
+                    |acc, rec| {
+                        if rec.is_positive() {
+                            acc + 1
+                        } else {
+                            acc - 1
+                        }
+                    },
+                );
+            assert_eq!(state_size, expected)
+        }
+
+        #[test]
+        fn bag_union_ingredient_returns_correct_results() {
+            let (mut u, l, r) = setup(DuplicateMode::BagUnion);
+
+            let left_row = vec![1.into(), "a".into()];
+            let right_row = vec![1.into(), "skipped".into(), "a".into()];
+            assert_eq!(
+                u.one_row(l, left_row.clone(), false),
+                vec![left_row.clone()].into()
+            );
+            assert_eq!(
+                u.one_row(l, left_row.clone(), false),
+                vec![left_row.clone()].into()
+            );
+            assert_eq!(u.one_row(r, right_row.clone(), false), Default::default());
+            assert_eq!(u.one_row(r, right_row.clone(), false), Default::default());
+            assert_eq!(u.one_row(r, right_row, false), vec![left_row].into());
         }
     }
 }

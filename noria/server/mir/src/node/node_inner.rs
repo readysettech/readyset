@@ -3,6 +3,8 @@ use crate::{Column, MirNodeRef};
 use common::DataType;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
+use dataflow::ops::union;
+use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
 use std::fmt::{self, Debug, Formatter};
 
@@ -70,6 +72,7 @@ pub enum MirNodeInner {
     /// emit columns
     Union {
         emit: Vec<Vec<Column>>,
+        duplicate_mode: union::DuplicateMode,
     },
     /// order function, group columns, limit k
     TopK {
@@ -135,7 +138,7 @@ impl MirNodeInner {
             MirNodeInner::Project { ref mut emit, .. } => {
                 emit.push(c);
             }
-            MirNodeInner::Union { ref mut emit } => {
+            MirNodeInner::Union { ref mut emit, .. } => {
                 for e in emit.iter_mut() {
                     e.push(c.clone());
                 }
@@ -336,8 +339,14 @@ impl MirNodeInner {
                 MirNodeInner::Leaf { ref keys, .. } => keys == our_keys,
                 _ => false,
             },
-            MirNodeInner::Union { emit: ref our_emit } => match *other {
-                MirNodeInner::Union { ref emit } => emit == our_emit,
+            MirNodeInner::Union {
+                emit: ref our_emit,
+                duplicate_mode: ref our_duplicate_mode,
+            } => match *other {
+                MirNodeInner::Union {
+                    ref emit,
+                    ref duplicate_mode,
+                } => emit == our_emit && our_duplicate_mode == duplicate_mode,
                 _ => false,
             },
             MirNodeInner::Rewrite {
@@ -531,7 +540,14 @@ impl Debug for MirNodeInner {
             MirNodeInner::TopK {
                 ref order, ref k, ..
             } => write!(f, "TopK [k: {}, {:?}]", k, order),
-            MirNodeInner::Union { ref emit } => {
+            MirNodeInner::Union {
+                ref emit,
+                ref duplicate_mode,
+            } => {
+                let symbol = match duplicate_mode {
+                    union::DuplicateMode::BagUnion => '⊎',
+                    union::DuplicateMode::UnionAll => '⋃',
+                };
                 let cols = emit
                     .iter()
                     .map(|c| {
@@ -540,8 +556,7 @@ impl Debug for MirNodeInner {
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .collect::<Vec<_>>()
-                    .join(" ⋃ ");
+                    .join(&format!(" {} ", symbol));
 
                 write!(f, "{}", cols)
             }

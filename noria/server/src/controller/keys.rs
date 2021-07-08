@@ -577,9 +577,13 @@ mod tests {
         let x = g.add_node(node::Node::new(
             "x",
             &["x1", "x2"],
-            ops::NodeOperator::Union(ops::union::Union::new(
-                vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
-            )),
+            ops::NodeOperator::Union(
+                ops::union::Union::new(
+                    vec![(a, vec![0, 1]), (b, vec![0, 1])].into_iter().collect(),
+                    ops::union::DuplicateMode::UnionAll,
+                )
+                .unwrap(),
+            ),
         ));
         g.add_edge(a, x, ());
         g.add_edge(b, x, ());
