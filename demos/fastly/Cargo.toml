@@ -28,3 +28,8 @@ path = "src/bin/fastly_data_generator.rs"
 name = "reader"
 path = "src/bin/reader.rs"
 
+[[bin]]
+name = "writer"
+path = "src/bin/writer.rs"
+
+

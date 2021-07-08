@@ -18,12 +18,14 @@ use std::fs::read_to_string;
 use std::path::PathBuf;
 
 /// Set of parameters used to generate a single table's data.
+#[derive(Clone)]
 pub struct TableGenerationSpec {
     pub table: TableSpec,
     pub num_rows: usize,
 }
 
 /// Set of parameters used to generate a database's data.
+#[derive(Clone)]
 pub struct DatabaseGenerationSpec {
     pub tables: HashMap<TableName, TableGenerationSpec>,
 }
@@ -71,6 +73,7 @@ impl DatabaseGenerationSpec {
 
 /// A database schema parsed from a file of CREATE TABLE
 /// operations.
+#[derive(Clone)]
 pub struct DatabaseSchema {
     tables: HashMap<TableName, TableSpec>,
 }

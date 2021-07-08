@@ -10,7 +10,10 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
     // Iterate over the set of tables in the database for each, generate random
     // data.
     for (table_name, table_spec) in spec.tables.iter_mut() {
-        println!("Generating {} rows for {}", table_spec.num_rows, table_name);
+        if table_spec.num_rows == 0 {
+            continue;
+        }
+
         let data = table_spec.table.generate_data(table_spec.num_rows, false);
         let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
         let insert = nom_sql::InsertStatement {
