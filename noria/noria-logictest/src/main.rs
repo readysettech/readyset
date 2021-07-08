@@ -362,6 +362,14 @@ impl Verify {
                             .push(script.name().into_owned());
                         eprintln!("{:#}", e);
                     }
+                    Err(e) => {
+                        eprintln!(
+                            "Test script {} failed as expected:\n\n{:#}",
+                            script.name(),
+                            e
+                        );
+                        result.lock().await.passes += 1;
+                    }
                     _ => {
                         result.lock().await.passes += 1;
                     }
