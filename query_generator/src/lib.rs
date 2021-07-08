@@ -349,6 +349,8 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
 pub enum ColumnGenerationSpec {
     /// Generates a unique value for every row.
     Unique,
+    /// Generates a unique value starting at an index.
+    UniqueFrom(u32),
     /// Generates a new unique value every n rows.
     UniqueRepeated(u32),
     /// Generates an integer in the specified range.
@@ -370,8 +372,11 @@ impl ColumnGenerationSpec {
     fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
         match self {
             ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
+            ColumnGenerationSpec::UniqueFrom(index) => {
+                ColumnGenerator::Unique(UniqueGenerator::new(col_type, *index, 1))
+            }
             ColumnGenerationSpec::UniqueRepeated(n) => {
-                ColumnGenerator::Unique(UniqueGenerator::new(col_type, *n))
+                ColumnGenerator::Unique(UniqueGenerator::new(col_type, 0, *n))
             }
             ColumnGenerationSpec::Uniform(a, b) => ColumnGenerator::Uniform(UniformGenerator {
                 min: a.clone(),
@@ -440,10 +445,10 @@ pub struct UniqueGenerator {
 }
 
 impl UniqueGenerator {
-    fn new(sql_type: SqlType, batch_size: u32) -> Self {
+    fn new(sql_type: SqlType, index: u32, batch_size: u32) -> Self {
         Self {
             generated: 0,
-            index: 0,
+            index,
             batch_size,
             sql_type,
         }
@@ -452,7 +457,7 @@ impl UniqueGenerator {
 
 impl From<SqlType> for UniqueGenerator {
     fn from(t: SqlType) -> Self {
-        UniqueGenerator::new(t, 1)
+        UniqueGenerator::new(t, 0, 1)
     }
 }
 
