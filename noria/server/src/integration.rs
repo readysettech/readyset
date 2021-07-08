@@ -15,7 +15,7 @@ use dataflow::ops::identity::Identity;
 use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
-use dataflow::ops::union::Union;
+use dataflow::ops::union::{self, Union};
 use dataflow::{DurabilityMode, PersistenceParameters};
 use itertools::Itertools;
 use nom_sql::BinaryOperator;
@@ -52,7 +52,7 @@ async fn it_completes() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -119,7 +119,7 @@ async fn test_timestamp_propagation_simple() {
 
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, c)
@@ -187,7 +187,7 @@ async fn test_timestamp_propagation_multitable() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -471,11 +471,11 @@ async fn shared_interdomain_ancestor() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
 
-            let u = Union::new(emits.clone());
+            let u = Union::new(emits.clone(), union::DuplicateMode::UnionAll).unwrap();
             let b = mig.add_ingredient("b", &["a", "b"], u);
             mig.maintain_anonymous(b, &[0]);
 
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -525,7 +525,7 @@ async fn it_works_w_mat() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -600,7 +600,7 @@ async fn it_works_w_partial_mat() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             c
@@ -638,7 +638,7 @@ async fn it_works_w_partial_mat_below_empty() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -685,7 +685,7 @@ async fn it_works_deletion() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![1, 2]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["x", "y"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -1501,7 +1501,7 @@ async fn votes() {
             let mut emits = HashMap::new();
             emits.insert(article1, vec![0, 1]);
             emits.insert(article2, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let article = mig.add_ingredient("article", &["id", "title"], u);
             mig.maintain_anonymous(article, &[0]);
 
@@ -1607,7 +1607,7 @@ async fn empty_migration() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)
@@ -2275,7 +2275,7 @@ async fn crossing_migration() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             c
@@ -2378,7 +2378,7 @@ async fn domain_amend_migration() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             c
@@ -2932,7 +2932,7 @@ async fn node_removal() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0])
         })

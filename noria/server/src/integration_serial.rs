@@ -12,7 +12,7 @@ use crate::Builder;
 use crate::DataType;
 use assert_approx_eq::assert_approx_eq;
 use dataflow::node::special::Base;
-use dataflow::ops::union::Union;
+use dataflow::ops::union::{self, Union};
 use noria::consensus::LocalAuthority;
 use noria::internal::DomainIndex;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
@@ -37,7 +37,7 @@ async fn it_works_basic() {
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
             emits.insert(b, vec![0, 1]);
-            let u = Union::new(emits);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
             let c = mig.add_ingredient("c", &["a", "b"], u);
             mig.maintain_anonymous(c, &[0]);
             (a, b, c)

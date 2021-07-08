@@ -285,16 +285,20 @@ fn mir_node_to_flow_parts(
                         FlowNode::Existing(na) => FlowNode::Existing(na),
                     }
                 }
-                MirNodeInner::Union { ref emit } => {
+                MirNodeInner::Union {
+                    ref emit,
+                    duplicate_mode,
+                } => {
                     invariant_eq!(mir_node.ancestors.len(), emit.len());
                     make_union_node(
                         &name,
                         mir_node.columns.as_slice(),
                         emit,
                         mir_node.ancestors(),
+                        duplicate_mode,
                         mig,
                         table_mapping,
-                    )
+                    )?
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
@@ -463,9 +467,10 @@ fn make_union_node(
     columns: &[Column],
     emit: &[Vec<Column>],
     ancestors: &[MirNodeRef],
+    duplicate_mode: ops::union::DuplicateMode,
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> FlowNode {
+) -> ReadySetResult<FlowNode> {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
 
@@ -484,10 +489,10 @@ fn make_union_node(
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        ops::union::Union::new(emit_column_id),
+        ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
 
-    FlowNode::New(node)
+    Ok(FlowNode::New(node))
 }
 
 fn make_rewrite_node(

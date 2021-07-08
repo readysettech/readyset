@@ -1,4 +1,5 @@
 use dataflow::ops::join::JoinType;
+use dataflow::ops::union;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
@@ -227,6 +228,7 @@ impl SqlToMirConverter {
             CompoundSelectOperator::Union => self.make_union_node(
                 &union_name,
                 &sqs.iter().map(|mq| mq.leaf.clone()).collect::<Vec<_>>()[..],
+                union::DuplicateMode::UnionAll,
             )?,
             _ => internal!(),
         };
@@ -636,7 +638,12 @@ impl SqlToMirConverter {
         })
     }
 
-    fn make_union_node(&self, name: &str, ancestors: &[MirNodeRef]) -> ReadySetResult<MirNodeRef> {
+    fn make_union_node(
+        &self,
+        name: &str,
+        ancestors: &[MirNodeRef],
+        duplicate_mode: union::DuplicateMode,
+    ) -> ReadySetResult<MirNodeRef> {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
@@ -692,7 +699,10 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             emit.first().unwrap().clone(),
-            MirNodeInner::Union { emit },
+            MirNodeInner::Union {
+                emit,
+                duplicate_mode,
+            },
             ancestors.to_vec(),
             vec![],
         ))
@@ -799,7 +809,10 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 emit.first().unwrap().clone(),
-                MirNodeInner::Union { emit },
+                MirNodeInner::Union {
+                    emit,
+                    duplicate_mode: union::DuplicateMode::UnionAll,
+                },
                 ancestors.to_vec(),
                 vec![],
             ),
@@ -812,6 +825,7 @@ impl SqlToMirConverter {
         name: &str,
         ancestors: Vec<MirNodeRef>,
         columns: Vec<Column>,
+        duplicate_mode: union::DuplicateMode,
     ) -> ReadySetResult<MirNodeRef> {
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
         trace!(
@@ -826,7 +840,10 @@ impl SqlToMirConverter {
             name,
             self.schema_version,
             columns,
-            MirNodeInner::Union { emit },
+            MirNodeInner::Union {
+                emit,
+                duplicate_mode,
+            },
             ancestors,
             vec![],
         ))
@@ -1363,6 +1380,9 @@ impl SqlToMirConverter {
                             &format!("{}_un{}", name, nc + left.len() + right.len()),
                             vec![last_left, last_right],
                             output_cols,
+                            // the filters might overlap, so we need to set BagUnion mode which
+                            // removes rows in one side that exist in the other
+                            union::DuplicateMode::BagUnion,
                         )?;
 
                         pred_nodes.extend(left);

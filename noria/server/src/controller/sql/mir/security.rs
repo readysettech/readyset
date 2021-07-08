@@ -5,6 +5,7 @@ use crate::controller::sql::query_signature::Signature;
 use crate::controller::sql::UniverseId;
 use crate::errors::internal_err;
 use crate::ReadySetResult;
+use dataflow::ops::union;
 use mir::MirNodeRef;
 use noria::{internal, invariant, ReadySetError};
 use std::collections::HashMap;
@@ -57,7 +58,11 @@ impl SecurityBoundary for SqlToMirConverter {
         // First, union the results from all ancestors
         let (union, mapping) = if !sec {
             (
-                Some(self.make_union_node(&format!("{}_n{}", name, node_count), &ancestors)?),
+                Some(self.make_union_node(
+                    &format!("{}_n{}", name, node_count),
+                    &ancestors,
+                    union::DuplicateMode::UnionAll,
+                )?),
                 None,
             )
         } else {
