@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef};
+use dataflow::prelude::{internal_err, ReadySetResult};
 
 pub mod node_inner;
 
@@ -337,13 +338,13 @@ impl MirNode {
         )
     }
 
-    pub fn flow_node_addr(&self) -> Result<NodeIndex, String> {
+    pub fn flow_node_addr(&self) -> ReadySetResult<NodeIndex> {
         match self.flow_node {
             Some(FlowNode::New(na)) | Some(FlowNode::Existing(na)) => Ok(na),
-            None => Err(format!(
+            None => Err(internal_err(format!(
                 "MIR node \"{}\" does not have an associated FlowNode",
                 self.versioned_name()
-            )),
+            ))),
         }
     }
 
