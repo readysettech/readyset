@@ -62,6 +62,8 @@ url = { version = "2.2", features = ["serde"] }
 maplit = "1.0.2"
 tokio-stream = "0.1.5"
 futures = "0.3.14"
+lazy_static = "1.4.0"
+regex = "1.5.4"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
