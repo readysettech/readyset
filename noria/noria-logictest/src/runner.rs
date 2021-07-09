@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::time::sleep;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
@@ -262,6 +263,7 @@ impl TestScript {
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
+                Record::Sleep(msecs) => sleep(Duration::from_millis(*msecs)).await,
                 Record::Graphviz => {
                     if let Some(noria) = &mut noria {
                         println!("{}", noria.graphviz().await?);

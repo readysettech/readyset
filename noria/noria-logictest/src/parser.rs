@@ -334,6 +334,16 @@ named!(
 );
 
 named!(
+    sleep<Record>,
+    do_parse!(
+        tag!("sleep")
+            >> multispace1
+            >> msecs: flat_map!(digit1, parse_to!(u64))
+            >> (Record::Sleep(msecs))
+    )
+);
+
+named!(
     halt<Record>,
     do_parse!(
         conditionals: conditionals
@@ -346,6 +356,7 @@ named!(
 named!(pub record<Record>, alt!(
     statement => { |stmt| Record::Statement(stmt) } |
     query => { |query| Record::Query(query) } |
+    sleep |
     halt |
     terminated!(tag!("graphviz"), line_ending) => { |_| Record::Graphviz } |
     hash_threshold
