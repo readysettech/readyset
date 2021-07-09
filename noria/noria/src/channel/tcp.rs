@@ -5,7 +5,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use crate::Tagged;
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
-use bincode::Options;
+use bincode::{ErrorKind, Options};
 use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
@@ -62,8 +62,7 @@ pub struct TcpSender<T> {
 
 impl<T: Serialize> TcpSender<T> {
     pub fn new(stream: std::net::TcpStream) -> Result<Self, io::Error> {
-        stream.set_nodelay(true).unwrap();
-        Ok(Self {
+        stream.set_nodelay(true).map(|_| Self {
             stream: BufStream::new(stream),
             poisoned: false,
             phantom: PhantomData,
@@ -125,7 +124,9 @@ impl<T: Serialize> TcpSender<T> {
             let c = bincode::options()
                 .with_limit(u32::max_value() as u64)
                 .allow_trailing_bytes();
-            let size = u32::try_from(c.serialized_size(t).unwrap()).unwrap();
+            let size = c
+                .serialized_size(t)
+                .and_then(|s| u32::try_from(s).map_err(|_| Box::new(ErrorKind::SizeLimit)))?;
             poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
             poisoning_try!(self, c.serialize_into(&mut self.stream, t));
             poisoning_try!(self, self.stream.flush());
