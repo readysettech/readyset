@@ -510,6 +510,9 @@ pub enum Record {
         conditionals: Vec<Conditional>,
     },
 
+    /// Sleep for the given number of milliseconds
+    Sleep(u64),
+
     /// Print a graphviz representation of the current query graph.
     Graphviz,
 }
@@ -524,6 +527,7 @@ impl Display for Record {
                 writeln!(f, "{}\nhalt\n", conditionals.iter().join("\n"))
             }
             Record::Graphviz => f.write_str("graphviz\n"),
+            Record::Sleep(msecs) => writeln!(f, "sleep {}", msecs),
         }
     }
 }

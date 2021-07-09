@@ -167,7 +167,7 @@ impl TryFrom<PathBuf> for Seed {
                     hash_threshold = *ht;
                 }
                 Record::Halt { .. } => break,
-                Record::Graphviz => {}
+                Record::Graphviz | Record::Sleep(_) => {}
             }
         }
 
