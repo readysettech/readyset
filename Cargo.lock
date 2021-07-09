@@ -150,7 +150,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "serde",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -835,7 +835,7 @@ dependencies = [
  "rand 0.8.4",
  "serial_test",
  "shiplift",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "url 2.2.2",
 ]
 
@@ -1362,7 +1362,7 @@ dependencies = [
  "noria",
  "noria-logictest",
  "query_generator",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -1615,7 +1615,7 @@ dependencies = [
  "noria-logictest",
  "query_generator",
  "rand 0.8.4",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -2111,7 +2111,7 @@ dependencies = [
  "http 0.2.4",
  "indexmap",
  "slab",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-util 0.6.7",
  "tracing",
 ]
@@ -2407,7 +2407,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.6",
  "socket2 0.4.0",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tower-service",
  "tracing",
  "want 0.3.0",
@@ -2426,7 +2426,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "parking_lot 0.11.1",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-openssl",
  "tower-layer",
 ]
@@ -2470,7 +2470,7 @@ dependencies = [
  "bytes 1.0.1",
  "hyper 0.14.9",
  "native-tls",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
 ]
 
@@ -2484,7 +2484,7 @@ dependencies = [
  "hex 0.4.3",
  "hyper 0.14.9",
  "pin-project 1.0.7",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -2642,7 +2642,7 @@ dependencies = [
  "noria-server",
  "serde_json",
  "slog",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "zookeeper",
 ]
 
@@ -3052,7 +3052,7 @@ dependencies = [
  "parking_lot 0.11.1",
  "quanta 0.7.2",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -3235,7 +3235,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "time 0.2.27",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -3345,7 +3345,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
  "tokio-util 0.6.7",
  "twox-hash",
@@ -3373,7 +3373,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
  "tokio-util 0.6.7",
  "twox-hash",
@@ -3402,7 +3402,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
  "tokio-util 0.6.7",
  "twox-hash",
@@ -3780,7 +3780,7 @@ dependencies = [
  "slog",
  "test-strategy",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "tokio-tower",
  "tower",
@@ -3819,7 +3819,7 @@ dependencies = [
  "regex",
  "slog",
  "slog-term",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-test 0.2.1",
  "tower-limit",
  "tower-service",
@@ -3858,7 +3858,7 @@ dependencies = [
  "slog",
  "thiserror",
  "timestamp_service",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tracing",
  "vec1",
  "zookeeper",
@@ -3881,7 +3881,7 @@ dependencies = [
  "noria-client-metrics",
  "slog",
  "slog-term",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
@@ -3950,7 +3950,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "timekeeper",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-stream",
  "tuple",
  "unbounded-interval-tree",
@@ -3986,7 +3986,7 @@ dependencies = [
  "proptest",
  "query_generator",
  "slog",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "walkdir",
  "zookeeper",
 ]
@@ -4013,7 +4013,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tracing",
 ]
 
@@ -4033,7 +4033,7 @@ dependencies = [
  "postgres 0.19.1",
  "psql-srv",
  "slog",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "zookeeper",
 ]
 
@@ -4090,7 +4090,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "timekeeper",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-stream",
  "tokio-tower",
  "toml",
@@ -4110,7 +4110,7 @@ dependencies = [
  "anyhow",
  "clap 2.33.3",
  "noria",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -4657,7 +4657,7 @@ dependencies = [
  "fallible-iterator 0.2.0",
  "futures 0.3.15",
  "log 0.4.14",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-postgres 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4668,7 +4668,7 @@ source = "git+https://github.com/readysettech/rust-postgres.git#e899d18e0044f3f3
 dependencies = [
  "futures 0.3.15",
  "native-tls",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
 ]
@@ -4887,7 +4887,7 @@ dependencies = [
  "postgres 0.19.1",
  "postgres-types 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-test 0.4.2",
  "tokio-util 0.6.7",
 ]
@@ -4961,7 +4961,7 @@ dependencies = [
  "strum_macros",
  "test-strategy",
  "thiserror",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -5436,7 +5436,7 @@ dependencies = [
  "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "slog",
  "slog-term",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
 ]
 
@@ -5500,7 +5500,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded 0.7.0",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-native-tls",
  "url 2.2.2",
  "wasm-bindgen",
@@ -5981,7 +5981,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "url 2.2.2",
 ]
 
@@ -6210,7 +6210,7 @@ checksum = "f36848ff9e3e8af125e00ab244aca7af0a8b270d4c6afcc9ccb4e523f7972c4c"
 dependencies = [
  "futures-core",
  "pin-project 1.0.7",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -6652,9 +6652,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.7.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c79ba603c337335df6ba6dd6afc38c38a7d5e1b0c871678439ea973cd62a118e"
+checksum = "98c8b05dc14c75ea83d63dd391100353789f5f24b8b3866542a5e85c8be8e985"
 dependencies = [
  "autocfg 1.0.1",
  "bytes 1.0.1",
@@ -6771,7 +6771,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
 dependencies = [
  "native-tls",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -6783,7 +6783,7 @@ dependencies = [
  "futures 0.3.15",
  "openssl",
  "pin-project 1.0.7",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -6804,7 +6804,7 @@ dependencies = [
  "postgres-protocol 0.6.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "socket2 0.4.0",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-util 0.6.7",
 ]
 
@@ -6827,7 +6827,7 @@ dependencies = [
  "postgres-protocol 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "postgres-types 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "socket2 0.4.0",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-util 0.6.7",
 ]
 
@@ -6870,7 +6870,7 @@ checksum = "f8864d706fdb3cc0843a49647ac892720dac98a6eeb818b77190592cf4994066"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.6",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -6917,7 +6917,7 @@ dependencies = [
  "async-stream",
  "bytes 1.0.1",
  "futures-core",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-stream",
 ]
 
@@ -6961,7 +6961,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "pin-project 1.0.7",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tower",
  "tower-service",
  "tracing",
@@ -7025,7 +7025,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.14",
  "pin-project-lite 0.2.6",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]
@@ -7049,7 +7049,7 @@ dependencies = [
  "pin-project 1.0.7",
  "rand 0.8.4",
  "slab",
- "tokio 1.7.0",
+ "tokio 1.8.1",
  "tokio-stream",
  "tokio-util 0.6.7",
  "tower-layer",
@@ -7651,7 +7651,7 @@ dependencies = [
  "noria",
  "noria-logictest",
  "query_generator",
- "tokio 1.7.0",
+ "tokio 1.8.1",
 ]
 
 [[package]]

@@ -10,5 +10,5 @@ msql-srv = { version = "0.8.7", path = "../msql-srv" }
 noria = { path = "../noria/noria" }
 noria-client = { version = "0.1.0", path = "../noria-client" }
 noria-client-adapter = { version = "0.1.0", path = "../noria-client/adapter" }
-tokio = { version = "1.5.0" }
+tokio = "1.8.1"
 tracing = "0.1.3"
