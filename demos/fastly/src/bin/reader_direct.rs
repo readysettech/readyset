@@ -29,6 +29,15 @@ struct Reader {
     #[clap(long)]
     target_qps: Option<u64>,
 
+    /// The amount of time to batch a set of requests for in ms. If
+    /// `batch_duration_ms` is not specified, no batching is performed.
+    #[clap(long, default_value = "0")]
+    batch_duration_ms: u64,
+
+    /// The maximum batch size for lookup requests.
+    #[clap(long, default_value = "10")]
+    batch_size: u64,
+
     /// The number of threads to spawn to issue reader queries.
     #[clap(long, default_value = "1")]
     threads: u64,
@@ -69,9 +78,12 @@ impl Reader {
 
         let mut view = handle.view("w").await.unwrap();
 
-        loop {
-            let id = self.generate_user_id();
+        let batch_interval = Duration::from_millis(self.batch_duration_ms);
+        let mut batch_start = Instant::now();
+        let mut batch_query_start = Vec::new();
+        let mut batch_keys = Vec::new();
 
+        loop {
             let now = Instant::now();
 
             // Update the aggregator process on this reader's state.
@@ -81,6 +93,7 @@ impl Reader {
                 last_thread_update = Instant::now();
             }
 
+            // Throttle the thread if we are trying to hit a target qps.
             if let Some(t) = next_query {
                 if now < t {
                     // Sleep for 1/10th the query interval so we don't miss any
@@ -92,24 +105,45 @@ impl Reader {
                 }
             }
 
+            // A client is executing a query.
             next_query = query_interval.map(|i| now + i);
+            let id = self.generate_user_id();
 
-            // Execute and time the query.
-            let query_start = Instant::now();
+            if batch_query_start.is_empty() {
+                batch_start = Instant::now();
+            }
 
+            batch_query_start.push(Instant::now());
+            batch_keys.push(id);
+
+            // Client executes a query but we have not reached the batch interval
+            // so we keep adding queries.
+            if batch_keys.len() < self.batch_size as usize && now < batch_start + batch_interval {
+                continue;
+            }
+
+            // It is batch time, execute the batched query and calculate the time
+            // for each query from the query start times.
+            let keys: Vec<_> = batch_keys
+                .iter()
+                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(*k as i32))))
+                .collect();
             let vq = ViewQuery {
-                key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(id as i32)))],
+                key_comparisons: keys,
                 block: true,
                 order_by: None,
                 limit: Some(5),
                 filter: None,
                 timestamp: None,
             };
-
             let _ = view.raw_lookup(vq).await?;
+            let finish = Instant::now();
 
-            let query_elapsed = Instant::now() - query_start;
-            reader_update.queries.push(query_elapsed.as_millis());
+            for q_start in &batch_query_start {
+                reader_update.queries.push((finish - *q_start).as_millis());
+            }
+            batch_query_start.clear();
+            batch_keys.clear();
         }
     }
 
