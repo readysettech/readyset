@@ -13,6 +13,7 @@ use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::{self, Method, StatusCode};
+use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema};
 use noria::{
@@ -21,8 +22,10 @@ use noria::{
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
+use regex::Regex;
 use reqwest::Url;
 use slog::Logger;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
@@ -93,6 +96,14 @@ pub(super) fn graphviz(
 
     let indentln = |s: &mut String| s.push_str("    ");
 
+    #[allow(clippy::unwrap_used)] // regex is hardcoded and valid
+    fn sanitize(s: &str) -> Cow<str> {
+        lazy_static! {
+            static ref SANITIZE_RE: Regex = Regex::new("([<>])").unwrap();
+        };
+        SANITIZE_RE.replace_all(s, "\\$1")
+    }
+
     // header.
     s.push_str("digraph {{\n");
 
@@ -112,7 +123,7 @@ pub(super) fn graphviz(
         let materialization_status = materializations.get_status(index, node);
         indentln(&mut s);
         s.push_str(&format!("n{}", index.index()));
-        s.push_str(&node.describe(index, detailed, materialization_status));
+        s.push_str(sanitize(&node.describe(index, detailed, materialization_status)).as_ref());
     }
 
     // edges.
