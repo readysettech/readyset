@@ -1,7 +1,7 @@
 use crate::internal::*;
 use crate::MaterializationStatus;
 use petgraph::graph::NodeIndex;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type DomainMap = HashMap<(DomainIndex, usize), (DomainStats, HashMap<NodeIndex, NodeStats>)>;
@@ -45,8 +45,6 @@ pub struct NodeStats {
 /// Statistics about the Soup data-flow.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphStats {
-    #[serde(serialize_with = "serialize_domainmap")]
-    #[serde(deserialize_with = "deserialize_domainmap")]
     #[doc(hidden)]
     pub domains: DomainMap,
 }
@@ -57,25 +55,4 @@ impl Deref for GraphStats {
     fn deref(&self) -> &Self::Target {
         &self.domains
     }
-}
-
-// TODO: probably use https://serde.rs/impl-serialize.html#serializing-a-sequence-or-map instead
-fn serialize_domainmap<S: Serializer>(map: &DomainMap, s: S) -> Result<S::Ok, S::Error> {
-    map.iter()
-        .map(|((di, shard), v)| (format!("{}.{}", di.index(), shard), v))
-        .collect::<HashMap<_, _>>()
-        .serialize(s)
-}
-
-fn deserialize_domainmap<'de, D: Deserializer<'de>>(d: D) -> Result<DomainMap, D::Error> {
-    use std::str::FromStr;
-
-    let dm = <HashMap<String, (DomainStats, HashMap<NodeIndex, NodeStats>)>>::deserialize(d)?;
-    let mut map = DomainMap::default();
-    for (k, v) in dm {
-        let di = usize::from_str(&k[..k.find('.').unwrap()]).unwrap().into();
-        let shard = usize::from_str(&k[k.find('.').unwrap() + 1..]).unwrap();
-        map.insert((di, shard), v);
-    }
-    Ok(map)
 }
