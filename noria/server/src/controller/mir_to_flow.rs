@@ -1,3 +1,13 @@
+#![deny(
+    clippy::dbg_macro,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::unreachable
+)]
+
 use nom_sql::{
     BinaryOperator, ColumnConstraint, ColumnSpecification, Expression, FunctionExpression, InValue,
     OrderType, UnaryOperator,
@@ -40,9 +50,16 @@ pub(super) fn mir_query_to_flow_parts(
     for n in &node_queue {
         in_edge_counts.insert(n.borrow().versioned_name(), 0);
     }
-    while !node_queue.is_empty() {
-        let n = node_queue.pop_front().unwrap();
-        invariant_eq!(in_edge_counts[&n.borrow().versioned_name()], 0);
+    while let Some(n) = node_queue.pop_front() {
+        let edge_counts = in_edge_counts
+            .get(&n.borrow().versioned_name())
+            .ok_or_else(|| {
+                internal_err(format!(
+                    "no in_edge_counts for {}",
+                    n.borrow().versioned_name()
+                ))
+            })?;
+        invariant_eq!(*edge_counts, 0);
         let (name, from_version) = {
             let n = n.borrow_mut();
             (n.name.clone(), n.from_version)
@@ -61,8 +78,8 @@ pub(super) fn mir_query_to_flow_parts(
         }
         for child in n.borrow().children.iter() {
             let nd = child.borrow().versioned_name();
-            let in_edges = if in_edge_counts.contains_key(&nd) {
-                in_edge_counts[&nd]
+            let in_edges = if let Some(ine) = in_edge_counts.get(&nd) {
+                *ine
             } else {
                 child.borrow().ancestors.len()
             };
@@ -106,6 +123,7 @@ fn mir_node_to_flow_parts(
                     ref kind,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_grouped_node(
                         &name,
@@ -138,6 +156,7 @@ fn mir_node_to_flow_parts(
                     ref kind,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_grouped_node(
                         &name,
@@ -152,6 +171,7 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
 
                     make_filter_node(
@@ -164,8 +184,9 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
-                    make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)
+                    make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)?
                 }
                 MirNodeInner::Join {
                     ref on_left,
@@ -173,7 +194,9 @@ fn mir_node_to_flow_parts(
                     ref project,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let left = mir_node.ancestors[0].clone();
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let right = mir_node.ancestors[1].clone();
                     make_join_node(
                         &name,
@@ -189,7 +212,9 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let left = mir_node.ancestors[0].clone();
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let right = mir_node.ancestors[1].clone();
                     make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
                 }
@@ -199,6 +224,7 @@ fn mir_node_to_flow_parts(
                     ref operator,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_param_filter_node(
                         &name,
@@ -213,6 +239,7 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
@@ -223,14 +250,16 @@ fn mir_node_to_flow_parts(
                     ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     let post_lookup = make_post_lookup(&parent, order_by, limit)?;
-                    materialize_leaf_node(&parent, name, keys, mig, post_lookup);
+                    materialize_leaf_node(&parent, name, keys, mig, post_lookup)?;
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
-                    // FIXME(eta): get rid of unwraps
-                    let node = match *parent.borrow().flow_node.as_ref().unwrap() {
+                    let node = match *parent.borrow().flow_node.as_ref().ok_or_else(|| {
+                        internal_err("parent of a Leaf mirnodeinner had no flow_node")
+                    })? {
                         FlowNode::New(na) => FlowNode::Existing(na),
                         ref n @ FlowNode::Existing(..) => n.clone(),
                     };
@@ -242,7 +271,9 @@ fn mir_node_to_flow_parts(
                     ref project,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let left = mir_node.ancestors[0].clone();
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let right = mir_node.ancestors[1].clone();
                     make_join_node(
                         &name,
@@ -262,6 +293,7 @@ fn mir_node_to_flow_parts(
                     ref expressions,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_project_node(
                         &name,
@@ -304,6 +336,7 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
@@ -314,6 +347,7 @@ fn mir_node_to_flow_parts(
                     ref offset,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
                     make_topk_node(
                         &name,
@@ -331,7 +365,10 @@ fn mir_node_to_flow_parts(
                     ref column,
                     ref key,
                 } => {
+                    invariant_eq!(mir_node.ancestors.len(), 2);
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let src = mir_node.ancestors[0].clone();
+                    #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let should_rewrite = mir_node.ancestors[1].clone();
 
                     make_rewrite_node(
@@ -343,7 +380,7 @@ fn mir_node_to_flow_parts(
                         column,
                         key,
                         mig,
-                    )
+                    )?
                 }
             };
 
@@ -396,7 +433,15 @@ fn adapt_base_node(
             .column_specifications()
             .iter()
             .position(|&(ref ecs, _)| ecs == r)
-            .unwrap();
+            .ok_or_else(|| {
+                internal_err(format!(
+                    "could not find ColumnSpecification {:?} in {:?}",
+                    r,
+                    over_node.column_specifications()
+                ))
+            })?;
+        // pos just came from `position` above
+        #[allow(clippy::indexing_slicing)]
         let cid = over_node.column_specifications()[pos]
             .1
             .ok_or_else(|| internal_err("base column ID must be set to remove column"))?;
@@ -446,13 +491,16 @@ fn make_base_node(
         let pkey_column_ids = pkey_columns
             .iter()
             .map(|pkc| {
+                // FIXME(eta): why was this commented out?
                 //assert_eq!(pkc.table.as_ref().unwrap(), name);
                 column_specs
                     .iter()
                     .position(|&(ref cs, _)| Column::from(&cs.column) == *pkc)
-                    .unwrap()
+                    .ok_or_else(|| {
+                        internal_err(format!("could not find pkey column id for {:?}", pkc))
+                    })
             })
-            .collect();
+            .collect::<ReadySetResult<Vec<_>>>()?;
         node::special::Base::new(default_values).with_key(pkey_column_ids)
     } else {
         node::special::Base::new(default_values)
@@ -481,12 +529,14 @@ fn make_union_node(
     // which might cause improper ordering of columns in a union node
     // eg. Q6 in finkelstein.txt
     for (i, n) in ancestors.iter().enumerate() {
-        let emit_cols = emit[i]
+        let emit_cols = emit
+            .get(i)
+            .ok_or_else(|| internal_err(format!("no index {} in emit cols {:?}", i, emit)))?
             .iter()
             .map(|c| n.borrow().column_id_for_column(c, table_mapping))
             .collect::<Vec<_>>();
 
-        let ni = n.borrow().flow_node_addr().unwrap();
+        let ni = n.borrow().flow_node_addr()?;
         emit_column_id.insert(ni, emit_cols);
     }
     let node = mig.add_ingredient(
@@ -507,22 +557,25 @@ fn make_rewrite_node(
     rewrite_col: &str,
     key: &str,
     mig: &mut Migration,
-) -> FlowNode {
-    let src_na = src.borrow().flow_node_addr().unwrap();
-    let should_rewrite_na = should_rewrite.borrow().flow_node_addr().unwrap();
+) -> ReadySetResult<FlowNode> {
+    let src_na = src.borrow().flow_node_addr()?;
+    let should_rewrite_na = should_rewrite.borrow().flow_node_addr()?;
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
     let rewrite_col = column_names
         .iter()
         .rposition(|c| *c == rewrite_col)
-        .unwrap();
-    let key = column_names.iter().rposition(|c| *c == key).unwrap();
+        .ok_or_else(|| internal_err("could not find rewrite col"))?;
+    let key = column_names
+        .iter()
+        .rposition(|c| *c == key)
+        .ok_or_else(|| internal_err("could not find rewrite col key"))?;
 
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
         ops::rewrite::Rewrite::new(src_na, should_rewrite_na, rewrite_col, value.into(), key),
     );
-    FlowNode::New(node)
+    Ok(FlowNode::New(node))
 }
 
 fn make_filter_node(
@@ -532,7 +585,7 @@ fn make_filter_node(
     conditions: Expression,
     mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
     let filter_conditions = lower_expression(&parent, conditions)?;
 
@@ -555,7 +608,7 @@ fn make_grouped_node(
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let parent_node = parent.borrow();
     let column_names = column_names(columns);
     let over_col_indx = parent_node.column_id_for_column(on, table_mapping);
@@ -593,8 +646,8 @@ fn make_identity_node(
     parent: MirNodeRef,
     columns: &[Column],
     mig: &mut Migration,
-) -> FlowNode {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+) -> ReadySetResult<FlowNode> {
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
 
     let node = mig.add_ingredient(
@@ -602,7 +655,7 @@ fn make_identity_node(
         column_names.as_slice(),
         ops::identity::Identity::new(parent_na),
     );
-    FlowNode::New(node)
+    Ok(FlowNode::New(node))
 }
 
 fn make_join_node(
@@ -661,7 +714,7 @@ fn make_join_node(
                 .ok_or_else(|| {
                     internal_err(format!(
                         "missing left-side join column {:#?} in {:#?}",
-                        on_left.first().unwrap(),
+                        on_left.first(),
                         left.borrow().columns
                     ))
                 })?;
@@ -674,7 +727,7 @@ fn make_join_node(
                 .ok_or_else(|| {
                     internal_err(format!(
                         "missing right-side join column {:#?} in {:#?}",
-                        on_right.first().unwrap(),
+                        on_right.first(),
                         right.borrow().columns
                     ))
                 })?;
@@ -720,8 +773,8 @@ fn make_join_node(
     invariant_eq!(from_left, projected_cols_left.len());
     invariant_eq!(from_right, projected_cols_right.len());
 
-    let left_na = left.borrow().flow_node_addr().unwrap();
-    let right_na = right.borrow().flow_node_addr().unwrap();
+    let left_na = left.borrow().flow_node_addr()?;
+    let right_na = right.borrow().flow_node_addr()?;
 
     let j = match kind {
         JoinType::Inner => Join::new(left_na, right_na, JoinType::Inner, join_config),
@@ -791,8 +844,8 @@ fn make_join_aggregates_node(
         )
         .collect();
 
-    let left_na = left.borrow().flow_node_addr().unwrap();
-    let right_na = right.borrow().flow_node_addr().unwrap();
+    let left_na = left.borrow().flow_node_addr()?;
+    let right_na = right.borrow().flow_node_addr()?;
 
     // Always treated as a JoinType::Inner based on joining on group_by cols, which always match
     // between parents.
@@ -826,13 +879,13 @@ fn make_param_filter_node(
     use nom_sql::BinaryOperator as nom_op;
     use ops::param_filter::Operator as pf_op;
 
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
     let col = parent.borrow().column_id_for_column(col, table_mapping);
     let emit_key = column_names
         .iter()
         .rposition(|c| *c == emit_key.name)
-        .unwrap();
+        .ok_or_else(|| internal_err("could not find paramfilter emit key"))?;
     let operator = match operator {
         nom_op::ILike => pf_op::ILike,
         nom_op::Like => pf_op::Like,
@@ -853,7 +906,7 @@ fn make_latest_node(
     group_by: &[Column],
     mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
 
     let group_col_indx = group_by
@@ -865,6 +918,7 @@ fn make_latest_node(
     if group_col_indx.len() != 1 {
         unsupported!("latest node doesn't support compound GROUP BY")
     }
+    #[allow(clippy::indexing_slicing)] // group_col_indx length checked above
     let na = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
@@ -987,7 +1041,7 @@ fn make_project_node(
     mig: &mut Migration,
     table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(source_columns);
 
     let projected_column_ids = emit
@@ -1029,7 +1083,7 @@ fn make_distinct_node(
     group_by: &[Column],
     mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
 
     let group_by_indx = if group_by.is_empty() {
@@ -1072,7 +1126,7 @@ fn make_topk_node(
     offset: usize,
     mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
-    let parent_na = parent.borrow().flow_node_addr().unwrap();
+    let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
 
     invariant!(
@@ -1139,8 +1193,8 @@ fn materialize_leaf_node(
     key_cols: &[Column],
     mig: &mut Migration,
     post_lookup: PostLookup,
-) {
-    let na = parent.borrow().flow_node_addr().unwrap();
+) -> ReadySetResult<()> {
+    let na = parent.borrow().flow_node_addr()?;
 
     // we must add a new reader for this query. This also requires adding an identity node (at
     // least currently), since a node can only have a single associated reader. However, the
@@ -1159,4 +1213,5 @@ fn materialize_leaf_node(
         // if no key specified, default to the first column
         mig.maintain(name, na, &[0], post_lookup);
     }
+    Ok(())
 }
