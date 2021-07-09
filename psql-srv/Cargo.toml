@@ -18,11 +18,11 @@ nom-sql = { version = "0.0.11", path = "../nom-sql" }
 postgres = "0.19.1"
 postgres-types = { version = "0.2.1", features = ["with-chrono-0_4"] }
 thiserror = "1.0.24"
-tokio = { version = "1.5.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.8.1", features = ["rt-multi-thread"] }
 tokio-util = { version = "0.6.6", features = ["codec"] }
 
 [dev-dependencies]
-tokio = { version = "1.5.0", features = ["macros", "net"] }
+tokio = { version = "1.8.1", features = ["macros", "net"] }
 tokio-test = "0.4.1"
 
 [[example]]
