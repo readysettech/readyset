@@ -390,7 +390,7 @@ where
         _key: &KeyType,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
-    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         None
     }
 
@@ -409,23 +409,25 @@ where
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
-        states
-            .get(parent)
-            .map(move |state| match state.lookup(columns, key) {
-                LookupResult::Some(rs) => Some(Box::new(rs.into_iter()) as Box<_>),
-                LookupResult::Missing => None,
-            })
-            .or_else(|| {
+    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
+        match states.get(parent) {
+            Some(state) => match state.lookup(columns, key) {
+                LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter().map(Ok)) as Box<_>)),
+                LookupResult::Missing => Some(None),
+            },
+            None => {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
+                #[allow(clippy::indexing_slicing)] // Node must exist to have gotten here.
                 let parent = nodes[parent].borrow();
+
                 if parent.is_internal() {
                     parent.query_through(columns, key, nodes, states)
                 } else {
                     None
                 }
-            })
+            }
+        }
     }
 
     /// Performance hint: should return true if this operator reduces the size of its input

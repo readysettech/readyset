@@ -103,7 +103,7 @@ impl Ingredient for Project {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
@@ -129,11 +129,12 @@ impl Ingredient for Project {
             .map(|result| {
                 result.map(|rs| match emit {
                     Some(emit) => Box::new(rs.map(move |r| {
+                        let r = r?;
                         let mut new_r = Vec::with_capacity(r.len());
                         let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
                             e.iter()
-                                .map(|expr| expr.eval(&r).unwrap().into_owned())
-                                .collect()
+                                .map(|expr| Ok(expr.eval(&r)?.into_owned()))
+                                .collect::<ReadySetResult<Vec<DataType>>>()?
                         } else {
                             vec![]
                         };
@@ -151,7 +152,7 @@ impl Ingredient for Project {
                             new_r.append(&mut a.clone());
                         }
 
-                        Cow::from(new_r)
+                        Ok(Cow::from(new_r))
                     })) as Box<_>,
                     None => Box::new(rs) as Box<_>,
                 })
@@ -549,7 +550,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert_eq!(expected, iter.next().unwrap().into_owned());
+        assert_eq!(expected, iter.next().unwrap().unwrap().into_owned());
     }
 
     #[test]

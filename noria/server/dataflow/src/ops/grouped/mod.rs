@@ -318,7 +318,14 @@ where
                                                 .map_err(|_| internal_err("Empty group"))?,
                                         });
                                     }
-                                    rs.into_iter().map(|x| x.into_owned()).collect::<Vec<_>>()
+                                    rs.into_iter().map(|x| match x {
+                                        Ok(r) => {
+                                            Ok(r.into_owned())
+                                        }
+                                        Err(e) => {
+                                            Err(e)
+                                        }
+                                    }).collect::<ReadySetResult<Vec<_>>>()?
                                 }
                             }
                         };

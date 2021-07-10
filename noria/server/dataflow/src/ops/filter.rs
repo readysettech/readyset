@@ -90,17 +90,33 @@ impl Ingredient for Filter {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
-    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         self.lookup(*self.src, columns, key, nodes, states)
             .map(|result| {
-                let f = self.expression.clone();
-                let filter = move |r: &[DataType]| {
-                    f.eval(r)
-                        .expect("query_through can't currently return an error")
-                        .is_truthy()
-                };
-
-                result.map(|rs| Box::new(rs.filter(move |r| filter(r))) as Box<_>)
+                result.map(|rs| {
+                    let f = self.expression.clone();
+                    let filter = move |r: &[DataType]| Ok(f.eval(r)?.is_truthy());
+                    Box::new(rs.filter_map(move |r| {
+                        match r {
+                            Ok(data) => {
+                                match filter(&(*data)) {
+                                    Ok(true) => Some(Ok(data)),
+                                    Err(e) => {
+                                        // If we got an error, we need to combine this result as part of the
+                                        // iterator, so a caller can deal with the error.
+                                        Some(Err(e))
+                                    }
+                                    _ => None,
+                                }
+                            }
+                            Err(e) => {
+                                // If we got an error, we need to combine this result as part of the
+                                // iterator, so a caller can deal with the error.
+                                Some(Err(e))
+                            }
+                        }
+                    })) as Box<_>
+                })
             })
     }
 

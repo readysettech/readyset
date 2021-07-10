@@ -639,7 +639,7 @@ impl Ingredient for Join {
                     // `row`, we re-use its memory instead of allocating a new Vec. we do this by
                     // (ab)using .peek() to terminate the loop one iteration early.
                     other_rows_count += 1;
-                    let mut other = other_rows.next().unwrap();
+                    let mut other = other_rows.next().unwrap()?;
                     while other_rows.peek().is_some() {
                         if let Some(false) = make_null {
                             // we need to generate a -NULL for all these lefts
@@ -666,7 +666,7 @@ impl Ingredient for Join {
                             // we need to generate a +NULL for all these lefts
                             ret.push((self.generate_null(&other), true).into());
                         }
-                        other = other_rows.next().unwrap();
+                        other = other_rows.next().unwrap()?;
                         other_rows_count += 1;
                     }
 
