@@ -171,8 +171,9 @@ impl Ingredient for Rewrite {
                 if other_rows.peek().is_none() {
                     continue;
                 } else {
+                    // TODO(peter): This is gross. Fix it.
                     while other_rows.peek().is_some() {
-                        let other = other_rows.next().unwrap().to_vec();
+                        let other = other_rows.next().unwrap()?.to_vec();
 
                         emit_rs.push((other.clone(), !r.is_positive()).into());
                         emit_rs.push((self.rewrite(other), r.is_positive()).into());

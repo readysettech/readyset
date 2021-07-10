@@ -115,7 +115,7 @@ impl Ingredient for ParamFilter {
         _key: &KeyType,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
-    ) -> Option<Option<Box<dyn Iterator<Item = Cow<'a, [DataType]>> + 'a>>> {
+    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         todo!()
     }
 }
