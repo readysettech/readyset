@@ -23,6 +23,7 @@ use noria::{
 };
 use noria::{PacketData, ReadySetError, Tagged};
 use pin_project::pin_project;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
@@ -258,7 +259,7 @@ impl Replica {
         Ok(())
     }
 
-    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), anyhow::Error> {
+    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> ReadySetResult<()> {
         let this = self.project();
 
         let cc = this.coord;
@@ -272,11 +273,14 @@ impl Replica {
                 continue;
             }
 
-            let &mut (ref mut tx, ref mut pending) = outputs.entry(ri).or_insert_with(|| {
-                while !cc.has(&ri) {}
-                let tx = cc.builder_for(&ri).unwrap().build_async().unwrap();
-                (tx, true)
-            });
+            let &mut (ref mut tx, ref mut pending) = match outputs.entry(ri) {
+                Occupied(entry) => entry.into_mut(),
+                Vacant(entry) => entry.insert({
+                    while !cc.has(&ri)? {}
+                    let tx = cc.builder_for(&ri)?.unwrap().build_async().unwrap();
+                    (tx, true)
+                }),
+            };
 
             let mut tx = Pin::new(tx);
 

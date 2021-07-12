@@ -20,6 +20,9 @@ use tokio::io::BufWriter;
 pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
+use crate::errors::internal_err;
+use crate::internal;
+use crate::ReadySetResult;
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
 pub const CONNECTION_FROM_DOMAIN: u8 = 2;
@@ -140,7 +143,7 @@ where
 {
     pub fn build_async(
         self,
-    ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
+    ) -> ReadySetResult<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(
                 ImplSinkForSender(chan)
@@ -156,10 +159,16 @@ where
             }
             .build_async()
             .map(|c| Box::new(c) as Box<_>)
+            .map_err(|e| {
+                internal_err(format!(
+                    "an error occurred while trying to create a domain connection: '{}'",
+                    e
+                ))
+            })
         }
     }
 
-    pub fn build_sync(self) -> io::Result<Box<dyn Sender<Item = T> + Send>> {
+    pub fn build_sync(self) -> ReadySetResult<Box<dyn Sender<Item = T> + Send>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(chan))
         } else {
@@ -172,6 +181,12 @@ where
             }
             .build_sync()
             .map(|c| Box::new(c) as Box<_>)
+            .map_err(|e| {
+                internal_err(format!(
+                    "an error occurred while trying to create a domain connection: '{}'",
+                    e
+                ))
+            })
         }
     }
 }
@@ -193,6 +208,12 @@ impl<K: Eq + Hash + Clone, T> Default for ChannelCoordinator<K, T> {
     }
 }
 
+macro_rules! map_poisoned_err {
+    ($res:expr) => {
+        $res.map_err(|e| internal_err(format!("mutex is poisoned: '{}'", e)))
+    };
+}
+
 impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     pub fn new() -> Self {
         Self {
@@ -203,52 +224,63 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         }
     }
 
-    pub fn insert_remote(&self, key: K, addr: SocketAddr) {
-        let mut inner = self.inner.write().unwrap();
+    pub fn insert_remote(&self, key: K, addr: SocketAddr) -> ReadySetResult<()> {
+        let mut inner = map_poisoned_err!(self.inner.write())?;
         inner.addrs.insert(key, addr);
+        Ok(())
     }
 
-    pub fn insert_local(&self, key: K, chan: tokio::sync::mpsc::UnboundedSender<T>) {
-        let mut inner = self.inner.write().unwrap();
+    pub fn insert_local(
+        &self,
+        key: K,
+        chan: tokio::sync::mpsc::UnboundedSender<T>,
+    ) -> ReadySetResult<()> {
+        let mut inner = map_poisoned_err!(self.inner.write())?;
         inner.locals.insert(key, chan);
+        Ok(())
     }
 
-    pub fn has<Q>(&self, key: &Q) -> bool
+    pub fn has<Q>(&self, key: &Q) -> ReadySetResult<bool>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.inner.read().unwrap().addrs.contains_key(key)
+        map_poisoned_err!(self.inner.read()).map(|guard| guard.addrs.contains_key(key))
     }
 
-    pub fn get_addr<Q>(&self, key: &Q) -> Option<SocketAddr>
+    pub fn get_addr<Q>(&self, key: &Q) -> ReadySetResult<Option<SocketAddr>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.inner.read().unwrap().addrs.get(key).cloned()
+        map_poisoned_err!(self.inner.read()).map(|guard| guard.addrs.get(key).cloned())
     }
 
-    pub fn is_local<Q>(&self, key: &Q) -> Option<bool>
+    pub fn is_local<Q>(&self, key: &Q) -> ReadySetResult<Option<bool>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.inner.read().unwrap().locals.get(key).map(|_| true)
+        map_poisoned_err!(self.inner.read()).map(|guard| guard.locals.get(key).map(|_| true))
     }
 
-    pub fn builder_for<Q>(&self, key: &Q) -> Option<DomainConnectionBuilder<MaybeLocal, T>>
+    pub fn builder_for<Q>(
+        &self,
+        key: &Q,
+    ) -> ReadySetResult<Option<DomainConnectionBuilder<MaybeLocal, T>>>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let inner = self.inner.read().unwrap();
-        Some(DomainConnectionBuilder {
-            sport: None,
-            addr: *inner.addrs.get(key)?,
-            chan: inner.locals.get(key).cloned(),
-            is_for_base: false,
-            _marker: MaybeLocal,
+        map_poisoned_err!(self.inner.read()).and_then(|guard| match guard.addrs.get(key) {
+            None => internal!("no addresses found for key"),
+            Some(addrs) => Ok(Some(DomainConnectionBuilder {
+                sport: None,
+                addr: *addrs,
+                chan: guard.locals.get(key).cloned(),
+                is_for_base: false,
+                _marker: MaybeLocal,
+            })),
         })
     }
 }
