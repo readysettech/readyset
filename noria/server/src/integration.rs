@@ -7,6 +7,7 @@
 
 use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
+use crate::get_col;
 use crate::integration_utils::*;
 use crate::{Builder, ReadySetError};
 use dataflow::node::special::Base;
@@ -373,9 +374,7 @@ async fn broad_recursing_upquery() {
     let rows = reader.lookup(&[DataType::Int(1)], true).await.unwrap();
     assert_eq!(rows.len(), n as usize);
     for i in 0..n {
-        assert!(rows
-            .iter()
-            .any(|row| row.get::<i32>("base_col").unwrap().unwrap() == i));
+        assert!(rows.iter().any(|row| get_col!(row, "base_col", i32) == i));
     }
 }
 
@@ -3333,7 +3332,7 @@ async fn union_basic() {
             .await
             .unwrap()
             .iter()
-            .map(|r| r.get("id").unwrap().unwrap()),
+            .map(|r| r.get("id").and_then(|dt| i32::try_from(dt).ok()).unwrap()),
     )
     .collect();
     let expected_ids: Vec<i32> = (0..10).filter(|i: &i32| i % 2 == 0 || i % 3 == 0).collect();
@@ -3378,7 +3377,7 @@ async fn union_all_basic() {
             .await
             .unwrap()
             .iter()
-            .map(|r| r.get("id").unwrap().unwrap()),
+            .map(|r| r.get("id").and_then(|dt| i32::try_from(dt).ok()).unwrap()),
     )
     .collect();
     let expected_ids: Vec<i32> = sorted(
@@ -3694,7 +3693,7 @@ async fn test_join_across_shards() {
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("u").unwrap().unwrap(), r.get("s").unwrap().unwrap()))
+        .map(|r| (get_col!(r, "u", i32), get_col!(r, "s", i32)))
         .sorted()
         .collect();
     let expected = vec![
@@ -3748,7 +3747,7 @@ async fn test_join_across_shards_with_param() {
         .await
         .unwrap()
         .iter()
-        .map(|r| (r.get("u").unwrap().unwrap(), r.get("s").unwrap().unwrap()))
+        .map(|r| (get_col!(r, "u", i32), get_col!(r, "s", i32)))
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
@@ -3791,12 +3790,7 @@ async fn test_join_with_reused_column_name() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("story").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "story", i32)))
         .sorted()
         .collect();
     let expected = vec![
@@ -3846,12 +3840,7 @@ async fn test_join_with_reused_column_name_with_param() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("story").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "story", i32)))
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
@@ -3887,12 +3876,7 @@ async fn self_join_basic() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("agreer").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "agreer", i32)))
         .sorted()
         .collect();
     let expected = vec![
@@ -3917,12 +3901,7 @@ async fn self_join_basic() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("agreer").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "agreer", i32)))
         .sorted()
         .collect();
     assert_eq!(results, expected);
@@ -3961,12 +3940,7 @@ async fn self_join_param() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("fof").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "fof", i32)))
         .sorted()
         .collect();
     let expected = vec![(1, 1), (1, 5)];
@@ -3984,12 +3958,7 @@ async fn self_join_param() {
         .await
         .unwrap()
         .iter()
-        .map(|r| {
-            (
-                r.get("user").unwrap().unwrap(),
-                r.get("fof").unwrap().unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "user", i32), get_col!(r, "fof", i32)))
         .sorted()
         .collect();
     assert_eq!(results, expected);
@@ -4368,7 +4337,7 @@ async fn aggregate_expression() {
 
     let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
 
-    assert_eq!(&res["max_num"], &DataType::from(100));
+    assert_eq!(get_col!(res, "max_num"), &DataType::from(100));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4507,7 +4476,7 @@ async fn filter_on_expression() {
 
     let res = &q.lookup_first(&[0i32.into()], true).await.unwrap().unwrap();
 
-    assert_eq!(&res["id"], &DataType::from(1));
+    assert_eq!(get_col!(res, "id"), &DataType::from(1));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4592,12 +4561,7 @@ async fn compound_join_key() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| {
-            (
-                <i32>::try_from(r["val_1"].clone()).unwrap(),
-                <i32>::try_from(r["val_2"].clone()).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "val_1", i32), get_col!(r, "val_2", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -4750,8 +4714,6 @@ async fn test_view_includes_replicas() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
-    use std::convert::TryInto;
-
     let mut g = start_simple_logging("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
@@ -4787,9 +4749,9 @@ async fn overlapping_indices() {
         .into_iter()
         .map(|r| {
             (
-                r["s"].clone().try_into().unwrap(),
-                r["id"].clone().try_into().unwrap(),
-                r["b"].clone().try_into().unwrap(),
+                get_col!(r, "s", i32),
+                get_col!(r, "id", i32),
+                get_col!(r, "b", i32),
             )
         })
         .sorted()
@@ -4829,7 +4791,7 @@ async fn aggregate_after_filter_non_equality() {
         .await
         .unwrap()
         .into_iter()
-        .map(|r| i32::try_from(&r["s"]).unwrap())
+        .map(|r| get_col!(r, "s", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![13]);
@@ -4874,7 +4836,7 @@ async fn join_simple_cte() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(res["name"], "four".try_into().unwrap());
+    assert_eq!(get_col!(res, "name"), &DataType::try_from("four").unwrap());
 }
 
 // multiple_aggregate_sum tests multiple aggregators of the same type, in this case sum(),
@@ -4929,12 +4891,7 @@ async fn multiple_aggregate_sum() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s1"]).unwrap(),
-                i32::try_from(&r["s2"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s1", i32), get_col!(r, "s2", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -4973,12 +4930,7 @@ async fn multiple_aggregate_same_col() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5037,12 +4989,7 @@ async fn multiple_aggregate_sum_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s1"]).unwrap(),
-                i32::try_from(&r["s2"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s1", i32), get_col!(r, "s2", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5081,12 +5028,7 @@ async fn multiple_aggregate_same_col_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5128,10 +5070,10 @@ async fn multiple_aggregate_over_two() {
         .into_iter()
         .map(|r| {
             (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-                i32::try_from(&r["c"]).unwrap(),
-                i32::try_from(&r["m"]).unwrap(),
+                get_col!(r, "s", i32),
+                get_col!(r, "a", f64),
+                get_col!(r, "c", i32),
+                get_col!(r, "m", i32),
             )
         })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
@@ -5176,10 +5118,10 @@ async fn multiple_aggregate_over_two_sharded() {
         .into_iter()
         .map(|r| {
             (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-                i32::try_from(&r["c"]).unwrap(),
-                i32::try_from(&r["m"]).unwrap(),
+                get_col!(r, "s", i32),
+                get_col!(r, "a", f64),
+                get_col!(r, "c", i32),
+                get_col!(r, "m", i32),
             )
         })
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
@@ -5221,12 +5163,7 @@ async fn multiple_aggregate_with_expressions() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5266,12 +5203,7 @@ async fn multiple_aggregate_with_expressions_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5311,12 +5243,7 @@ async fn multiple_aggregate_reuse() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -5340,12 +5267,7 @@ async fn multiple_aggregate_reuse() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["s"]).unwrap(),
-                i32::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "a", i32)))
         .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
         .collect::<Vec<(i32, i32)>>();
 
@@ -5418,7 +5340,7 @@ async fn round_int_to_int() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![1000]);
@@ -5448,7 +5370,7 @@ async fn round_float_to_float() {
 
     let res = rows
         .into_iter()
-        .map(|r| f64::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", f64))
         .collect::<Vec<f64>>();
 
     assert_eq!(res, vec![2.22_f64]);
@@ -5478,7 +5400,7 @@ async fn round_float_to_int() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![2]);
@@ -5511,7 +5433,7 @@ async fn round_with_precision_float() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![120]);
@@ -5541,7 +5463,7 @@ async fn round_bigint_to_bigint() {
 
     let res = rows
         .into_iter()
-        .map(|r| i64::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", i64))
         .collect::<Vec<i64>>();
 
     assert_eq!(res, vec![1000]);
@@ -5571,7 +5493,7 @@ async fn round_unsignedint_to_unsignedint() {
 
     let res = rows
         .into_iter()
-        .map(|r| u32::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", u32))
         .collect::<Vec<u32>>();
 
     assert_eq!(res, vec![1000]);
@@ -5601,7 +5523,7 @@ async fn round_unsignedbigint_to_unsignedbitint() {
 
     let res = rows
         .into_iter()
-        .map(|r| u64::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", u64))
         .collect::<Vec<u64>>();
 
     assert_eq!(res, vec![1000]);
@@ -5631,7 +5553,7 @@ async fn round_with_no_precision() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["r"]).unwrap())
+        .map(|r| get_col!(r, "r", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![56]);
@@ -5667,7 +5589,7 @@ async fn distinct_select_works() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["v"]).unwrap())
+        .map(|r| get_col!(r, "v", i32))
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -5694,7 +5616,7 @@ async fn partial_distinct() {
         ($q: expr, $k: expr) => {{
             let rows = $q.lookup(&[($k as i32).into()], true).await.unwrap();
             rows.into_iter()
-                .map(|r| i32::try_from(&r["value"]).unwrap())
+                .map(|r| get_col!(r, "value", i32))
                 .sorted()
                 .collect::<Vec<i32>>()
         }};
@@ -5772,12 +5694,7 @@ async fn partial_distinct_multi() {
     let rows = q.lookup(&[(0_i32).into()], true).await.unwrap();
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["value"]).unwrap(),
-                i32::try_from(&r["s"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "value", i32), get_col!(r, "s", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5814,7 +5731,7 @@ async fn distinct_select_works_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["v"]).unwrap())
+        .map(|r| get_col!(r, "v", i32))
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -5852,12 +5769,7 @@ async fn distinct_select_multi_col() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["v"]).unwrap(),
-                i32::try_from(&r["n"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "v", i32), get_col!(r, "n", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5895,12 +5807,7 @@ async fn distinct_select_multi_col_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["v"]).unwrap(),
-                i32::try_from(&r["n"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "v", i32), get_col!(r, "n", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -5940,9 +5847,9 @@ async fn distinct_select_with_builtin() {
         .into_iter()
         .map(|r| {
             (
-                i32::try_from(&r["v"]).unwrap(),
-                i32::try_from(&r["n"]).unwrap(),
-                i32::try_from(&r["r"]).unwrap(),
+                get_col!(r, "v", i32),
+                get_col!(r, "n", i32),
+                get_col!(r, "r", i32),
             )
         })
         .sorted()
@@ -5984,9 +5891,9 @@ async fn distinct_select_with_builtin_sharded() {
         .into_iter()
         .map(|r| {
             (
-                i32::try_from(&r["v"]).unwrap(),
-                i32::try_from(&r["n"]).unwrap(),
-                i32::try_from(&r["r"]).unwrap(),
+                get_col!(r, "v", i32),
+                get_col!(r, "n", i32),
+                get_col!(r, "r", i32),
             )
         })
         .sorted()
@@ -6037,12 +5944,7 @@ async fn distinct_select_with_join() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["n"]).unwrap(),
-                i32::try_from(&r["v"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "n", i32), get_col!(r, "v", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -6091,12 +5993,7 @@ async fn distinct_select_with_join_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["n"]).unwrap(),
-                i32::try_from(&r["v"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "n", i32), get_col!(r, "v", i32)))
         .sorted()
         .collect::<Vec<(i32, i32)>>();
 
@@ -6134,7 +6031,7 @@ async fn distinct_select_with_agg() {
 
     let res = rows
         .into_iter()
-        .map(|r| f64::try_from(&r["a"]).unwrap())
+        .map(|r| get_col!(r, "a", f64))
         .collect::<Vec<f64>>();
 
     assert_eq!(res, vec![4.5]);
@@ -6171,7 +6068,7 @@ async fn distinct_select_with_agg_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| f64::try_from(&r["a"]).unwrap())
+        .map(|r| get_col!(r, "a", f64))
         .collect::<Vec<f64>>();
 
     assert_eq!(res, vec![4.5]);
@@ -6208,12 +6105,7 @@ async fn distinct_select_with_multi_agg() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                f64::try_from(&r["a"]).unwrap(),
-                i32::try_from(&r["c"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "a", f64), get_col!(r, "c", i32)))
         .collect::<Vec<(f64, i32)>>();
 
     assert_eq!(res, vec![(4.5, 2)]);
@@ -6250,12 +6142,7 @@ async fn distinct_select_with_multi_agg_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                f64::try_from(&r["a"]).unwrap(),
-                i32::try_from(&r["c"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "a", f64), get_col!(r, "c", i32)))
         .collect::<Vec<(f64, i32)>>();
 
     assert_eq!(res, vec![(4.5, 2)]);
@@ -6294,7 +6181,7 @@ async fn distinct_select_with_distinct_agg() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["c"]).unwrap())
+        .map(|r| get_col!(r, "c", i32))
         .collect::<Vec<i32>>();
 
     assert_eq!(res, vec![1, 2]);
@@ -6336,7 +6223,7 @@ async fn distinct_select_with_distinct_agg_sharded() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["c"]).unwrap())
+        .map(|r| get_col!(r, "c", i32))
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -6392,8 +6279,6 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_straddled_columns() {
-    use std::convert::TryInto;
-
     let mut g = start_simple_logging("join_straddled_columns").await;
 
     g.install_recipe(
@@ -6432,9 +6317,9 @@ async fn join_straddled_columns() {
         .into_iter()
         .map(|r| {
             (
-                r["a1"].clone().try_into().unwrap(),
-                r["a2"].clone().try_into().unwrap(),
-                r["b2"].clone().try_into().unwrap(),
+                get_col!(r, "a1", i32),
+                get_col!(r, "a2", i32),
+                get_col!(r, "b2", i32),
             )
         })
         .sorted()
@@ -6563,7 +6448,7 @@ async fn group_by_agg_col_count() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["c"]).unwrap())
+        .map(|r| get_col!(r, "c", i32))
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -6604,7 +6489,7 @@ async fn group_by_agg_col_avg() {
 
     let res = rows
         .into_iter()
-        .map(|r| f64::try_from(&r["a"]).unwrap())
+        .map(|r| get_col!(r, "a", f64))
         .sorted_by(|a, b| a.partial_cmp(b).unwrap())
         .collect::<Vec<f64>>();
 
@@ -6645,7 +6530,7 @@ async fn group_by_agg_col_sum() {
 
     let res = rows
         .into_iter()
-        .map(|r| i32::try_from(&r["s"]).unwrap())
+        .map(|r| get_col!(r, "s", i32))
         .sorted()
         .collect::<Vec<i32>>();
 
@@ -6686,12 +6571,7 @@ async fn group_by_agg_col_multi() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["c"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "c", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| a.0.cmp(&b.0))
         .collect::<Vec<(i32, f64)>>();
 
@@ -6741,12 +6621,7 @@ async fn group_by_agg_col_with_join() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                i32::try_from(&r["c"]).unwrap(),
-                f64::try_from(&r["a"]).unwrap(),
-            )
-        })
+        .map(|r| (get_col!(r, "c", i32), get_col!(r, "a", f64)))
         .sorted_by(|a, b| a.0.cmp(&b.0))
         .collect::<Vec<(i32, f64)>>();
 
