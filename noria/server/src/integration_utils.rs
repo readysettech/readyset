@@ -144,3 +144,17 @@ pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
         panic!("{} is not a counter", metric);
     }
 }
+
+/// Retrieves the value of column of a row, by passing the column name and
+/// the type.
+#[macro_export(local_inner_macros)]
+macro_rules! get_col {
+    ($row:expr, $field:expr, $into_type:ty) => {
+        $row.get($field)
+            .and_then(|dt| <$into_type>::try_from(dt).ok())
+            .unwrap()
+    };
+    ($row:expr, $field:expr) => {
+        $row.get($field).unwrap()
+    };
+}

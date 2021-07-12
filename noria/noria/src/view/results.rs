@@ -1,6 +1,4 @@
-use crate::errors::ReadySetError;
-use crate::{data::*, ReadySetResult};
-use std::convert::TryInto;
+use crate::data::*;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -72,28 +70,17 @@ impl<'a> ResultRow<'a> {
 impl std::ops::Index<usize> for ResultRow<'_> {
     type Output = DataType;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.result[index]
-    }
-}
-
-impl std::ops::Index<&'_ str> for ResultRow<'_> {
-    type Output = DataType;
-    fn index(&self, index: &'_ str) -> &Self::Output {
-        let index = self.columns.iter().position(|col| col == index).unwrap();
-        &self.result[index]
+        self.result.get(index).unwrap()
     }
 }
 
 impl<'a> ResultRow<'a> {
-    /// Retrieve the field of the result by the given name as a `T`.
+    /// Retrieve the field of the result by the given name.
     ///
     /// Returns `None` if the given field does not exist.
-    pub fn get<T>(&self, field: &str) -> Option<ReadySetResult<T>>
-    where
-        &'a DataType: TryInto<T, Error = ReadySetError>,
-    {
+    pub fn get(&self, field: &str) -> Option<&DataType> {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some((&self.result[index]).try_into())
+        self.result.get(index)
     }
 }
 
@@ -298,30 +285,17 @@ impl Deref for Row {
 impl std::ops::Index<usize> for Row {
     type Output = DataType;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.row[index]
-    }
-}
-
-impl std::ops::Index<&'_ str> for Row {
-    type Output = DataType;
-    fn index(&self, index: &'_ str) -> &Self::Output {
-        let index = self.columns.iter().position(|col| col == index).unwrap();
-        &self.row[index]
+        self.row.get(index).unwrap()
     }
 }
 
 impl Row {
-    /// Retrieve the field of the result by the given name as a `T`.
+    /// Retrieve the field of the result by the given name.
     ///
     /// Returns `None` if the given field does not exist.
-    ///
-    /// Panics if the value at the given field cannot be turned into a `T`.
-    pub fn get<T>(&self, field: &str) -> Option<T>
-    where
-        for<'a> &'a DataType: Into<T>,
-    {
+    pub fn get(&self, field: &str) -> Option<&DataType> {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some((&self.row[index]).into())
+        self.row.get(index)
     }
 
     /// Remove the value for the field of the result by the given name.
@@ -329,6 +303,8 @@ impl Row {
     /// Returns `None` if the given field does not exist.
     pub fn take(&mut self, field: &str) -> Option<DataType> {
         let index = self.columns.iter().position(|col| col == field)?;
-        Some(std::mem::replace(&mut self.row[index], DataType::None))
+        self.row
+            .get_mut(index)
+            .map(|r| std::mem::replace(r, DataType::None))
     }
 }

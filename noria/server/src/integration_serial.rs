@@ -7,6 +7,7 @@
 //! requirement in integration.rs, which supports running tests in
 //! parallel.
 
+use crate::get_col;
 use crate::integration_utils::*;
 use crate::Builder;
 use crate::DataType;
@@ -122,13 +123,13 @@ async fn it_works_basic() {
     assert!(res.iter().any(|r| r == vec![id.clone(), 4.into()]));
 
     // check that looking up columns by name works
-    assert!(res.iter().all(|r| r.get::<i32>("a").unwrap().unwrap() == 1));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 2));
-    assert!(res.iter().any(|r| r.get::<i32>("b").unwrap().unwrap() == 4));
+    assert!(res.iter().all(|r| get_col!(r, "a", i32) == 1));
+    assert!(res.iter().any(|r| get_col!(r, "b", i32) == 2));
+    assert!(res.iter().any(|r| get_col!(r, "b", i32) == 4));
     // same with index
-    assert!(res.iter().all(|r| r["a"] == id));
-    assert!(res.iter().any(|r| r["b"] == 2.into()));
-    assert!(res.iter().any(|r| r["b"] == 4.into()));
+    assert!(res.iter().all(|r| get_col!(r, "a", DataType) == id));
+    assert!(res.iter().any(|r| get_col!(r, "b", DataType) == 2.into()));
+    assert!(res.iter().any(|r| get_col!(r, "b", DataType) == 4.into()));
 
     // This request does not hit the base table.
     let metrics = metrics_client.get_metrics().await.unwrap();
