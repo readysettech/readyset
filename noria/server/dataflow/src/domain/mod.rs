@@ -523,7 +523,7 @@ impl Domain {
         &mut self,
         tag: Tag,
         keys: Vec<KeyComparison>,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
         if let TriggerEndpoint::End {
             source,
@@ -591,7 +591,7 @@ impl Domain {
             } else if let Some(key_shard_i) = ask_shard_by_key_i {
                 let mut shards = HashMap::new();
                 for key in keys {
-                    for shard in key.shard_keys_at(key_shard_i, options.len()) {
+                    for shard in key.shard_keys_at(key_shard_i, options.len())? {
                         shards
                             .entry(shard)
                             .or_insert_with(Vec::new)
@@ -1134,15 +1134,15 @@ impl Domain {
                                 if n == 1 {
                                     let misses = misses.cloned().collect::<Vec<_>>();
                                     if misses.is_empty() {
-                                        return true;
+                                        return Ok(true);
                                     }
-                                    txs[0].send(misses).is_ok()
+                                    Ok(txs[0].send(misses).is_ok())
                                 } else {
                                     // TODO: compound reader
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
                                         assert!(matches!(miss.len(), Some(1) | None));
-                                        for shard in miss.shard_keys(n) {
+                                        for shard in miss.shard_keys(n)? {
                                             per_shard
                                                 .entry(shard)
                                                 .or_insert_with(Vec::new)
@@ -1150,11 +1150,11 @@ impl Domain {
                                         }
                                     }
                                     if per_shard.is_empty() {
-                                        return true;
+                                        return Ok(true);
                                     }
-                                    per_shard.into_iter().all(|(shard, keys)| {
+                                    Ok(per_shard.into_iter().all(|(shard, keys)| {
                                         txs[shard].send(keys.into_iter().cloned().collect()).is_ok()
-                                    })
+                                    }))
                                 }
                             },
                         );

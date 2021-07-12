@@ -2,7 +2,7 @@ use crate::consistency::Timestamp;
 use crate::data::*;
 use crate::errors::{internal_err, view_err, ReadySetError, ReadySetResult};
 use crate::util::like::CaseSensitivityMode;
-use crate::{rpc_err, Tagged, Tagger};
+use crate::{internal, rpc_err, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
-use std::iter::FromIterator;
 use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
@@ -234,21 +233,26 @@ impl KeyComparison {
 
     /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
     /// the total number of shards
-    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> Vec<usize> {
-        match self {
-            KeyComparison::Equal(key) => vec![crate::shard_by(&key[key_idx], num_shards)],
+    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> ReadySetResult<Vec<usize>> {
+        Ok(match self {
+            KeyComparison::Equal(key) => vec![crate::shard_by(
+                key.get(key_idx).ok_or_else(|| {
+                    internal_err(format!("key does not have a value for index {}", key_idx))
+                })?,
+                num_shards,
+            )],
             // Since we currently implement hash-based sharding, any non-point query must target all
             // shards. This restriction could be lifted in the future by implementing (perhaps
             // optional) range-based sharding, likely with rebalancing. See Guillote-Blouin, J.
             // (2020) Implementing Range Queries and Write Policies in a Partially-Materialized
             // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
             _ => (0..num_shards).collect(),
-        }
+        })
     }
 
     /// Returns the shard key(s) that the first column in this [`KeyComparison`] must target, given
     /// the total number of shards
-    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
+    pub fn shard_keys(&self, num_shards: usize) -> ReadySetResult<Vec<usize>> {
         self.shard_keys_at(0, num_shards)
     }
 
@@ -330,14 +334,6 @@ impl From<Vec1<DataType>> for KeyComparison {
     }
 }
 
-impl FromIterator<DataType> for KeyComparison {
-    /// Collects into a [`KeyComparison::Equal`], panicking if the iterator yields no values
-    fn from_iter<T: IntoIterator<Item = DataType>>(iter: T) -> Self {
-        Self::try_from(iter.into_iter().collect::<Vec<_>>())
-            .expect("Tried to build a KeyComparison from an iterator that yielded no values")
-    }
-}
-
 impl From<Range<Vec1<DataType>>> for KeyComparison {
     fn from(range: Range<Vec1<DataType>>) -> Self {
         KeyComparison::Range((Bound::Included(range.start), Bound::Excluded(range.end)))
@@ -411,25 +407,31 @@ impl RangeBounds<Vec<DataType>> for &KeyComparison {
 
 impl Arbitrary for KeyComparison {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<KeyComparison>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::arbitrary::any_with;
         use proptest::prop_oneof;
         use proptest::strategy::Strategy;
 
         let bound = || {
-            any_with::<Bound<Vec<DataType>>>(((1..100).into(), ()))
-                .prop_map(|bound| bound.map(|k| Vec1::try_from_vec(k).unwrap()))
+            any_with::<Bound<Vec<DataType>>>(((1..100).into(), ())).prop_map(|bound| {
+                // This is only used for testing, so we allow calling `unwrap()`
+                #[allow(clippy::unwrap_used)]
+                bound.map(|k| Vec1::try_from_vec(k).unwrap())
+            })
         };
 
         prop_oneof![
-            any_with::<Vec<DataType>>(((1..100).into(), ()))
-                .prop_map(|k| KeyComparison::try_from(k).unwrap()),
+            any_with::<Vec<DataType>>(((1..100).into(), ())).prop_map(|k| {
+                // This is only used for testing, so we allow calling `unwrap()`
+                #[allow(clippy::unwrap_used)]
+                KeyComparison::try_from(k).unwrap()
+            }),
             (bound(), bound()).prop_map(KeyComparison::Range)
         ]
         .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<KeyComparison>;
 }
 
 #[doc(hidden)]
@@ -471,7 +473,7 @@ pub enum ReadReply<D = ReadReplyBatch> {
 pub struct ViewBuilder {
     /// Set of replicas for a view, this will only include one element
     /// if there is no reader replication.
-    pub replicas: Vec<ViewReplica>,
+    pub replicas: Vec1<ViewReplica>,
 }
 
 /// A reader replica for a view.
@@ -494,24 +496,6 @@ pub struct ReplicaShard {
     pub region: Option<String>,
 }
 
-// This function assumes that `replicas` is not empty.
-fn view_replica_for_region(region: String, replicas: &[ViewReplica]) -> &ViewReplica {
-    replicas
-        .iter()
-        .map(|vr| {
-            // Map each replica to a pair of <ViewReplica, percent of shards in region>.
-            let num_replicas = vr
-                .shards
-                .iter()
-                .filter(|s| s.region == Some(region.clone()))
-                .count();
-            (vr, num_replicas as u32 * 100 / vr.shards.len() as u32)
-        })
-        .max_by_key(|p| p.1) // Take replica with the highest percent.
-        .unwrap()
-        .0
-}
-
 impl ViewBuilder {
     /// Selects the replica from `replicas` that has the highest fraction of replica
     /// shards in `region`.
@@ -523,11 +507,26 @@ impl ViewBuilder {
         &self,
         region: Option<String>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
-    ) -> View {
+    ) -> ReadySetResult<View> {
         let replica = if let Some(region) = region {
-            view_replica_for_region(region, &self.replicas)
+            #[allow(clippy::unwrap_used)]
+            self.replicas
+                .iter()
+                .map(|vr| {
+                    // Map each replica to a pair of <ViewReplica, percent of shards in region>.
+                    let num_replicas = vr
+                        .shards
+                        .iter()
+                        .filter(|s| s.region == Some(region.clone()))
+                        .count();
+                    (vr, num_replicas as u32 * 100 / vr.shards.len() as u32)
+                })
+                .max_by_key(|p| p.1) // Take replica with the highest percent.
+                // We know there is at least one element in the iterator, so this `unwrap()` is safe.
+                .unwrap()
+                .0
         } else {
-            &self.replicas[0]
+            self.replicas.first()
         };
 
         let node = replica.node;
@@ -545,7 +544,9 @@ impl ViewBuilder {
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
-            let mut rpcs = rpcs.lock().unwrap();
+            let mut rpcs = rpcs
+                .lock()
+                .map_err(|e| internal_err(format!("mutex was poisoned: '{}'", e)))?;
             let s = match rpcs.entry((shard.addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -571,14 +572,15 @@ impl ViewBuilder {
         }
 
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
-        View {
+        Ok(View {
             node,
             schema,
             columns,
             shard_addrs: addrs,
-            shards: conns,
+            shards: Vec1::try_from_vec(conns)
+                .map_err(|_| internal_err("cannot create view '{}' without shards"))?,
             tracer,
-        }
+        })
     }
 }
 
@@ -592,7 +594,7 @@ pub struct View {
     columns: Vec<String>,
     schema: Option<ViewSchema>,
 
-    shards: Vec<ViewRpc>,
+    shards: Vec1<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
 
     tracer: tracing::Dispatch,
@@ -744,8 +746,9 @@ impl Service<ViewQuery> for View {
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
 
-            return future::Either::Left(
-                self.shards[0]
+            return future::Either::Left(future::Either::Right(
+                self.shards
+                    .first_mut()
                     .call(request)
                     .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                     .and_then(move |reply| async move {
@@ -759,7 +762,7 @@ impl Service<ViewQuery> for View {
                         }
                     })
                     .map_err(move |e| view_err(ni, e)),
-            );
+            ));
         }
 
         if let Some(ref span) = span {
@@ -767,8 +770,27 @@ impl Service<ViewQuery> for View {
         }
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
-            for shard in comparison.shard_keys(self.shards.len()) {
-                shard_queries[shard].push(comparison.clone());
+            match comparison.shard_keys(self.shards.len()) {
+                Ok(shards) => {
+                    for shard in shards {
+                        if shard_queries
+                            .get_mut(shard)
+                            .map(|sq| sq.push(comparison.clone()))
+                            .is_none()
+                        {
+                            return future::Either::Left(future::Either::Left(
+                                future::Either::Left(async move {
+                                    internal!("could not found shard query for shard '{}'", shard)
+                                }),
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    return future::Either::Left(future::Either::Left(future::Either::Right(
+                        async move { Err(e) },
+                    )))
+                }
             }
         }
 
@@ -988,7 +1010,9 @@ impl View {
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
-        Ok(rs.into_iter().next().unwrap())
+        rs.into_iter()
+            .next()
+            .ok_or_else(|| internal_err("no result found for key"))
     }
 
     /// Retrieve the query results for the given parameter values
@@ -1025,7 +1049,12 @@ impl View {
         let rs = self
             .multi_lookup_ryw(vec![KeyComparison::Equal(key)], block, ticket)
             .await?;
-        Ok(rs.into_iter().next().unwrap().into_iter().next())
+        Ok(rs
+            .into_iter()
+            .next()
+            .ok_or_else(|| internal_err("no result found for key"))?
+            .into_iter()
+            .next())
     }
 }
 

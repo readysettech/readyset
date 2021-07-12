@@ -32,6 +32,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{cell, time};
+use vec1::Vec1;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
 /// for replication offsets)
@@ -988,7 +989,10 @@ impl ControllerInner {
             });
         }
 
-        Ok(Some(ViewBuilder { replicas }))
+        Ok(Some(ViewBuilder {
+            replicas: Vec1::try_from_vec(replicas)
+                .map_err(|_| ReadySetError::ViewNotFound(view_req.name))?,
+        }))
     }
 
     fn view_schema(&self, view_ni: NodeIndex) -> Result<Option<ViewSchema>, ReadySetError> {
@@ -1173,7 +1177,7 @@ impl ControllerInner {
     pub(super) fn create_universe(
         &mut self,
         context: HashMap<String, DataType>,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         let log = self.log.clone();
         let mut r = self.recipe.clone();
         let groups = self.recipe.security_groups();
@@ -1197,7 +1201,7 @@ impl ControllerInner {
                 let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
                 // TODO: using block_on here _only_ works because View::lookup just waits on a
                 // channel, which doesn't use anything except the pure executor
-                let mut view = rgb.map(|rgb| rgb.build(None, x.clone())).unwrap();
+                let mut view = rgb.map(|rgb| rgb.build(None, x.clone())).unwrap()?;
                 let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
                     .unwrap()
                     .iter()

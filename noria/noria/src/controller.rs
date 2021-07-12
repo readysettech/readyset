@@ -386,7 +386,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                     None
                 };
             let view_builder = self.view_builder(view_request).await?;
-            Ok(view_builder.build(region, views))
+            view_builder.build(region, views)
         }
     }
 
