@@ -395,7 +395,7 @@ named!(from_clause_tree(&[u8]) -> FromClause, alt!(
 
 named!(from_clause(&[u8]) -> FromClause, do_parse!(
     multispace0
-        >> tag_no_case!("from")
+        >> complete!(tag_no_case!("from"))
         >> multispace1
         >> from_clause: from_clause_tree
         >> (from_clause)
@@ -504,6 +504,22 @@ mod tests {
         let qstring = "SELECT * FROM;";
         let res = selection(qstring.as_bytes());
         assert!(res.is_err(), "!{:?}.is_err()", res);
+    }
+
+    #[test]
+    fn bare_expression_select() {
+        let qstring = "SELECT 1";
+        let res = selection(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            SelectStatement {
+                fields: vec![FieldDefinitionExpression::Expression {
+                    expr: Expression::Literal(Literal::Integer(1)),
+                    alias: None
+                }],
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
