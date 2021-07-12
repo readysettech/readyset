@@ -19,20 +19,13 @@ impl Extremum {
     ///
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
-    /// identifier. The `over` column should not be in the `group_by` array.
-    ///
-    /// TODO: support case conditions
-    /// CH: https://app.clubhouse.io/readysettech/story/198/add-filtering-to-all-grouped-operations
+    /// identifier.
     pub fn over(
         self,
         src: NodeIndex,
         over: usize,
         group_by: &[usize],
     ) -> GroupedOperator<ExtremumOperator> {
-        assert!(
-            !group_by.iter().any(|&i| i == over),
-            "cannot group by aggregation column"
-        );
         GroupedOperator::new(
             src,
             ExtremumOperator {
