@@ -8,6 +8,7 @@ use serde::Serialize;
 use super::Authority;
 use super::Epoch;
 use super::CONTROLLER_KEY;
+use crate::errors::internal_err;
 
 struct LocalAuthorityInner {
     keys: BTreeMap<String, Vec<u8>>,
@@ -36,9 +37,16 @@ impl LocalAuthority {
         }
     }
 }
+
+macro_rules! try_poisoned {
+    ($res:expr) => {
+        $res.map_err(|e| internal_err(format!("mutex is poisoned: '{}'", e)))?;
+    };
+}
+
 impl Authority for LocalAuthority {
     fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = try_poisoned!(self.inner.lock());
         if !inner.keys.contains_key(CONTROLLER_KEY) {
             inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
             self.cv.notify_all();
@@ -49,7 +57,7 @@ impl Authority for LocalAuthority {
     }
 
     fn surrender_leadership(&self) -> Result<(), Error> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = try_poisoned!(self.inner.lock());
         assert!(inner.keys.remove(CONTROLLER_KEY).is_some());
         inner.epoch = Epoch(inner.epoch.0 + 1);
         self.cv.notify_all();
@@ -57,18 +65,21 @@ impl Authority for LocalAuthority {
     }
 
     fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = try_poisoned!(self.inner.lock());
         while !inner.keys.contains_key(CONTROLLER_KEY) {
-            inner = self.cv.wait(inner).unwrap();
+            inner = try_poisoned!(self.cv.wait(inner));
         }
-        Ok((
-            inner.epoch,
-            inner.keys.get(CONTROLLER_KEY).cloned().unwrap(),
-        ))
+        inner
+            .keys
+            .get(CONTROLLER_KEY)
+            .ok_or_else(|| {
+                anyhow::Error::from(internal_err("no keys found when looking for leader"))
+            })
+            .map(|keys| (inner.epoch, keys.clone()))
     }
 
     fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        let inner = self.inner.lock().unwrap();
+        let inner = try_poisoned!(self.inner.lock());
 
         Ok(inner
             .keys
@@ -78,9 +89,9 @@ impl Authority for LocalAuthority {
     }
 
     fn await_new_epoch(&self, epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = try_poisoned!(self.inner.lock());
         while inner.epoch == epoch && inner.keys.contains_key(CONTROLLER_KEY) {
-            inner = self.cv.wait(inner).unwrap();
+            inner = try_poisoned!(self.cv.wait(inner));
         }
 
         Ok(inner
@@ -91,7 +102,7 @@ impl Authority for LocalAuthority {
     }
 
     fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
-        let inner = self.inner.lock().unwrap();
+        let inner = try_poisoned!(self.inner.lock());
         Ok(inner.keys.get(path).cloned())
     }
 
@@ -100,15 +111,13 @@ impl Authority for LocalAuthority {
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = try_poisoned!(self.inner.lock());
         let r = f(inner
             .keys
             .get(path)
-            .map(|data| serde_json::from_slice(data).unwrap()));
+            .and_then(|data| serde_json::from_slice(data).ok()));
         if let Ok(ref p) = r {
-            inner
-                .keys
-                .insert(path.to_owned(), serde_json::to_vec(&p).unwrap());
+            inner.keys.insert(path.to_owned(), serde_json::to_vec(&p)?);
         }
         Ok(r)
     }
