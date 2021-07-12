@@ -14,7 +14,7 @@ use std::sync::Arc;
 use vec1::Vec1;
 
 pub(crate) trait Trigger =
-    Fn(&mut dyn Iterator<Item = &KeyComparison>) -> bool + 'static + Send + Sync;
+    Fn(&mut dyn Iterator<Item = &KeyComparison>) -> ReadySetResult<bool> + 'static + Send + Sync;
 
 /// Allocate a new end-user facing result table.
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
@@ -379,7 +379,7 @@ impl std::fmt::Debug for SingleReadHandle {
 
 impl SingleReadHandle {
     /// Trigger a replay of a missing key from a partially materialized view.
-    pub fn trigger<'a, I>(&self, keys: I) -> bool
+    pub fn trigger<'a, I>(&self, keys: I) -> ReadySetResult<bool>
     where
         I: Iterator<Item = &'a KeyComparison>,
     {
@@ -663,7 +663,9 @@ mod tests {
 
     #[test]
     fn find_missing_partial() {
-        let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+        let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| {
+            Ok(true)
+        });
         w.swap();
 
         assert_eq!(
@@ -678,8 +680,9 @@ mod tests {
 
         #[test]
         fn point() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| {
+                Ok(true)
+            });
             w.swap();
 
             let key = vec1![DataType::from(0)];
@@ -692,8 +695,9 @@ mod tests {
 
         #[test]
         fn range() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| {
+                Ok(true)
+            });
             w.swap();
 
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];
@@ -717,8 +721,9 @@ mod tests {
 
         #[test]
         fn point() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| {
+                Ok(true)
+            });
             w.swap();
 
             let key = vec1![DataType::from(0)];
@@ -733,8 +738,9 @@ mod tests {
 
         #[test]
         fn range() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| {
+                Ok(true)
+            });
             w.swap();
 
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];

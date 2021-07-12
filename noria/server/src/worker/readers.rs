@@ -269,10 +269,10 @@ fn handle_normal_read_query(
         }
 
         if !ready {
-            return Ok(Tagged {
+            return Ok(Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Err(())),
-            });
+            }));
         }
 
         // Hit on all the keys and were RYW consistent
@@ -283,10 +283,10 @@ fn handle_normal_read_query(
                 "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
             );
 
-            return Ok(Tagged {
+            return Ok(Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Ok(ret)),
-            });
+            }));
         }
 
         counter!(
@@ -297,11 +297,16 @@ fn handle_normal_read_query(
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {
-            reader.trigger(keys_to_replay.iter());
+            reader.trigger(keys_to_replay.iter()).map_err(|_| ())?;
         }
 
-        Err((miss_keys, ret, miss_indices))
+        Ok(Err((miss_keys, ret, miss_indices)))
     });
+
+    let immediate = match immediate {
+        Ok(v) => v,
+        Err(e) => return Either::Right(Either::Left(async move { Err(e) })),
+    };
 
     match immediate {
         Ok(reply) => Either::Left(future::ready(Ok(reply))),
@@ -339,10 +344,10 @@ fn handle_normal_read_query(
                     // we're shutting down
                     return Either::Left(future::ready(Err(())));
                 }
-                Either::Right(rx.map(|r| match r {
+                Either::Right(Either::Right(rx.map(|r| match r {
                     Err(_) => Err(()),
                     Ok(r) => r,
-                }))
+                })))
             }
         }
     }
@@ -663,7 +668,7 @@ impl BlockingRead {
                 if now > next_trigger && !self.pending_keys.is_empty() {
                     // Retrigger all un-read keys. Its possible they could have been filled and then
                     // evicted again without us reading it.
-                    if !reader.trigger(self.pending_keys.iter()) {
+                    if !reader.trigger(self.pending_keys.iter()).map_err(|_| ())? {
                         // server is shutting down and won't do the backfill
                         return Err(());
                     }

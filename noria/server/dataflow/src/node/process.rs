@@ -339,7 +339,7 @@ impl Node {
                 )?;
             }
             NodeType::Sharder(ref mut s) => {
-                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex)?;
             }
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, tag, keys);
