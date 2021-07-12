@@ -162,7 +162,7 @@ impl TestScript {
                 .await
                 .with_context(|| "connecting to mysql")?;
 
-            self.run_on_mysql(&mut conn, None, false).await?;
+            self.run_on_mysql(&mut conn, None).await?;
         } else {
             if let Some(binlog_url) = &opts.binlog_url {
                 self.recreate_test_database(binlog_url.try_into().unwrap(), &opts.mysql_db)
@@ -218,8 +218,7 @@ impl TestScript {
             .await
             .with_context(|| "connecting to noria-mysql")?;
 
-        self.run_on_mysql(&mut conn, noria_handle.c.clone(), opts.binlog_url.is_some())
-            .await?;
+        self.run_on_mysql(&mut conn, noria_handle.c.clone()).await?;
 
         // After all tests are done, stop the adapter
         adapter_task.abort();
@@ -236,7 +235,6 @@ impl TestScript {
         &self,
         conn: &mut mysql::Conn,
         mut noria: Option<ControllerHandle<LocalAuthority>>,
-        needs_sleep: bool,
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
 
@@ -250,10 +248,10 @@ impl TestScript {
                 }
 
                 Record::Query(query) => {
-                    if prev_was_statement && needs_sleep {
+                    if prev_was_statement {
                         prev_was_statement = false;
-                        // When binlog replication is enabled, we need to give the statements some time to propagate
-                        // before we can issue the next query
+                        // we need to give the statements some time to propagate before we can issue
+                        // the next query
                         tokio::time::sleep(Duration::from_millis(250)).await;
                     }
 
