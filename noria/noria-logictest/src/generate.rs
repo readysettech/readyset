@@ -80,7 +80,7 @@ impl DatabaseConnection {
 
     async fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
         match self {
-            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, None, false).await,
+            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, None).await,
         }
     }
 }
