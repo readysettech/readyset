@@ -751,7 +751,7 @@ impl ControllerInner {
             info!(log, "worker booted domain at {}", ret.external_addr);
 
             self.channel_coordinator
-                .insert_remote((idx, shard), ret.external_addr);
+                .insert_remote((idx, shard), ret.external_addr)?;
             domain_addresses.push(DomainDescriptor::new(idx, shard, ret.external_addr));
             assignments.push(w.uri.clone());
         }
@@ -1036,12 +1036,14 @@ impl ControllerInner {
             .map(|i| {
                 self.channel_coordinator
                     .get_addr(&(node.domain(), i))
-                    .ok_or_else(|| {
-                        internal_err(format!(
-                            "failed to get channel coordinator for {}.{}",
-                            node.domain().index(),
-                            i
-                        ))
+                    .and_then(|opt| {
+                        opt.ok_or_else(|| {
+                            internal_err(format!(
+                                "failed to get channel coordinator for {}.{}",
+                                node.domain().index(),
+                                i
+                            ))
+                        })
                     })
             })
             .collect::<ReadySetResult<Vec<_>>>()?;

@@ -1100,7 +1100,7 @@ impl Domain {
                                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                 let sender = self
                                     .channel_coordinator
-                                    .builder_for(&(trigger_domain, shard))
+                                    .builder_for(&(trigger_domain, shard))?
                                     .unwrap()
                                     .build_async()
                                     .unwrap();
@@ -1123,9 +1123,9 @@ impl Domain {
                                             }
                                         }),
                                 );
-                                tx
+                                Ok(tx)
                             })
-                            .collect::<Vec<_>>();
+                            .collect::<ReadySetResult<Vec<_>>>()?;
                         let (r_part, w_part) = backlog::new_partial(
                             cols,
                             &k[..],
@@ -1228,10 +1228,9 @@ impl Domain {
                         let shard = |shardi| {
                             // TODO: make async
                             self.channel_coordinator
-                                .builder_for(&(domain, shardi))
+                                .builder_for(&(domain, shardi))?
                                 .unwrap()
                                 .build_sync()
-                                .unwrap()
                         };
 
                         let options = tokio::task::block_in_place(|| {
@@ -1239,13 +1238,17 @@ impl Domain {
                                 SourceSelection::AllShards(nshards)
                                 | SourceSelection::KeyShard { nshards, .. } => {
                                     // we may need to send to any of these shards
-                                    (0..nshards).map(shard).collect()
+                                    let mut options = Vec::new();
+                                    for s in 0..nshards {
+                                        options.push(shard(s)?)
+                                    }
+                                    Ok::<_, ReadySetError>(options)
                                 }
                                 SourceSelection::SameShard => {
-                                    vec![shard(self.shard.unwrap())]
+                                    Ok::<_, ReadySetError>(vec![shard(self.shard.unwrap())?])
                                 }
                             }
-                        });
+                        })?;
 
                         TriggerEndpoint::End {
                             source: selection,
@@ -1349,7 +1352,7 @@ impl Domain {
 
                     let replay_tx_desc = self
                         .channel_coordinator
-                        .builder_for(&(self.index, self.shard.unwrap_or(0)))
+                        .builder_for(&(self.index, self.shard.unwrap_or(0)))?
                         .unwrap();
 
                     let domain_str = self.index.index().to_string();

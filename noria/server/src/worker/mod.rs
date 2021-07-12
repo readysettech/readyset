@@ -12,6 +12,7 @@ use noria::internal::DomainIndex;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
 use replica::ReplicaAddr;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
@@ -263,8 +264,8 @@ impl Worker {
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                self.coord.insert_local((idx, shard), local_tx);
-                self.coord.insert_remote((idx, shard), bind_external);
+                self.coord.insert_local((idx, shard), local_tx)?;
+                self.coord.insert_remote((idx, shard), bind_external)?;
 
                 tokio::task::block_in_place(|| {
                     self.state_sizes
@@ -316,7 +317,7 @@ impl Worker {
                     shard,
                     addr
                 );
-                self.coord.insert_remote((domain, shard), addr);
+                self.coord.insert_remote((domain, shard), addr)?;
                 Ok(None)
             }
             WorkerRequestKind::DomainRequest {
@@ -427,7 +428,7 @@ async fn do_eviction(
     memory_limit: Option<usize>,
     coord: Arc<ChannelCoordinator>,
     state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
-) {
+) -> ReadySetResult<()> {
     let mut domain_senders = HashMap::new();
 
     use std::cmp;
@@ -459,7 +460,7 @@ async fn do_eviction(
         total as f64
     );
     match memory_limit {
-        None => (),
+        None => Ok(()),
         Some(limit) => {
             if total >= limit {
                 let mut over = total - limit;
@@ -513,11 +514,12 @@ async fn do_eviction(
                         "domain" => target.0.index().to_string(),
                     );
 
-                    let tx = domain_senders.entry(target).or_insert_with(|| {
-                        tokio::task::block_in_place(|| {
-                            coord.builder_for(&target).unwrap().build_async().unwrap()
-                        })
-                    });
+                    let tx = match domain_senders.entry(target) {
+                        Occupied(entry) => entry.into_mut(),
+                        Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
+                            coord.builder_for(&target)?.unwrap().build_async()
+                        })?),
+                    };
                     let r = tx
                         .send(Box::new(Packet::Evict {
                             node: None,
@@ -533,6 +535,7 @@ async fn do_eviction(
                     }
                 }
             }
+            Ok(())
         }
     }
 }
