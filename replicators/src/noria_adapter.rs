@@ -5,6 +5,7 @@ use crate::postgres_connector::{
 use async_trait::async_trait;
 use futures::FutureExt;
 use mysql_async as mysql;
+use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
 use slog::{error, info, o, Discard, Logger};
@@ -19,6 +20,11 @@ pub(crate) enum ReplicationAction {
     TableAction {
         table: String,
         actions: Vec<TableOperation>,
+        /// The transaction id of a table write operation. Each
+        /// table write operation within a transaction should be assigned
+        /// the same transaction id. These id's should be monotonically
+        /// increasing across transactions.         
+        txid: Option<u64>,
     },
     SchemaChange {
         ddl: String,
@@ -270,11 +276,27 @@ impl<A: Authority> NoriaAdapter<A> {
                 Ok(())
             }
 
-            ReplicationAction::TableAction { table, mut actions } => {
+            ReplicationAction::TableAction {
+                table,
+                mut actions,
+                txid,
+            } => {
                 // Send the rows as are
                 let table_mutator = self.mutator_for_table(table).await?;
                 actions.push(TableOperation::SetReplicationOffset(pos));
-                table_mutator.perform_all(actions).await
+                table_mutator.perform_all(actions).await?;
+
+                // If there was a transaction id associated, propagate the
+                // timestamp with that transaction id
+                // TODO(justin): Make this operation atomic with the table
+                // actions being pushed above.
+                if let Some(tx) = txid {
+                    let mut timestamp = Timestamp::default();
+                    timestamp.map.insert(table_mutator.node, tx);
+                    table_mutator.update_timestamp(timestamp).await?;
+                }
+
+                Ok(())
             }
         }
     }

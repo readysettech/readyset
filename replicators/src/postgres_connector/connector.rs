@@ -363,6 +363,7 @@ impl Connector for PostgresWalConnector {
                     ReplicationAction::TableAction {
                         table: cur_table,
                         actions,
+                        txid: None,
                     },
                     cur_lsn.into(),
                 ));
@@ -389,6 +390,7 @@ impl Connector for PostgresWalConnector {
                             ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
+                                txid: None,
                             },
                             cur_lsn.into(),
                         ));
@@ -412,6 +414,7 @@ impl Connector for PostgresWalConnector {
                             ReplicationAction::TableAction {
                                 table: cur_table,
                                 actions,
+                                txid: None,
                             },
                             cur_lsn.into(),
                         ));

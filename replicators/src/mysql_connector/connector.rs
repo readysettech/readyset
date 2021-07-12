@@ -41,6 +41,9 @@ pub struct MySqlBinlogConnector {
     next_position: BinlogPosition,
     /// The list of schemas we are interested in, others will be filtered out
     schemas: Vec<String>,
+    /// The GTID of the current transaction. Table modification events will have
+    /// the current GTID attached if enabled in mysql.
+    current_gtid: Option<u64>,
 }
 
 impl PartialOrd for BinlogPosition {
@@ -193,6 +196,7 @@ impl MySqlBinlogConnector {
             server_id,
             next_position,
             schemas: schemas.into_iter().map(|e| e.into()).collect(),
+            current_gtid: None,
         };
 
         connector.register_as_replica().await?;
@@ -309,6 +313,7 @@ impl MySqlBinlogConnector {
                         ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
                             actions: inserted_rows,
+                            txid: self.current_gtid,
                         },
                         &self.next_position,
                     ));
@@ -356,6 +361,7 @@ impl MySqlBinlogConnector {
                         ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
                             actions: updated_rows,
+                            txid: self.current_gtid,
                         },
                         &self.next_position,
                     ));
@@ -390,6 +396,7 @@ impl MySqlBinlogConnector {
                         ReplicationAction::TableAction {
                             table: tme.table_name().to_string(),
                             actions: deleted_rows,
+                            txid: self.current_gtid,
                         },
                         &self.next_position,
                     ));
@@ -399,7 +406,6 @@ impl MySqlBinlogConnector {
                 EventType::UPDATE_ROWS_EVENT_V1 => unimplemented!(), // The V1 event numbers are used from 5.1.16 until mysql-5.6.
                 EventType::DELETE_ROWS_EVENT_V1 => unimplemented!(), // The V1 event numbers are used from 5.1.16 until mysql-5.6.
 
-                /*
                 EventType::GTID_EVENT => {
                     // GTID stands for Global Transaction IDentifier It is composed of two parts:
                     // SID for Source Identifier, and GNO for Group Number. The basic idea is to
@@ -408,7 +414,11 @@ impl MySqlBinlogConnector {
                     // slave's binary log, the GTID is preserved.  When a slave connects to a master, the slave
                     // uses GTIDs instead of (file, offset)
                     // See also https://dev.mysql.com/doc/refman/8.0/en/replication-mode-change-online-concepts.html
+                    let ev: events::GtidEvent = binlog_event.read_event()?;
+                    self.current_gtid = Some(ev.gno());
                 }
+
+                /*
 
                 EventType::ANONYMOUS_GTID_EVENT => {}
 
