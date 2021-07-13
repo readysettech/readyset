@@ -1,3 +1,4 @@
+use crate::prelude::ReadySetResult;
 use ahash::RandomState;
 use common::DataType;
 use launchpad::intervals::{BoundFunctor, BoundPair};
@@ -149,6 +150,15 @@ impl LookupError {
 /// The result of an equality or range lookup to the reader node.
 pub type LookupResult<T> = Result<(T, i64), LookupError>;
 
+macro_rules! try_result {
+    ($res:expr) => {
+        match $res {
+            Ok(v) => v,
+            Err(e) => return Ok(Err(e)),
+        }
+    };
+}
+
 impl Handle {
     pub(super) fn timestamp(&self) -> Option<Timestamp> {
         match *self {
@@ -174,40 +184,44 @@ impl Handle {
         }
     }
 
-    pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
+    pub(super) fn meta_get_and<F, T>(
+        &self,
+        key: &[DataType],
+        then: F,
+    ) -> ReadySetResult<LookupResult<T>>
     where
-        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> T,
+        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> ReadySetResult<T>,
     {
         use LookupError::*;
 
         match *self {
             Handle::Single(ref h) => {
                 assert_eq!(key.len(), 1);
-                let map = h.enter().ok_or(NotReady)?;
+                let map = try_result!(h.enter().ok_or(NotReady));
                 let m = *map.meta();
-                let v = map
+                let v = try_result!(map
                     .get(&key[0])
-                    .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
-                Ok((then(v), m))
+                    .ok_or_else(|| MissPointSingle(key[0].clone(), m)));
+                Ok(Ok((then(v)?, m)))
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
                 unsafe {
                     let tuple_key = slice_to_2_tuple(&key);
-                    let map = h.enter().ok_or(NotReady)?;
+                    let map = try_result!(h.enter().ok_or(NotReady));
                     let m = *map.meta();
-                    let v = map
+                    let v = try_result!(map
                         .get(&tuple_key)
-                        .ok_or_else(|| MissPointDouble(tuple_key.clone(), m))?;
+                        .ok_or_else(|| MissPointDouble(tuple_key.clone(), m)));
                     mem::forget(tuple_key);
-                    Ok((then(v), m))
+                    Ok(Ok((then(v)?, m)))
                 }
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = try_result!(h.enter().ok_or(NotReady));
                 let m = *map.meta();
-                let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
-                Ok((then(v), m))
+                let v = try_result!(map.get(key).ok_or_else(|| MissPointMany(key.into(), m)));
+                Ok(Ok((then(v)?, m)))
             }
         }
     }
@@ -247,16 +261,20 @@ impl Handle {
     ///
     /// Panics if the vectors in the bounds of `range` are a different size than the length of our
     /// keys.
-    pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, mut then: F) -> LookupResult<Vec<T>>
+    pub(super) fn meta_get_range_and<F, T, R>(
+        &self,
+        range: &R,
+        mut then: F,
+    ) -> ReadySetResult<LookupResult<Vec<T>>>
     where
-        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        F: FnMut(&Values<Vec<DataType>, RandomState>) -> ReadySetResult<T>,
         R: RangeBounds<Vec<DataType>>,
     {
         use LookupError::*;
 
         match *self {
             Handle::Single(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = try_result!(h.enter().ok_or(NotReady));
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|v| {
                     assert!(v.len() == 1);
@@ -266,13 +284,18 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                let records = map
+                let records = try_result!(map
                     .range((start_bound.cloned(), end_bound.cloned()))
-                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta)));
+                let mut result = Vec::new();
+                for (_, row) in records {
+                    result.push(then(row)?)
+                }
+                Ok(Ok((result, meta)))
+                // Ok(Ok((records.map(|(_, row)| then(row)?).collect::<ReadySetResult<Values<_>>>()?, meta)))
             }
             Handle::Double(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = try_result!(h.enter().ok_or(NotReady));
                 let meta = *map.meta();
                 let start_bound = range.start_bound().map(|r| {
                     assert_eq!(r.len(), 2);
@@ -282,18 +305,27 @@ impl Handle {
                     assert_eq!(r.len(), 2);
                     (r[0].clone(), r[1].clone())
                 });
-                let records = map
+                let records = try_result!(map
                     .range((start_bound, end_bound))
-                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta)));
+                let mut result = Vec::new();
+                for (_, row) in records {
+                    result.push(then(row)?)
+                }
+                Ok(Ok((result, meta)))
             }
             Handle::Many(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
+                let map = try_result!(h.enter().ok_or(NotReady));
                 let meta = *map.meta();
-                let records = map
+                let records = try_result!(map
                     .range((range.start_bound(), range.end_bound()))
-                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta)));
+                let mut result = Vec::new();
+                for (_, row) in records {
+                    result.push(then(row)?)
+                }
+                Ok(Ok((result, meta)))
+                // Ok(Ok((records.map(|(_, row)| then(row)?).collect()?, meta)))
             }
         }
     }
@@ -387,7 +419,8 @@ mod tests {
             w.publish();
             handle.meta_get_and(&[key.0, key.1], |result| {
                 assert_eq!(result.into_iter().cloned().collect::<Vec<_>>(), vec![val]);
-            }).unwrap();
+                Ok(())
+            }).unwrap().unwrap();
         }
     }
 
@@ -404,8 +437,9 @@ mod tests {
 
         let (res, meta) = handle
             .meta_get_range_and(&(vec![2.into()]..=vec![3.into()]), |vals| {
-                vals.into_iter().cloned().collect::<Vec<_>>()
+                Ok(vals.into_iter().cloned().collect::<Vec<_>>())
             })
+            .unwrap()
             .unwrap();
         assert_eq!(
             res,
@@ -443,8 +477,9 @@ mod tests {
         let (res, meta) = handle
             .meta_get_range_and(
                 &(vec![2.into(), 2.into()]..=vec![3.into(), 3.into()]),
-                |vals| vals.into_iter().cloned().collect::<Vec<_>>(),
+                |vals| Ok(vals.into_iter().cloned().collect::<Vec<_>>()),
             )
+            .unwrap()
             .unwrap();
         assert_eq!(
             res,
