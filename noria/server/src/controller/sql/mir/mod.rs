@@ -245,19 +245,14 @@ impl SqlToMirConverter {
             })
             .collect();
 
-        if limit.is_some() {
+        if let Some(limit) = limit.as_ref() {
             let (topk_name, topk_columns) = if !has_leaf {
                 (String::from(name), sanitized_columns.iter().collect())
             } else {
                 (format!("{}_topk", name), columns.iter().collect())
             };
-            let topk_node = self.make_topk_node(
-                &topk_name,
-                final_node,
-                topk_columns,
-                order,
-                limit.as_ref().unwrap(),
-            )?;
+            let topk_node =
+                self.make_topk_node(&topk_name, final_node, topk_columns, order, limit)?;
             let node_id = (topk_name, self.schema_version);
             self.nodes
                 .entry(node_id)
@@ -345,7 +340,9 @@ impl SqlToMirConverter {
             .ok_or_else(|| internal_err(format!("no query named \"{}\"?", name)))?;
 
         let nodeid = (name.to_owned(), v);
-        let leaf_mn = self.nodes.remove(&nodeid).unwrap();
+        let leaf_mn = self.nodes.remove(&nodeid).ok_or_else(|| {
+            internal_err(format!("could not find MIR node {:?} for removal", nodeid))
+        })?;
 
         invariant_eq!(leaf_mn.borrow().name, mq.leaf.borrow().name);
 
@@ -353,8 +350,7 @@ impl SqlToMirConverter {
         let mut q = VecDeque::new();
         q.push_back(leaf_mn);
 
-        while !q.is_empty() {
-            let mnr = q.pop_front().unwrap();
+        while let Some(mnr) = q.pop_front() {
             let n = mnr.borrow_mut();
             q.extend(n.ancestors.clone());
             // node may not be registered, so don't bother checking return
@@ -419,6 +415,7 @@ impl SqlToMirConverter {
         if leaves.len() != 1 {
             internal!("expected just one leaf! leaves: {:?}", leaves);
         }
+        #[allow(clippy::unwrap_used)] // checked above
         let leaf = leaves.into_iter().next().unwrap();
         self.current
             .insert(String::from(leaf.borrow().name()), self.schema_version);
@@ -448,9 +445,7 @@ impl SqlToMirConverter {
         keys: Option<&Vec<TableKey>>,
     ) -> ReadySetResult<MirNodeRef> {
         // have we seen a base of this name before?
-        if self.base_schemas.contains_key(name) {
-            let mut existing_schemas: Vec<(usize, Vec<ColumnSpecification>)> =
-                self.base_schemas[name].clone();
+        if let Some(mut existing_schemas) = self.base_schemas.get(name).cloned() {
             existing_schemas.sort_by_key(|&(sv, _)| sv);
             // newest schema first
             existing_schemas.reverse();
@@ -467,7 +462,10 @@ impl SqlToMirConverter {
                         name,
                         existing_sv
                     );
-                    let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
+                    let node_key = (String::from(name), existing_sv);
+                    let existing_node = self.nodes.get(&node_key).cloned().ok_or_else(|| {
+                        internal_err(format!("could not find MIR node {:?} for reuse", node_key))
+                    })?;
                     return Ok(MirNode::reuse(existing_node, self.schema_version));
                 } else {
                     // match, but schema is different, so we'll need to either:
@@ -512,7 +510,14 @@ impl SqlToMirConverter {
                             columns_removed,
                             existing_sv
                         );
-                        let existing_node = self.nodes[&(String::from(name), existing_sv)].clone();
+                        let node_key = (String::from(name), existing_sv);
+                        let existing_node =
+                            self.nodes.get(&node_key).cloned().ok_or_else(|| {
+                                internal_err(format!(
+                                    "couldn't find MIR node {:?} in add/remove cols",
+                                    node_key
+                                ))
+                            })?;
 
                         let mut columns: Vec<ColumnSpecification> = existing_node
                             .borrow()
@@ -528,13 +533,13 @@ impl SqlToMirConverter {
                                 columns
                                     .iter()
                                     .position(|cc| cc == *removed)
-                                    .unwrap_or_else(|| {
-                                        panic!(
+                                    .ok_or_else(|| {
+                                        internal_err(format!(
                                             "couldn't find column \"{:#?}\", \
                                              which we're removing",
                                             removed
-                                        )
-                                    });
+                                        ))
+                                    })?;
                             columns.remove(pos);
                         }
                         invariant_eq!(
@@ -639,6 +644,7 @@ impl SqlToMirConverter {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
+        #[allow(clippy::unwrap_used)] // checked above
         let ucols: Vec<Column> = ancestors.first().unwrap().borrow().columns().to_vec();
         let num_ucols = ucols.len();
 
@@ -685,6 +691,9 @@ impl SqlToMirConverter {
             selected_cols
         );
 
+        invariant!(!emit.is_empty());
+
+        #[allow(clippy::unwrap_used)] // checked above
         Ok(MirNode::new(
             name,
             self.schema_version,
@@ -710,6 +719,7 @@ impl SqlToMirConverter {
         let mut emit: Vec<Vec<Column>> = Vec::new();
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
 
+        #[allow(clippy::unwrap_used)] // checked above
         let ucols: Vec<Column> = ancestors.first().unwrap().borrow().columns().to_vec();
         let num_ucols = ucols.len();
 
@@ -727,13 +737,13 @@ impl SqlToMirConverter {
 
         let mut precedent_table = " ".to_string();
         for col in selected_col_objects.clone() {
-            match &col.table {
+            match col.table {
                 Some(x) => {
                     debug!(
                         self.log,
                         "Selected column {} from table {} for UNION.", col.name, x
                     );
-                    precedent_table = col.table.unwrap();
+                    precedent_table = x;
                 }
                 None => {
                     debug!(
@@ -792,6 +802,9 @@ impl SqlToMirConverter {
             selected_cols
         );
 
+        invariant!(!emit.is_empty());
+
+        #[allow(clippy::unwrap_used)] // checked above
         Ok((
             MirNode::new(
                 name,
@@ -867,7 +880,7 @@ impl SqlToMirConverter {
         group_cols: Vec<&Column>,
         parent: MirNodeRef,
         projected_exprs: &HashMap<Expression, String>,
-    ) -> Vec<MirNodeRef> {
+    ) -> ReadySetResult<Vec<MirNodeRef>> {
         use dataflow::ops::grouped::aggregate::Aggregation;
         use dataflow::ops::grouped::extremum::Extremum;
         use nom_sql::FunctionExpression::*;
@@ -894,8 +907,13 @@ impl SqlToMirConverter {
             out_nodes
         };
 
-        let func = func_col.function.as_ref().unwrap();
-        match *func.deref() {
+        let func = func_col.function.as_ref().ok_or_else(|| {
+            internal_err(format!(
+                "aggregate col {:?} was not a function",
+                func_col.function
+            ))
+        })?;
+        Ok(match *func.deref() {
             // TODO: support more types of filter expressions
             // CH: https://app.clubhouse.io/readysettech/story/193
             Sum {
@@ -908,7 +926,9 @@ impl SqlToMirConverter {
             ),
             Sum { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[expr].clone()),
+                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                    internal_err(format!("projected_exprs does not contain {:?}", expr))
+                })?),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
@@ -919,7 +939,7 @@ impl SqlToMirConverter {
                 // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
                 // rows including those with NULL values, and we don't have a mechanism to do that
                 // (but we also don't have a NULL value, so maybe we're okay).
-                panic!("COUNT(*) should have been rewritten earlier!")
+                internal!("COUNT(*) should have been rewritten earlier!")
             }
             Count {
                 expr: box Expression::Column(ref col),
@@ -936,7 +956,9 @@ impl SqlToMirConverter {
                 count_nulls,
             } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[expr].clone()),
+                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                    internal_err(format!("projected_exprs does not contain {:?}", expr))
+                })?),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
@@ -950,7 +972,9 @@ impl SqlToMirConverter {
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[expr].clone()),
+                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                    internal_err(format!("projected_exprs does not contain {:?}", expr))
+                })?),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
@@ -963,7 +987,9 @@ impl SqlToMirConverter {
             ),
             Max(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[expr].clone()),
+                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                    internal_err(format!("projected_exprs does not contain {:?}", expr))
+                })?),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
@@ -974,7 +1000,9 @@ impl SqlToMirConverter {
             ),
             Min(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[expr].clone()),
+                &Column::named(projected_exprs.get(expr).cloned().ok_or_else(|| {
+                    internal_err(format!("projected_exprs does not contain {:?}", expr))
+                })?),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
@@ -988,8 +1016,8 @@ impl SqlToMirConverter {
                 }),
                 false,
             ),
-            _ => unimplemented!("{:?}", func),
-        }
+            _ => internal!("{:?}", func),
+        })
     }
 
     fn make_grouped_node(
@@ -1247,9 +1275,9 @@ impl SqlToMirConverter {
             MirNodeInner::ParamFilter {
                 col: col.clone(),
                 emit_key: emit_key.clone(),
-                operator: operator.clone(),
+                operator: *operator,
             },
-            vec![parent_node.clone()],
+            vec![parent_node],
             vec![],
         )
     }
@@ -1338,6 +1366,8 @@ impl SqlToMirConverter {
                 match op {
                     BinaryOperator::And => {
                         let left = self.make_predicate_nodes(name, parent, lhs, nc)?;
+                        invariant!(!left.is_empty());
+                        #[allow(clippy::unwrap_used)] // checked above
                         let right = self.make_predicate_nodes(
                             name,
                             left.last().unwrap().clone(),
@@ -1355,7 +1385,11 @@ impl SqlToMirConverter {
 
                         debug!(self.log, "Creating union node for `or` predicate");
 
+                        invariant!(!left.is_empty());
+                        invariant!(!right.is_empty());
+                        #[allow(clippy::unwrap_used)] // checked above
                         let last_left = left.last().unwrap().clone();
+                        #[allow(clippy::unwrap_used)] // checked above
                         let last_right = right.last().unwrap().clone();
                         let union = self.make_union_from_same_base(
                             &format!("{}_un{}", name, nc + left.len() + right.len()),
@@ -1429,7 +1463,10 @@ impl SqlToMirConverter {
                     0,
                 )?;
                 invariant!(!mpns.is_empty());
-                prev_node = mpns.last().unwrap().clone();
+                #[allow(clippy::unwrap_used)] // checked above
+                {
+                    prev_node = mpns.last().unwrap().clone();
+                }
                 predicates_above_group_by_nodes.extend(mpns);
                 created_predicates.push(ce);
             }
@@ -1573,6 +1610,7 @@ impl SqlToMirConverter {
                 Some(n) => Some(n.clone()),
                 None => {
                     invariant_eq!(base_nodes.len(), 1);
+                    #[allow(clippy::unwrap_used)] // checked above
                     Some(base_nodes.last().unwrap().clone())
                 }
             };
@@ -1600,7 +1638,9 @@ impl SqlToMirConverter {
                     continue;
                 }
 
-                let qgn = &qg.relations[*rel];
+                let qgn = qg.relations.get(*rel).ok_or_else(|| {
+                    internal_err(format!("couldn't find {:?} in qg relations", rel))
+                })?;
                 for pred in qgn.predicates.iter().chain(&qg.global_predicates) {
                     for col in pred.referred_columns() {
                         column_to_predicates
@@ -1689,7 +1729,9 @@ impl SqlToMirConverter {
                 // added in a different order every time, which will yield different node identifiers
                 // and make it difficult for applications to check what's going on.
                 for rel in &sorted_rels {
-                    let qgn = &qg.relations[*rel];
+                    let qgn = qg.relations.get(*rel).ok_or_else(|| {
+                        internal_err(format!("qg relations did not contain {:?}", rel))
+                    })?;
                     // we've already handled computed columns
                     if *rel == "computed_columns" {
                         continue;
@@ -1705,7 +1747,9 @@ impl SqlToMirConverter {
                             }
 
                             let parent = match prev_node {
-                                None => node_for_rel[rel].clone(),
+                                None => node_for_rel.get(rel).cloned().ok_or_else(|| {
+                                    internal_err(format!("node_for_rel did not contain {:?}", rel))
+                                })?,
                                 Some(pn) => pn,
                             };
 
@@ -1724,7 +1768,10 @@ impl SqlToMirConverter {
 
                             invariant!(!fns.is_empty());
                             new_node_count += fns.len();
-                            prev_node = Some(fns.iter().last().unwrap().clone());
+                            #[allow(clippy::unwrap_used)] // checked above
+                            {
+                                prev_node = Some(fns.iter().last().unwrap().clone());
+                            }
                             predicate_nodes.extend(fns);
                         }
                     }
@@ -1768,7 +1815,10 @@ impl SqlToMirConverter {
 
                     invariant!(!fns.is_empty());
                     new_node_count += fns.len();
-                    prev_node = Some(fns.iter().last().unwrap().clone());
+                    #[allow(clippy::unwrap_used)] // checked above
+                    {
+                        prev_node = Some(fns.iter().last().unwrap().clone());
+                    }
                     predicate_nodes.extend(fns);
                 }
 
@@ -1792,7 +1842,13 @@ impl SqlToMirConverter {
                     None => {
                         // no join, filter, or function node --> base node is parent
                         invariant_eq!(sorted_rels.len(), 1);
-                        node_for_rel[sorted_rels.last().unwrap()].clone()
+                        #[allow(clippy::unwrap_used)]
+                        node_for_rel
+                            .get(sorted_rels.last().unwrap())
+                            .cloned()
+                            .ok_or_else(|| {
+                                internal_err("node_for_rel does not contain final node rel")
+                            })?
                     }
                 };
 
@@ -1871,9 +1927,15 @@ impl SqlToMirConverter {
 
                 new_node_count += nodes.len();
                 nodes_added.extend(nodes.clone());
-                nodes.last().unwrap().clone()
+                nodes
+                    .last()
+                    .ok_or_else(|| internal_err("reconciliation gave no nodes"))?
+                    .clone()
             } else {
-                ancestors.last().unwrap().clone()
+                ancestors
+                    .last()
+                    .ok_or_else(|| internal_err("final node had no ancestors?"))?
+                    .clone()
             };
 
             let final_node_cols: Vec<Column> = final_node.borrow().columns().to_vec();

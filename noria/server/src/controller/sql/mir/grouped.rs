@@ -304,7 +304,7 @@ pub(super) fn make_grouped(
                 group_cols.iter().collect(),
                 parent_node.clone(),
                 projected_exprs,
-            );
+            )?;
 
             node_count += nodes.len();
             agg_nodes.extend(nodes);
