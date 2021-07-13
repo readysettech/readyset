@@ -92,7 +92,11 @@ impl GroupCommitQueueSet {
         I: Iterator<Item = Box<Packet>>,
     {
         let mut packets = packets.peekable();
-        let merged_dst = packets.peek().as_mut().unwrap().dst();
+        let merged_dst = if let Some(packet) = packets.peek().as_mut() {
+            packet.dst()
+        } else {
+            return Ok(None);
+        };
 
         let mut all_senders = vec![];
         let merged_data = packets.try_fold(Vec::new(), |mut acc, p| -> ReadySetResult<_> {
