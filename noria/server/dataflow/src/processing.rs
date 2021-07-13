@@ -24,10 +24,24 @@ pub(crate) enum MissRecord {
 
 impl MissRecord {
     /// Project the values in `columns` out of this `MissRecord` into a [`KeyComparison`]
+    ///
+    /// # Panics
+    ///
+    /// * Panics if any of the columns passed in exceed the length of the record.
+    /// * Panics if columns is empty.
     pub fn project_key(&self, columns: &[usize]) -> KeyComparison {
         let project_rec = move |rec: &Vec1<DataType>| {
-            Vec1::try_from_vec(columns.iter().map(|i| rec[*i].clone()).collect())
-                .expect("Empty key columns")
+            #[allow(clippy::expect_used)] // Documented invariant.
+            Vec1::try_from_vec(
+                columns
+                    .iter()
+                    .map(|i| {
+                        #[allow(clippy::indexing_slicing)] // Documented invariant.
+                        rec[*i].clone()
+                    })
+                    .collect(),
+            )
+            .expect("Empty key columns")
         };
         match self {
             Self::Point(rec) => KeyComparison::Equal(project_rec(rec)),
@@ -53,8 +67,10 @@ pub(crate) struct Miss {
     /// The columns of `on` we were looking up on.
     pub(crate) lookup_idx: Vec<usize>,
     /// The columns of `record` we were using for the lookup.
+    /// Invariant: lookup_cols cannot contain a column index that exceeds record.len()
     pub(crate) lookup_cols: Vec<usize>,
     /// The columns of `record` that identify the replay key (if any).
+    /// Invariant: replay_cols cannot contain a column index that exceeds record.len()
     pub(crate) replay_cols: Option<Vec<usize>>,
     /// The record we were processing when we missed.
     pub(crate) record: MissRecord,
