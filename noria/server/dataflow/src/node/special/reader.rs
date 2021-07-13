@@ -125,7 +125,14 @@ impl Reader {
             if m.is_regular() && state.is_partial() {
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
+                        // We pass a dummy `then` function to `try_find_and`, so it is safe
+                        // to call `unwrap()`
+                        #[allow(clippy::unwrap_used)]
+                        match state
+                            .entry_from_record(&row[..])
+                            .try_find_and(|_| Ok(()))
+                            .unwrap()
+                        {
                             Err(e) if e.is_miss() => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
@@ -148,7 +155,14 @@ impl Reader {
             if !m.is_regular() && state.is_partial() {
                 m.map_data(|data| {
                     data.retain(|row| {
-                        match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
+                        // We pass a dummy `then` function to `try_find_and`, so it is safe
+                        // to call `unwrap()`
+                        #[allow(clippy::unwrap_used)]
+                        match state
+                            .entry_from_record(&row[..])
+                            .try_find_and(|_| Ok(()))
+                            .unwrap()
+                        {
                             Err(e) if e.is_miss() => {
                                 // filling a hole with replay -- ok
                                 true
