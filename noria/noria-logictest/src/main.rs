@@ -1,7 +1,7 @@
 #![warn(clippy::dbg_macro)]
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -244,6 +244,11 @@ struct Verify {
     /// The parameter to this argument is a MySQL URL with no database specified.
     #[clap(long)]
     binlog_mysql: Option<String>,
+
+    /// When tests are encountered that are expected to fail but do not, rename the test file from
+    /// .fail.test to .test
+    #[clap(long)]
+    rename_passing: bool,
 }
 
 #[derive(Default)]
@@ -334,6 +339,7 @@ impl Verify {
                 .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
             let run_opts: RunOptions = self.into();
             let result = Arc::clone(&result);
+            let rename_passing = self.rename_passing;
 
             tasks.push(tokio::spawn(async move {
                 let script_result = script
@@ -348,11 +354,18 @@ impl Verify {
                             .await
                             .unexpected_passes
                             .push(script.name().into_owned());
+
+                        let failing_fname = script.path().to_str().unwrap();
+                        let passing_fname = failing_fname.replace(".fail.test", ".test");
                         eprintln!(
                             "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
-                            script.name(),
-                            script.name().replace(".fail.test", ".test")
-                        )
+                            failing_fname, passing_fname,
+                        );
+                        if rename_passing {
+                            eprintln!("Renaming {} to {}", failing_fname, passing_fname);
+                            fs::rename(Path::new(failing_fname), Path::new(&passing_fname))
+                                .unwrap();
+                        }
                     }
                     Err(e) if expected_result == ExpectedResult::Pass => {
                         result

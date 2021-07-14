@@ -13,7 +13,7 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io;
 use std::iter::FromIterator;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -137,6 +137,10 @@ impl TestScript {
             Some(n) => n.to_string_lossy(),
             None => Cow::Borrowed("unknown"),
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub async fn run(&self, opts: RunOptions) -> anyhow::Result<()> {
