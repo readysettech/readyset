@@ -146,6 +146,23 @@ pub enum ReadySetError {
         col: String,
     },
 
+    /// An expression appears in either the select list, HAVING condition, or ORDER BY list that is
+    /// not either named in the GROUP BY clause or is functionally dependent on (uniquely determined
+    /// by) GROUP BY columns.
+    ///
+    /// cf <https://dev.mysql.com/doc/refman/8.0/en/sql-mode.html#sqlmode_only_full_group_by>
+    #[error(
+        "Expression `{expression}` appears in {position} but is not functionally dependent on \
+             columns in the GROUP BY clause"
+    )]
+    ExpressionNotInGroupBy {
+        /// A string representation (via [`.to_string()`](ToString::to_string)) of the expression in
+        /// question
+        expression: String,
+        /// A name for where the expression appears in the query (eg "ORDER BY")
+        position: String,
+    },
+
     /// A table couldn't be found.
     ///
     /// FIXME(eta): this is currently slightly overloaded in meaning.

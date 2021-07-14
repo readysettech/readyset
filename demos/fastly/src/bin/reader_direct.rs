@@ -131,8 +131,6 @@ impl Reader {
             let vq = ViewQuery {
                 key_comparisons: keys,
                 block: true,
-                order_by: None,
-                limit: Some(5),
                 filter: None,
                 timestamp: None,
             };

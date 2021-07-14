@@ -4716,7 +4716,7 @@ async fn overlapping_indices() {
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
     g.install_recipe(
         "CREATE TABLE test (id int, a int, b int);
-         VIEW overlapping: SELECT SUM(a) as s, id FROM test WHERE b = ? ORDER BY id LIMIT 2;",
+         VIEW overlapping: SELECT SUM(a) as s, id FROM test WHERE b = ? GROUP BY id ORDER BY id LIMIT 2;",
     )
     .await
     .unwrap();
