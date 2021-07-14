@@ -372,7 +372,7 @@ impl Domain {
                                 if new_keys.is_some() {
                                     // We should only match one remapped upquery per tag.
                                     internal!(
-                                        "conflicting remapped upqueries while finding tags for {:?} in l{}: {:?}", 
+                                        "conflicting remapped upqueries while finding tags for {:?} in l{}: {:?}",
                                         miss_columns,
                                         miss_in.id(),
                                         remapped_upqueries
@@ -1126,7 +1126,7 @@ impl Domain {
                                 Ok(tx)
                             })
                             .collect::<ReadySetResult<Vec<_>>>()?;
-                        let (r_part, w_part) = backlog::new_partial(
+                        let (mut r_part, w_part) = backlog::new_partial(
                             cols,
                             &k[..],
                             move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
@@ -1162,6 +1162,8 @@ impl Domain {
                         let mut n = self.nodes[node].borrow_mut();
                         tokio::task::block_in_place(|| {
                             n.with_reader_mut(|r| {
+                                r_part.post_lookup = r.post_lookup().clone();
+
                                 assert!(self
                                     .readers
                                     .lock()
@@ -1177,11 +1179,13 @@ impl Domain {
                     }
                     InitialState::Global { gid, cols, key } => {
                         use crate::backlog;
-                        let (r_part, w_part) = backlog::new(cols, &key[..]);
+                        let (mut r_part, w_part) = backlog::new(cols, &key[..]);
 
                         let mut n = self.nodes[node].borrow_mut();
                         tokio::task::block_in_place(|| {
                             n.with_reader_mut(|r| {
+                                r_part.post_lookup = r.post_lookup().clone();
+
                                 assert!(self
                                     .readers
                                     .lock()

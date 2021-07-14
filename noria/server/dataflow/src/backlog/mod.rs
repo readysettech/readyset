@@ -1,5 +1,5 @@
 pub use self::multir::{LookupError, LookupResult};
-use crate::prelude::*;
+use crate::{prelude::*, PostLookup};
 use ahash::RandomState;
 use common::SizeOf;
 use launchpad::intervals::BoundFunctor;
@@ -100,6 +100,7 @@ fn new_inner(
         handle: r,
         trigger,
         key: Vec::from(key),
+        post_lookup: Default::default(),
     };
 
     (r, w)
@@ -365,6 +366,7 @@ pub struct SingleReadHandle {
     handle: multir::Handle,
     trigger: Option<Arc<dyn Trigger>>,
     key: Vec<usize>,
+    pub post_lookup: PostLookup,
 }
 
 impl std::fmt::Debug for SingleReadHandle {

@@ -93,7 +93,11 @@ pub enum MirNodeInner {
     Leaf {
         node: MirNodeRef,
         keys: Vec<Column>,
-        operator: nom_sql::BinaryOperator,
+
+        /// Optional set of columns and direction to order the results of lookups to this leaf
+        order_by: Option<Vec<(Column, OrderType)>>,
+        /// Optional limit for the set of results to lookups to this leaf
+        limit: Option<usize>,
     },
     /// Rewrite node
     Rewrite {
@@ -110,6 +114,17 @@ pub enum MirNodeInner {
 }
 
 impl MirNodeInner {
+    /// Construct a new [`MirNodeInner::Leaf`] for the given node and with the given keys, without
+    /// any post-lookup operations
+    pub fn leaf(node: MirNodeRef, keys: Vec<Column>) -> Self {
+        Self::Leaf {
+            node,
+            keys,
+            order_by: None,
+            limit: None,
+        }
+    }
+
     pub(crate) fn description(&self) -> String {
         format!("{:?}", self)
     }

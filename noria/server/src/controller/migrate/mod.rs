@@ -31,11 +31,10 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
-use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
+use dataflow::{prelude::*, PostLookup};
 use metrics::counter;
 use metrics::histogram;
-use nom_sql::BinaryOperator;
 use noria::metrics::recorded;
 use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
@@ -527,16 +526,11 @@ impl Migration {
         &self.ingredients
     }
 
-    fn ensure_reader_for(
-        &mut self,
-        n: NodeIndex,
-        name: Option<String>,
-        operator: nom_sql::BinaryOperator,
-    ) {
+    fn ensure_reader_for(&mut self, n: NodeIndex, name: Option<String>, post_lookup: PostLookup) {
         use std::collections::hash_map::Entry;
         if let Entry::Vacant(e) = self.readers.entry(n) {
             // make a reader
-            let r = node::special::Reader::new(n, operator);
+            let r = node::special::Reader::new(n, post_lookup);
             let mut r = if let Some(name) = name {
                 self.ingredients[n].named_mirror(r, name)
             } else {
@@ -556,7 +550,27 @@ impl Migration {
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
     pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
-        self.ensure_reader_for(n, None, BinaryOperator::Equal);
+        self.ensure_reader_for(n, None, Default::default());
+        let ri = self.readers[&n];
+
+        self.ingredients[ri]
+            .with_reader_mut(|r| r.set_key(key))
+            .unwrap();
+
+        ri
+    }
+
+    /// Set up the given node such that its output can be efficiently queried, with the given
+    /// [`PostLookup`] operations to be performed on the results of all lookups
+    ///
+    /// To query into the maintained state, use `ControllerInner::get_getter`.
+    pub fn maintain_anonymous_with_post_lookup(
+        &mut self,
+        n: NodeIndex,
+        key: &[usize],
+        post_lookup: PostLookup,
+    ) -> NodeIndex {
+        self.ensure_reader_for(n, None, post_lookup);
         let ri = self.readers[&n];
 
         self.ingredients[ri]
@@ -569,14 +583,8 @@ impl Migration {
     /// Set up the given node such that its output can be efficiently queried.
     ///
     /// To query into the maintained state, use `ControllerInner::get_getter`.
-    pub fn maintain(
-        &mut self,
-        name: String,
-        n: NodeIndex,
-        key: &[usize],
-        operator: nom_sql::BinaryOperator,
-    ) {
-        self.ensure_reader_for(n, Some(name), operator);
+    pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize], post_lookup: PostLookup) {
+        self.ensure_reader_for(n, Some(name), post_lookup);
 
         let ri = self.readers[&n];
 
