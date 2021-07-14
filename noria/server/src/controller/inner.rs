@@ -546,11 +546,11 @@ impl ControllerInner {
                     && child.name() == query_name
                 {
                     // Now the child is the reader node of the query we are looking at.
-                    // Here, we extract its [`BinaryOperator`] and use it to create a new
+                    // Here, we extract its [`PostLookup`] and use it to create a new
                     // mirror node.
-                    let op = child.with_reader(|r| r.operator).unwrap();
+                    let post_lookup = child.with_reader(|r| r.post_lookup().clone()).unwrap();
                     let mut reader_node = self.ingredients[node_index].named_mirror(
-                        node::special::Reader::new(node_index, op),
+                        node::special::Reader::new(node_index, post_lookup),
                         child.name().to_string(),
                     );
                     // We also take the associated keys of the original reader node.

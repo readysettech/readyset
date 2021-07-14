@@ -188,11 +188,7 @@ impl SqlToMirConverter {
                     c
                 })
                 .collect(),
-            MirNodeInner::Leaf {
-                node: n.clone(),
-                keys: Vec::from(params),
-                operator: BinaryOperator::Equal,
-            },
+            MirNodeInner::leaf(n.clone(), Vec::from(params)),
             vec![n],
             vec![],
         );
@@ -274,11 +270,7 @@ impl SqlToMirConverter {
                 name,
                 self.schema_version,
                 sanitized_columns,
-                MirNodeInner::Leaf {
-                    node: final_node.clone(),
-                    keys: vec![],
-                    operator: BinaryOperator::Equal,
-                },
+                MirNodeInner::leaf(final_node.clone(), vec![]),
                 vec![final_node],
                 vec![],
             )
@@ -2069,11 +2061,6 @@ impl SqlToMirConverter {
                     })
                     .collect();
 
-                let operator = match &st.where_clause {
-                    Some(Expression::BinaryOp { op, .. }) => *op,
-                    _ => BinaryOperator::Equal,
-                };
-
                 let leaf_node = MirNode::new(
                     name,
                     self.schema_version,
@@ -2081,7 +2068,15 @@ impl SqlToMirConverter {
                     MirNodeInner::Leaf {
                         node: leaf_project_node.clone(),
                         keys: key_columns,
-                        operator,
+                        order_by: st.order.as_ref().map(|order| {
+                            order
+                                .columns
+                                .iter()
+                                .cloned()
+                                .map(|(col, ot)| (col.into(), ot))
+                                .collect()
+                        }),
+                        limit: st.limit.as_ref().map(|lc| lc.limit as usize),
                     },
                     vec![leaf_project_node],
                     vec![],

@@ -14,7 +14,7 @@ use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::param_filter::ParamFilter;
 use dataflow::ops::project::Project;
-use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression};
+use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression, PostLookup};
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
@@ -219,12 +219,14 @@ fn mir_node_to_flow_parts(
                 }
                 MirNodeInner::Leaf {
                     ref keys,
-                    ref operator,
+                    ref order_by,
+                    limit,
                     ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     let parent = mir_node.ancestors[0].clone();
-                    materialize_leaf_node(&parent, name, keys, mig, *operator);
+                    let post_lookup = make_post_lookup(&parent, order_by, limit)?;
+                    materialize_leaf_node(&parent, name, keys, mig, post_lookup);
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
                     // here.
@@ -1123,12 +1125,26 @@ fn make_topk_node(
     Ok(FlowNode::New(na))
 }
 
+fn make_post_lookup(
+    parent: &MirNodeRef,
+    order_by: &Option<Vec<(Column, OrderType)>>,
+    limit: Option<usize>,
+) -> ReadySetResult<PostLookup> {
+    let order_by = order_by.as_ref().map(|order| {
+        order
+            .iter()
+            .map(|(col, ot)| (parent.borrow().column_id_for_column(col, None), *ot))
+            .collect()
+    });
+    Ok(PostLookup { order_by, limit })
+}
+
 fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
     key_cols: &[Column],
     mig: &mut Migration,
-    operator: nom_sql::BinaryOperator,
+    post_lookup: PostLookup,
 ) {
     let na = parent.borrow().flow_node_addr().unwrap();
 
@@ -1144,9 +1160,9 @@ fn materialize_leaf_node(
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c, None))
             .collect();
-        mig.maintain(name, na, &key_cols[..], operator);
+        mig.maintain(name, na, &key_cols[..], post_lookup);
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, &[0], operator);
+        mig.maintain(name, na, &[0], post_lookup);
     }
 }

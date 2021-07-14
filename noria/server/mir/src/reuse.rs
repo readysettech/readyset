@@ -222,7 +222,7 @@ pub fn merge_mir_for_queries(
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{self, BinaryOperator, ColumnSpecification, SqlType};
+    use nom_sql::{self, ColumnSpecification, SqlType};
 
     use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;
@@ -277,11 +277,7 @@ mod tests {
             "d",
             0,
             vec![Column::from("aa"), Column::from("ba")],
-            MirNodeInner::Leaf {
-                node: c.clone(),
-                keys: vec![Column::from("ba")],
-                operator: BinaryOperator::Equal,
-            },
+            MirNodeInner::leaf(c.clone(), vec![Column::from("ba")]),
             vec![],
             vec![],
         );

@@ -12,14 +12,11 @@ use futures_util::{
 use metrics::counter;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::util::like::LikePattern;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
 use serde::ser::Serializer;
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::mem;
 use std::time;
 use std::{future::Future, task::Poll};
@@ -188,10 +185,8 @@ fn handle_normal_read_query(
     let ViewQuery {
         mut key_comparisons,
         block,
-        order_by,
-        limit,
-        filter,
         timestamp,
+        filter,
     } = query;
     let immediate = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
@@ -229,7 +224,7 @@ fn handle_normal_read_query(
             }
 
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key, order_by.clone(), limit, &filter) {
+            match do_lookup(reader, &key, &filter) {
                 Ok(rs) => {
                     if consistency_miss {
                         ret.push(SerializedReadReplyBatch::empty());
@@ -333,8 +328,6 @@ fn handle_normal_read_query(
                         next_trigger: now,
                         first: now,
                         warned: false,
-                        order_by,
-                        limit,
                         filter,
                         timestamp,
                     },
@@ -394,144 +387,18 @@ fn handle_keys_query(
     }))
 }
 
-/// A container for four different exact-size iterators.
-///
-/// This type exists to avoid having to return a `dyn Iterator` when applying an ORDER BY / LIMIT
-/// to the results of a query. It implements `Iterator` and `ExactSizeIterator` iff all of its
-/// type parameters implement `Iterator<Item = &Vec<DataType>>`.
-enum OrderedLimitedIter<I, J, K, L> {
-    Original(I),
-    Ordered(J),
-    Limited(K),
-    OrderedLimited(L),
-}
-
-/// WARNING: This impl does NOT delegate calls to `len()` to the underlying iterators.
-impl<'a, I, J, K, L> ExactSizeIterator for OrderedLimitedIter<I, J, K, L>
-where
-    I: Iterator<Item = &'a Vec<DataType>>,
-    J: Iterator<Item = &'a Vec<DataType>>,
-    K: Iterator<Item = &'a Vec<DataType>>,
-    L: Iterator<Item = &'a Vec<DataType>>,
-{
-}
-
-impl<'a, I, J, K, L> Iterator for OrderedLimitedIter<I, J, K, L>
-where
-    I: Iterator<Item = &'a Vec<DataType>>,
-    J: Iterator<Item = &'a Vec<DataType>>,
-    K: Iterator<Item = &'a Vec<DataType>>,
-    L: Iterator<Item = &'a Vec<DataType>>,
-{
-    type Item = &'a Vec<DataType>;
-    fn next(&mut self) -> Option<Self::Item> {
-        use self::OrderedLimitedIter::*;
-        match self {
-            Original(i) => i.next(),
-            Ordered(i) => i.next(),
-            Limited(i) => i.next(),
-            OrderedLimited(i) => i.next(),
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        use self::OrderedLimitedIter::*;
-        match self {
-            Original(i) => i.size_hint(),
-            Ordered(i) => i.size_hint(),
-            Limited(i) => i.size_hint(),
-            OrderedLimited(i) => i.size_hint(),
-        }
-    }
-}
-
-fn do_order<'a, I>(iter: I, indices: &[(usize, bool)]) -> impl Iterator<Item = &'a Vec<DataType>>
-where
-    I: Iterator<Item = &'a Vec<DataType>>,
-{
-    // TODO(eta): is there a way to avoid buffering all the results?
-    let mut results = iter.collect::<Vec<_>>();
-    results.sort_by(|a, b| {
-        // protip: look at what `Ordering::then` does if you're confused by this
-        //
-        // TODO(eta): Technically, this is inefficient, because you can break out of the fold
-        //            early if you hit something that isn't `Ordering::Equal`. In practice though
-        //            it's likely to be neglegible.
-        indices
-            .iter()
-            .map(|&(idx, reverse)| {
-                let ret = a[idx].cmp(&b[idx]);
-                if reverse {
-                    ret.reverse()
-                } else {
-                    ret
-                }
-            })
-            .fold(Ordering::Equal, |acc, next| acc.then(next))
-    });
-    results.into_iter()
-}
-
-fn do_order_limit<'a, I>(
-    iter: I,
-    order_by: Option<Vec<(usize, bool)>>,
-    limit: Option<usize>,
-) -> impl Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator
-where
-    I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
-{
-    match (order_by, limit) {
-        (None, None) => OrderedLimitedIter::Original(iter),
-        (Some(indices), None) => OrderedLimitedIter::Ordered(do_order(iter, &indices)),
-        (None, Some(lim)) => OrderedLimitedIter::Limited(iter.take(lim)),
-        (Some(indices), Some(lim)) => {
-            OrderedLimitedIter::OrderedLimited(do_order(iter, &indices).take(lim))
-        }
-    }
-}
-
-fn post_lookup<'a, I>(
-    iter: I,
-    order_by: Option<Vec<(usize, bool)>>,
-    limit: Option<usize>,
-    filter: &Option<ViewQueryFilter>,
-) -> impl Iterator<Item = &'a Vec<DataType>>
-where
-    I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
-{
-    let ordered_limited = do_order_limit(iter, order_by, limit);
-    let like_pattern = filter.as_ref().map(
-        |ViewQueryFilter {
-             value,
-             operator,
-             column,
-         }| { (LikePattern::new(value, (*operator).into()), *column) },
-    );
-    ordered_limited.filter(move |rec| {
-        like_pattern
-            .as_ref()
-            .map(|(pat, col)| {
-                pat.matches(
-                    (&rec[*col])
-                        .try_into()
-                        .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
-                )
-            })
-            .unwrap_or(true)
-    })
-}
-
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
-    order_by: Option<Vec<(usize, bool)>>,
-    limit: Option<usize>,
     filter: &Option<ViewQueryFilter>,
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(&*equal, |rs| {
                 serialize(
-                    post_lookup(rs.into_iter(), order_by.clone(), limit, filter)
+                    reader
+                        .post_lookup
+                        .process(rs.into_iter(), filter)
                         .collect::<Vec<_>>(),
                 )
             })
@@ -541,13 +408,10 @@ fn do_lookup(
             .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
             .map(|(rs, _)| {
                 serialize(
-                    post_lookup(
-                        rs.into_iter().flatten().collect::<Vec<_>>().iter(),
-                        order_by,
-                        limit,
-                        filter,
-                    )
-                    .collect::<Vec<_>>(),
+                    reader
+                        .post_lookup
+                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filter)
+                        .collect::<Vec<_>>(),
                 )
             })
     }
@@ -575,8 +439,6 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 struct BlockingRead {
     tag: u32,
     target: (NodeIndex, usize),
-    order_by: Option<Vec<(usize, bool)>>,
-    limit: Option<usize>,
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read and their corresponding indices in the reader
@@ -639,13 +501,7 @@ impl BlockingRead {
                         .pop()
                         .expect("pending.len() == keys.len()");
 
-                    match do_lookup(
-                        reader,
-                        &key,
-                        self.order_by.clone(),
-                        self.limit,
-                        &self.filter,
-                    ) {
+                    match do_lookup(reader, &key, &self.filter) {
                         Ok(rs) => {
                             read[read_i] = rs;
                         }

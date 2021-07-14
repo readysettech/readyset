@@ -28,7 +28,7 @@ use crate::backend::SelectSchema;
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
-use noria::{internal, invariant, invariant_eq, unsupported};
+use noria::{internal, invariant_eq, unsupported};
 use std::fmt;
 
 type StatementID = u32;
@@ -734,48 +734,9 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 .collect::<ReadySetResult<Vec<_>>>()?
         };
 
-        let order_by = q
-            .order
-            .as_ref()
-            .map(|oc| -> ReadySetResult<_> {
-                invariant!(!oc.columns.is_empty());
-
-                let col_indices = oc
-                    .columns
-                    .iter()
-                    .map(|&(ref col, typ)| {
-                        getter_schema
-                            .index_for_col(&col.name, col.table.as_deref())
-                            .or_else(|_| {
-                                // The column didn't get an exact match in the schema, so it must be
-                                // a column that is outside the schema (marked with prefixed `-` in `to_query_graph`)
-                                let maybe_discarded = format!("-{}", col.name);
-                                getter_schema.index_for_col(&maybe_discarded, col.table.as_deref())
-                            })
-                            .map(|x| (x, typ == nom_sql::OrderType::OrderDescending))
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?;
-                Ok(col_indices)
-            })
-            .transpose()?;
-
-        let limit = q
-            .limit
-            .as_ref()
-            .map(|lc| -> ReadySetResult<_> {
-                if lc.offset != 0 {
-                    unsupported!("OFFSET is not supported yet");
-                }
-                // FIXME(eta): this cast is ugly!
-                Ok(lc.limit as usize)
-            })
-            .transpose()?;
-
         let vq = ViewQuery {
             key_comparisons: keys,
             block: true,
-            order_by,
-            limit,
             filter,
             // TODO(andrew): Add a timestamp to views when RYW consistency
             // is specified.

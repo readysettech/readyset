@@ -17,9 +17,9 @@ use dataflow::ops::join::JoinSource::*;
 use dataflow::ops::join::{Join, JoinSource, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::union::{self, Union};
-use dataflow::{DurabilityMode, PersistenceParameters};
+use dataflow::{DurabilityMode, PersistenceParameters, PostLookup};
 use itertools::Itertools;
-use nom_sql::BinaryOperator;
+use nom_sql::OrderType;
 use noria::consensus::LocalAuthority;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, ViewQuery,
@@ -146,8 +146,6 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: true,
-            order_by: None,
-            limit: None,
             filter: None,
             timestamp: Some(t.clone()),
         })
@@ -161,8 +159,6 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: false,
-            order_by: None,
-            limit: None,
             filter: None,
             // The timestamp at the reader node { 0: 4 }, does not
             // satisfy this timestamp.
@@ -233,8 +229,6 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: true,
-            order_by: None,
-            limit: None,
             filter: None,
             timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
         })
@@ -250,8 +244,6 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: false,
-            order_by: None,
-            limit: None,
             filter: None,
             timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
         })
@@ -343,7 +335,7 @@ async fn broad_recursing_upquery() {
             Join::new(x, y, JoinType::Left, vec![L(0), B(1, 0), L(2)]),
         );
         // reader, sharded by the lookup column, which is the third column on x
-        mig.maintain("reader".to_string(), join, &[2], BinaryOperator::Equal);
+        mig.maintain("reader".to_string(), join, &[2], Default::default());
     })
     .await;
 
@@ -4066,7 +4058,7 @@ async fn range_upquery_after_point_queries() {
             Join::new(a, b, JoinType::Inner, vec![B(0, 0), L(1), R(1)]),
         );
 
-        mig.maintain("reader".to_string(), join, &[0], BinaryOperator::Equal);
+        mig.maintain("reader".to_string(), join, &[0], Default::default());
     })
     .await;
 
@@ -4229,7 +4221,14 @@ async fn post_read_ilike() {
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::default().with_key(vec![0]));
-        mig.maintain_anonymous(a, &[0]);
+        mig.maintain_anonymous_with_post_lookup(
+            a,
+            &[0],
+            PostLookup {
+                order_by: Some(vec![(1, OrderType::OrderAscending)]),
+                ..Default::default()
+            },
+        );
     })
     .await;
 
@@ -4254,8 +4253,6 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            order_by: Some(vec![(1, false)]),
-            limit: None,
             filter: Some(ViewQueryFilter {
                 column: 0,
                 operator: ViewQueryOperator::ILike,
