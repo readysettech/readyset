@@ -13,6 +13,7 @@ mysql = "20.1.0"
 rand = "0.8.3"
 futures = "0.3.15"
 vec1 = "1.8.0"
+url = "2.2.2"
 
 # local dependencies
 demo-utils = { path = "../utils/" }
@@ -32,5 +33,9 @@ path = "src/bin/reader.rs"
 [[bin]]
 name = "writer"
 path = "src/bin/writer.rs"
+
+[[bin]]
+name = "replicate"
+path = "src/bin/replicate.rs"
 
 
