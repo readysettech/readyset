@@ -18,7 +18,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use vec1::Vec1;
 
 pub use internal::DomainIndex as Index;
-use noria::channel::{self};
+use noria::channel;
 use noria::errors::{internal_err, ReadySetResult};
 use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
@@ -90,10 +90,23 @@ enum TriggerEndpoint {
 
 pub(crate) struct ReplayPath {
     source: Option<LocalNodeIndex>,
+    /// The nodes in the replay path.
+    ///
+    /// Invariant: path can never be empty
+    ///
+    /// TODO(grfn): make this a vec1?
     path: Vec<ReplayPathSegment>,
     notify_done: bool,
     pub(crate) partial_unicast_sharder: Option<NodeIndex>,
     trigger: TriggerEndpoint,
+}
+
+impl ReplayPath {
+    /// Return a reference to the last [`ReplayPathSegment`] of this replay path
+    pub(crate) fn last_segment(&self) -> &ReplayPathSegment {
+        #[allow(clippy::unwrap_used)] // replay paths can't be empty
+        self.path.last().unwrap()
+    }
 }
 
 type Hole = (Vec<usize>, KeyComparison);
@@ -234,8 +247,21 @@ pub struct Domain {
     shard: Option<usize>,
     _nshards: usize,
 
+    /// Map of nodes managed by this domain
+    ///
+    /// # Invariants
+    ///
+    /// * All nodes mentioned in `self.replay_paths`, `self.active_remaps`, `self.not_ready` must
+    ///   exist in `self.nodes`
+    /// * All keys of `self.state` must also be keys in `self.nodes`
+    /// * `nodes` cannot be empty
     nodes: DomainNodes,
+
+    /// State for all materialized nodes managed by this domain
+    ///
+    /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
     state: StateMap,
+
     log: Logger,
 
     not_ready: HashSet<LocalNodeIndex>,
@@ -260,6 +286,11 @@ pub struct Domain {
     ///             dealing with remaps involves a fair deal of heavy looping / iteration.
     ///             See ENG-228.
     active_remaps: HashMap<(LocalNodeIndex, Hole), HashSet<(Tag, KeyComparison)>>,
+    /// Map of replay paths by tag
+    ///
+    /// Invariant: All nodes mentioned in replay paths must exist in `self.nodes`
+    ///
+    /// TODO(grfn): Write a doc somewhere explaining what replay paths are, and link to that here
     replay_paths: HashMap<Tag, ReplayPath>,
     /// Raw replay paths, as returned by `replay_paths_for` in `keys.rs`. Used to inform processing
     /// for the `handle_upquery` API.
@@ -268,6 +299,14 @@ pub struct Domain {
     /// include the domain-specific information in `ReplayPath` and `ReplayPathSegment`.
     raw_replay_paths: HashMap<Tag, Vec<OptColumnRef>>,
     reader_triggered: Map<HashSet<KeyComparison, RandomState>>,
+
+    /// Queue of purge operations to be performed on reader nodes at some point in the future, used
+    /// as part of the implementation of materialization frontiers
+    ///
+    /// # Invariants
+    ///
+    /// * Each node referenced by a `view` of a TimedPurge must be in `self.nodes`
+    /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: VecDeque<TimedPurge>,
 
     replay_paths_by_dst: Map<HashMap<Vec<usize>, Vec<Tag>>>,
@@ -310,6 +349,13 @@ pub struct Domain {
 }
 
 impl Domain {
+    /// Initiate a replay for a miss represented by the given keys and column indices in the given
+    /// node.
+    ///
+    /// # Invariants
+    ///
+    /// * `miss_columns` must not be empty
+    /// * `miss_in` must be a node in the graph
     fn find_tags_and_replay(
         &mut self,
         miss_keys: Vec<KeyComparison>,
@@ -328,8 +374,10 @@ impl Domain {
             .generated_columns
             .contains(&(miss_in, miss_columns.into()))
         {
+            #[allow(clippy::indexing_slicing)] // Documented invariant
             let mut n = self.nodes[miss_in].borrow_mut();
             let miss_node = n.global_addr();
+            #[allow(clippy::unwrap_used)] // Documented invariant
             let upqueries = n.handle_upquery(ColumnMiss {
                 missed_columns: ColumnRef {
                     node: miss_node,
@@ -360,6 +408,7 @@ impl Domain {
                 // that are mentioned in the list of remapped upqueries.
                 // We also need to twiddle the `keys` to be the key associated with the remapped
                 // upquery for the given tag.
+                #[allow(clippy::indexing_slicing)] // Tag must exist
                 let replay_path = &self.raw_replay_paths[&tag];
                 let mut new_keys = None;
                 for OptColumnRef { node, cols } in replay_path.iter() {
@@ -398,6 +447,7 @@ impl Domain {
                 }
             };
             processed += 1;
+            #[allow(clippy::indexing_slicing)] // Tag must exist
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
                 // *in theory* we could just call self.seed_replay, and everything would be good.
                 // however, then we start recursing, which could get us into sad situations where
@@ -519,12 +569,18 @@ impl Domain {
         Ok(())
     }
 
+    /// Send a partial replay request for keys to the replay path indicated by tag
+    ///
+    /// # Invariants
+    ///
+    /// * `tag` must be a tag for a valid replay path
     fn send_partial_replay_request(
         &mut self,
         tag: Tag,
         keys: Vec<KeyComparison>,
     ) -> ReadySetResult<()> {
         debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
+        #[allow(clippy::unwrap_used)] // documented invariant
         if let TriggerEndpoint::End {
             source,
             ref mut options,
@@ -577,6 +633,7 @@ impl Domain {
             );
 
             if options.len() == 1 {
+                #[allow(clippy::indexing_slicing)] // we just checked len() is 1
                 if options[0]
                     .send(Box::new(Packet::RequestPartialReplay {
                         tag,
@@ -599,6 +656,7 @@ impl Domain {
                     }
                 }
                 for (shard, keys) in shards {
+                    #[allow(clippy::indexing_slicing)] // we know len(options) is num_shards
                     if options[shard]
                         .send(Box::new(Packet::RequestPartialReplay {
                             tag,
@@ -641,7 +699,13 @@ impl Domain {
         }
     }
 
+    /// Called when a partial replay has been completed
+    ///
+    /// # Invariants
+    ///
+    /// * `tag` must be a valid replay tag
     fn finished_partial_replay(&mut self, tag: Tag, num: usize) -> Result<(), ReadySetError> {
+        #[allow(clippy::indexing_slicing)] // documented invariant
         match self.replay_paths[&tag].trigger {
             TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
@@ -652,8 +716,11 @@ impl Domain {
                 // `self.concurrent_replays` constantly grows by +1 (+2 for the backfill requests,
                 // -1 when satisfied), which would lead to a deadlock!
                 let mut requests_satisfied = 0;
-                let last = self.replay_paths[&tag].path.last().unwrap();
+                #[allow(clippy::unwrap_used)] // Replay paths can't be empty
+                let last = self.replay_paths[&tag].last_segment();
                 if let Some(ref cs) = self.replay_paths_by_dst.get(last.node) {
+                    // We already know it's a partial replay path, so it must have a partial key
+                    #[allow(clippy::unwrap_used)]
                     if let Some(ref tags) = cs.get(last.partial_key.as_ref().unwrap()) {
                         requests_satisfied = tags
                             .iter()
@@ -711,13 +778,13 @@ impl Domain {
         }
     }
 
-    fn dispatch(
-        &mut self,
-        m: Box<Packet>,
-        executor: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
+    fn dispatch(&mut self, m: Box<Packet>, executor: &mut dyn Executor) -> ReadySetResult<()> {
         let src = m.src();
         let me = m.dst();
+
+        if !self.nodes.contains_key(me) {
+            return Err(ReadySetError::NoSuchNode(me));
+        }
 
         match self.mode {
             DomainMode::Forwarding => (),
@@ -737,6 +804,7 @@ impl Domain {
         }
 
         let (mut m, evictions) = {
+            #[allow(clippy::indexing_slicing)] // we checked the node exists already
             let mut n = self.nodes[me].borrow_mut();
             self.process_times.start(me);
             self.process_ptimes.start(me);
@@ -805,9 +873,14 @@ impl Domain {
                 //
                 // but, for now, here we go:
                 // first, what partial replay paths go through this node?
-                let from = self.nodes[src].borrow().global_addr();
+                let from = self
+                    .nodes
+                    .get(src)
+                    .ok_or(ReadySetError::NoSuchNode(src))?
+                    .borrow()
+                    .global_addr();
                 // TODO: this is a linear walk of replay paths -- we should make that not linear
-                let deps: Vec<_> = self
+                let deps: Vec<(Tag, Vec<usize>)> = self
                     .replay_paths
                     .iter()
                     .filter_map(|(&tag, rp)| {
@@ -868,6 +941,8 @@ impl Domain {
             }
         }
 
+        // We checked it's Some above, it's only an Option so we can take()
+        #[allow(clippy::unwrap_used)]
         match &**m.as_ref().unwrap() {
             m @ &Packet::Message { .. } if m.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
@@ -883,8 +958,11 @@ impl Domain {
         }
 
         // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
+        #[allow(clippy::indexing_slicing)] // we checked the node exists above
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
+            // We checked it's Some above, it's only an Option so we can take()
+            #[allow(clippy::unwrap_used)]
             // avoid cloning if we can
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
@@ -892,9 +970,12 @@ impl Domain {
                 m.as_ref().map(|m| Box::new(m.clone_data())).unwrap()
             };
 
+            #[allow(clippy::indexing_slicing)] // see NOTE above
             let childi = self.nodes[me].borrow().children()[i];
             let child_is_merger = {
                 // XXX: shouldn't NLL make this unnecessary?
+                #[allow(clippy::indexing_slicing)]
+                // we got the node from the children of the other node
                 let c = self.nodes[childi].borrow();
                 c.is_shard_merger()
             };
@@ -911,22 +992,42 @@ impl Domain {
         Ok(())
     }
 
-    fn handle_timestamp(&mut self, m: Packet, executor: &mut dyn Executor) -> ReadySetResult<()> {
-        let me = m.dst();
+    fn handle_timestamp(
+        &mut self,
+        message: Packet,
+        executor: &mut dyn Executor,
+    ) -> ReadySetResult<()> {
+        let me = message.dst();
 
-        let m = {
-            let mut n = self.nodes[me].borrow_mut();
-            // TODO: error handling in the RYW code paths seems nonexistent!!
-            n.process_timestamp(m, executor)
+        let message = {
+            let mut n = self
+                .nodes
+                .get(me)
+                .ok_or(ReadySetError::NoSuchNode(me))?
+                .borrow_mut();
+            n.process_timestamp(message, executor)?
         };
 
+        let message = if let Some(m) = message {
+            m
+        } else {
+            // no message to send, so no need to run through children
+            return Ok(());
+        };
+
+        #[allow(clippy::indexing_slicing)] // Already checked the node exists
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
-            let mut p = Box::new(m.as_ref().unwrap().clone_data());
+            let mut p = Box::new(message.as_ref().clone_data());
 
+            #[allow(clippy::indexing_slicing)]
+            // Already checked the node exists, and we're iterating through nchildren so we know i
+            // is in-bounds
             let childi = self.nodes[me].borrow().children()[i];
             let child_is_merger = {
                 // XXX: shouldn't NLL make this unnecessary?
+                #[allow(clippy::indexing_slicing)]
+                // we know the child exists since we got it from the node
                 let c = self.nodes[childi].borrow();
                 c.is_shard_merger()
             };
@@ -968,7 +1069,11 @@ impl Domain {
             }
             DomainRequest::RemoveNodes { nodes } => {
                 for &node in &nodes {
-                    self.nodes[node].borrow_mut().remove();
+                    self.nodes
+                        .get(node)
+                        .ok_or(ReadySetError::NoSuchNode(node))?
+                        .borrow_mut()
+                        .remove();
                     self.state.remove(node);
                     gauge!(
                         "domain.node_state_size_bytes",
@@ -994,7 +1099,11 @@ impl Domain {
                 field,
                 default,
             } => {
-                let mut n = self.nodes[node].borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .borrow_mut();
                 n.add_column(&field);
                 if let Some(b) = n.get_base_mut() {
                     b.add_column(default)?;
@@ -1010,7 +1119,11 @@ impl Domain {
                 Ok(None)
             }
             DomainRequest::DropBaseColumn { node, column } => {
-                let mut n = self.nodes[node].borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .borrow_mut();
                 n.get_base_mut()
                     .ok_or_else(|| internal_err("told to drop base column from non-base node"))?
                     .drop_column(column)?;
@@ -1021,7 +1134,11 @@ impl Domain {
                 new_tx,
                 new_tag,
             } => {
-                let mut n = self.nodes[node].borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .borrow_mut();
                 n.with_egress_mut(move |e| {
                     if let Some((node, local, addr)) = new_tx {
                         e.add_tx(node, local, addr);
@@ -1036,14 +1153,22 @@ impl Domain {
                 egress_node,
                 target_node,
             } => {
-                let mut n = self.nodes[egress_node].borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(egress_node)
+                    .ok_or(ReadySetError::NoSuchNode(egress_node))?
+                    .borrow_mut();
                 n.with_egress_mut(move |e| {
                     e.add_for_filtering(target_node);
                 });
                 Ok(None)
             }
             DomainRequest::UpdateSharder { node, new_txs } => {
-                let mut n = self.nodes[node].borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .borrow_mut();
                 n.with_sharder_mut(move |s| {
                     s.add_sharded_child(new_txs.0, new_txs.1);
                     Ok(())
@@ -1089,16 +1214,26 @@ impl Domain {
                         trigger_domain: (trigger_domain, shards),
                     } => {
                         use crate::backlog;
+
+                        if !self
+                            .nodes
+                            .get(node)
+                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .borrow()
+                            .is_reader()
+                        {
+                            return Err(ReadySetError::NotAReader(node));
+                        }
+
                         let k = key.clone(); // ugh
                         let txs = (0..shards)
-                            .map(|shard| {
+                            .map(|shard| -> ReadySetResult<_> {
                                 let key = key.clone();
                                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                 let sender = self
                                     .channel_coordinator
                                     .builder_for(&(trigger_domain, shard))?
-                                    .build_async()
-                                    .unwrap();
+                                    .build_async()?;
 
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
@@ -1131,6 +1266,7 @@ impl Domain {
                                     if misses.is_empty() {
                                         return true;
                                     }
+                                    #[allow(clippy::indexing_slicing)] // just checked len is 1
                                     txs[0].send(misses).is_ok()
                                 } else {
                                     // TODO: compound reader
@@ -1148,13 +1284,17 @@ impl Domain {
                                         return true;
                                     }
                                     per_shard.into_iter().all(|(shard, keys)| {
+                                        #[allow(clippy::indexing_slicing)]
+                                        // we know txs.len() is equal to num_shards
                                         txs[shard].send(keys.into_iter().cloned().collect()).is_ok()
                                     })
                                 }
                             },
                         );
 
+                        #[allow(clippy::indexing_slicing)] // checked node exists above
                         let mut n = self.nodes[node].borrow_mut();
+                        #[allow(clippy::unwrap_used)] // checked it was a reader above
                         tokio::task::block_in_place(|| {
                             n.with_reader_mut(|r| {
                                 r_part.post_lookup = r.post_lookup().clone();
@@ -1176,7 +1316,23 @@ impl Domain {
                         use crate::backlog;
                         let (mut r_part, w_part) = backlog::new(cols, &key[..]);
 
-                        let mut n = self.nodes[node].borrow_mut();
+                        if !self
+                            .nodes
+                            .get(node)
+                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .borrow()
+                            .is_reader()
+                        {
+                            return Err(ReadySetError::NotAReader(node));
+                        }
+
+                        let mut n = self
+                            .nodes
+                            .get(node)
+                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .borrow_mut();
+
+                        #[allow(clippy::unwrap_used)] // checked it was a reader above
                         tokio::task::block_in_place(|| {
                             n.with_reader_mut(|r| {
                                 r_part.post_lookup = r.post_lookup().clone();
@@ -1224,17 +1380,12 @@ impl Domain {
                     payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
                     payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
                     payload::TriggerEndpoint::End(selection, domain) => {
-                        let shard = |shardi| {
+                        let shard = |shardi| -> ReadySetResult<_> {
                             // TODO: make async
-                            self.channel_coordinator
+                            Ok(self
+                                .channel_coordinator
                                 .builder_for(&(domain, shardi))?
-                                .build_sync()
-                                .map_err(|e| {
-                                    internal_err(format!(
-                                        "an error occurred while trying to create a domain connection: '{}'",
-                                        e
-                                    ))
-                                })
+                                .build_sync()?)
                         };
 
                         let options = tokio::task::block_in_place(|| {
@@ -1242,14 +1393,15 @@ impl Domain {
                                 SourceSelection::AllShards(nshards)
                                 | SourceSelection::KeyShard { nshards, .. } => {
                                     // we may need to send to any of these shards
-                                    let mut options = Vec::new();
-                                    for s in 0..nshards {
-                                        options.push(shard(s)?)
-                                    }
-                                    Ok::<_, ReadySetError>(options)
+                                    (0..nshards).map(shard).collect::<Result<Vec<_>, _>>()
                                 }
                                 SourceSelection::SameShard => {
-                                    Ok::<_, ReadySetError>(vec![shard(self.shard.unwrap())?])
+                                    Ok(vec![shard(self.shard.ok_or_else(|| {
+                                        internal_err(
+                                            "Cannot use SourceSelection::SameShard for a replay path\
+                                             through an unsharded domain"
+                                        )}
+                                    )?)?])
                                 }
                             }
                         })?;
@@ -1262,7 +1414,9 @@ impl Domain {
                 };
 
                 if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
+                    #[allow(clippy::unwrap_used)] // Replay paths are non-empty
                     let last = path.last().unwrap();
+                    #[allow(clippy::unwrap_used)] // Replay path must have a partial key
                     self.replay_paths_by_dst
                         .entry(last.node)
                         .or_insert_with(HashMap::new)
@@ -1286,7 +1440,13 @@ impl Domain {
             }
             DomainRequest::StartReplay { tag, from } => {
                 use std::thread;
-                assert_eq!(self.replay_paths[&tag].source, Some(from));
+                invariant_eq!(
+                    self.replay_paths
+                        .get(&tag)
+                        .ok_or_else(|| ReadySetError::NoSuchReplayPath(tag.into()))?
+                        .source,
+                    Some(from)
+                );
 
                 let start = time::Instant::now();
                 self.total_replay_time.start();
@@ -1311,6 +1471,8 @@ impl Domain {
                        "μs" => start.elapsed().as_micros()
                 );
 
+                #[allow(clippy::indexing_slicing)]
+                // we checked the replay path exists above, and replay paths cannot be empty
                 let link = Link::new(from, self.replay_paths[&tag].path[0].node);
 
                 // we're been given an entire state snapshot, but we need to digest it
@@ -1334,7 +1496,11 @@ impl Domain {
 
                     let added_cols = self.ingress_inject.get(from).cloned();
                     let default = {
-                        let n = self.nodes[from].borrow();
+                        let n = self
+                            .nodes
+                            .get(from)
+                            .ok_or(ReadySetError::NoSuchNode(from))?
+                            .borrow();
                         let mut default = None;
                         if let Some(b) = n.get_base() {
                             let mut row = Vec::new();
@@ -1364,6 +1530,7 @@ impl Domain {
                     thread::Builder::new()
                         .name(format!(
                             "replay{}.{}",
+                            #[allow(clippy::unwrap_used)] // self.nodes can't be empty
                             self.nodes
                                 .values()
                                 .next()
@@ -1377,7 +1544,13 @@ impl Domain {
                             use itertools::Itertools;
 
                             // TODO: make async
-                            let mut chunked_replay_tx = replay_tx_desc.build_sync().unwrap();
+                            let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    error!(log, "Error building channel for chunked replay"; "error" => e);
+                                    return;
+                                }
+                            };
 
                             let start = time::Instant::now();
                             debug!(log, "starting state chunker"; "node" => %link.dst);
@@ -1429,8 +1602,7 @@ impl Domain {
                                 "shard" => shard_str,
                                 "from_node" => link.dst.id().to_string()
                             );
-                        })
-                        .unwrap();
+                        })?;
                 }
                 self.handle_replay(*p, executor)?;
 
@@ -1455,23 +1627,33 @@ impl Domain {
             DomainRequest::Ready { node, purge, index } => {
                 invariant_eq!(self.mode, DomainMode::Forwarding);
 
-                self.nodes[node].borrow_mut().purge = purge;
+                let node_ref = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?;
+
+                node_ref.borrow_mut().purge = purge;
 
                 if !index.is_empty() {
                     let mut s: Box<dyn State> = {
-                        let n = self.nodes[node].borrow();
-                        let params = &self.persistence_parameters;
-                        match (n.get_base(), &params.mode) {
+                        match (
+                            node_ref.borrow().get_base(),
+                            &self.persistence_parameters.mode,
+                        ) {
                             (Some(base), &DurabilityMode::DeleteOnExit)
                             | (Some(base), &DurabilityMode::Permanent) => {
                                 let base_name = format!(
                                     "{}-{}-{}",
-                                    params.log_prefix,
-                                    n.name(),
+                                    &self.persistence_parameters.log_prefix,
+                                    node_ref.borrow().name(),
                                     self.shard.unwrap_or(0),
                                 );
 
-                                Box::new(PersistentState::new(base_name, base.key(), &params))
+                                Box::new(PersistentState::new(
+                                    base_name,
+                                    base.key(),
+                                    &self.persistence_parameters,
+                                ))
                             }
                             _ => Box::new(MemoryState::default()),
                         }
@@ -1490,19 +1672,14 @@ impl Domain {
                 }
 
                 // swap replayed reader nodes to expose new state
-                {
-                    let mut n = self.nodes[node].borrow_mut();
-                    if n.is_reader() {
-                        n.with_reader_mut(|r| {
-                            if let Some(ref mut state) = r.writer_mut() {
-                                trace!(self.log, "swapping state"; "local" => node.id());
-                                state.swap();
-                                trace!(self.log, "state swapped"; "local" => node.id());
-                            }
-                        })
-                        .unwrap();
-                    }
-                }
+                let _ = // if it's not a reader, no-op
+                    node_ref.borrow_mut().with_reader_mut(|r| {
+                        if let Some(ref mut state) = r.writer_mut() {
+                            trace!(self.log, "swapping state"; "local" => node.id());
+                            state.swap();
+                            trace!(self.log, "state swapped"; "local" => node.id());
+                        }
+                    });
 
                 Ok(None)
             }
@@ -1528,20 +1705,26 @@ impl Domain {
 
                         let time = self.process_times.num_nanoseconds(local_index);
                         let ptime = self.process_ptimes.num_nanoseconds(local_index);
-                        let mem_size = if n.is_reader() {
-                            let mut size = 0;
-                            n.with_reader(|r| size = r.state_size().unwrap_or(0))
-                                .unwrap();
-                            size
-                        } else {
-                            self.state
-                                .get(local_index)
-                                .map(|s| s.deep_size_of())
-                                .unwrap_or(0)
-                        };
+                        let mem_size = n
+                            .with_reader(|r| r.state_size().unwrap_or(0))
+                            .unwrap_or_else(|_| {
+                                self.state
+                                    .get(local_index)
+                                    .map(|s| s.deep_size_of())
+                                    .unwrap_or(0)
+                            });
 
-                        let mat_state = if !n.is_reader() {
-                            match self.state.get(local_index) {
+                        let mat_state = n
+                            .with_reader(|r| {
+                                if r.is_partial() {
+                                    MaterializationStatus::Partial {
+                                        beyond_materialization_frontier: n.purge,
+                                    }
+                                } else {
+                                    MaterializationStatus::Full
+                                }
+                            })
+                            .unwrap_or_else(|_| match self.state.get(local_index) {
                                 Some(ref s) => {
                                     if s.is_partial() {
                                         MaterializationStatus::Partial {
@@ -1552,19 +1735,7 @@ impl Domain {
                                     }
                                 }
                                 None => MaterializationStatus::Not,
-                            }
-                        } else {
-                            n.with_reader(|r| {
-                                if r.is_partial() {
-                                    MaterializationStatus::Partial {
-                                        beyond_materialization_frontier: n.purge,
-                                    }
-                                } else {
-                                    MaterializationStatus::Full
-                                }
-                            })
-                            .unwrap()
-                        };
+                            });
 
                         let probe_result = if n.is_internal() {
                             n.probe()
@@ -1704,11 +1875,22 @@ impl Domain {
                         cols,
                         node,
                     } => {
+                        if !self
+                            .nodes
+                            .get(node)
+                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .borrow()
+                            .is_reader()
+                        {
+                            return Err(ReadySetError::NotAReader(node));
+                        }
+
                         let start = time::Instant::now();
                         self.total_replay_time.start();
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
+                        #[allow(clippy::indexing_slicing)] // we just checked node existed above
                         self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut::<_, ReadySetResult<()>>(|r| {
@@ -1725,7 +1907,10 @@ impl Domain {
                                 internal_err("reader replay requested for non-reader node")
                             })??;
 
-                        // don't requests keys that have been filled since the request was sent
+                        // don't request keys that have been filled since the request was sent
+                        #[allow(clippy::indexing_slicing)] // we just checked node existed above
+                        #[allow(clippy::unwrap_used)]
+                        // checked it was a reader above
                         self.nodes[node]
                             .borrow_mut()
                             .with_reader_mut::<_, ReadySetResult<()>>(|r| {
@@ -1845,7 +2030,9 @@ impl Domain {
                         // As the packet is not propagated or mutated before reaching the
                         // domain, we still have a source channel identifier that we can use
                         // to ack the packet.
-                        executor.ack(src.unwrap());
+                        if let Some(src) = src {
+                            executor.ack(src);
+                        }
                     }
                     _ => {
                         internal!();
@@ -1921,9 +2108,14 @@ impl Domain {
                 while let Some(tp) = self.timed_purges.front() {
                     let now = time::Instant::now();
                     if tp.time <= now {
+                        #[allow(clippy::unwrap_used)]
+                        // we know it's Some because we check at the head of the while
                         let tp = self.timed_purges.pop_front().unwrap();
+                        #[allow(clippy::indexing_slicing)]
+                        // nodes in tp.view must reference nodes in self
                         let mut node = self.nodes[tp.view].borrow_mut();
                         trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                        #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
                         node.with_reader_mut(|r| {
                             if let Some(wh) = r.writer_mut() {
                                 for key in tp.keys {
@@ -1938,6 +2130,9 @@ impl Domain {
                     }
                 }
                 for n in swap {
+                    #[allow(clippy::indexing_slicing)] // nodes in tp.view must reference nodes in self
+                    #[allow(clippy::unwrap_used)]
+                    // nodes in tp.view must reference readers
                     self.nodes[n]
                         .borrow_mut()
                         .with_reader_mut(|r| {
@@ -1965,33 +2160,39 @@ impl Domain {
         Ok(())
     }
 
-    fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> Record {
+    fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> ReadySetResult<Record> {
         if let Some(&(start, ref defaults)) = self.ingress_inject.get(source) {
             let mut v = Vec::with_capacity(start + defaults.len());
             v.extend(row.iter().cloned());
             v.extend(defaults.iter().cloned());
-            return (v, true).into();
+            return Ok((v, true).into());
         }
 
-        let n = self.nodes[source].borrow();
+        let n = self
+            .nodes
+            .get(source)
+            .ok_or(ReadySetError::NoSuchNode(source))?
+            .borrow();
         if let Some(b) = n.get_base() {
             let mut row = row.into_owned();
             b.fix(&mut row);
-            return Record::Positive(row);
+            return Ok(Record::Positive(row));
         }
 
-        row.into_owned().into()
+        Ok(row.into_owned().into())
     }
 
     // Records state lookup metrics for specific dataflow nodes.
-    fn record_dataflow_lookup_metrics(&self, node: LocalNodeIndex) {
-        if self.nodes[node].borrow().is_base() {
-            counter!(
-                recorded::BASE_TABLE_LOOKUP_REQUESTS,
-                1,
-                "domain" => self.index.index().to_string(),
-                "node" => node.to_string(),
-            );
+    fn record_dataflow_lookup_metrics(&self, node_idx: LocalNodeIndex) {
+        if let Some(node) = self.nodes.get(node_idx) {
+            if node.borrow().is_base() {
+                counter!(
+                    recorded::BASE_TABLE_LOOKUP_REQUESTS,
+                    1,
+                    "domain" => self.index.index().to_string(),
+                    "node" => node_idx.to_string(),
+                );
+            }
         }
     }
 
@@ -2003,6 +2204,8 @@ impl Domain {
         single_shard: bool,
         ex: &mut dyn Executor,
     ) -> Result<(), ReadySetError> {
+        #[allow(clippy::indexing_slicing)]
+        // tag came from an internal data structure that guarantees it's present
         let (m, source, is_miss) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
@@ -2080,7 +2283,7 @@ impl Domain {
                             ignore: false,
                             requesting_shard,
                         },
-                        data: rs.into(),
+                        data: rs.into_iter().collect::<Result<Records, _>>()?,
                     }))
                 } else {
                     None
@@ -2154,12 +2357,10 @@ impl Domain {
         requesting_shard: usize,
         ex: &mut dyn Executor,
     ) -> Result<(), ReadySetError> {
+        #[allow(clippy::indexing_slicing)]
+        // tag came from an internal data structure that guarantees it exists
         if let ReplayPath {
-            trigger: TriggerEndpoint::Start(..),
-            ..
-        }
-        | ReplayPath {
-            trigger: TriggerEndpoint::Local(..),
+            trigger: TriggerEndpoint::Start(..) | TriggerEndpoint::Local(..),
             ..
         } = self.replay_paths[&tag]
         {
@@ -2183,6 +2384,8 @@ impl Domain {
             return Ok(());
         }
 
+        #[allow(clippy::indexing_slicing)]
+        // tag came from an internal data structure that guarantees it exists
         let (m, source, misses) = match self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
@@ -2209,16 +2412,21 @@ impl Domain {
                         .map_err(|misses| {
                             misses
                                 .into_iter()
-                                .map(|miss| Cow::Owned(KeyComparison::try_from(miss).unwrap()))
+                                .map(|miss| {
+                                    #[allow(clippy::unwrap_used)]
+                                    // keys can't be empty coming from misses
+                                    Cow::Owned(KeyComparison::try_from(miss).unwrap())
+                                })
                                 .collect()
                         }),
                 };
 
                 match rs {
                     Ok(rs) => {
-                        use std::iter::FromIterator;
-                        let data =
-                            Records::from_iter(rs.into_iter().map(|r| self.seed_row(source, r)));
+                        let data = rs
+                            .into_iter()
+                            .map(|r| self.seed_row(source, r))
+                            .collect::<Result<Records, _>>()?;
 
                         let mut k = HashSet::new();
                         k.insert(key.clone().into_owned());
@@ -2278,9 +2486,13 @@ impl Domain {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> Result<(), ReadySetError> {
-        let tag = m.tag().unwrap();
-        if self.nodes[self.replay_paths[&tag].path.last().unwrap().node]
+    fn handle_replay(&mut self, m: Packet, ex: &mut dyn Executor) -> ReadySetResult<()> {
+        let tag = m
+            .tag()
+            .ok_or_else(|| internal_err("handle_replay called on an invalid message"))?;
+        #[allow(clippy::indexing_slicing)]
+        // tag came from an internal data structure that guarantees it exists
+        if self.nodes[self.replay_paths[&tag].last_segment().node]
             .borrow()
             .is_dropped()
         {
@@ -2294,6 +2506,8 @@ impl Domain {
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
         #[allow(clippy::never_loop)]
         'outer: loop {
+            #[allow(clippy::indexing_slicing)]
+            // tag came from an internal data structure that guarantees it exists
             let rp = &self.replay_paths[&tag];
             let &ReplayPath {
                 ref path,
@@ -2313,7 +2527,7 @@ impl Domain {
                     // applied them after all the state has been replayed, we would double-apply
                     // those changes, which is bad.
                     self.mode = DomainMode::Replaying {
-                        to: path.last().unwrap().node,
+                        to: rp.last_segment().node,
                         buffered: VecDeque::new(),
                         passes: 0,
                     };
@@ -2347,12 +2561,19 @@ impl Domain {
                     }
 
                     // let's collect some information about the destination of this replay
+                    #[allow(clippy::unwrap_used)] // replay paths are non-empty
                     let dst = path.last().unwrap().node;
+                    #[allow(clippy::indexing_slicing)] // dst came from a replay path
                     let dst_is_reader = self.nodes[dst]
                         .borrow()
                         .with_reader(|r| r.is_materialized())
                         .unwrap_or(false);
-                    let dst_is_target = !self.nodes[dst].borrow().is_sender();
+                    let dst_is_target = !self
+                        .nodes
+                        .get(dst)
+                        .ok_or(ReadySetError::NoSuchNode(dst))?
+                        .borrow()
+                        .is_sender();
                     let mut holes_for_remap = vec![];
                     let mut remap_holes_mark_filled = vec![];
 
@@ -2363,6 +2584,7 @@ impl Domain {
                         } = context
                         {
                             let had = for_keys.len();
+                            #[allow(clippy::unwrap_used)] // replay paths are non-empty
                             let partial_keys = path.last().unwrap().partial_key.as_ref().unwrap();
                             if let Some(w) = self.waiting.get(dst) {
                                 let mut remapped_keys_to_holes = vec![];
@@ -2446,6 +2668,8 @@ impl Domain {
                                 // note that we need to use the partial_keys column IDs from the
                                 // *start* of the path here, as the records haven't been processed
                                 // yet
+                                // We already know it's a partial replay path, so it must have a partial key
+                                #[allow(clippy::unwrap_used)]
                                 let partial_keys =
                                     path.first().unwrap().partial_key.as_ref().unwrap();
                                 data.retain(|r| {
@@ -2453,7 +2677,12 @@ impl Domain {
                                         k.contains(
                                             &partial_keys
                                                 .iter()
-                                                .map(|c| r[*c].clone())
+                                                .map(|c| {
+                                                    #[allow(clippy::indexing_slicing)]
+                                                    // record came from processing, which means it
+                                                    // must have the right number of columns
+                                                    r[*c].clone()
+                                                })
                                                 .collect::<Vec<_>>(),
                                         )
                                     })
@@ -2491,6 +2720,9 @@ impl Domain {
 
                     for (i, segment) in path.iter().enumerate() {
                         if let Some(force_tag) = segment.force_tag_to {
+                            #[allow(clippy::unwrap_used)]
+                            // We would have bailed in a previous iteration (break 'outer, below) if
+                            // it wasn't Some
                             if let Packet::ReplayPiece { ref mut tag, .. } =
                                 m.as_deref_mut().unwrap()
                             {
@@ -2498,6 +2730,8 @@ impl Domain {
                             }
                         }
 
+                        #[allow(clippy::indexing_slicing)]
+                        // we know replay paths only contain real nodes
                         let mut n = self.nodes[segment.node].borrow_mut();
                         let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
 
@@ -2528,26 +2762,29 @@ impl Domain {
 
                         // are we about to fill a hole?
                         if target && (holes_for_remap.is_empty() || segment.node != dst) {
-                            let backfill_keys = backfill_keys.as_ref().unwrap();
-                            // mark the state for the key being replayed as *not* a hole otherwise
-                            // we'll just end up with the same "need replay" response that
-                            // triggered this replay initially.
-                            if let Some(state) = self.state.get_mut(segment.node) {
-                                for key in backfill_keys.iter() {
-                                    state.mark_filled(key.clone(), tag);
-                                }
-                            } else {
-                                n.with_reader_mut(|r| {
-                                    // we must be filling a hole in a Reader. we need to ensure
-                                    // that the hole for the key we're replaying ends up being
-                                    // filled, even if that hole is empty!
-                                    if let Some(wh) = r.writer_mut() {
-                                        for key in backfill_keys.iter() {
-                                            wh.mark_filled(key.clone());
-                                        }
+                            if let Some(backfill_keys) = &backfill_keys {
+                                // mark the state for the key being replayed as *not* a hole otherwise
+                                // we'll just end up with the same "need replay" response that
+                                // triggered this replay initially.
+                                if let Some(state) = self.state.get_mut(segment.node) {
+                                    for key in backfill_keys.iter() {
+                                        state.mark_filled(key.clone(), tag);
                                     }
-                                })
-                                .unwrap();
+                                } else {
+                                    n.with_reader_mut(|r| {
+                                        // we must be filling a hole in a Reader. we need to ensure
+                                        // that the hole for the key we're replaying ends up being
+                                        // filled, even if that hole is empty!
+                                        if let Some(wh) = r.writer_mut() {
+                                            for key in backfill_keys.iter() {
+                                                wh.mark_filled(key.clone());
+                                            }
+                                        }
+                                    })
+                                    .map_err(|_| {
+                                        internal_err("Trying to fill hole in non-materialized node")
+                                    })?;
+                                }
                             }
                         }
                         let mut materialize_into_all = false;
@@ -2583,6 +2820,8 @@ impl Domain {
                         let missed_on = if backfill_keys.is_some() {
                             let mut missed_on = HashSet::with_capacity(misses.len());
                             for miss in &misses {
+                                #[allow(clippy::unwrap_used)]
+                                // this is a partial miss, so it must have a partial key
                                 missed_on.insert(miss.replay_key().unwrap());
                             }
                             missed_on
@@ -2606,17 +2845,18 @@ impl Domain {
                                         state.mark_hole(miss, tag);
                                     }
                                 } else {
-                                    n.with_reader_mut(|r| {
-                                        if let Some(wh) = r.writer_mut() {
-                                            for miss in &missed_on {
-                                                wh.mark_hole(miss);
+                                    let _ = // if there's no state, we don't need to worry about it
+                                        n.with_reader_mut(|r| {
+                                            if let Some(wh) = r.writer_mut() {
+                                                for miss in &missed_on {
+                                                    wh.mark_hole(miss);
+                                                }
                                             }
-                                        }
-                                    })
-                                    .unwrap();
+                                        });
                                 }
                             } else if is_reader {
                                 // we filled a hole! swap the reader.
+                                #[allow(clippy::unwrap_used)] // we just checked it's a reader
                                 n.with_reader_mut(|r| {
                                     if let Some(wh) = r.writer_mut() {
                                         wh.swap();
@@ -2627,8 +2867,10 @@ impl Domain {
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(segment.node)
                                 {
-                                    for key in backfill_keys.as_ref().unwrap().iter() {
-                                        prev.remove(key);
+                                    if let Some(backfill_keys) = &backfill_keys {
+                                        for key in backfill_keys {
+                                            prev.remove(key);
+                                        }
                                     }
                                 }
                             }
@@ -2642,14 +2884,14 @@ impl Domain {
                                     state.mark_hole(key, tag);
                                 }
                             } else {
-                                n.with_reader_mut(|r| {
-                                    if let Some(wh) = r.writer_mut() {
-                                        for key in &process_result.captured {
-                                            wh.mark_hole(key);
+                                let _ = // if there's no state, we don't need to worry about it
+                                    n.with_reader_mut(|r| {
+                                        if let Some(wh) = r.writer_mut() {
+                                            for key in &process_result.captured {
+                                                wh.mark_hole(key);
+                                            }
                                         }
-                                    }
-                                })
-                                .unwrap();
+                                    });
                             }
                         }
 
@@ -2679,14 +2921,15 @@ impl Domain {
                         //     replay count! note that it's *not* sufficient to check if the
                         //     *current* node is a target/reader, because we could miss during a
                         //     join along the path.
-                        if backfill_keys.is_some()
-                            && finished_partial == 0
-                            && (dst_is_reader || dst_is_target)
-                        {
-                            finished_partial = backfill_keys.as_ref().unwrap().len();
+                        if let Some(backfill_keys) = &backfill_keys {
+                            if finished_partial == 0 && (dst_is_reader || dst_is_target) {
+                                finished_partial = backfill_keys.len();
+                            }
                         }
 
                         // only continue with the keys that weren't captured
+                        #[allow(clippy::unwrap_used)]
+                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
                         if let Packet::ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
@@ -2695,10 +2938,9 @@ impl Domain {
                             ..
                         } = **m.as_mut().unwrap()
                         {
-                            backfill_keys
-                                .as_mut()
-                                .unwrap()
-                                .retain(|k| for_keys.contains(k));
+                            for backfill_keys in &mut backfill_keys {
+                                backfill_keys.retain(|k| for_keys.contains(k));
+                            }
                         }
 
                         // if we missed during replay, we need to do another replay
@@ -2708,6 +2950,8 @@ impl Domain {
                             // since we only enter this branch in the cases where we have a miss,
                             // it is okay to assume that unishard _hasn't_ changed, and therefore
                             // we can use the value that's in m.
+                            #[allow(clippy::unwrap_used)]
+                            // We would have bailed earlier (break 'outer, above) if m wasn't Some
                             let (unishard, requesting_shard) = if let Packet::ReplayPiece {
                                 context:
                                     ReplayPieceContext::Partial {
@@ -2724,6 +2968,8 @@ impl Domain {
                             };
 
                             for miss in misses {
+                                #[allow(clippy::unwrap_used)]
+                                // We know this is a partial replay
                                 need_replay.push((
                                     miss.on,
                                     miss.replay_key().unwrap(),
@@ -2736,6 +2982,7 @@ impl Domain {
                             }
 
                             // we should only finish the replays for keys that *didn't* miss
+                            #[allow(clippy::unwrap_used)] // We already checked it's Some
                             backfill_keys
                                 .as_mut()
                                 .unwrap()
@@ -2743,7 +2990,11 @@ impl Domain {
 
                             // prune all replayed records for keys where any replayed record for
                             // that key missed.
+                            #[allow(clippy::unwrap_used)]
+                            // We know this is a partial replay
                             let partial_col = partial_key_cols.as_ref().unwrap();
+                            #[allow(clippy::unwrap_used)]
+                            // We would have bailed earlier (break 'outer, above) if m wasn't Some
                             m.as_mut().unwrap().map_data(|rs| {
                                 rs.retain(|r| {
                                     // XXX: don't we technically need to translate the columns a
@@ -2754,7 +3005,12 @@ impl Domain {
                                         miss.contains(
                                             &partial_col
                                                 .iter()
-                                                .map(|&c| r[c].clone())
+                                                .map(|&c| {
+                                                    #[allow(clippy::indexing_slicing)]
+                                                    // record came from processing, which means it
+                                                    // must have the right number of columns
+                                                    r[c].clone()
+                                                })
                                                 .collect::<Vec<_>>(),
                                         )
                                     })
@@ -2808,12 +3064,13 @@ impl Domain {
                             if i == path.len() - 1 {
                                 // only evict if we own the state where the replay originated
                                 if let Some(src) = source {
+                                    #[allow(clippy::indexing_slicing)]
+                                    // src came from a replay path
                                     let n = self.nodes[*src].borrow();
                                     if n.beyond_mat_frontier() {
-                                        let state = self
-                                            .state
-                                            .get_mut(*src)
-                                            .expect("replay sourced at non-materialized node");
+                                        let state = self.state.get_mut(*src).ok_or_else(|| {
+                                            internal_err("replay sourced at non-materialized node")
+                                        })?;
                                         trace!(self.log, "clearing keys from purgeable replay source after replay";
                                                "node" => n.global_addr().index(),
                                                "keys" => ?backfill_keys);
@@ -2843,6 +3100,8 @@ impl Domain {
 
                                     while let Some(pn) = tmp.pop() {
                                         if self.state.contains_key(pn) {
+                                            #[allow(clippy::indexing_slicing)]
+                                            // we know the lookup was into a real node
                                             if self.nodes[pn].borrow().beyond_mat_frontier() {
                                                 // we should evict from this!
                                                 pns.push(pn);
@@ -2853,6 +3112,8 @@ impl Domain {
                                         }
 
                                         // this parent needs to be resolved further
+                                        #[allow(clippy::indexing_slicing)]
+                                        // we know the lookup was into a real node
                                         let pn = self.nodes[pn].borrow();
                                         if !pn.can_query_through() {
                                             internal!("lookup into non-materialized, non-query-through node.");
@@ -2865,9 +3126,11 @@ impl Domain {
                                     pns_for = Some(lookup.on);
                                 }
 
+                                #[allow(clippy::unwrap_used)]
+                                // we know this is a partial replay path
                                 let tag_match = |rp: &ReplayPath, pn| {
-                                    rp.path.last().unwrap().node == pn
-                                        && rp.path.last().unwrap().partial_key.as_ref().unwrap()
+                                    rp.last_segment().node == pn
+                                        && rp.last_segment().partial_key.as_ref().unwrap()
                                             == &lookup.cols
                                 };
 
@@ -2879,6 +3142,8 @@ impl Domain {
                                     // the replay -- make sure we evict any state we may have added
                                     // there.
                                     if let Some(tag) = evict_tag {
+                                        #[allow(clippy::indexing_slicing)]
+                                        // tag came from an internal data structure that guarantees it exists
                                         if !tag_match(&self.replay_paths[&tag], pn) {
                                             // we can't re-use this
                                             evict_tag = None;
@@ -2887,18 +3152,21 @@ impl Domain {
 
                                     if evict_tag.is_none() {
                                         if let Some(ref cs) = self.replay_paths_by_dst.get(pn) {
+                                            #[allow(clippy::indexing_slicing)]
+                                            // we check len is 1 first
                                             if let Some(ref tags) = cs.get(&lookup.cols) {
                                                 // this is the tag we would have used to
                                                 // fill a lookup hole in this ancestor, so
                                                 // this is the tag we need to evict from.
 
                                                 // TODO: could there have been multiple
-                                                assert_eq!(tags.len(), 1);
+                                                invariant_eq!(tags.len(), 1);
                                                 evict_tag = Some(tags[0]);
                                             }
                                         }
                                     }
 
+                                    #[allow(clippy::indexing_slicing)] // came from self.nodes
                                     if let Some(tag) = evict_tag {
                                         // NOTE: this assumes that the key order is the same
                                         trace!(self.log, "clearing keys from purgeable materialization after replay";
@@ -2906,16 +3174,19 @@ impl Domain {
                                                "key" => ?&lookup.key);
                                         state.mark_hole(&lookup.key, tag);
                                     } else {
-                                        internal!("no tag found for lookup target {:?}({:?}) (really {:?})",
-                                        self.nodes[lookup.on].borrow().global_addr(),
-                                        lookup.cols,
-                                        self.nodes[pn].borrow().global_addr());
+                                        internal!(
+                                            "no tag found for lookup target {:?}({:?}) (really {:?})",
+                                            self.nodes[lookup.on].borrow().global_addr(),
+                                            lookup.cols,
+                                            self.nodes[pn].borrow().global_addr());
                                     }
                                 }
                             }
                         }
 
                         // we're all good -- continue propagating
+                        #[allow(clippy::unwrap_used)]
+                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
                         if m.as_ref().unwrap().is_empty() {
                             if let Packet::ReplayPiece {
                                 context: ReplayPieceContext::Regular { last: false },
@@ -2931,18 +3202,27 @@ impl Domain {
                             }
                         }
 
-                        if i != path.len() - 1 {
+                        #[allow(clippy::unwrap_used)]
+                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
+                        if i + 1 < path.len() {
                             // update link for next iteration
+                            #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                             if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
                                 // we need to preserve the egress src for shard mergers
                                 // (which includes shard identifier)
                             } else {
                                 m.as_mut().unwrap().link_mut().src = segment.node;
                             }
-                            m.as_mut().unwrap().link_mut().dst = path[i + 1].node;
+                            m.as_mut().unwrap().link_mut().dst = {
+                                #[allow(clippy::indexing_slicing)]
+                                // we already checked i + 1 isn't out-of-bounds
+                                path[i + 1].node
+                            };
                         }
 
                         // feed forward the updated backfill_keys
+                        #[allow(clippy::unwrap_used)]
+                        // We would have bailed earlier (break 'outer, above) if m wasn't Some
                         if let Packet::ReplayPiece {
                             context:
                                 ReplayPieceContext::Partial {
@@ -2955,6 +3235,8 @@ impl Domain {
                         }
                     }
 
+                    #[allow(clippy::unwrap_used)]
+                    // We would have bailed earlier (break 'outer, above) if m wasn't Some
                     let context = if let Packet::ReplayPiece { context, .. } = *m.unwrap() {
                         context
                     } else {
@@ -2983,7 +3265,13 @@ impl Domain {
                         } => {
                             assert!(!ignore);
                             if dst_is_reader {
-                                if self.nodes[dst].borrow().beyond_mat_frontier() {
+                                if self
+                                    .nodes
+                                    .get(dst)
+                                    .ok_or(ReadySetError::NoSuchNode(dst))?
+                                    .borrow()
+                                    .beyond_mat_frontier()
+                                {
                                     // make sure we eventually evict these from here
                                     self.timed_purges.push_back(TimedPurge {
                                         time: time::Instant::now()
@@ -3076,10 +3364,12 @@ impl Domain {
                     "waiting" => ?waiting,
                 );
 
+                #[allow(clippy::indexing_slicing)]
+                // tag came from an internal data structure that guarantees it exists
+                #[allow(clippy::unwrap_used)]
+                // We already know this is a partial replay path
                 let key_cols = self.replay_paths[&tag]
-                    .path
-                    .last()
-                    .unwrap()
+                    .last_segment()
                     .partial_key
                     .clone()
                     .unwrap();
@@ -3087,6 +3377,8 @@ impl Domain {
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
+                #[allow(clippy::unwrap_used)]
+                // this is a partial replay (since it's in waiting), so it must have keys
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
                     let replay = waiting.redos.remove(&hole);
@@ -3252,6 +3544,8 @@ impl Domain {
                 internal!();
             }
 
+            #[allow(clippy::indexing_slicing)]
+            // tag came from an internal data structure that guarantees it exists
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
                 info!(self.log, "noting replay completed"; "node" => node.id());
@@ -3306,7 +3600,9 @@ impl Domain {
                     walk_path(&path.path[..], &mut keys, *tag, shard, nodes, ex)?;
 
                     if let TriggerEndpoint::Local(_) = path.trigger {
-                        let target = replay_paths[&tag].path.last().unwrap();
+                        #[allow(clippy::indexing_slicing)] // tag came from replay_paths
+                        let target = replay_paths[&tag].last_segment();
+                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                         if nodes[target.node].borrow().is_reader() {
                             // already evicted from in walk_path
                             continue;
@@ -3320,7 +3616,10 @@ impl Domain {
                             continue;
                         }
 
+                        #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
                         state[target.node].evict_keys(*tag, &keys[..]);
+                        #[allow(clippy::unwrap_used)]
+                        // we can only evict from partial replay paths, so we must have a partial key
                         trigger_downstream_evictions(
                             log,
                             &target.partial_key.as_ref().unwrap()[..],
@@ -3347,8 +3646,12 @@ impl Domain {
             nodes: &DomainNodes,
             executor: &mut dyn Executor,
         ) -> ReadySetResult<()> {
+            #[allow(clippy::indexing_slicing)] // replay paths can't be empty
             let mut from = path[0].node;
             for segment in path {
+                #[allow(clippy::indexing_slicing)] // nodes in replay paths must exist
+                #[allow(clippy::unwrap_used)]
+                // partial_key must be Some for partial replay paths
                 nodes[segment.node].borrow_mut().process_eviction(
                     from,
                     &segment.partial_key.as_ref().unwrap()[..],
@@ -3384,21 +3687,14 @@ impl Domain {
                             let n = &*nd.borrow();
                             let local_index = n.local_addr();
 
-                            if n.is_reader() {
-                                let mut size = None;
-                                n.with_reader(|r| {
-                                    if r.is_partial() {
-                                        size = r.state_size();
-                                    }
+                            n.with_reader(|r| if r.is_partial() { r.state_size() } else { None })
+                                .unwrap_or_else(|_| {
+                                    self.state
+                                        .get(local_index)
+                                        .filter(|state| state.is_partial())
+                                        .map(|state| state.deep_size_of())
                                 })
-                                .unwrap();
-                                size.map(|s| (local_index, s))
-                            } else {
-                                self.state
-                                    .get(local_index)
-                                    .filter(|state| state.is_partial())
-                                    .map(|state| (local_index, state.deep_size_of()))
-                            }
+                                .map(|s| (local_index, s))
                         })
                         .filter(|&(_, s)| s > 0)
                         .map(|(x, s)| (x, s as usize))
@@ -3412,6 +3708,8 @@ impl Domain {
                     candidates.truncate(3);
 
                     // don't evict from tiny things (< 10% of max)
+                    #[allow(clippy::indexing_slicing)]
+                    // candidates must be at least nodes.len(), and nodes can't be empty
                     if let Some(too_small_i) = candidates
                         .iter()
                         .position(|&(_, s)| s < candidates[0].1 / 10)
@@ -3443,15 +3741,18 @@ impl Domain {
 
                 for (node, num_bytes) in nodes {
                     let mut freed = 0u64;
+                    #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
                     let mut n = self.nodes[node].borrow_mut();
                     while freed < num_bytes as u64 {
                         // TODO: use (num_bytes - freed) / SOMETHING to compute # keys to evict
                         if n.is_dropped() {
                             break; // Node was dropped. Give up.
                         } else if n.is_reader() {
+                            #[allow(clippy::unwrap_used)] // just checked it was a reader
                             let freed_now = n.with_reader_mut(|r| r.evict_random_keys(16)).unwrap();
 
                             freed += freed_now;
+                            #[allow(clippy::unwrap_used)] // just checked it was a reader
                             if n.with_reader(|r| r.is_empty()).unwrap() {
                                 trace!(
                                     self.log,
@@ -3462,6 +3763,7 @@ impl Domain {
                             }
                         } else {
                             let (key_columns, keys, bytes) = {
+                                #[allow(clippy::indexing_slicing)] // came from self.nodes
                                 let (key_columns, keys, bytes) =
                                     self.state[node].evict_random_keys(16);
                                 (
@@ -3491,6 +3793,7 @@ impl Domain {
                                     &self.nodes,
                                 )?;
                             }
+                            #[allow(clippy::indexing_slicing)] // came from self.nodes
                             if self.state[node].is_empty() {
                                 trace!(self.log, "done evicting from now-empty node {:?}", n);
                                 break;
@@ -3524,22 +3827,28 @@ impl Domain {
                 let i = path
                     .iter()
                     .position(|ps| ps.node == dst)
-                    .ok_or_else(|| internal_err("got eviction for non-local node"))?;
+                    .ok_or(ReadySetError::NoSuchNode(dst))?;
+                #[allow(clippy::indexing_slicing)]
+                // i is definitely in bounds, since it came from a call to position
                 walk_path(&path[i..], &mut keys, tag, self.shard, &self.nodes, ex)?;
 
                 match trigger {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propagate the eviction further downstream.
+                        #[allow(clippy::unwrap_used)] // replay paths are non-empty
                         let target = path.last().unwrap().node;
                         // We've already evicted from readers in walk_path
+                        #[allow(clippy::indexing_slicing)] // came from replay paths
                         if self.nodes[target].borrow().is_reader() {
                             return Ok(());
                         }
                         // No need to continue if node was dropped.
+                        #[allow(clippy::indexing_slicing)] // came from replay paths
                         if self.nodes[target].borrow().is_dropped() {
                             return Ok(());
                         }
+                        #[allow(clippy::indexing_slicing)] // came from replay paths
                         if let Some(evicted) = self.state[target].evict_keys(tag, &keys) {
                             let key_columns = evicted.0.to_vec();
                             trigger_downstream_evictions(
@@ -3580,25 +3889,23 @@ impl Domain {
                 let n = &*nd.borrow();
                 let local_index = n.local_addr();
 
-                if n.is_reader() {
+                n.with_reader(|r| {
                     // We are a reader, which has its own kind of state
                     let mut size = 0;
-                    n.with_reader(|r| {
-                        if r.is_partial() {
-                            size = r.state_size().unwrap_or(0);
-                            reader_size += size;
-                        }
-                    })
-                    .unwrap();
+                    if r.is_partial() {
+                        size = r.state_size().unwrap_or(0);
+                        reader_size += size;
+                    }
                     size
-                } else {
+                })
+                .unwrap_or_else(|_| {
                     // Not a reader, state is with domain
                     self.state
                         .get(local_index)
                         .filter(|state| state.is_partial())
                         .map(|s| s.deep_size_of())
                         .unwrap_or(0)
-                }
+                })
             })
             .sum();
 
@@ -3684,9 +3991,13 @@ impl Domain {
                 });
 
                 let mut timeout = opt1.or(opt2).or(opt3);
+                // timeout is based on opt2, so if opt2 is Some so is timeout
+                #[allow(clippy::unwrap_used)]
                 if let Some(opt2) = opt2 {
                     timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
                 }
+                // timeout is based on opt3, so if opt3 is Some so is timeout
+                #[allow(clippy::unwrap_used)]
                 if let Some(opt3) = opt3 {
                     timeout = Some(std::cmp::min(timeout.unwrap(), opt3));
                 }
