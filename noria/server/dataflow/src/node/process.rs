@@ -412,7 +412,7 @@ impl Node {
         &mut self,
         m: Packet,
         executor: &mut dyn Executor,
-    ) -> Option<Box<Packet>> {
+    ) -> ReadySetResult<Option<Box<Packet>>> {
         // TODO: not error handling compliant!
         let src_node = m.src();
         match m {
@@ -465,7 +465,7 @@ impl Node {
 
                 if let NodeType::Reader(ref mut r) = self.inner {
                     r.process_timestamp(timestamp);
-                    return None;
+                    return Ok(None);
                 }
 
                 // Create a link if one does not already exist. This only happens
@@ -486,21 +486,23 @@ impl Node {
 
                 // Some node types require additional packet handling after aggregating
                 // all parent node timestamps.
-                match self.inner {
+                Ok(match self.inner {
                     NodeType::Egress(Some(ref mut e)) => {
                         // TODO(justin): Should this use on_shard like process.
                         let p = &mut Some(p);
-                        e.process(p, None, 0, executor).unwrap();
+                        e.process(p, None, 0, executor)?;
                         None
                     }
                     NodeType::Base(_) => {
-                        executor.ack(src.unwrap());
+                        if let Some(src) = src {
+                            executor.ack(src);
+                        }
                         Some(p)
                     }
                     _ => Some(p),
-                }
+                })
             }
-            _ => unreachable!("process_timestamp passed non timestamp packet."),
+            _ => internal!("process_timestamp passed non timestamp packet."),
         }
     }
 }

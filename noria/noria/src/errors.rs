@@ -2,8 +2,10 @@
 
 use crate::channel::tcp::SendError;
 use crate::consensus::Epoch;
+use crate::internal::LocalNodeIndex;
 use petgraph::graph::NodeIndex;
 use std::error::Error;
+use std::io;
 use thiserror::Error;
 use url::Url;
 
@@ -344,6 +346,18 @@ pub enum ReadySetError {
         shard: usize,
     },
 
+    /// A request referencing a node was sent to a domain not responsible for that node.
+    #[error("Node {0:?} not found in domain")]
+    NoSuchNode(LocalNodeIndex),
+
+    /// A reader-only operation was made on a node that is not a reader
+    #[error("Node {0:?} is not a reader")]
+    NotAReader(LocalNodeIndex),
+
+    /// A request was sent to a domain with a nonexistent or unknown replay path
+    #[error("Replay path identified by Tag({0}) not found")]
+    NoSuchReplayPath(u32),
+
     /// A migration tried to reference a domain that doesn't exist.
     #[error("Migration tried to reference domain {domain_index}.{shard:?}")]
     MigrationUnknownDomain {
@@ -392,6 +406,10 @@ pub enum ReadySetError {
     /// A dataflow ingredient received a record of the wrong length
     #[error("Record of invalid length received")]
     InvalidRecordLength,
+
+    /// Wrapper for [`io::Error`]
+    #[error("{0}")]
+    IOError(String),
 }
 
 impl ReadySetError {
@@ -670,6 +688,14 @@ impl From<mysql_async::Error> for ReadySetError {
 impl From<tokio_postgres::Error> for ReadySetError {
     fn from(e: tokio_postgres::Error) -> ReadySetError {
         ReadySetError::ReplicationFailed(e.to_string())
+    }
+}
+
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
+impl From<io::Error> for ReadySetError {
+    fn from(e: io::Error) -> ReadySetError {
+        ReadySetError::IOError(e.to_string())
     }
 }
 

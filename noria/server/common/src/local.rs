@@ -139,6 +139,12 @@ impl std::fmt::Display for Tag {
     }
 }
 
+impl From<Tag> for u32 {
+    fn from(tag: Tag) -> Self {
+        tag.0
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub enum KeyType<'a> {
     Single(&'a DataType),
