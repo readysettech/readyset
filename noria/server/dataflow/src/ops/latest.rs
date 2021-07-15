@@ -135,11 +135,8 @@ impl Ingredient for Latest {
         }
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
-        Ok(ColumnSource::exact_copy(
-            self.src.as_global(),
-            cols.try_into().unwrap(),
-        ))
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
+        ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -281,15 +278,15 @@ mod tests {
     fn it_resolves() {
         let c = setup(1, false);
         assert_eq!(
-            c.node().resolve(0).unwrap(),
+            c.node().resolve(0),
             Some(vec![(c.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            c.node().resolve(1).unwrap(),
+            c.node().resolve(1),
             Some(vec![(c.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            c.node().resolve(2).unwrap(),
+            c.node().resolve(2),
             Some(vec![(c.narrow_base_id().as_global(), 2)])
         );
     }

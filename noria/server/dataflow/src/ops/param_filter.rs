@@ -72,16 +72,11 @@ impl Ingredient for ParamFilter {
         HashMap::new()
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         if cols.iter().any(|&col| col >= self.emit_key) {
-            Ok(ColumnSource::RequiresFullReplay(vec1![self
-                .src
-                .as_global()]))
+            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            Ok(ColumnSource::exact_copy(
-                self.src.as_global(),
-                cols.try_into().unwrap(),
-            ))
+            ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
         }
     }
 
@@ -148,14 +143,14 @@ mod tests {
     fn resolve() {
         let g = setup(Like);
         assert_eq!(
-            g.node().resolve(0).unwrap(),
+            g.node().resolve(0),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1).unwrap(),
+            g.node().resolve(1),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
-        assert_eq!(g.node().resolve(2).unwrap(), None);
+        assert_eq!(g.node().resolve(2), None);
     }
 
     #[test]

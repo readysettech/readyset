@@ -221,7 +221,7 @@ impl Materializations {
                                     return Ok(col);
                                 }
 
-                                let really = n.parent_columns(col)?;
+                                let really = n.parent_columns(col);
                                 let really = really
                                     .into_iter()
                                     .find(|&(anc, _)| anc == parent)

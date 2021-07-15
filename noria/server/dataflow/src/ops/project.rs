@@ -227,7 +227,7 @@ impl Ingredient for Project {
         HashMap::new()
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         let mapped_cols = cols
             .iter()
             .filter_map(|&x| {
@@ -244,14 +244,9 @@ impl Ingredient for Project {
             })
             .collect::<Vec<_>>();
         if mapped_cols.len() != cols.len() {
-            Ok(ColumnSource::RequiresFullReplay(vec1![self
-                .src
-                .as_global()]))
+            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            Ok(ColumnSource::exact_copy(
-                self.src.as_global(),
-                mapped_cols.try_into().unwrap(),
-            ))
+            ColumnSource::exact_copy(self.src.as_global(), mapped_cols.try_into().unwrap())
         }
     }
 
@@ -692,11 +687,11 @@ mod tests {
     fn it_resolves() {
         let p = setup(false, false, true);
         assert_eq!(
-            p.node().resolve(0).unwrap(),
+            p.node().resolve(0),
             Some(vec![(p.narrow_base_id().as_global(), 2)])
         );
         assert_eq!(
-            p.node().resolve(1).unwrap(),
+            p.node().resolve(1),
             Some(vec![(p.narrow_base_id().as_global(), 0)])
         );
     }
@@ -705,15 +700,15 @@ mod tests {
     fn it_resolves_all() {
         let p = setup(false, true, true);
         assert_eq!(
-            p.node().resolve(0).unwrap(),
+            p.node().resolve(0),
             Some(vec![(p.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            p.node().resolve(1).unwrap(),
+            p.node().resolve(1),
             Some(vec![(p.narrow_base_id().as_global(), 1)])
         );
         assert_eq!(
-            p.node().resolve(2).unwrap(),
+            p.node().resolve(2),
             Some(vec![(p.narrow_base_id().as_global(), 2)])
         );
     }
@@ -721,6 +716,6 @@ mod tests {
     #[test]
     fn it_fails_to_resolve_literal() {
         let p = setup(false, false, true);
-        assert!(p.node().resolve(2).unwrap().is_none());
+        assert!(p.node().resolve(2).is_none());
     }
 }

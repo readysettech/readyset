@@ -112,7 +112,7 @@ impl Ingredient for NodeOperator {
     fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         impl_ingredient_fn_ref!(self, column_source, cols)
     }
     fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {

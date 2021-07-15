@@ -839,7 +839,7 @@ impl Ingredient for Join {
         ])
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         // NOTE: This function relies pretty heavily on the fact that upqueries for NULLs are not
         // possible. If they were possible, you could return incorrect results, because
         //   SELECT * FROM a LEFT JOIN b where b.col IS NULL;
@@ -857,7 +857,7 @@ impl Ingredient for Join {
         if left_cols.iter().all(|x| x.is_some()) {
             // the left parent has all the columns in `cols`
             // we can just 1:1 index the left parent and do the joining bits on replay
-            Ok(ColumnSource::exact_copy(
+            ColumnSource::exact_copy(
                 self.left.as_global(),
                 left_cols
                     .into_iter()
@@ -865,10 +865,10 @@ impl Ingredient for Join {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-            ))
+            )
         } else if right_cols.iter().all(|x| x.is_some()) {
             // same for right parent
-            Ok(ColumnSource::exact_copy(
+            ColumnSource::exact_copy(
                 self.right.as_global(),
                 right_cols
                     .into_iter()
@@ -876,7 +876,7 @@ impl Ingredient for Join {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-            ))
+            )
         } else {
             let right_cols = right_cols
                 .into_iter()
@@ -885,7 +885,7 @@ impl Ingredient for Join {
                 .filter_map(|(idx, col)| col.filter(|_| left_cols[idx].is_none()))
                 .collect::<Vec<_>>();
             let left_cols = left_cols.into_iter().flatten().collect::<Vec<_>>();
-            Ok(ColumnSource::GeneratedFromColumns(vec1![
+            ColumnSource::GeneratedFromColumns(vec1![
                 ColumnRef {
                     node: self.left.as_global(),
                     columns: left_cols.try_into().unwrap()
@@ -894,7 +894,7 @@ impl Ingredient for Join {
                     node: self.right.as_global(),
                     columns: right_cols.try_into().unwrap()
                 },
-            ]))
+            ])
         }
     }
 }
@@ -1081,7 +1081,7 @@ mod tests {
     #[test]
     fn parent_join_columns() {
         let (g, l, _) = setup();
-        let res = g.node().parent_columns(0).unwrap();
+        let res = g.node().parent_columns(0);
         assert_eq!(res, vec![(l.as_global(), Some(0))]);
     }
 

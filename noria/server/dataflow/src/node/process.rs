@@ -362,7 +362,7 @@ impl Node {
         if node.is_internal() && node.can_query_through() {
             let mut new_parent: Option<IndexPair> = None;
             for col in miss.lookup_idx.iter_mut() {
-                let parents = node.resolve(*col)?.unwrap();
+                let parents = node.resolve(*col).unwrap();
                 assert_eq!(parents.len(), 1, "query_through with more than one parent");
 
                 let (parent_global, parent_col) = parents[0];

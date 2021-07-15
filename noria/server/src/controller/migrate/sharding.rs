@@ -93,7 +93,7 @@ pub fn shard(
                     // remap c according to node's semantics
                     let n = &graph[node];
                     let src = (0..n.fields().len()).try_find(|&col| -> ReadySetResult<bool> {
-                        Ok(if let Some(src) = n.parent_columns(col)?[0].1 {
+                        Ok(if let Some(src) = n.parent_columns(col)[0].1 {
                             src == c
                         } else {
                             false
@@ -149,7 +149,7 @@ pub fn shard(
             }
 
             let resolved = if graph[node].is_internal() {
-                graph[node].resolve(want_sharding)?
+                graph[node].resolve(want_sharding)
             } else if graph[node].is_base() {
                 // nothing resolves through a base
                 None
@@ -257,7 +257,7 @@ pub fn shard(
                 let srcs = if graph[node].is_base() {
                     vec![(node, None)]
                 } else {
-                    graph[node].parent_columns(col)?
+                    graph[node].parent_columns(col)
                 };
                 let srcs: Vec<_> = srcs
                     .into_iter()
@@ -471,7 +471,7 @@ pub fn shard(
                 continue;
             }
 
-            let src_cols = graph[p].parent_columns(col)?;
+            let src_cols = graph[p].parent_columns(col);
             // FIXME(eta): since joins now return only one parent after the column_source redesign,
             //             we have to hackily special-case them out here; see ENG-216
             if graph[p].is_join() || src_cols.len() != 1 {
@@ -715,7 +715,7 @@ pub fn validate(
                 if let Sharding::ByColumn(c, shards) = ps {
                     // remap c according to node's semantics
                     let src = (0..nd.fields().len()).try_find(|&col| -> ReadySetResult<bool> {
-                        for pc in nd.parent_columns(col)? {
+                        for pc in nd.parent_columns(col) {
                             if let (p, Some(src)) = pc {
                                 // found column c in parent pni
                                 if p == pni && src == c {
