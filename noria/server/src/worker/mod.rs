@@ -53,11 +53,11 @@ pub enum WorkerRequestKind {
     /// A new domain should be started on this worker.
     RunDomain(DomainBuilder),
 
-    /// A domain has been started elsewhere in the distributed system.
+    /// A set of domains has been started elsewhere in the distributed system.
     ///
     /// The message contains information on how the domain can be reached, in order that
     /// domains on this worker can communicate with it.
-    GossipDomainInformation(DomainDescriptor),
+    GossipDomainInformation(Vec<DomainDescriptor>),
 
     /// The sender of the request would like one of the domains on this worker to do something.
     ///
@@ -306,18 +306,20 @@ impl Worker {
                 };
                 Ok(Some(bincode::serialize(&resp)?))
             }
-            WorkerRequestKind::GossipDomainInformation(dd) => {
-                let domain = dd.domain();
-                let shard = dd.shard();
-                let addr = dd.addr();
-                trace!(
-                    self.log,
-                    "found that domain {}.{} is at {:?}",
-                    domain.index(),
-                    shard,
-                    addr
-                );
-                self.coord.insert_remote((domain, shard), addr)?;
+            WorkerRequestKind::GossipDomainInformation(domains) => {
+                for dd in domains {
+                    let domain = dd.domain();
+                    let shard = dd.shard();
+                    let addr = dd.addr();
+                    trace!(
+                        self.log,
+                        "found that domain {}.{} is at {:?}",
+                        domain.index(),
+                        shard,
+                        addr
+                    );
+                    self.coord.insert_remote((domain, shard), addr)?;
+                }
                 Ok(None)
             }
             WorkerRequestKind::DomainRequest {

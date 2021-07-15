@@ -329,6 +329,32 @@ impl ControllerInner {
 
         let ws = Worker::new(worker_uri.clone(), region, reader_only);
 
+        let mut domain_addresses = Vec::new();
+        for (index, handle) in &self.domains {
+            for i in 0..handle.shards.len() {
+                let socket_addr = self
+                    .channel_coordinator
+                    .get_addr(&(*index, i))?
+                    .ok_or_else(|| ReadySetError::NoSuchDomain {
+                        domain_index: index.index(),
+                        shard: i,
+                    })?;
+
+                domain_addresses.push(DomainDescriptor::new(*index, i, socket_addr));
+            }
+        }
+
+        if let Err(e) = futures_executor::block_on(
+            ws.rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses)),
+        ) {
+            error!(
+                    self.log,
+                    "Worker could not be reached and was not updated on domain information. Address: {:?} | Error: {:?}",
+                    worker_uri,
+                    e
+                );
+        }
+
         self.workers.insert(worker_uri.clone(), ws);
         self.read_addrs.insert(worker_uri, reader_addr);
 
@@ -777,7 +803,7 @@ impl ControllerInner {
                     "informing worker at {} about newly placed domain", w.uri
                 );
                 if let Err(e) = futures_executor::block_on(
-                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(dd)),
+                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd])),
                 ) {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
