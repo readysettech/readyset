@@ -38,4 +38,6 @@ path = "src/bin/writer.rs"
 name = "replicate"
 path = "src/bin/replicate.rs"
 
-
+[[bin]]
+name = "extend_recipe"
+path = "src/bin/extend_recipe.rs"
