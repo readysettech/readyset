@@ -1,160 +1,136 @@
-use crate::ops::grouped::GroupedOperation;
-use crate::ops::grouped::GroupedOperator;
+//! Kinda (s)crappy group_concat() implementation
 
-use std::collections::HashSet;
-
+use crate::node::Node;
+use crate::ops::grouped::aggregate::SqlType;
+use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
-use noria::{invariant, ReadySetResult};
-use std::convert::TryFrom;
+use common::{DataType, Record};
+use launchpad::Indices;
+use noria::{internal, invariant_eq};
+use serde_derive::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Write;
 
-/// Designator for what a given position in a group concat output should contain.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TextComponent {
-    /// Emit a literal string.
-    Literal(String),
-    /// Emit the string representation of the given column in the current record.
-    Column(usize),
+/// The last stored state for a given group.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LastState {
+    /// The string representation we last emitted for this group.
+    string_repr: String,
+    /// A list of vectors (one for each source column, in order) containing the actual data.
+    data_for_source_cols: Vec<Vec<DataType>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Modify {
-    Add(String),
-    Remove(String),
+impl LastState {
+    /// Set up a `LastState` for a group, making an empty vector for each source column.
+    fn make(num_source_cols: usize) -> Self {
+        Self {
+            string_repr: "".try_into().unwrap(),
+            data_for_source_cols: std::iter::repeat(vec![]).take(num_source_cols).collect(),
+        }
+    }
 }
 
-/// `GroupConcat` joins multiple records into one using string concatenation.
-///
-/// It is conceptually similar to the `group_concat` function available in most SQL databases. The
-/// records are first grouped by a set of fields. Within each group, a string representation is
-/// then constructed, and the strings of all the records in a group are concatenated by joining
-/// them with a literal separator.
-///
-/// The current implementation *requires* the separator to be non-empty, and relatively distinct,
-/// as it is used as a sentinel for reconstructing the individual records' string representations.
-/// This is necessary to incrementally maintain the group concatenation efficiently. This
-/// requirement may be relaxed in the future. \u001E may be a good candidate.
-///
-/// If a group has only one record, the separator is not used.
-///
-/// For convenience, `GroupConcat` also orders the string representations of the records within a
-/// group before joining them. This allows easy equality comparison of `GroupConcat` outputs. This
-/// is the primary reason for the "separator as sentinel" behavior mentioned above, and may be made
-/// optional in the future such that more efficient incremental updating and relaxed separator
-/// semantics can be implemented.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `GroupConcat` partially implements the `GROUP_CONCAT` SQL aggregate function, which
+/// aggregates a set of arbitrary `DataType`s into a string representation separated by
+/// a user-defined separator.
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupConcat {
-    components: Vec<TextComponent>,
+    /// Which columns (in order) to aggregate.
+    source_cols: Vec<usize>,
+    /// The columns to group by, which are just all columns not aggregated by.
+    ///
+    /// This is computed automatically on `setup()`.
+    group_by: Vec<usize>,
+    /// The user-defined separator.
     separator: String,
-    group: Vec<usize>,
-    slen: usize,
+    /// Cached state for each group (set of data corresponding to the columns of `group_by`).
+    last_state: RefCell<HashMap<Vec<DataType>, LastState>>,
+}
+
+fn concat_fmt<F: Write>(f: &mut F, dt: &DataType) -> ReadySetResult<()> {
+    match dt {
+        DataType::Text(..) | DataType::TinyText(..) => {
+            let text: &str = <&str>::try_from(dt)?;
+            write!(f, "{}", text).unwrap();
+        }
+        x => write!(f, "{}", x).unwrap(),
+    }
+    Ok(())
 }
 
 impl GroupConcat {
-    /// Construct a new `GroupConcat` operator.
-    ///
-    /// All columns of the input to this node that are not mentioned in `components` will be used
-    /// as group by parameters. For each record in a group, `components` dictates the construction
-    /// of the record's string representation. `Literal`s are used, well, literally, and `Column`s
-    /// are replaced with the string representation of corresponding value from the record under
-    /// consideration. The string representations of all records within each group are joined using
-    /// the given `separator`.
-    ///
-    /// Note that `separator` is *also* used as a sentinel in the resulting data to reconstruct
-    /// the individual record strings from a group string. It should therefore not appear in the
-    /// record data.
-    ///
-    /// TODO: support case conditions
-    /// CH: https://app.clubhouse.io/readysettech/story/198/add-filtering-to-all-grouped-operations
+    /// Construct a new `GroupConcat`, aggregating the provided `source_cols` and separating
+    /// aggregated data with the provided `separator`.
     pub fn new(
         src: NodeIndex,
-        components: Vec<TextComponent>,
+        source_cols: Vec<usize>,
         separator: String,
     ) -> ReadySetResult<GroupedOperator<GroupConcat>> {
-        invariant!(
-            !separator.is_empty(),
-            "group concat separator cannot be empty"
-        );
-
         Ok(GroupedOperator::new(
             src,
             GroupConcat {
-                components,
+                source_cols,
+                group_by: vec![],
                 separator,
-                group: Vec::new(),
-                slen: 0,
+                last_state: RefCell::new(HashMap::new()),
             },
         ))
     }
+}
 
-    fn build(&self, rec: &[DataType]) -> ReadySetResult<String> {
-        let mut s = String::with_capacity(self.slen);
-        for tc in &self.components {
-            match *tc {
-                TextComponent::Literal(ref l) => {
-                    s.push_str(l);
-                }
-                TextComponent::Column(ref i) => match rec[*i] {
-                    DataType::Text(..) | DataType::TinyText(..) => {
-                        let text: &str = <&str>::try_from(&rec[*i])?;
-                        s.push_str(text);
-                    }
-                    DataType::Int(ref n) => s.push_str(&n.to_string()),
-                    DataType::UnsignedInt(ref n) => s.push_str(&n.to_string()),
-                    DataType::BigInt(ref n) => s.push_str(&n.to_string()),
-                    DataType::UnsignedBigInt(ref n) => s.push_str(&n.to_string()),
-                    DataType::Real(..) => s.push_str(&rec[*i].to_string()),
-                    DataType::Timestamp(ref ts) => s.push_str(&ts.format("%+").to_string()),
-                    DataType::Time(ref t) => s.push_str(&t.to_string()),
-                    DataType::None => unreachable!(),
-                },
-            }
-        }
-
-        Ok(s)
-    }
+pub struct ConcatDiff {
+    record: Record,
+    group_by: Vec<DataType>,
 }
 
 impl GroupedOperation for GroupConcat {
-    type Diff = Modify;
+    type Diff = ConcatDiff;
 
     fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
-        // group by all columns
-        let cols = parent.fields().len();
-        let mut group = HashSet::new();
-        group.extend(0..cols);
-        // except the ones that are used in output
-        for tc in &self.components {
-            if let TextComponent::Column(col) = *tc {
-                invariant!(col < cols, "group concat emits fields parent doesn't have");
-                group.remove(&col);
-            }
-        }
-        self.group = group.into_iter().collect();
+        let num_cols = parent.fields().len();
+        let mut group_by = HashSet::new();
+        // We group by all columns that aren't involved in the aggregation, so insert all columns
+        // and then remove the ones we aggregate.
+        group_by.extend(0..num_cols);
 
-        // how long are we expecting strings to be?
-        self.slen = 0;
-        // well, the length of all literal components
-        for tc in &self.components {
-            if let TextComponent::Literal(ref l) = *tc {
-                self.slen += l.len();
+        for sc in self.source_cols.iter() {
+            if !group_by.remove(sc) {
+                // TODO(eta): check the global_addr is actually set so we don't just turn this
+                //            into an unreachable
+                internal!(
+                    "tried to reference invalid column {} in group_concat (of node {})",
+                    sc,
+                    parent.global_addr().index()
+                );
             }
         }
-        // plus some fixed size per value
-        self.slen += 10 * (cols - self.group.len());
+
+        self.group_by = group_by.into_iter().collect();
         Ok(())
     }
 
     fn group_by(&self) -> &[usize] {
-        &self.group[..]
+        &self.group_by
     }
 
-    fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
-        let v = self.build(r)?;
-        if pos {
-            Ok(Modify::Add(v))
-        } else {
-            Ok(Modify::Remove(v))
-        }
+    fn to_diff(&self, record: &[DataType], is_positive: bool) -> ReadySetResult<Self::Diff> {
+        let data = record
+            .cloned_indices(self.source_cols.iter().copied())
+            .map_err(|_| ReadySetError::InvalidRecordLength)?;
+        // We need this to figure out which state to use.
+        let group_by = record
+            .cloned_indices(self.group_by.iter().cloned())
+            .map_err(|_| ReadySetError::InvalidRecordLength)?;
+        Ok(ConcatDiff {
+            record: if is_positive {
+                Record::Positive(data)
+            } else {
+                Record::Negative(data)
+            },
+            group_by,
+        })
     }
 
     fn apply(
@@ -162,98 +138,291 @@ impl GroupedOperation for GroupConcat {
         current: Option<&DataType>,
         diffs: &mut dyn Iterator<Item = Self::Diff>,
     ) -> ReadySetResult<DataType> {
-        use std::collections::BTreeSet;
+        let current: Option<&str> = current
+            .filter(|dt| matches!(dt, &DataType::Text(..) | &DataType::TinyText(..)))
+            .and_then(|dt| <&str>::try_from(dt).ok());
 
-        // updating the value is a bit tricky because we want to retain ordering of the
-        // elements. we therefore need to first split the value, add the new ones,
-        // remove revoked ones, sort, and then join again. ugh. we try to make it more
-        // efficient by splitting into a BTree, which maintains sorting while
-        // supporting efficient add/remove.
+        let first_diff = diffs
+            .next()
+            .ok_or_else(|| internal_err("group_concat got no diffs"))?;
+        let group = first_diff.group_by.clone();
 
-        use std::borrow::Cow;
-        let current: &str = match current {
-            Some(dt @ &DataType::Text(..)) | Some(dt @ &DataType::TinyText(..)) => {
-                <&str>::try_from(dt)?
+        let mut ls = self.last_state.borrow_mut().remove(&group);
+        let mut prev_state = match current {
+            #[allow(clippy::unwrap_used)] // check for is_some() before unwrapping
+            Some(text) if ls.is_some() && text == ls.as_ref().unwrap().string_repr => {
+                // if state matches, use it
+                ls.take().unwrap()
             }
-            None => "",
-            _ => unreachable!(),
+            // if state doesn't match, need to recreate it
+            Some(_) => {
+                return Err(ReadySetError::GroupedStateLost);
+            }
+            // if we're recreating or this is the first record for the group, make a new state
+            None => LastState::make(self.source_cols.len()),
         };
-        let clen = current.len();
+        for ConcatDiff { record, group_by } in Some(first_diff).into_iter().chain(diffs.into_iter())
+        {
+            invariant_eq!(group_by, group);
 
-        // TODO this is not particularly robust, and requires a non-empty separator
-        let mut current: BTreeSet<_> = current
-            .split_terminator(&self.separator)
-            .map(Cow::Borrowed)
-            .collect();
-        for diff in diffs {
-            match diff {
-                Modify::Add(s) => {
-                    current.insert(Cow::Owned(s));
-                }
-                Modify::Remove(s) => {
-                    current.remove(&*s);
+            let (data, positive_p) = record.extract();
+            for (i, dt) in data.into_iter().enumerate() {
+                let col_state = prev_state.data_for_source_cols.get_mut(i).ok_or_else(|| {
+                    internal_err("group_concat received overlong data for previous col_state")
+                })?;
+                if positive_p {
+                    col_state.push(dt);
+                } else {
+                    let item_pos = col_state.iter().rposition(|x| x == &dt).ok_or_else(|| {
+                        internal_err(format!(
+                            "group_concat couldn't remove {:?} from {:?}",
+                            dt, col_state
+                        ))
+                    })?;
+                    col_state.remove(item_pos);
                 }
             }
         }
-
-        // WHY doesn't rust have an iterator joiner?
-        let mut new = current
-            .into_iter()
-            .fold(String::with_capacity(2 * clen), |mut acc, s| {
-                acc.push_str(&*s);
-                acc.push_str(&self.separator);
-                acc
-            });
-        // we pushed one separator too many above
-        let real_len = new.len() - self.separator.len();
-        new.truncate(real_len);
-        DataType::try_from(new)
+        // what I *really* want here is Haskell's "intercalate" ~eta
+        let mut out_str = String::new();
+        for (i, data) in prev_state.data_for_source_cols.iter().enumerate() {
+            for (j, piece) in data.iter().enumerate() {
+                // TODO(eta): not unwrap, maybe
+                concat_fmt(&mut out_str, piece)?;
+                if !(j == data.len() - 1 && i == prev_state.data_for_source_cols.len() - 1) {
+                    write!(&mut out_str, "{}", self.separator).unwrap();
+                }
+            }
+        }
+        prev_state.string_repr = out_str.clone();
+        self.last_state.borrow_mut().insert(group, prev_state);
+        DataType::try_from(out_str)
     }
 
     fn description(&self, detailed: bool) -> String {
         if !detailed {
-            return String::from("CONCAT");
+            return "CONCAT2".try_into().unwrap();
         }
 
-        let fields = self
-            .components
-            .iter()
-            .map(|c| match *c {
-                TextComponent::Literal(ref s) => format!("\"{}\"", s),
-                TextComponent::Column(ref i) => i.to_string(),
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        // Sort group by columns for consistent output.
-        let mut group_cols = self.group.clone();
-        group_cols.sort_unstable();
-        let group_cols = group_cols
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        format!("||([{}], \"{}\") γ[{}]", fields, self.separator, group_cols)
+        format!(
+            "||({:?}, {:?}) γ{:?}",
+            self.source_cols, self.separator, self.group_by
+        )
     }
 
     fn over_columns(&self) -> Vec<usize> {
-        self.components
-            .iter()
-            .filter_map(|c| match *c {
-                TextComponent::Column(c) => Some(c),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
+        self.source_cols.clone()
     }
 
-    fn output_col_type(&self) -> Option<nom_sql::SqlType> {
+    fn output_col_type(&self) -> Option<SqlType> {
         Some(nom_sql::SqlType::Text)
     }
 
     fn empty_value(&self) -> Option<DataType> {
-        // It is safe to create a DataType from an empty string.
+        // It is safe to convert an empty String into a DataType, so it's
+        // safe to unwrap.
         #[allow(clippy::unwrap_used)]
         Some(DataType::try_from("").unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::ops;
+    use std::convert::TryInto;
+
+    fn setup(mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+
+        let c = GroupConcat::new(s.as_global(), vec![1], String::from("#")).unwrap();
+
+        g.set_op("concat", &["x", "ys"], c, mat);
+        g
+    }
+
+    #[test]
+    fn it_describes() {
+        let c = setup(true);
+        assert_eq!(c.node().description(true), "||([1], \"#\") γ[0]",);
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn it_forwards() {
+        let mut c = setup(true);
+
+        let u: Record = vec![1.into(), 1.into()].into();
+
+        // first row for a group should emit +"1" for that group
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], "1".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![2.into(), 2.into()].into();
+
+        // first row for a second group should emit +"2" for that new group
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 2.into());
+                assert_eq!(r[1], "2".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+
+        let u: Record = vec![1.into(), 2.into()].into();
+
+        // second row for a group should emit -"1" and +"1#2"
+        let rs = c.narrow_one(u, true);
+        eprintln!("{:?}", rs);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], "1".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], "1#2".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = (vec![1.into(), 1.into()], false);
+
+        // negative row for a group should emit -"1#2" and +"2"
+        let rs = c.narrow_one_row(u, true);
+        assert_eq!(rs.len(), 2);
+        let mut rs = rs.into_iter();
+
+        match rs.next().unwrap() {
+            Record::Negative(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], "1#2".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+        match rs.next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], "2".try_into().unwrap());
+            }
+            _ => unreachable!(),
+        }
+
+        let u = vec![
+            // remove non-existing
+            // (vec![1.into(), 1.into()], false),
+            // add old
+            (vec![1.into(), 1.into()], true),
+            // add duplicate
+            (vec![1.into(), 2.into()], true),
+            (vec![2.into(), 2.into()], false),
+            (vec![2.into(), 3.into()], true),
+            (vec![2.into(), 2.into()], true),
+            (vec![2.into(), 1.into()], true),
+            // new group
+            (vec![3.into(), 3.into()], true),
+        ];
+
+        // multiple positives and negatives should update aggregation value by appropriate amount
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
+                                 // group 1 had [2], now has [1,2]
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+            if r[0] == 1.into() {
+                assert_eq!(r[1], "2".try_into().unwrap());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            if r[0] == 1.into() {
+                assert_eq!(r[1], "2#1#2".try_into().unwrap());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+        // group 2 was [2], is now [1,2,3]
+        assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
+            if r[0] == 2.into() {
+                assert_eq!(r[1], "2".try_into().unwrap());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            if r[0] == 2.into() {
+                assert_eq!(r[1], "3#2#1".try_into().unwrap());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+        // group 3 was [], is now [3]
+        assert!(rs.iter().any(|r| if let Record::Positive(ref r) = *r {
+            if r[0] == 3.into() {
+                assert_eq!(r[1], "3".try_into().unwrap());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }));
+    }
+
+    #[test]
+    fn it_suggests_indices() {
+        let me = 1.into();
+        let c = setup(false);
+        let idx = c.node().suggest_indexes(me);
+
+        // should only add index on own columns
+        assert_eq!(idx.len(), 1);
+        assert!(idx.contains_key(&me));
+
+        // should only index on the group-by column
+        assert_eq!(idx[&me], Index::hash_map(vec![0]));
+    }
+
+    #[test]
+    fn it_resolves() {
+        let c = setup(false);
+        assert_eq!(
+            c.node().resolve(0).unwrap(),
+            Some(vec![(c.narrow_base_id().as_global(), 0)])
+        );
+        assert_eq!(c.node().resolve(1).unwrap(), None);
     }
 }
