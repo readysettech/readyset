@@ -67,11 +67,8 @@ impl Ingredient for Filter {
         HashMap::new()
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
-        Ok(ColumnSource::exact_copy(
-            self.src.as_global(),
-            cols.try_into().unwrap(),
-        ))
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
+        ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
     }
 
     fn description(&self, detailed: bool) -> String {
@@ -215,11 +212,11 @@ mod tests {
     fn it_resolves() {
         let g = setup(false, None);
         assert_eq!(
-            g.node().resolve(0).unwrap(),
+            g.node().resolve(0),
             Some(vec![(g.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(
-            g.node().resolve(1).unwrap(),
+            g.node().resolve(1),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
     }

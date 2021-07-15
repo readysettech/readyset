@@ -825,16 +825,12 @@ impl Domain {
                                 // forwarded anything related to the write we're now handling.
                                 keys.iter()
                                     .map(|&k| {
-                                        n.parent_columns(k)?
+                                        n.parent_columns(k)
                                             .into_iter()
                                             .find(|&(ni, _)| ni == from)
-                                            .ok_or_else(|| {
-                                                internal_err("predicate implication not supported")
-                                            })
-                                            .map(|k| k.1.unwrap())
+                                            .and_then(|k| k.1)
                                     })
-                                    .collect::<Result<Vec<_>, _>>()
-                                    .ok()
+                                    .collect::<Option<Vec<_>>>()
                             })
                             .map(move |k| (tag, k))
                     })

@@ -195,16 +195,11 @@ impl Ingredient for Rewrite {
         }
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         if cols.iter().any(|&col| col == self.rw_col) {
-            Ok(ColumnSource::RequiresFullReplay(vec1![self
-                .src
-                .as_global()]))
+            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            Ok(ColumnSource::exact_copy(
-                self.src.as_global(),
-                cols.try_into().unwrap(),
-            ))
+            ColumnSource::exact_copy(self.src.as_global(), cols.try_into().unwrap())
         }
     }
 

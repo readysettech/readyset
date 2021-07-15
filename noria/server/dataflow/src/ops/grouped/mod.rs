@@ -382,20 +382,15 @@ where
         }
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         let mapped_cols = cols
             .iter()
             .filter_map(|x| self.group_by.get(*x).copied())
             .collect::<Vec<_>>();
         if mapped_cols.len() != cols.len() {
-            Ok(ColumnSource::RequiresFullReplay(vec1![self
-                .src
-                .as_global()]))
+            ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
         } else {
-            Ok(ColumnSource::exact_copy(
-                self.src.as_global(),
-                mapped_cols.try_into().unwrap(),
-            ))
+            ColumnSource::exact_copy(self.src.as_global(), mapped_cols.try_into().unwrap())
         }
     }
 

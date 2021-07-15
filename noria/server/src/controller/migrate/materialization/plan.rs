@@ -313,7 +313,7 @@ impl<'a> Plan<'a> {
                         let mut generated = false;
                         if self.graph[first.0].is_internal() {
                             if let ColumnSource::GeneratedFromColumns(..) =
-                                self.graph[first.0].column_source(cols)?
+                                self.graph[first.0].column_source(cols)
                             {
                                 generated = true;
                             }

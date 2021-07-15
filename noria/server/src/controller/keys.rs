@@ -64,7 +64,7 @@ fn deduce_column_source(
     }
 
     let colsrc = if let Some(ref cols) = *cols {
-        n.column_source(cols)?
+        n.column_source(cols)
     } else {
         // if we don't have any columns to pass to `column_source`, we're going for
         // a full materialization.
@@ -284,7 +284,7 @@ fn trace(
         .iter()
         .enumerate()
         .filter_map(|(i, &c)| c.map(|c| (i, c)))
-        .map(|(i, c)| Ok((i, n.parent_columns(c)?)))
+        .map(|(i, c)| Ok((i, n.parent_columns(c))))
         .collect::<Result<Vec<(usize, Vec<(NodeIndex, Option<usize>)>)>, ReadySetError>>()?
         .iter()
         .flat_map(|(i, origins)| {

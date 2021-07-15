@@ -912,13 +912,12 @@ impl Ingredient for Union {
         HashMap::new()
     }
 
-    fn column_source(&self, cols: &[usize]) -> ReadySetResult<ColumnSource> {
+    fn column_source(&self, cols: &[usize]) -> ColumnSource {
         match self.emit {
-            Emit::AllFrom(p, _) => Ok(ColumnSource::exact_copy(
-                p.as_global(),
-                cols.try_into().unwrap(),
-            )),
-            Emit::Project { ref emit, .. } => Ok(ColumnSource::Union(
+            Emit::AllFrom(p, _) => {
+                ColumnSource::exact_copy(p.as_global(), cols.try_into().unwrap())
+            }
+            Emit::Project { ref emit, .. } => ColumnSource::Union(
                 emit.iter()
                     .map(|(src, emit)| ColumnRef {
                         node: src.as_global(),
@@ -932,7 +931,7 @@ impl Ingredient for Union {
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-            )),
+            ),
         }
     }
 
@@ -1030,7 +1029,7 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (u, l, r) = setup(DuplicateMode::UnionAll);
-        let r0 = u.node().resolve(0).unwrap();
+        let r0 = u.node().resolve(0);
         assert!(r0
             .as_ref()
             .unwrap()
@@ -1041,7 +1040,7 @@ mod tests {
             .unwrap()
             .iter()
             .any(|&(n, c)| n == r.as_global() && c == 0));
-        let r1 = u.node().resolve(1).unwrap();
+        let r1 = u.node().resolve(1);
         assert!(r1
             .as_ref()
             .unwrap()
