@@ -14,7 +14,6 @@ use noria::errors::{internal_err, ReadySetResult};
 // pub mod latest;
 pub mod aggregate;
 pub mod concat;
-pub mod conkitten;
 pub mod extremum;
 
 /// Trait for implementing operations that collapse a group of records into a single record.
