@@ -29,6 +29,10 @@ struct Reader {
     #[clap(long)]
     target_qps: Option<u64>,
 
+    /// The region used when requesting a view.
+    #[clap(long)]
+    target_region: Option<String>,
+
     /// The amount of time to batch a set of requests for in ms. If
     /// `batch_duration_ms` is not specified, no batching is performed.
     #[clap(long, default_value = "0")]
@@ -76,7 +80,10 @@ impl Reader {
             queries: Vec::new(),
         };
 
-        let mut view = handle.view("w").await.unwrap();
+        let mut view = match &self.target_region {
+            None => handle.view("w").await.unwrap(),
+            Some(r) => handle.view_from_region("w", r.clone()).await.unwrap(),
+        };
 
         let batch_interval = Duration::from_millis(self.batch_duration_ms);
         let mut batch_start = Instant::now();
