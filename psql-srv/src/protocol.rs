@@ -272,6 +272,7 @@ impl Protocol {
                         Update(n) => CommandCompleteTag::Update(n),
                         Delete(n) => CommandCompleteTag::Delete(n),
                         Command => CommandCompleteTag::Empty,
+                        #[allow(clippy::unreachable)]
                         Select { .. } => unreachable!("Select is handled as a special case above."),
                     };
                     Ok(Response::Message(CommandComplete { tag }))
@@ -300,6 +301,7 @@ impl Protocol {
                         Update(n) => CommandCompleteTag::Update(n),
                         Delete(n) => CommandCompleteTag::Delete(n),
                         Command => CommandCompleteTag::Empty,
+                        #[allow(clippy::unreachable)]
                         Select { .. } => unreachable!("Select is handled as a special case above."),
                     };
                     Ok(Response::Message2(

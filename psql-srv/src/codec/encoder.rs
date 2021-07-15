@@ -122,7 +122,12 @@ where
             let tag_data_len = tag_str.find(NUL_CHAR).ok_or_else(|| {
                 Error::InternalError("error formatting command complete tag".to_string())
             })?;
-            put_str(&tag_str[..tag_data_len], dst);
+            put_str(
+                tag_str.get(..tag_data_len).ok_or_else(|| {
+                    Error::InternalError("Failed to index into tag_str".to_string())
+                })?,
+                dst,
+            );
         }
 
         DataRow {
@@ -212,7 +217,7 @@ where
                 put_format(d.transfer_format, dst);
             }
         }
-
+        #[allow(clippy::unreachable)]
         SSLResponse { .. } => {
             unreachable!("SSLResponse is handled as a special case above.")
         }
@@ -283,6 +288,7 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     let start_ofs = dst.len();
     put_i32(LENGTH_PLACEHOLDER, dst);
     match val {
+        #[allow(clippy::unreachable)]
         Value::Null => {
             unreachable!("Null is handled as a special case above.");
         }
@@ -335,6 +341,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
     let start_ofs = dst.len();
     put_i32(LENGTH_PLACEHOLDER, dst);
     match val {
+        #[allow(clippy::unreachable)]
         Value::Null => {
             unreachable!("Null is handled as a special case above.");
         }
