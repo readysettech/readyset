@@ -129,6 +129,10 @@ impl Aggregator {
     fn group_hash(&self, rec: &[DataType]) -> GroupHash {
         let mut hasher = DefaultHasher::new();
         for &col in self.group.iter() {
+            #[allow(clippy::indexing_slicing)]
+            // When the Aggregator is constructed, it is constructed with a group by that is
+            // derived from existing columns. If we lack a column in the record, then something has
+            // gone horrible wrong and we should panic.
             rec[col].hash(&mut hasher)
         }
         hasher.finish()
@@ -153,6 +157,10 @@ impl GroupedOperation for Aggregator {
     fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
         let group_hash = self.group_hash(r);
         Ok(NumericalDiff {
+            #[allow(clippy::indexing_slicing)]
+            // When the Aggregator is constructed, it is constructed with an over that is
+            // derived from an existing column, or it is defaulted to 0. We should always have at
+            // least one column in this node, so this index is safe.
             value: r[self.over].clone(),
             positive: pos,
             group_hash,
@@ -201,7 +209,7 @@ impl GroupedOperation for Aggregator {
                     Aggregation::Count { .. } => apply_count(curr?, diff),
                     Aggregation::Sum => apply_sum(curr?, diff),
                     Aggregation::Avg => apply_avg(curr?, diff),
-                    Aggregation::GroupConcat { separator: _ } => unreachable!(
+                    Aggregation::GroupConcat { separator: _ } => internal!(
                         "GroupConcats are separate from the other aggregations in the dataflow."
                     ),
                 }
