@@ -61,9 +61,7 @@ impl From<Vec<u8>> for SerializedReadReplyBatch {
     }
 }
 
-type Ack = tokio::sync::oneshot::Sender<
-    Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>,
->;
+type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>>;
 
 pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: Readers) {
     let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
@@ -165,8 +163,7 @@ fn handle_message(
     m: Tagged<ReadQuery>,
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-) -> impl Future<Output = Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>> + Send
-{
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let tag = m.tag;
     match m.v {
         ReadQuery::Normal { target, query } => {
@@ -187,8 +184,7 @@ fn handle_normal_read_query(
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     target: (NodeIndex, usize),
     query: ViewQuery,
-) -> impl Future<Output = Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>> + Send
-{
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let ViewQuery {
         mut key_comparisons,
         block,
@@ -233,7 +229,7 @@ fn handle_normal_read_query(
             }
 
             use dataflow::LookupError::*;
-            match do_lookup(reader, &key, order_by.clone(), limit, &filter)? {
+            match do_lookup(reader, &key, order_by.clone(), limit, &filter) {
                 Ok(rs) => {
                     if consistency_miss {
                         ret.push(SerializedReadReplyBatch::empty());
@@ -273,7 +269,7 @@ fn handle_normal_read_query(
         }
 
         if !ready {
-            return Ok::<_, ReadySetError>(Ok(Tagged {
+            return Ok(Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Err(())),
             }));
@@ -287,7 +283,7 @@ fn handle_normal_read_query(
                 "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
             );
 
-            return Ok::<_, ReadySetError>(Ok(Tagged {
+            return Ok(Ok(Tagged {
                 tag,
                 v: ReadReply::Normal(Ok(ret)),
             }));
@@ -301,27 +297,24 @@ fn handle_normal_read_query(
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {
-            reader.trigger(keys_to_replay.iter())?;
+            reader.trigger(keys_to_replay.iter()).map_err(|_| ())?;
         }
 
-        Ok::<_, ReadySetError>(Err((miss_keys, ret, miss_indices)))
+        Ok(Err((miss_keys, ret, miss_indices)))
     });
 
     let immediate = match immediate {
         Ok(v) => v,
-        Err(e) => return Either::Right(Either::Left(future::ready(Ok(Tagged { tag, v: Err(e) })))),
+        Err(()) => return Either::Right(Either::Left(async move { Err(()) })),
     };
 
     match immediate {
-        Ok(reply) => Either::Left(future::ready(Ok(Tagged {
-            tag: reply.tag,
-            v: Ok(reply.v),
-        }))),
+        Ok(reply) => Either::Left(future::ready(Ok(reply))),
         Err((pending_keys, ret, pending_indices)) => {
             if !block {
                 Either::Left(future::ready(Ok(Tagged {
                     tag,
-                    v: Ok(ReadReply::Normal(Ok(ret))),
+                    v: ReadReply::Normal(Ok(ret)),
                 })))
             } else {
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -364,8 +357,7 @@ fn handle_size_query(
     tag: u32,
     s: &Readers,
     target: (NodeIndex, usize),
-) -> impl Future<Output = Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>> + Send
-{
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let size = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
         let reader = readers_cache.entry(target).or_insert_with(|| {
@@ -378,7 +370,7 @@ fn handle_size_query(
 
     future::ready(Ok(Tagged {
         tag,
-        v: Ok(ReadReply::Size(size)),
+        v: ReadReply::Size(size),
     }))
 }
 
@@ -386,8 +378,7 @@ fn handle_keys_query(
     tag: u32,
     s: &Readers,
     target: (NodeIndex, usize),
-) -> impl Future<Output = Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>> + Send
-{
+) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let keys = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
         let reader = readers_cache.entry(target).or_insert_with(|| {
@@ -399,7 +390,7 @@ fn handle_keys_query(
     });
     future::ready(Ok(Tagged {
         tag,
-        v: Ok(ReadReply::Keys(keys)),
+        v: ReadReply::Keys(keys),
     }))
 }
 
@@ -502,36 +493,30 @@ fn post_lookup<'a, I>(
     iter: I,
     order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
-    filter: &'a Option<ViewQueryFilter>,
-) -> impl Iterator<Item = ReadySetResult<&'a Vec<DataType>>>
+    filter: &Option<ViewQueryFilter>,
+) -> impl Iterator<Item = &'a Vec<DataType>>
 where
     I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
 {
     let ordered_limited = do_order_limit(iter, order_by, limit);
-    ordered_limited.filter_map(move |rec| {
-        match filter
+    let like_pattern = filter.as_ref().map(
+        |ViewQueryFilter {
+             value,
+             operator,
+             column,
+         }| { (LikePattern::new(value, (*operator).into()), *column) },
+    );
+    ordered_limited.filter(move |rec| {
+        like_pattern
             .as_ref()
-            .map(
-                |ViewQueryFilter {
-                     value,
-                     operator,
-                     column,
-                 }| {
-                    Ok::<_, ReadySetError>((LikePattern::new(value, (*operator).into())?, *column))
-                },
-            )
-            .map(|res| {
-                let (pat, col) = res?;
-                Ok::<_, ReadySetError>(pat.matches((&rec[col]).try_into().map_err(|_| {
-                    internal_err("Type mismatch: LIKE and ILIKE can only be applied to strings")
-                })?))
+            .map(|(pat, col)| {
+                pat.matches(
+                    (&rec[*col])
+                        .try_into()
+                        .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
+                )
             })
-            .unwrap_or(Ok(true))
-        {
-            Ok(should_keep) if should_keep => Some(Ok(rec)),
-            Err(e) => Some(Err(e)),
-            _ => None,
-        }
+            .unwrap_or(true)
     })
 }
 
@@ -541,42 +526,30 @@ fn do_lookup(
     order_by: Option<Vec<(usize, bool)>>,
     limit: Option<usize>,
     filter: &Option<ViewQueryFilter>,
-) -> ReadySetResult<Result<SerializedReadReplyBatch, dataflow::LookupError>> {
+) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
-        Ok(reader
+        reader
             .try_find_and(&*equal, |rs| {
-                Ok(serialize(
-                    post_lookup(rs.into_iter(), order_by.clone(), limit, filter).try_fold(
-                        Vec::new(),
-                        |mut acc, r| {
-                            acc.push(r?);
-                            Ok::<_, ReadySetError>(acc)
-                        },
-                    )?,
-                ))
-            })?
-            .map(|r| r.0))
+                serialize(
+                    post_lookup(rs.into_iter(), order_by.clone(), limit, filter)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .map(|r| r.0)
     } else {
-        Ok(
-            match reader
-                .try_find_range_and(&key, |r| Ok(r.into_iter().cloned().collect::<Vec<_>>()))
-                .unwrap()
-            {
-                Ok((rs, _)) => Ok(serialize(
+        reader
+            .try_find_range_and(&key, |r| r.into_iter().cloned().collect::<Vec<_>>())
+            .map(|(rs, _)| {
+                serialize(
                     post_lookup(
                         rs.into_iter().flatten().collect::<Vec<_>>().iter(),
                         order_by,
                         limit,
                         filter,
                     )
-                    .try_fold(Vec::new(), |mut acc, r| {
-                        acc.push(r?);
-                        Ok::<_, ReadySetError>(acc)
-                    })?,
-                )),
-                Err(e) => Err(e),
-            },
-        )
+                    .collect::<Vec<_>>(),
+                )
+            })
     }
 }
 
@@ -635,10 +608,8 @@ impl std::fmt::Debug for BlockingRead {
 }
 
 impl BlockingRead {
-    fn check(
-        &mut self,
-    ) -> Poll<Result<Tagged<ReadySetResult<ReadReply<SerializedReadReplyBatch>>>, ()>> {
-        if let Err(e) = READERS.with(|readers_cache| {
+    fn check(&mut self) -> Poll<Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> {
+        READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
             let target = &self.target;
@@ -668,18 +639,13 @@ impl BlockingRead {
                         .pop()
                         .expect("pending.len() == keys.len()");
 
-                    let lookup_res = match do_lookup(
+                    match do_lookup(
                         reader,
                         &key,
                         self.order_by.clone(),
                         self.limit,
                         &self.filter,
                     ) {
-                        Ok(r) => r,
-                        Err(e) => return Ok(Err(e)),
-                    };
-
-                    match lookup_res {
                         Ok(rs) => {
                             read[read_i] = rs;
                         }
@@ -733,18 +699,13 @@ impl BlockingRead {
                 }
             }
 
-            Ok(Ok(()))
-        })? {
-            return Poll::Ready(Ok(Tagged {
-                tag: self.tag,
-                v: Err(e),
-            }));
-        }
+            Ok(())
+        })?;
 
         if self.pending_keys.is_empty() {
             Poll::Ready(Ok(Tagged {
                 tag: self.tag,
-                v: Ok(ReadReply::Normal(Ok(mem::take(&mut self.read)))),
+                v: ReadReply::Normal(Ok(mem::take(&mut self.read))),
             }))
         } else {
             Poll::Pending
