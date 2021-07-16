@@ -87,22 +87,25 @@ impl<T> Map<T> {
     pub fn insert(&mut self, addr: LocalNodeIndex, value: T) -> Option<T> {
         let i = addr.id();
 
-        if i >= self.things.len() {
-            let diff = i - self.things.len() + 1;
-            self.things.reserve(diff);
-            for _ in 0..diff {
-                self.things.push(None);
+        match self.things.get_mut(i) {
+            None => {
+                let diff = i - self.things.len();
+                self.things.reserve(diff + 1);
+                for _ in 0..diff {
+                    self.things.push(None);
+                }
+                self.things.push(Some(value));
+                self.n += 1;
+                None
+            }
+            Some(v) => {
+                let old = std::mem::replace(v, Some(value));
+                if old.is_none() {
+                    self.n += 1;
+                }
+                old
             }
         }
-
-        let old = self.things.get_mut(i).and_then(|e| e.take());
-        // This is safe since we are already checking that `i` is less that the length of `self.things`.
-        #[allow(clippy::indexing_slicing)]
-        self.things[i] = Some(value);
-        if old.is_none() {
-            self.n += 1;
-        }
-        old
     }
 
     pub fn get(&self, addr: LocalNodeIndex) -> Option<&T> {
