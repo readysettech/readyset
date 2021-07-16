@@ -30,7 +30,7 @@ use vec1::Vec1;
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
-    Tagged<ReadySetResult<ReadReply>>,
+    Tagged<ReadReply>,
     Tagged<ReadQuery>,
     AsyncDestination,
 >;
@@ -752,7 +752,7 @@ impl Service<ViewQuery> for View {
                     .call(request)
                     .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                     .and_then(move |reply| async move {
-                        match reply.v? {
+                        match reply.v {
                             ReadReply::Normal(Ok(rows)) => Ok(rows
                                 .into_iter()
                                 .map(|rows| Results::new(rows.into(), Arc::clone(&columns)))
@@ -839,7 +839,7 @@ impl Service<ViewQuery> for View {
                         .call(request)
                         .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                         .and_then(|reply| async move {
-                            match reply.v? {
+                            match reply.v {
                                 ReadReply::Normal(Ok(rows)) => Ok(rows),
                                 ReadReply::Normal(Err(())) => {
                                     Err(ReadySetError::ViewNotYetAvailable)
@@ -903,7 +903,7 @@ impl View {
             .transpose()
             .map_err(rpc_err!("View::len"))?
         {
-            if let ReadReply::Size(rows) = reply.v? {
+            if let ReadReply::Size(rows) = reply.v {
                 nrows += rows;
             } else {
                 unreachable!();
@@ -936,7 +936,7 @@ impl View {
             .transpose()
             .map_err(rpc_err!("View::keys"))?
         {
-            if let ReadReply::Keys(mut keys) = reply.v? {
+            if let ReadReply::Keys(mut keys) = reply.v {
                 vec.append(&mut keys);
             } else {
                 unreachable!();

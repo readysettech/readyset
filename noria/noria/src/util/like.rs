@@ -8,7 +8,7 @@
 //! * `\_` represents a literal `_` character
 
 use lazy_static::lazy_static;
-use regex::{Error, Regex};
+use regex::Regex;
 
 /// Case-sensitivity mode for a [`LikePattern`]
 #[derive(Debug, Eq, PartialEq)]
@@ -19,7 +19,6 @@ pub enum CaseSensitivityMode {
     /// Match case-insentitively
     CaseInsensitive,
 }
-use crate::{ReadySetError, ReadySetResult};
 pub use CaseSensitivityMode::*;
 
 impl Default for CaseSensitivityMode {
@@ -52,14 +51,10 @@ impl regex::Replacer for LikeTokenReplacer {
     }
 }
 
-fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> ReadySetResult<Regex> {
+fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> Regex {
     lazy_static! {
-        static ref TOKEN: Regex = {
-            // We have a hardocded string so we know this will not fail to create a valid
-            // regex.
-            #[allow(clippy::unwrap_used)]
-            Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap()
-        };
+        #[allow(clippy::unwrap_used)] // regex is hardcoded
+        static ref TOKEN: Regex = Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap();
     }
     let mut re = if mode == CaseInsensitive {
         "(?i)^".to_string()
@@ -68,13 +63,10 @@ fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> ReadySetResul
     };
     re.push_str(&TOKEN.replace_all(like_pattern, LikeTokenReplacer));
     re.push('$');
-    Regex::new(&re).map_err(|e| {
-        ReadySetError::BadRequest(match e {
-            Error::Syntax(s) => format!("syntax error: '{}'", s),
-            Error::CompiledTooBig(l) => format!("size limit exceeded. Limit: {}", l),
-            _ => "could not create regex".to_owned(),
-        })
-    })
+    #[allow(clippy::expect_used)]
+    // We escape all regex characters that could cause regex construction to fail, so there's no way
+    // this expect can actually get hit (and there's a property test asserting that)
+    Regex::new(&re).expect("Like pattern compiled to invalid regex")
 }
 
 /// Representation for a LIKE or ILIKE pattern
@@ -86,10 +78,10 @@ impl LikePattern {
     /// Construct a new LIKE pattern from the given string and [`CaseSensitivityMode`].
     ///
     /// This will do some work, so should be done ideally at most once per pattern.
-    pub fn new(pat: &str, case_sensitivity_mode: CaseSensitivityMode) -> ReadySetResult<Self> {
-        Ok(Self {
-            regex: like_to_regex(pat, case_sensitivity_mode)?,
-        })
+    pub fn new(pat: &str, case_sensitivity_mode: CaseSensitivityMode) -> Self {
+        Self {
+            regex: like_to_regex(pat, case_sensitivity_mode),
+        }
     }
 
     /// Returns true if this LikePattern matches the given string.
@@ -98,19 +90,19 @@ impl LikePattern {
     }
 }
 
-// /// Converts to a [`CaseSensitive`] pattern
-// impl From<&str> for LikePattern {
-//     fn from(s: &str) -> Self {
-//         Self::new(s, CaseSensitive)
-//     }
-// }
-//
-// /// Converts to a [`CaseSensitive`] pattern
-// impl From<String> for LikePattern {
-//     fn from(s: String) -> Self {
-//         Self::new(&s, CaseSensitive)
-//     }
-// }
+/// Converts to a [`CaseSensitive`] pattern
+impl From<&str> for LikePattern {
+    fn from(s: &str) -> Self {
+        Self::new(s, CaseSensitive)
+    }
+}
+
+/// Converts to a [`CaseSensitive`] pattern
+impl From<String> for LikePattern {
+    fn from(s: String) -> Self {
+        Self::new(&s, CaseSensitive)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -119,53 +111,31 @@ mod tests {
 
     #[test]
     fn like_matching() {
-        assert!(LikePattern::new("foo%", CaseSensitive)
-            .unwrap()
-            .matches("foobar"));
-        assert!(!LikePattern::new("foo%", CaseSensitive)
-            .unwrap()
-            .matches("oofoobar"));
-        assert!(LikePattern::new("%foo%", CaseSensitive)
-            .unwrap()
-            .matches("oofoobar"));
-        assert!(LikePattern::new("%foo___", CaseSensitive)
-            .unwrap()
-            .matches("oofoobar"));
-        assert!(!LikePattern::new("%foo___", CaseSensitive)
-            .unwrap()
-            .matches("oofoobarr"));
-        assert!(!LikePattern::new("%foo%", CaseSensitive)
-            .unwrap()
-            .matches("ooFOOoo"));
+        assert!(LikePattern::new("foo%", CaseSensitive).matches("foobar"));
+        assert!(!LikePattern::new("foo%", CaseSensitive).matches("oofoobar"));
+        assert!(LikePattern::new("%foo%", CaseSensitive).matches("oofoobar"));
+        assert!(LikePattern::new("%foo___", CaseSensitive).matches("oofoobar"));
+        assert!(!LikePattern::new("%foo___", CaseSensitive).matches("oofoobarr"));
+        assert!(!LikePattern::new("%foo%", CaseSensitive).matches("ooFOOoo"));
     }
 
     #[test]
     fn ilike_matching() {
-        assert!(LikePattern::new("%foo%", CaseInsensitive)
-            .unwrap()
-            .matches("oofoobar"));
-        assert!(LikePattern::new("%foo%", CaseInsensitive)
-            .unwrap()
-            .matches("ooFOObar"));
+        assert!(LikePattern::new("%foo%", CaseInsensitive).matches("oofoobar"));
+        assert!(LikePattern::new("%foo%", CaseInsensitive).matches("ooFOObar"));
     }
 
     #[test]
     fn ilike_matching_unicode() {
-        assert!(LikePattern::new("σ%Σ%σ%", CaseInsensitive)
-            .unwrap()
-            .matches("Σomebody σet up uσ the bomb"));
+        assert!(LikePattern::new("σ%Σ%σ%", CaseInsensitive).matches("Σomebody σet up uσ the bomb"));
     }
 
     #[test]
     fn escapes() {
-        assert!(LikePattern::new(r"\%", CaseSensitive).unwrap().matches("%"));
-        assert!(!LikePattern::new(r"\%", CaseSensitive)
-            .unwrap()
-            .matches(r"\foo"));
-        assert!(LikePattern::new(r"\_", CaseSensitive).unwrap().matches("_"));
-        assert!(!LikePattern::new(r"\_", CaseSensitive)
-            .unwrap()
-            .matches(r"\a"));
+        assert!(LikePattern::new(r"\%", CaseSensitive).matches("%"));
+        assert!(!LikePattern::new(r"\%", CaseSensitive).matches(r"\foo"));
+        assert!(LikePattern::new(r"\_", CaseSensitive).matches("_"));
+        assert!(!LikePattern::new(r"\_", CaseSensitive).matches(r"\a"));
     }
 
     #[proptest]
@@ -174,7 +144,7 @@ mod tests {
             static ref ESCAPER: Regex = Regex::new(r"(\\)+(?P<tok>[%_])").unwrap();
         }
         let pat = ESCAPER.replace_all(&pat, "$tok");
-        let pattern = LikePattern::new(&pat, CaseSensitive).unwrap();
+        let pattern = LikePattern::new(&pat, CaseSensitive);
         assert!(pattern.matches(&pat));
     }
 }
