@@ -115,7 +115,7 @@ where
                 let string_url = url.as_ref().unwrap().to_string();
                 let r = hyper::Request::post(string_url)
                     .body(hyper::Body::from(body.clone()))
-                    .map_err(|e| internal_err(format!("hyper request failed: {}", e)))?;
+                    .map_err(|e| internal_err(format!("http request failed: {}", e)))?;
 
                 // TODO(eta): custom error types here?
 
