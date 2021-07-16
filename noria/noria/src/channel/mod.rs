@@ -20,8 +20,8 @@ use tokio::io::BufWriter;
 pub mod tcp;
 
 pub use self::tcp::{DualTcpStream, TcpSender};
-use crate::errors::internal_err;
-use crate::internal;
+use crate::internal::DomainIndex;
+use crate::ReadySetError;
 use crate::ReadySetResult;
 
 pub const CONNECTION_FROM_BASE: u8 = 1;
@@ -208,12 +208,6 @@ impl<K: Eq + Hash + Clone, T> Default for ChannelCoordinator<K, T> {
     }
 }
 
-macro_rules! map_poisoned_err {
-    ($res:expr) => {
-        $res.map_err(|e| internal_err(format!("mutex is poisoned: '{}'", e)))
-    };
-}
-
 impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     pub fn new() -> Self {
         Self {
@@ -225,8 +219,11 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
     }
 
     pub fn insert_remote(&self, key: K, addr: SocketAddr) -> ReadySetResult<()> {
-        let mut inner = map_poisoned_err!(self.inner.write())?;
-        inner.addrs.insert(key, addr);
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let mut guard = self.inner.write().expect("poisoned mutex");
+        guard.addrs.insert(key, addr);
         Ok(())
     }
 
@@ -235,52 +232,73 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
         key: K,
         chan: tokio::sync::mpsc::UnboundedSender<T>,
     ) -> ReadySetResult<()> {
-        let mut inner = map_poisoned_err!(self.inner.write())?;
-        inner.locals.insert(key, chan);
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let mut guard = self.inner.write().expect("poisoned mutex");
+        guard.locals.insert(key, chan);
         Ok(())
     }
 
-    pub fn has<Q>(&self, key: &Q) -> ReadySetResult<bool>
+    pub fn has<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        map_poisoned_err!(self.inner.read()).map(|guard| guard.addrs.contains_key(key))
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let guard = self.inner.read().expect("poisoned mutex");
+        guard.addrs.contains_key(key)
     }
 
-    pub fn get_addr<Q>(&self, key: &Q) -> ReadySetResult<Option<SocketAddr>>
+    pub fn get_addr<Q>(&self, key: &Q) -> Option<SocketAddr>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        map_poisoned_err!(self.inner.read()).map(|guard| guard.addrs.get(key).cloned())
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let guard = self.inner.read().expect("poisoned mutex");
+        guard.addrs.get(key).cloned()
     }
 
-    pub fn is_local<Q>(&self, key: &Q) -> ReadySetResult<Option<bool>>
+    pub fn is_local<Q>(&self, key: &Q) -> Option<bool>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        map_poisoned_err!(self.inner.read()).map(|guard| guard.locals.get(key).map(|_| true))
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let guard = self.inner.read().expect("poisoned mutex");
+        guard.locals.get(key).map(|_| true)
     }
 
-    pub fn builder_for<Q>(
+    pub fn builder_for(
         &self,
-        key: &Q,
-    ) -> ReadySetResult<Option<DomainConnectionBuilder<MaybeLocal, T>>>
+        key: &(DomainIndex, usize),
+    ) -> ReadySetResult<DomainConnectionBuilder<MaybeLocal, T>>
     where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        K: Borrow<(DomainIndex, usize)>,
     {
-        map_poisoned_err!(self.inner.read()).and_then(|guard| match guard.addrs.get(key) {
-            None => internal!("no addresses found for key"),
-            Some(addrs) => Ok(Some(DomainConnectionBuilder {
+        #[allow(clippy::expect_used)]
+        // This can only fail if the mutex is poisoned, in which case we can't recover,
+        // so we allow to panic if that happens.
+        let guard = self.inner.read().expect("poisoned mutex");
+        match guard.addrs.get(key) {
+            None => Err(ReadySetError::NoSuchDomain {
+                domain_index: key.0.index(),
+                shard: key.1,
+            }),
+            Some(addrs) => Ok(DomainConnectionBuilder {
                 sport: None,
                 addr: *addrs,
                 chan: guard.locals.get(key).cloned(),
                 is_for_base: false,
                 _marker: MaybeLocal,
-            })),
-        })
+            }),
+        }
     }
 }

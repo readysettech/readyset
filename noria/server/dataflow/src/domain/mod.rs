@@ -1101,7 +1101,6 @@ impl Domain {
                                 let sender = self
                                     .channel_coordinator
                                     .builder_for(&(trigger_domain, shard))?
-                                    .unwrap()
                                     .build_async()
                                     .unwrap();
 
@@ -1233,7 +1232,6 @@ impl Domain {
                             // TODO: make async
                             self.channel_coordinator
                                 .builder_for(&(domain, shardi))?
-                                .unwrap()
                                 .build_sync()
                         };
 
@@ -1356,8 +1354,7 @@ impl Domain {
 
                     let replay_tx_desc = self
                         .channel_coordinator
-                        .builder_for(&(self.index, self.shard.unwrap_or(0)))?
-                        .unwrap();
+                        .builder_for(&(self.index, self.shard.unwrap_or(0)))?;
 
                     let domain_str = self.index.index().to_string();
                     let shard_str = self.shard.unwrap_or(0).to_string();
