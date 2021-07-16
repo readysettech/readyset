@@ -2,7 +2,7 @@ use crate::consistency::Timestamp;
 use crate::data::*;
 use crate::errors::{internal_err, view_err, ReadySetError, ReadySetResult};
 use crate::util::like::CaseSensitivityMode;
-use crate::{internal, rpc_err, Tagged, Tagger};
+use crate::{rpc_err, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
@@ -232,13 +232,16 @@ impl KeyComparison {
     }
 
     /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
-    /// the total number of shards
-    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> ReadySetResult<Vec<usize>> {
-        Ok(match self {
+    /// the total number of shards.
+    ///
+    /// ## Invariants
+    /// * the `key_idx` must be in the `key`s.
+    /// * the `key`s should have at least one element.
+    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> Vec<usize> {
+        match self {
             KeyComparison::Equal(key) => vec![crate::shard_by(
-                key.get(key_idx).ok_or_else(|| {
-                    internal_err(format!("key does not have a value for index {}", key_idx))
-                })?,
+                #[allow(clippy::indexing_slicing)]
+                &key[key_idx],
                 num_shards,
             )],
             // Since we currently implement hash-based sharding, any non-point query must target all
@@ -247,12 +250,12 @@ impl KeyComparison {
             // (2020) Implementing Range Queries and Write Policies in a Partially-Materialized
             // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
             _ => (0..num_shards).collect(),
-        })
+        }
     }
 
     /// Returns the shard key(s) that the first column in this [`KeyComparison`] must target, given
     /// the total number of shards
-    pub fn shard_keys(&self, num_shards: usize) -> ReadySetResult<Vec<usize>> {
+    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
         self.shard_keys_at(0, num_shards)
     }
 
@@ -414,16 +417,18 @@ impl Arbitrary for KeyComparison {
 
         let bound = || {
             any_with::<Bound<Vec<DataType>>>(((1..100).into(), ())).prop_map(|bound| {
-                // This is only used for testing, so we allow calling `unwrap()`
                 #[allow(clippy::unwrap_used)]
+                // This is only used for testing, so we allow calling `unwrap()`, and because we know
+                // we are generating vectors of length 1 and beyond.
                 bound.map(|k| Vec1::try_from_vec(k).unwrap())
             })
         };
 
         prop_oneof![
             any_with::<Vec<DataType>>(((1..100).into(), ())).prop_map(|k| {
-                // This is only used for testing, so we allow calling `unwrap()`
                 #[allow(clippy::unwrap_used)]
+                // This is only used for testing, so we allow calling `unwrap()`, and because we know
+                // we are generating vectors of length 1 and beyond.
                 KeyComparison::try_from(k).unwrap()
             }),
             (bound(), bound()).prop_map(KeyComparison::Range)
@@ -736,7 +741,7 @@ impl Service<ViewQuery> for View {
             let _guard = span.as_ref().map(tracing::Span::enter);
             tracing::trace!("submit request");
 
-            return future::Either::Left(future::Either::Right(
+            return future::Either::Left(
                 self.shards
                     .first_mut()
                     .call(request)
@@ -752,7 +757,7 @@ impl Service<ViewQuery> for View {
                         }
                     })
                     .map_err(move |e| view_err(ni, e)),
-            ));
+            );
         }
 
         if let Some(ref span) = span {
@@ -760,27 +765,11 @@ impl Service<ViewQuery> for View {
         }
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
-            match comparison.shard_keys(self.shards.len()) {
-                Ok(shards) => {
-                    for shard in shards {
-                        if shard_queries
-                            .get_mut(shard)
-                            .map(|sq| sq.push(comparison.clone()))
-                            .is_none()
-                        {
-                            return future::Either::Left(future::Either::Left(
-                                future::Either::Left(async move {
-                                    internal!("could not found shard query for shard '{}'", shard)
-                                }),
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    return future::Either::Left(future::Either::Left(future::Either::Right(
-                        async move { Err(e) },
-                    )))
-                }
+            for shard in comparison.shard_keys(self.shards.len()) {
+                #[allow(clippy::indexing_slicing)]
+                // We built `shard_queries` to be the correct length, so it's safe to access
+                // it by index in this case.
+                shard_queries[shard].push(comparison.clone());
             }
         }
 

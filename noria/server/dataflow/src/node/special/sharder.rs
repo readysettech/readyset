@@ -169,13 +169,13 @@ impl Sharder {
         src: LocalNodeIndex,
         is_sharded: bool,
         output: &mut dyn Executor,
-    ) -> ReadySetResult<()> {
+    ) {
         assert!(!is_sharded);
 
         if key_columns.len() == 1 && key_columns[0] == self.shard_by {
             // Send only to the shards that must evict something.
             for key in keys {
-                for shard in key.shard_keys(self.txs.len())? {
+                for shard in key.shard_keys(self.txs.len()) {
                     let dst = self.txs[shard].0;
                     let p = self.sharded.entry(shard).or_insert_with(|| {
                         Box::new(Packet::EvictKeys {
@@ -212,6 +212,5 @@ impl Sharder {
                 )
             }
         }
-        Ok(())
     }
 }
