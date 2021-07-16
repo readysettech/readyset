@@ -1,6 +1,6 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
-use crate::errors::{internal_err, table_err, ReadySetError, ReadySetResult};
+use crate::errors::{table_err, ReadySetError, ReadySetResult};
 use crate::internal;
 use crate::internal::*;
 use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
@@ -145,10 +145,7 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub(crate) fn build(
-        self,
-        rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
-    ) -> ReadySetResult<Table> {
+    pub(crate) fn build(self, rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>) -> Table {
         let mut addrs = Vec::with_capacity(self.txs.len());
         let mut conns = Vec::with_capacity(self.txs.len());
         for (shardi, &addr) in self.txs.iter().enumerate() {
@@ -158,9 +155,10 @@ impl TableBuilder {
 
             // one entry per shard so that we can send sharded requests in parallel even if
             // they happen to be targeting the same machine.
-            let mut rpcs = rpcs.lock().map_err(|e| {
-                internal_err(format!("unable to acquire rpcs lock. Error: '{}'", e))
-            })?;
+            #[allow(clippy::unwrap_used)]
+            // This can only fail if the mutex is poisoned, in which case we want to panic
+            // since there's no way to recover.
+            let mut rpcs = rpcs.lock().unwrap();
             let s = match rpcs.entry((addr, shardi)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
@@ -186,7 +184,7 @@ impl TableBuilder {
         }
 
         let dispatch = tracing::dispatcher::get_default(|d| d.clone());
-        Ok(Table {
+        Table {
             ni: self.ni,
             node: self.addr,
             key: self.key,
@@ -201,7 +199,7 @@ impl TableBuilder {
             shards: conns,
 
             dispatch,
-        })
+        }
     }
 }
 
