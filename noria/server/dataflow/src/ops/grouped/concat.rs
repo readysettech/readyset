@@ -178,7 +178,7 @@ impl GroupedOperation for GroupConcat {
         }
         prev_state.string_repr = out_str.clone();
         self.last_state.borrow_mut().insert(group, prev_state);
-        DataType::try_from(out_str)
+        Ok(out_str.into())
     }
 
     fn description(&self, detailed: bool) -> String {

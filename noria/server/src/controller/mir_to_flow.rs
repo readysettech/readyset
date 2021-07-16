@@ -22,7 +22,6 @@ use mir::{Column, FlowNode, MirNodeRef};
 
 use dataflow::ops::grouped::concat::GroupConcat;
 use petgraph::graph::NodeIndex;
-use std::convert::TryFrom;
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
@@ -344,7 +343,7 @@ fn mir_node_to_flow_parts(
                         column,
                         key,
                         mig,
-                    )?
+                    )
                 }
             };
 
@@ -507,7 +506,7 @@ fn make_rewrite_node(
     rewrite_col: &str,
     key: &str,
     mig: &mut Migration,
-) -> ReadySetResult<FlowNode> {
+) -> FlowNode {
     let src_na = src.borrow().flow_node_addr().unwrap();
     let should_rewrite_na = should_rewrite.borrow().flow_node_addr().unwrap();
     let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
@@ -520,15 +519,9 @@ fn make_rewrite_node(
     let node = mig.add_ingredient(
         String::from(name),
         column_names.as_slice(),
-        ops::rewrite::Rewrite::new(
-            src_na,
-            should_rewrite_na,
-            rewrite_col,
-            DataType::try_from(value)?,
-            key,
-        ),
+        ops::rewrite::Rewrite::new(src_na, should_rewrite_na, rewrite_col, value.into(), key),
     );
-    Ok(FlowNode::New(node))
+    FlowNode::New(node)
 }
 
 fn make_filter_node(

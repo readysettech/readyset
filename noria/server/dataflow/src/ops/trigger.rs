@@ -49,9 +49,9 @@ impl Trigger {
         }
     }
 
-    fn trigger(&self, executor: &mut dyn Executor, ids: Vec<DataType>) -> ReadySetResult<()> {
+    fn trigger(&self, executor: &mut dyn Executor, ids: Vec<DataType>) {
         if ids.is_empty() {
-            return Ok(());
+            return;
         }
 
         match self.trigger {
@@ -60,14 +60,13 @@ impl Trigger {
                 for gid in ids.iter() {
                     let mut group_context: HashMap<String, DataType> = HashMap::new();
                     group_context.insert(String::from("id"), gid.clone());
-                    group_context.insert(String::from("group"), group.clone().try_into()?);
+                    group_context.insert(String::from("group"), group.clone().into());
                     requests.push(group_context);
                 }
 
                 self.create_universes(executor, requests);
             }
         }
-        Ok(())
     }
 }
 
@@ -120,7 +119,7 @@ impl Ingredient for Trigger {
             .cloned()
             .collect();
 
-        self.trigger(executor, keys)?;
+        self.trigger(executor, keys);
 
         Ok(ProcessingResult {
             results: rs,
