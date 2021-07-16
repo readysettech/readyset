@@ -6,10 +6,10 @@ use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 use common::{DataType, Record};
 use launchpad::Indices;
-use noria::{internal, invariant_eq};
+use noria::invariant_eq;
 use serde_derive::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Write;
 
@@ -66,13 +66,14 @@ impl GroupConcat {
     pub fn new(
         src: NodeIndex,
         source_cols: Vec<usize>,
+        group_by: Vec<usize>,
         separator: String,
     ) -> ReadySetResult<GroupedOperator<GroupConcat>> {
         Ok(GroupedOperator::new(
             src,
             GroupConcat {
                 source_cols,
-                group_by: vec![],
+                group_by,
                 separator,
                 last_state: RefCell::new(HashMap::new()),
             },
@@ -88,26 +89,7 @@ pub struct ConcatDiff {
 impl GroupedOperation for GroupConcat {
     type Diff = ConcatDiff;
 
-    fn setup(&mut self, parent: &Node) -> ReadySetResult<()> {
-        let num_cols = parent.fields().len();
-        let mut group_by = HashSet::new();
-        // We group by all columns that aren't involved in the aggregation, so insert all columns
-        // and then remove the ones we aggregate.
-        group_by.extend(0..num_cols);
-
-        for sc in self.source_cols.iter() {
-            if !group_by.remove(sc) {
-                // TODO(eta): check the global_addr is actually set so we don't just turn this
-                //            into an unreachable
-                internal!(
-                    "tried to reference invalid column {} in group_concat (of node {})",
-                    sc,
-                    parent.global_addr().index()
-                );
-            }
-        }
-
-        self.group_by = group_by.into_iter().collect();
+    fn setup(&mut self, _: &Node) -> ReadySetResult<()> {
         Ok(())
     }
 
@@ -237,7 +219,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let c = GroupConcat::new(s.as_global(), vec![1], String::from("#")).unwrap();
+        let c = GroupConcat::new(s.as_global(), vec![1], vec![0], String::from("#")).unwrap();
 
         g.set_op("concat", &["x", "ys"], c, mat);
         g
