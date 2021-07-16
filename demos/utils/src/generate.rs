@@ -6,6 +6,8 @@ use anyhow::{Context, Result};
 use noria_logictest::generate::DatabaseConnection;
 use std::convert::TryInto;
 
+const MAX_BATCH_ROWS: usize = 10000;
+
 pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random
     // data.
@@ -14,27 +16,38 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
             continue;
         }
 
-        let data = table_spec.table.generate_data(table_spec.num_rows, false);
-        let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
-        let insert = nom_sql::InsertStatement {
-            table: table_name.clone().into(),
-            fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
-            data: data
-                .into_iter()
-                .map(|mut row| {
-                    columns
-                        .iter()
-                        .map(|col| row.remove(col).unwrap().try_into().unwrap())
-                        .collect()
-                })
-                .collect(),
-            ignore: false,
-            on_duplicate: None,
-        };
+        let mut rows_remaining = table_spec.num_rows;
 
-        db.query_drop(insert.to_string())
-            .await
-            .with_context(|| format!("Inserting row into database for {}", table_name))?;
+        while rows_remaining > 0 {
+            let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
+            let data = table_spec.table.generate_data_from_index(
+                rows_to_generate,
+                table_spec.num_rows - rows_remaining,
+                false,
+            );
+            let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
+            let insert = nom_sql::InsertStatement {
+                table: table_name.clone().into(),
+                fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+                data: data
+                    .into_iter()
+                    .map(|mut row| {
+                        columns
+                            .iter()
+                            .map(|col| row.remove(col).unwrap().try_into().unwrap())
+                            .collect()
+                    })
+                    .collect(),
+                ignore: false,
+                on_duplicate: None,
+            };
+
+            db.query_drop(insert.to_string())
+                .await
+                .with_context(|| format!("Inserting row into database for {}", table_name))?;
+
+            rows_remaining -= rows_to_generate;
+        }
     }
 
     Ok(())

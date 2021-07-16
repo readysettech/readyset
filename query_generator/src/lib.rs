@@ -768,7 +768,20 @@ impl TableSpec {
         num_rows: usize,
         random: bool,
     ) -> Vec<HashMap<ColumnName, DataType>> {
-        (0..num_rows)
+        self.generate_data_from_index(num_rows, 0, random)
+    }
+
+    /// Generate `num_rows` rows of data for this table starting with the index:
+    /// `index`. If `random` is true, columns that are not unique and do not
+    /// need to yield expected values, have their DataGenerationSpec overriden
+    /// with DataGenerationSpec::Random.
+    pub fn generate_data_from_index(
+        &mut self,
+        num_rows: usize,
+        index: usize,
+        random: bool,
+    ) -> Vec<HashMap<ColumnName, DataType>> {
+        (index..index + num_rows)
             .map(|n| self.generate_row(n, random))
             .collect()
     }
