@@ -417,10 +417,16 @@ mod parse {
         ({
             let digits = numbers.len();
             let (hour, minutes, seconds) = if digits > 4 {
+                // allowed because length is checked before indexing
+                #[allow(clippy::indexing_slicing)]
                 (to_number(&numbers[0..digits-4]), to_number(&numbers[digits-4..digits-2]), to_number(& numbers[digits-2..digits]))
             } else if digits > 2 {
+                // allowed because length is checked before indexing
+                #[allow(clippy::indexing_slicing)]
                 (0, to_number(&numbers[0..digits-2]), to_number(&numbers[digits-2..digits]))
             } else {
+                // allowed because length is checked before indexing
+                #[allow(clippy::indexing_slicing)]
                 (0, 0, to_number(&numbers[0..digits]))
             };
             (sign.is_none(),

@@ -1,4 +1,5 @@
 use msql_srv::ErrorKind;
+use msql_srv::MsqlSrvError;
 use noria::ReadySetError;
 use std::io;
 use thiserror::Error;
@@ -15,6 +16,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error(transparent)]
     ReadySet(ReadySetError),
+    #[error("MsqlSrvError: {0}")]
+    MsqlSrv(#[from] MsqlSrvError),
 }
 
 /// Everything in `noria-client` involves doing a Noria RPC call, so this `From` implementation

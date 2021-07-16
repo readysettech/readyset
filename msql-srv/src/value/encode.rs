@@ -1,3 +1,4 @@
+use crate::error::{other_error, OtherErrorKind};
 use crate::myc;
 use crate::myc::constants::{ColumnFlags, ColumnType};
 use crate::myc::io::WriteMysqlExt;
@@ -53,7 +54,9 @@ where
             v.to_mysql_bin(w, ct)
         } else {
             // should be handled by NULL map
-            unreachable!();
+            Err(other_error(OtherErrorKind::Unexpected {
+                error: "Value should be handled by null map".to_string(),
+            }))
         }
     }
 
@@ -692,10 +695,9 @@ impl ToMysqlValue for myc::value::Value {
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
                 if neg {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "negative times not yet supported",
-                    ));
+                    return Err(other_error(OtherErrorKind::Unexpected {
+                        error: "negative times not yet supported".to_string(),
+                    }));
                 }
                 (chrono::Duration::days(i64::from(d))
                     + chrono::Duration::hours(i64::from(h))
@@ -703,7 +705,11 @@ impl ToMysqlValue for myc::value::Value {
                     + chrono::Duration::seconds(i64::from(s))
                     + chrono::Duration::microseconds(i64::from(us)))
                 .to_std()
-                .expect("only positive times at the moment")
+                .map_err(|_| {
+                    other_error(OtherErrorKind::Unexpected {
+                        error: "negative times not yet supported".to_string(),
+                    })
+                })?
                 .to_mysql_text(w)
             }
         }
@@ -712,7 +718,9 @@ impl ToMysqlValue for myc::value::Value {
     #[allow(clippy::many_single_char_names)]
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match *self {
-            myc::value::Value::NULL => unreachable!(),
+            myc::value::Value::NULL => Err(other_error(OtherErrorKind::Unexpected {
+                error: "NULL value not expected".to_string(),
+            })),
             myc::value::Value::Bytes(ref bytes) => bytes.to_mysql_bin(w, c),
             myc::value::Value::Int(n) => {
                 // we *could* just delegate to i64 impl here, but then you couldn't use myc::value::Value
@@ -757,10 +765,9 @@ impl ToMysqlValue for myc::value::Value {
             }
             myc::value::Value::Time(neg, d, h, m, s, us) => {
                 if neg {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "negative times not yet supported",
-                    ));
+                    return Err(other_error(OtherErrorKind::Unexpected {
+                        error: "negative times not yet supported".to_string(),
+                    }));
                 }
                 (chrono::Duration::days(i64::from(d))
                     + chrono::Duration::hours(i64::from(h))
@@ -768,7 +775,11 @@ impl ToMysqlValue for myc::value::Value {
                     + chrono::Duration::seconds(i64::from(s))
                     + chrono::Duration::microseconds(i64::from(us)))
                 .to_std()
-                .expect("only positive times at the moment")
+                .map_err(|_| {
+                    other_error(OtherErrorKind::Unexpected {
+                        error: "negative times not yet supported".to_string(),
+                    })
+                })?
                 .to_mysql_bin(w, c)
             }
         }

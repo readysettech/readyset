@@ -1,3 +1,4 @@
+use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, StatusFlags};
 use crate::packet::PacketWriter;
 use crate::value::ToMysqlValue;
@@ -250,7 +251,14 @@ where
 
     async fn start(&mut self) -> io::Result<()> {
         if !self.columns.is_empty() {
-            writers::column_definitions(self.columns, self.result.as_mut().unwrap().writer).await?;
+            writers::column_definitions(
+                self.columns,
+                self.result
+                    .as_mut()
+                    .ok_or_else(|| other_error(OtherErrorKind::PacketWriterErr))?
+                    .writer,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -274,9 +282,19 @@ where
             return Ok(());
         }
 
-        if self.result.as_mut().unwrap().is_bin {
+        if self
+            .result
+            .as_mut()
+            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+            .is_bin
+        {
             if self.col == 0 {
-                self.result.as_mut().unwrap().writer.write_u8(0x00).await?;
+                self.result
+                    .as_mut()
+                    .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+                    .writer
+                    .write_u8(0x00)
+                    .await?;
 
                 // leave space for nullmap
                 self.data.resize(self.bitmap_len, 0);
@@ -302,7 +320,15 @@ where
                     // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
                     // NULL-bitmap-byte = ((field-pos + offset) / 8)
                     // NULL-bitmap-bit  = ((field-pos + offset) % 8)
-                    self.data[(self.col + 2) / 8] |= 1u8 << ((self.col + 2) % 8);
+                    let idx = (self.col + 2) / 8;
+                    let len = self.data.len();
+                    *self.data.get_mut(idx).ok_or_else(|| {
+                        other_error(OtherErrorKind::IndexErr {
+                            data: "self.data".to_string(),
+                            index: idx,
+                            length: len,
+                        })
+                    })? |= 1u8 << ((self.col + 2) % 8);
                 }
             } else {
                 v.to_mysql_bin(&mut self.data, c)?;
@@ -311,7 +337,12 @@ where
             // HACK(eta): suboptimal buffering (see writers.rs too)
             let mut buf = Vec::new();
             v.to_mysql_text(&mut buf)?;
-            self.result.as_mut().unwrap().writer.write_all(&buf).await?;
+            self.result
+                .as_mut()
+                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+                .writer
+                .write_all(&buf)
+                .await?;
         }
         self.col += 1;
         Ok(())
@@ -331,16 +362,26 @@ where
             ));
         }
 
-        if self.result.as_mut().unwrap().is_bin {
+        if self
+            .result
+            .as_mut()
+            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+            .is_bin
+        {
             self.result
                 .as_mut()
-                .unwrap()
+                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
                 .writer
                 .write_all(&self.data[..])
                 .await?;
             self.data.clear();
         }
-        self.result.as_mut().unwrap().writer.end_packet().await?;
+        self.result
+            .as_mut()
+            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+            .writer
+            .end_packet()
+            .await?;
         self.col = 0;
 
         Ok(())
@@ -367,22 +408,30 @@ where
 }
 
 impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
-    fn finish_inner(&mut self) {
+    fn finish_inner(&mut self) -> io::Result<()> {
         if self.finished {
-            return;
+            return Ok(());
         }
         self.finished = true;
 
         if self.columns.is_empty() {
             // response to no column query is always an OK packet
             // we've kept track of the number of rows in col (hacky, I know)
-            self.result.as_mut().unwrap().last_end = Some(Finalizer::Ok {
+            self.result
+                .as_mut()
+                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+                .last_end = Some(Finalizer::Ok {
                 rows: self.col as u64,
                 last_insert_id: 0,
             });
+            Ok(())
         } else {
             // we wrote out at least one row
-            self.result.as_mut().unwrap().last_end = Some(Finalizer::Eof);
+            self.result
+                .as_mut()
+                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+                .last_end = Some(Finalizer::Eof);
+            Ok(())
         }
     }
 
@@ -396,16 +445,19 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
         if !self.columns.is_empty() && self.col != 0 {
             self.end_row().await?;
         }
-        self.finish_inner();
+        self.finish_inner()?;
         // we know that dropping self will see self.finished == true,
         // and so Drop won't try to use self.result.
-        Ok(self.result.take().unwrap())
+        Ok(self
+            .result
+            .take()
+            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?)
     }
 }
 
 impl<'a, W: AsyncWrite + Unpin + 'a> Drop for RowWriter<'a, W> {
     fn drop(&mut self) {
-        self.finish_inner();
+        let _ = self.finish_inner();
         if !self.columns.is_empty() && self.col != 0 {
             eprintln!("WARNING(msql-srv): RowWriter dropped without finishing")
         }

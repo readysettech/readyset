@@ -73,7 +73,14 @@ where
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> io::Result<()> {
-        (self.on_e)(id, params.into_iter().collect(), results).await
+        let mut extract_params = Vec::new();
+        for p in params {
+            extract_params.push(p.map_err(|e| {
+                let e: std::io::Error = e.into();
+                e
+            })?);
+        }
+        (self.on_e)(id, extract_params, results).await
     }
 
     async fn on_close(&mut self, _: u32) {}
@@ -518,7 +525,11 @@ fn it_prepares() {
                 params[0].coltype,
                 myc::constants::ColumnType::MYSQL_TYPE_LONGLONG
             );
-            assert_eq!(Into::<i8>::into(params[0].value), 42i8);
+            assert_eq!(
+                std::convert::TryInto::<i8>::try_into(params[0].value)
+                    .expect("Error calling try_into"),
+                42i8
+            );
 
             let cols = cols.clone();
             Box::pin(async move {
@@ -622,19 +633,41 @@ fn insert_exec() {
                 params[6].coltype,
                 myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
             );
-            assert_eq!(Into::<&str>::into(params[0].value), "user199");
-            assert_eq!(Into::<&str>::into(params[1].value), "user199@example.com");
             assert_eq!(
-                Into::<&str>::into(params[2].value),
+                std::convert::TryInto::<&str>::try_into(params[0].value)
+                    .expect("Error calling try_into"),
+                "user199"
+            );
+            assert_eq!(
+                std::convert::TryInto::<&str>::try_into(params[1].value)
+                    .expect("Error calling try_into"),
+                "user199@example.com"
+            );
+            assert_eq!(
+                std::convert::TryInto::<&str>::try_into(params[2].value)
+                    .expect("Error calling try_into"),
                 "$2a$10$Tq3wrGeC0xtgzuxqOlc3v.07VTUvxvwI70kuoVihoO2cE5qj7ooka"
             );
             assert_eq!(
-                Into::<chrono::NaiveDateTime>::into(params[3].value),
+                std::convert::TryInto::<chrono::NaiveDateTime>::try_into(params[3].value)
+                    .expect("Error calling try_into"),
                 chrono::NaiveDate::from_ymd(2018, 4, 6).and_hms(13, 0, 56)
             );
-            assert_eq!(Into::<&str>::into(params[4].value), "token199");
-            assert_eq!(Into::<&str>::into(params[5].value), "rsstoken199");
-            assert_eq!(Into::<&str>::into(params[6].value), "mtok199");
+            assert_eq!(
+                std::convert::TryInto::<&str>::try_into(params[4].value)
+                    .expect("Error calling try_into"),
+                "token199"
+            );
+            assert_eq!(
+                std::convert::TryInto::<&str>::try_into(params[5].value)
+                    .expect("Error calling try_into"),
+                "rsstoken199"
+            );
+            assert_eq!(
+                std::convert::TryInto::<&str>::try_into(params[6].value)
+                    .expect("Error calling try_into"),
+                "mtok199"
+            );
 
             Box::pin(async move { w.completed(42, 1).await })
         },
@@ -694,7 +727,11 @@ fn send_long() {
                 params[0].coltype,
                 myc::constants::ColumnType::MYSQL_TYPE_VAR_STRING
             );
-            assert_eq!(Into::<&[u8]>::into(params[0].value), b"Hello world");
+            assert_eq!(
+                std::convert::TryInto::<&[u8]>::try_into(params[0].value)
+                    .expect("Error calling try_into"),
+                b"Hello world"
+            );
 
             let cols = cols.clone();
             Box::pin(async move {
@@ -890,7 +927,11 @@ fn prepared_nulls() {
                 params[1].coltype,
                 myc::constants::ColumnType::MYSQL_TYPE_LONGLONG
             );
-            assert_eq!(Into::<i8>::into(params[1].value), 42i8);
+            assert_eq!(
+                std::convert::TryInto::<i8>::try_into(params[1].value)
+                    .expect("Error calling try_into"),
+                42i8
+            );
 
             let cols = cols.clone();
             Box::pin(async move {

@@ -107,6 +107,7 @@
 extern crate mysql_common as myc;
 
 use async_trait::async_trait;
+use error::{other_error, OtherErrorKind};
 use std::collections::HashMap;
 use std::io;
 use std::iter;
@@ -122,6 +123,7 @@ mod authentication;
 mod commands;
 mod constants;
 pub mod datatype;
+pub mod error;
 mod errorcodes;
 mod packet;
 mod params;
@@ -150,6 +152,7 @@ pub struct Column {
 }
 
 pub use crate::datatype::MysqlTime;
+pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};
 pub use crate::resultset::{InitWriter, QueryResultWriter, RowWriter, StatementMetaWriter};
@@ -276,7 +279,8 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     }
 
     async fn init(&mut self) -> Result<bool, B::Error> {
-        let auth_data = generate_auth_data();
+        let auth_data =
+            generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.writer.write_all(&[10]).await?; // protocol 10
 
         // 5.1.10 because that's what Ruby's ActiveRecord requires
@@ -365,14 +369,20 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         let mut stmts: HashMap<u32, _> = HashMap::new();
         while let Some((seq, packet)) = self.reader.next().await? {
             self.writer.set_seq(seq + 1);
-            let cmd = commands::parse(&packet).unwrap().1;
+            let cmd = commands::parse(&packet)
+                .map_err(|e| {
+                    other_error(OtherErrorKind::GenericErr {
+                        error: format!("{:?}", e),
+                    })
+                })?
+                .1;
             match cmd {
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);
                     if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
-                        let var = &q[b"SELECT @@".len()..];
+                        let var = &q.get(b"SELECT @@".len()..);
                         match var {
-                            b"max_allowed_packet" => {
+                            Some(b"max_allowed_packet") => {
                                 let cols = &[Column {
                                     table: String::new(),
                                     column: "@@max_allowed_packet".to_owned(),
@@ -383,8 +393,16 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                                 w.write_row(iter::once(67108864u32)).await?;
                                 w.finish().await?;
                             }
-                            _ => {
+                            Some(_) => {
                                 w.completed(0, 0).await?;
+                            }
+                            None => {
+                                return Err(other_error(OtherErrorKind::IndexErr {
+                                    data: "q (query_string)".to_string(),
+                                    index: b"SELECT @@".len(),
+                                    length: q.len(),
+                                })
+                                .into());
                             }
                         }
                     } else {

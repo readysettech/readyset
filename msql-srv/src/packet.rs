@@ -1,3 +1,4 @@
+use crate::error::{other_error, OtherErrorKind};
 use byteorder::{ByteOrder, LittleEndian};
 use std::io;
 use std::task::{Context, Poll};
@@ -26,7 +27,13 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for PacketWriter<W> {
             }
         }
         let left = min(buf.len(), U24_MAX - self.to_write.len());
-        self.to_write.extend(&buf[..left]);
+        self.to_write.extend(buf.get(..left).ok_or_else(|| {
+            other_error(OtherErrorKind::IndexErr {
+                data: "buf".to_string(),
+                index: left - 1,
+                length: buf.len(),
+            })
+        })?);
         Poll::Ready(Ok(left))
     }
     fn poll_flush(
@@ -72,16 +79,41 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         let len = self.to_write.len() - 4;
         if len != 0 || self.bytes_written > 0 {
             if self.bytes_written == 0 {
-                LittleEndian::write_u24(&mut self.to_write[0..3], len as u32);
-                self.to_write[3] = self.seq;
+                LittleEndian::write_u24(
+                    &mut self.to_write.get_mut(0..3).ok_or_else(|| {
+                        other_error(OtherErrorKind::IndexErr {
+                            data: "to_write".to_string(),
+                            index: 2,
+                            length: len + 4,
+                        })
+                    })?,
+                    len as u32,
+                );
+                *self.to_write.get_mut(3).ok_or_else(|| {
+                    other_error(OtherErrorKind::IndexErr {
+                        data: "to_write".to_string(),
+                        index: 3,
+                        length: len + 4,
+                    })
+                })? = self.seq;
             }
             let s = Pin::into_inner(self);
             loop {
-                let written =
-                    match Pin::new(&mut s.w).poll_write(cx, &s.to_write[s.bytes_written..]) {
-                        Poll::Pending => return Poll::Pending,
-                        Poll::Ready(x) => x?,
-                    };
+                let idx = s.bytes_written;
+                let len = s.to_write.len();
+                let written = match Pin::new(&mut s.w).poll_write(
+                    cx,
+                    s.to_write.get(s.bytes_written..).ok_or_else(|| {
+                        other_error(OtherErrorKind::IndexErr {
+                            data: "to_write".to_string(),
+                            index: idx,
+                            length: len,
+                        })
+                    })?,
+                ) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(x) => x?,
+                };
                 s.bytes_written += written;
                 if s.bytes_written < s.to_write.len() {
                     continue;
@@ -142,7 +174,13 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
                     // &self.bytes[self.start..] to `packet()`, and the lifetimes should all work
                     // out. however, without NLL, borrowck doesn't realize that self.bytes is no
                     // longer borrowed after the match, and so can be mutated.
-                    let bytes = &self.bytes[self.start..];
+                    let bytes = &self.bytes.get(self.start..).ok_or_else(|| {
+                        other_error(OtherErrorKind::IndexErr {
+                            data: "self.bytes".to_string(),
+                            index: self.start,
+                            length: self.bytes.len(),
+                        })
+                    })?;
                     unsafe { ::std::slice::from_raw_parts(bytes.as_ptr(), bytes.len()) }
                 };
                 match packet(bytes) {
@@ -164,9 +202,16 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
             self.bytes.drain(0..self.start);
             self.start = 0;
             let end = self.bytes.len();
-            self.bytes.resize(std::cmp::max(4096, end * 2), 0);
+            let new_len = std::cmp::max(4096, end * 2);
+            self.bytes.resize(new_len, 0);
             let read = {
-                let mut buf = &mut self.bytes[end..];
+                let mut buf = self.bytes.get_mut(end..).ok_or_else(|| {
+                    other_error(OtherErrorKind::IndexErr {
+                        data: "self.bytes".to_string(),
+                        index: end,
+                        length: new_len,
+                    })
+                })?;
                 self.r.read(&mut buf).await?
             };
             self.bytes.truncate(end + read);
@@ -190,6 +235,8 @@ pub fn fullpacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     let (i, _) = nom::bytes::complete::tag(&[0xff, 0xff, 0xff])(i)?;
     let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
     let (i, bytes) = nom::bytes::complete::take(U24_MAX)(i)?;
+    // nom::bytes::complete::take ensures that seq has one element
+    #[allow(clippy::indexing_slicing)]
     Ok((i, (seq[0], bytes)))
 }
 
@@ -197,6 +244,8 @@ pub fn onepacket(i: &[u8]) -> nom::IResult<&[u8], (u8, &[u8])> {
     let (i, length) = nom::number::complete::le_u24(i)?;
     let (i, seq) = nom::bytes::complete::take(1u8)(i)?;
     let (i, bytes) = nom::bytes::complete::take(length)(i)?;
+    // nom::bytes::complete::take ensures that seq has one element
+    #[allow(clippy::indexing_slicing)]
     Ok((i, (seq[0], bytes)))
 }
 
