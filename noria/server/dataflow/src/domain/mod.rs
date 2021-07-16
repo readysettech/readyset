@@ -1133,9 +1133,9 @@ impl Domain {
                                 if n == 1 {
                                     let misses = misses.cloned().collect::<Vec<_>>();
                                     if misses.is_empty() {
-                                        return Ok(true);
+                                        return true;
                                     }
-                                    Ok(txs[0].send(misses).is_ok())
+                                    txs[0].send(misses).is_ok()
                                 } else {
                                     // TODO: compound reader
                                     let mut per_shard = HashMap::new();
@@ -1149,11 +1149,11 @@ impl Domain {
                                         }
                                     }
                                     if per_shard.is_empty() {
-                                        return Ok(true);
+                                        return true;
                                     }
-                                    Ok(per_shard.into_iter().all(|(shard, keys)| {
+                                    per_shard.into_iter().all(|(shard, keys)| {
                                         txs[shard].send(keys.into_iter().cloned().collect()).is_ok()
-                                    }))
+                                    })
                                 }
                             },
                         );

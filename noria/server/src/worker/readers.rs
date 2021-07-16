@@ -292,7 +292,7 @@ fn handle_normal_read_query(
 
         // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
         if !keys_to_replay.is_empty() {
-            reader.trigger(keys_to_replay.iter()).map_err(|_| ())?;
+            reader.trigger(keys_to_replay.iter());
         }
 
         Ok(Err((miss_keys, ret, miss_indices)))
@@ -524,7 +524,7 @@ impl BlockingRead {
                 if now > next_trigger && !self.pending_keys.is_empty() {
                     // Retrigger all un-read keys. Its possible they could have been filled and then
                     // evicted again without us reading it.
-                    if !reader.trigger(self.pending_keys.iter()).map_err(|_| ())? {
+                    if !reader.trigger(self.pending_keys.iter()) {
                         // server is shutting down and won't do the backfill
                         return Err(());
                     }
