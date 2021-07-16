@@ -433,12 +433,10 @@ impl DataType {
                     .map(Cow::Owned)
             }
             (Self::Timestamp(ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(DataType::try_from(
-                    ts.format(TIMESTAMP_FORMAT).to_string(),
-                )?))
+                Ok(Cow::Owned(ts.format(TIMESTAMP_FORMAT).to_string().into()))
             }
             (Self::Time(ts), Some(Time), Text | Tinytext | Mediumtext | Varchar(_)) => {
-                Ok(Cow::Owned(DataType::try_from(ts.to_string())?))
+                Ok(Cow::Owned(ts.to_string().into()))
             }
             (Self::Timestamp(ts), Some(Timestamp), Date) => {
                 Ok(Cow::Owned(Self::Timestamp(ts.date().and_hms(0, 0, 0))))
@@ -894,7 +892,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
         match l {
             Literal::Null => Ok(DataType::None),
             Literal::Integer(i) => Ok((*i as i64).into()),
-            Literal::String(s) => s.as_str().try_into(),
+            Literal::String(s) => Ok(s.as_str().into()),
             Literal::CurrentTimestamp | Literal::CurrentTime => {
                 let ts = chrono::Local::now().naive_local();
                 Ok(DataType::Timestamp(ts))
@@ -1021,9 +1019,9 @@ impl<'a> TryFrom<&'a DataType> for &'a str {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Text(ref s) => Ok(s
-                .to_str()
-                .map_err(|e| internal_err(format!("unable to create str from &ArcCStr: {}", e)))?),
+            DataType::Text(ref s) => Ok(s.to_str().map_err(|e| {
+                ReadySetError::BadRequest(format!("unable to create str from &ArcCStr: {}", e))
+            })?),
             DataType::TinyText(ref bts) => {
                 if bts[TINYTEXT_WIDTH - 1] == 0 {
                     // NULL terminated CStr
@@ -1320,11 +1318,12 @@ impl TryFrom<&'_ DataType> for f64 {
     }
 }
 
-impl TryFrom<String> for DataType {
-    type Error = ReadySetError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        DataType::try_from(s.as_bytes())
+impl From<String> for DataType {
+    fn from(s: String) -> Self {
+        #[allow(clippy::unwrap_used)]
+        // The only way for this to fail is if the `String` is not a valid UTF-8 String,
+        // which can never happen since all Strings in Rust are valid UTF-8 encoded.
+        DataType::try_from(s.as_bytes()).unwrap()
     }
 }
 
@@ -1345,11 +1344,12 @@ impl TryFrom<DataType> for String {
     }
 }
 
-impl<'a> TryFrom<&'a str> for DataType {
-    type Error = ReadySetError;
-
-    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
-        DataType::try_from(s.as_bytes())
+impl<'a> From<&'a str> for DataType {
+    fn from(s: &'a str) -> Self {
+        #[allow(clippy::unwrap_used)]
+        // The only way for this to fail is if the `&str` is not a valid UTF-8 string,
+        // which can never happen since all String slices in Rust are valid UTF-8 encoded.
+        DataType::try_from(s.as_bytes()).unwrap()
     }
 }
 
@@ -1636,33 +1636,29 @@ impl TableOperation {
         }
     }
 
-    #[doc(hidden)]
+    /// Construct an iterator over the shards this TableOperation should target.
+    ///
+    /// ## Invariants
+    /// * `key_col` must be in the rows.
+    /// * the `key`s must have at least one element.
     #[inline]
-    pub fn shards(
-        &self,
-        key_col: usize,
-        num_shards: usize,
-    ) -> ReadySetResult<impl Iterator<Item = usize>> {
-        macro_rules! get_or_err {
-            ($vect:expr, $key:expr) => {
-                $vect.get($key).ok_or(internal_err("index out of bounds"))?
-            };
-        }
+    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
+        #[allow(clippy::indexing_slicing)]
         let key = match self {
-            TableOperation::Insert(r) => Some(get_or_err!(&r, key_col)),
-            TableOperation::DeleteByKey { key } => Some(get_or_err!(&key, 0)),
-            TableOperation::DeleteRow { row } => Some(get_or_err!(&row, key_col)),
-            TableOperation::Update { key, .. } => Some(get_or_err!(&key, 0)),
-            TableOperation::InsertOrUpdate { row, .. } => Some(get_or_err!(&row, key_col)),
+            TableOperation::Insert(row) => Some(&row[key_col]),
+            TableOperation::DeleteByKey { key } => Some(&key[0]),
+            TableOperation::DeleteRow { row } => Some(&row[key_col]),
+            TableOperation::Update { key, .. } => Some(&key[0]),
+            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
             TableOperation::SetReplicationOffset(_) => None,
         };
 
-        Ok(if let Some(key) = key {
+        if let Some(key) = key {
             Either::Left(iter::once(crate::shard_by(key, num_shards)))
         } else {
             // updates to replication offsets should hit all shards
             Either::Right(0..num_shards)
-        })
+        }
     }
 }
 
@@ -1689,12 +1685,7 @@ impl Arbitrary for DataType {
             any::<i64>().prop_map(BigInt),
             any::<u64>().prop_map(UnsignedBigInt),
             any::<(f64, u8)>().prop_map(|(f, p)| Real(f, p)),
-            any::<String>().prop_map(|s| {
-                // As long as the string does not have nulls, it should be safe to
-                // transform it into a DataType.
-                #[allow(clippy::unwrap_used)]
-                DataType::try_from(s.replace("\0", "")).unwrap()
-            }),
+            any::<String>().prop_map(|s| DataType::from(s.replace("\0", ""))),
             arbitrary_naive_date_time().prop_map(Timestamp),
             arbitrary_duration()
                 .prop_map(MysqlTime::new)

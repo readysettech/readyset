@@ -364,31 +364,17 @@ impl Table {
                 let ops: &mut Vec<TableOperation> = match (&mut i.data).try_into() {
                     Ok(v) => v,
                     Err(e) => {
-                        return future::Either::Left(future::Either::Right(future::Either::Right(
-                            async move {
-                                internal!(
-                                    "couldn't get table operations from packet. Error: '{}'",
-                                    e
-                                )
-                            },
-                        )))
+                        return future::Either::Left(future::Either::Right(async move {
+                            internal!("couldn't get table operations from packet. Error: '{}'", e)
+                        }))
                     }
                 };
                 for r in ops.drain(..) {
-                    match r.shards(key_col, nshards) {
-                        Ok(iter) => {
-                            for shard in iter {
-                                // The `shard` index belongs to the range `0..nshards`,
-                                // so it's not out of bounds.
-                                #[allow(clippy::indexing_slicing)]
-                                shard_writes[shard].push(r.clone())
-                            }
-                        }
-                        Err(e) => {
-                            return future::Either::Left(future::Either::Right(
-                                future::Either::Left(async move { Err(e) }),
-                            ))
-                        }
+                    for shard in r.shards(key_col, nshards) {
+                        // The `shard` index belongs to the range `0..nshards`,
+                        // so it's not out of bounds.
+                        #[allow(clippy::indexing_slicing)]
+                        shard_writes[shard].push(r.clone())
                     }
                 }
 

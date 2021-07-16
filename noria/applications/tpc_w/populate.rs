@@ -157,11 +157,11 @@ pub async fn populate_cc_xacts(
             let cx_co_id = i32::from_str(fields[8]).unwrap();
             records.push(vec![
                 cx_o_id.into(),
-                DataType::try_from(cx_type)?,
-                DataType::try_from(cx_num)?,
-                DataType::try_from(cx_name)?,
+                cx_type.into(),
+                cx_num.into(),
+                cx_name.into(),
                 cx_expire.into(),
-                DataType::try_from(cx_auth_id)?,
+                cx_auth_id.into(),
                 DataType::try_from(cx_amt)?,
                 cx_xact_date.into(),
                 cx_co_id.into(),
@@ -193,9 +193,9 @@ pub async fn populate_countries(
             let co_currency = fields[3];
             records.push(vec![
                 co_id.into(),
-                DataType::try_from(co_name)?,
+                co_name.into(),
                 DataType::try_from(co_exchange)?,
-                DataType::try_from(co_currency)?,
+                co_currency.into(),
             ]);
         }
         s.clear();
@@ -239,22 +239,22 @@ pub async fn populate_customers(
             let c_data = fields[16];
             records.push(vec![
                 c_id.into(),
-                DataType::try_from(c_uname)?,
-                DataType::try_from(c_passwd)?,
-                DataType::try_from(c_fname)?,
-                DataType::try_from(c_lname)?,
+                c_uname.into(),
+                c_passwd.into(),
+                c_fname.into(),
+                c_lname.into(),
                 c_addr_id.into(),
-                DataType::try_from(c_phone)?,
-                DataType::try_from(c_email)?,
+                c_phone.into(),
+                c_email.into(),
                 c_since.into(),
                 c_last_login.into(),
-                DataType::try_from(c_login)?,
-                DataType::try_from(c_expiration)?,
+                c_login.into(),
+                c_expiration.into(),
                 DataType::try_from(c_discount)?,
                 DataType::try_from(c_balance)?,
                 DataType::try_from(c_ytd_pmt)?,
                 c_birthdate.into(),
-                DataType::try_from(c_data)?,
+                c_data.into(),
             ]);
         }
         s.clear();
@@ -303,27 +303,27 @@ pub async fn populate_items(
             let i_dimensions = fields[21];
             records.push(vec![
                 i_id.into(),
-                DataType::try_from(i_title)?,
+                i_title.into(),
                 i_a_id.into(),
                 i_pub_date.into(),
-                DataType::try_from(i_publisher)?,
-                DataType::try_from(i_subject)?,
-                DataType::try_from(i_desc)?,
+                i_publisher.into(),
+                i_subject.into(),
+                i_desc.into(),
                 i_related1.into(),
                 i_related2.into(),
                 i_related3.into(),
                 i_related4.into(),
                 i_related5.into(),
-                DataType::try_from(i_thumbnail)?,
-                DataType::try_from(i_image)?,
+                i_thumbnail.into(),
+                i_image.into(),
                 DataType::try_from(i_srp)?,
-                DataType::try_from(i_cost)?,
+                i_cost.into(),
                 i_avail.into(),
                 i_stock.into(),
-                DataType::try_from(i_isbn)?,
+                i_isbn.into(),
                 i_page.into(),
-                DataType::try_from(i_backing)?,
-                DataType::try_from(i_dimensions)?,
+                i_backing.into(),
+                i_dimensions.into(),
             ]);
         }
         s.clear();
@@ -368,11 +368,11 @@ pub async fn populate_orders(backend: &mut Backend, data_location: &str) -> Read
                 DataType::try_from(o_sub_total)?,
                 DataType::try_from(o_tax)?,
                 DataType::try_from(o_total)?,
-                DataType::try_from(o_ship_type)?,
+                o_ship_type.into(),
                 o_ship_date.into(),
                 o_bill_addr_id.into(),
                 o_ship_addr_id.into(),
-                DataType::try_from(o_status)?,
+                o_status.into(),
             ]);
         }
         s.clear();
@@ -410,7 +410,7 @@ pub async fn populate_order_line(
                 ol_i_id.into(),
                 ol_qty.into(),
                 DataType::try_from(ol_discount)?,
-                DataType::try_from(ol_comments)?,
+                ol_comments.into(),
             ]);
         }
         s.clear();

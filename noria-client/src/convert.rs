@@ -16,7 +16,7 @@ impl ToDataType for Literal {
     fn into_datatype(self) -> ReadySetResult<DataType> {
         Ok(match self {
             Literal::Null => DataType::None,
-            Literal::String(b) => DataType::try_from(b)?,
+            Literal::String(b) => b.into(),
             Literal::Blob(b) => {
                 let len = b.len();
                 if len <= TINYTEXT_WIDTH {
