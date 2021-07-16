@@ -591,7 +591,7 @@ impl Domain {
             } else if let Some(key_shard_i) = ask_shard_by_key_i {
                 let mut shards = HashMap::new();
                 for key in keys {
-                    for shard in key.shard_keys_at(key_shard_i, options.len())? {
+                    for shard in key.shard_keys_at(key_shard_i, options.len()) {
                         shards
                             .entry(shard)
                             .or_insert_with(Vec::new)
@@ -615,10 +615,10 @@ impl Domain {
                 // would have hit the if further up
                 internal!();
             };
-            Ok(())
         } else {
             internal!("asked to replay along non-existing path");
         }
+        Ok(())
     }
 
     fn request_partial_replay(
@@ -1141,7 +1141,7 @@ impl Domain {
                                     let mut per_shard = HashMap::new();
                                     for miss in misses {
                                         assert!(matches!(miss.len(), Some(1) | None));
-                                        for shard in miss.shard_keys(n)? {
+                                        for shard in miss.shard_keys(n) {
                                             per_shard
                                                 .entry(shard)
                                                 .or_insert_with(Vec::new)
@@ -1233,6 +1233,12 @@ impl Domain {
                             self.channel_coordinator
                                 .builder_for(&(domain, shardi))?
                                 .build_sync()
+                                .map_err(|e| {
+                                    internal_err(format!(
+                                        "an error occurred while trying to create a domain connection: '{}'",
+                                        e
+                                    ))
+                                })
                         };
 
                         let options = tokio::task::block_in_place(|| {

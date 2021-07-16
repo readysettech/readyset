@@ -143,7 +143,7 @@ where
 {
     pub fn build_async(
         self,
-    ) -> ReadySetResult<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
+    ) -> io::Result<Box<dyn Sink<T, Error = bincode::Error> + Send + Unpin>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(
                 ImplSinkForSender(chan)
@@ -159,16 +159,10 @@ where
             }
             .build_async()
             .map(|c| Box::new(c) as Box<_>)
-            .map_err(|e| {
-                internal_err(format!(
-                    "an error occurred while trying to create a domain connection: '{}'",
-                    e
-                ))
-            })
         }
     }
 
-    pub fn build_sync(self) -> ReadySetResult<Box<dyn Sender<Item = T> + Send>> {
+    pub fn build_sync(self) -> io::Result<Box<dyn Sender<Item = T> + Send>> {
         if let Some(chan) = self.chan {
             Ok(Box::new(chan))
         } else {
@@ -181,12 +175,6 @@ where
             }
             .build_sync()
             .map(|c| Box::new(c) as Box<_>)
-            .map_err(|e| {
-                internal_err(format!(
-                    "an error occurred while trying to create a domain connection: '{}'",
-                    e
-                ))
-            })
         }
     }
 }
