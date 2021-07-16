@@ -3,7 +3,6 @@ use crate::ops::grouped::GroupedOperator;
 
 use crate::prelude::*;
 use noria::{invariant, ReadySetResult};
-use std::convert::TryFrom;
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -20,6 +19,10 @@ impl Extremum {
     /// The aggregation will be aggregate the value in column number `over` from its inputs (i.e.,
     /// from the `src` node in the graph), and use the columns in the `group_by` array as a group
     /// identifier.
+    ///
+    /// # Invariants
+    ///
+    /// * over argument must always be a valid column in the node.
     pub fn over(
         self,
         src: NodeIndex,
@@ -57,8 +60,9 @@ pub struct ExtremumOperator {
 }
 
 pub enum DiffType {
-    Insert(i128),
-    Remove(i128),
+    Insert(DataType),
+    Remove(DataType),
+    None,
 }
 
 impl GroupedOperation for ExtremumOperator {
@@ -77,30 +81,14 @@ impl GroupedOperation for ExtremumOperator {
     }
 
     fn to_diff(&self, r: &[DataType], pos: bool) -> ReadySetResult<Self::Diff> {
-        let v = match r[self.over] {
-            DataType::Int(n) => i128::from(n),
-            DataType::UnsignedInt(n) => i128::from(n),
-            DataType::BigInt(n) => i128::from(n),
-            DataType::UnsignedBigInt(n) => i128::from(n),
-            DataType::Timestamp(ts) => ts.timestamp_nanos().into(),
-            _ => {
-                // the column we're aggregating over is non-numerical (or rather, this value is).
-                // if you've removed a column, chances are the  default value has the wrong type.
-                unreachable!();
-
-                // if you *really* want to ignore this error, use this code:
-                //
-                //   match self.op {
-                //       Extremum::Min => i64::max_value(),
-                //       Extremum::Max => i64::min_value(),
-                //   }
-            }
-        };
-
-        if pos {
-            Ok(DiffType::Insert(v))
+        #[allow(clippy::indexing_slicing)] // Invariant documented.
+        let v = &r[self.over];
+        if let DataType::None = *v {
+            Ok(DiffType::None)
+        } else if pos {
+            Ok(DiffType::Insert(v.clone()))
         } else {
-            Ok(DiffType::Remove(v))
+            Ok(DiffType::Remove(v.clone()))
         }
     }
 
@@ -111,26 +99,13 @@ impl GroupedOperation for ExtremumOperator {
     ) -> ReadySetResult<DataType> {
         // Extreme values are those that are at least as extreme as the current min/max (if any).
         // let mut is_extreme_value : Box<dyn Fn(i64) -> bool> = Box::new(|_|true);
-        let mut extreme_values: Vec<i128> = vec![];
-        if let Some(data) = current {
-            match *data {
-                DataType::Int(n) => extreme_values.push(i128::from(n)),
-                DataType::UnsignedInt(n) => extreme_values.push(i128::from(n)),
-                DataType::BigInt(n) => extreme_values.push(i128::from(n)),
-                DataType::UnsignedBigInt(n) => extreme_values.push(i128::from(n)),
-                _ => unreachable!(),
-            }
-        };
+        let mut extreme_values: Vec<DataType> = vec![];
+        if let Some(d) = current {
+            extreme_values.push(d.clone());
+        }
 
-        let is_extreme_value = |x: i128| {
-            if let Some(data) = current {
-                let n = match *data {
-                    DataType::Int(n) => i128::from(n),
-                    DataType::UnsignedInt(n) => i128::from(n),
-                    DataType::BigInt(n) => i128::from(n),
-                    DataType::UnsignedBigInt(n) => i128::from(n),
-                    _ => unreachable!(),
-                };
+        let is_extreme_value = |x: &DataType| {
+            if let Some(n) = current {
                 match self.op {
                     Extremum::Max => x >= n,
                     Extremum::Min => x <= n,
@@ -142,9 +117,9 @@ impl GroupedOperation for ExtremumOperator {
 
         for d in diffs {
             match d {
-                DiffType::Insert(v) if is_extreme_value(v) => extreme_values.push(v),
-                DiffType::Remove(v) if is_extreme_value(v) => {
-                    if let Some(i) = extreme_values.iter().position(|x: &i128| *x == v) {
+                DiffType::Insert(v) if is_extreme_value(&v) => extreme_values.push(v),
+                DiffType::Remove(v) if is_extreme_value(&v) => {
+                    if let Some(i) = extreme_values.iter().position(|x| *x == v) {
                         extreme_values.swap_remove(i);
                     }
                 }
@@ -157,11 +132,7 @@ impl GroupedOperation for ExtremumOperator {
             Extremum::Max => extreme_values.into_iter().max(),
         };
 
-        if let Some(extreme) = extreme {
-            return DataType::try_from(extreme);
-        }
-
-        Err(ReadySetError::GroupedStateLost)
+        extreme.ok_or(ReadySetError::GroupedStateLost)
     }
 
     fn description(&self, detailed: bool) -> String {

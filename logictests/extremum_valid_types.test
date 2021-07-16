@@ -1,0 +1,25 @@
+statement ok
+CREATE TABLE t1 (col1 int, col2 float, col3 VARCHAR(30));
+
+statement ok
+CREATE TABLE t2 (col1 VARCHAR(30));
+
+statement ok
+INSERT INTO t1 (col1, col2, col3) VALUES (1, 1.0, 'yes'), (2, 2.0, 'no'), (NULL, NULL, NULL);
+
+statement ok
+INSERT INTO t2 (col1) VALUES ('yes'), ('no'), (NULL);
+
+query IRT nosort
+SELECT max(col1), max(col2), max(col3) FROM t1;
+----
+2
+2.0
+yes
+
+query IRT nosort
+SELECT min(col1), min(col2), min(col3) FROM t1;
+----
+1
+1.0
+no
