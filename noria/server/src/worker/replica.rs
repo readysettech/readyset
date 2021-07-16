@@ -276,8 +276,8 @@ impl Replica {
             let &mut (ref mut tx, ref mut pending) = match outputs.entry(ri) {
                 Occupied(entry) => entry.into_mut(),
                 Vacant(entry) => entry.insert({
-                    while !cc.has(&ri)? {}
-                    let tx = cc.builder_for(&ri)?.unwrap().build_async().unwrap();
+                    while !cc.has(&ri) {}
+                    let tx = cc.builder_for(&ri)?.build_async().unwrap();
                     (tx, true)
                 }),
             };

@@ -519,7 +519,7 @@ async fn do_eviction(
                     let tx = match domain_senders.entry(target) {
                         Occupied(entry) => entry.into_mut(),
                         Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
-                            coord.builder_for(&target)?.unwrap().build_async()
+                            coord.builder_for(&target)?.build_async()
                         })?),
                     };
                     let r = tx

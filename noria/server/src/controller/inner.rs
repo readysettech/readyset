@@ -332,13 +332,13 @@ impl ControllerInner {
         let mut domain_addresses = Vec::new();
         for (index, handle) in &self.domains {
             for i in 0..handle.shards.len() {
-                let socket_addr = self
-                    .channel_coordinator
-                    .get_addr(&(*index, i))?
-                    .ok_or_else(|| ReadySetError::NoSuchDomain {
-                        domain_index: index.index(),
-                        shard: i,
-                    })?;
+                let socket_addr =
+                    self.channel_coordinator
+                        .get_addr(&(*index, i))
+                        .ok_or_else(|| ReadySetError::NoSuchDomain {
+                            domain_index: index.index(),
+                            shard: i,
+                        })?;
 
                 domain_addresses.push(DomainDescriptor::new(*index, i, socket_addr));
             }
@@ -1066,14 +1066,12 @@ impl ControllerInner {
             .map(|i| {
                 self.channel_coordinator
                     .get_addr(&(node.domain(), i))
-                    .and_then(|opt| {
-                        opt.ok_or_else(|| {
-                            internal_err(format!(
-                                "failed to get channel coordinator for {}.{}",
-                                node.domain().index(),
-                                i
-                            ))
-                        })
+                    .ok_or_else(|| {
+                        internal_err(format!(
+                            "failed to get channel coordinator for {}.{}",
+                            node.domain().index(),
+                            i
+                        ))
                     })
             })
             .collect::<ReadySetResult<Vec<_>>>()?;
