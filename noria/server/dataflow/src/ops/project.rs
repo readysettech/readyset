@@ -351,10 +351,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let p = setup(false, false, true);
-        assert_eq!(
-            p.node().description(true),
-            "π[2, 0, lit: \"hello\", lit: 42]"
-        );
+        assert_eq!(p.node().description(true), "π[2, 0, lit: hello, lit: 42]");
     }
 
     #[test]
@@ -374,7 +371,7 @@ mod tests {
         let p = setup(false, true, true);
         assert_eq!(
             p.node().description(true),
-            "π[0, 1, 2, lit: \"hello\", lit: 42]"
+            "π[0, 1, 2, lit: hello, lit: 42]"
         );
     }
 

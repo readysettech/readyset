@@ -62,8 +62,7 @@ impl fmt::Display for DataType {
             DataType::None => write!(f, "NULL"),
             DataType::Text(..) | DataType::TinyText(..) => {
                 let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
-                // TODO: do we really want to produce quoted strings?
-                write!(f, "\"{}\"", text)
+                write!(f, "{}", text)
             }
             DataType::Int(n) => write!(f, "{}", n),
             DataType::UnsignedInt(n) => write!(f, "{}", n),
@@ -1928,8 +1927,8 @@ mod tests {
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
-        assert_eq!(format!("{}", tiny_text), "\"hi\"");
-        assert_eq!(format!("{}", text), "\"this is a very long text indeed\"");
+        assert_eq!(format!("{}", tiny_text), "hi");
+        assert_eq!(format!("{}", text), "this is a very long text indeed");
         assert_eq!(format!("{}", real), "-0.05");
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
