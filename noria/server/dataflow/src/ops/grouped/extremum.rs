@@ -191,21 +191,21 @@ mod tests {
         }
     }
 
-    fn assert_record_change(group: i32, old: i32, new: i32, rs: Records) {
+    fn assert_record_change(group: i32, old: DataType, new: DataType, rs: Records) {
         assert_eq!(rs.len(), 2);
         let mut rs = rs.into_iter();
 
         match rs.next().unwrap() {
             Record::Negative(r) => {
                 assert_eq!(r[0], group.into());
-                assert_eq!(r[1], old.into());
+                assert_eq!(r[1], old);
             }
             _ => unreachable!(),
         }
         match rs.next().unwrap() {
             Record::Positive(r) => {
                 assert_eq!(r[0], group.into());
-                assert_eq!(r[1], new.into());
+                assert_eq!(r[1], new);
             }
             _ => unreachable!(),
         }
@@ -222,7 +222,7 @@ mod tests {
 
         // Larger value should also trigger an update.
         let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
-        assert_record_change(key, 4, 7, out);
+        assert_record_change(key, 4.into(), 7.into(), out);
 
         // No change if new value isn't the max.
         let rs = c.narrow_one_row(vec![key.into(), 2.into()], true);
@@ -238,7 +238,7 @@ mod tests {
 
         // One more new max.
         let out = c.narrow_one_row(vec![key.into(), 22.into()], true);
-        assert_record_change(key, 7, 22, out);
+        assert_record_change(key, 7.into(), 22.into(), out);
 
         // Negative for old max should be fine if there is a positive for a larger value.
         let u = vec![
@@ -246,7 +246,7 @@ mod tests {
             (vec![key.into(), 23.into()], true),
         ];
         let out = c.narrow_one(u, true);
-        assert_record_change(key, 22, 23, out);
+        assert_record_change(key, 22.into(), 23.into(), out);
     }
 
     #[test]
@@ -260,7 +260,7 @@ mod tests {
 
         // Smaller value should also trigger an update.
         let out = c.narrow_one_row(vec![key.into(), 7.into()], true);
-        assert_record_change(key, 10, 7, out);
+        assert_record_change(key, 10.into(), 7.into(), out);
 
         // No change if new value isn't the min.
         let rs = c.narrow_one_row(vec![key.into(), 9.into()], true);
@@ -268,7 +268,7 @@ mod tests {
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 15.into()], true);
-        assert_positive_record(2, 15, out);
+        assert_positive_record(2, 15.into(), out);
 
         // Smaller than last value, but not smallest in group.
         let rs = c.narrow_one_row(vec![key.into(), 8.into()], true);
@@ -280,7 +280,7 @@ mod tests {
             (vec![key.into(), 5.into()], true),
         ];
         let out = c.narrow_one(u, true);
-        assert_record_change(key, 7, 5, out);
+        assert_record_change(key, 7.into(), 5.into(), out);
     }
 
     #[test]
@@ -319,5 +319,29 @@ mod tests {
             Some(vec![(c.narrow_base_id().as_global(), 0)])
         );
         assert_eq!(c.node().resolve(1).unwrap(), None);
+    }
+
+    #[test]
+    fn it_works_with_varying_types() {
+        let mut c = setup(Extremum::Max, true);
+        let key = 1;
+
+        // First insertion should trigger an update.
+        let out = c.narrow_one_row(vec![key.into(), 1.into()], true);
+        assert_positive_record(key, 1, out);
+
+        use std::convert::TryInto;
+        let float_value = 1.2;
+        let out = c.narrow_one_row(vec![key.into(), float_value.try_into().unwrap()], true);
+        assert_record_change(key, 1.into(), float_value.try_into().unwrap(), out);
+
+        let string_value = "yes";
+        let out = c.narrow_one_row(vec![key.into(), string_value.try_into().unwrap()], true);
+        assert_record_change(
+            key,
+            float_value.try_into().unwrap(),
+            string_value.try_into().unwrap(),
+            out,
+        );
     }
 }
