@@ -53,8 +53,14 @@ impl regex::Replacer for LikeTokenReplacer {
 
 fn like_to_regex(like_pattern: &str, mode: CaseSensitivityMode) -> Regex {
     lazy_static! {
-        #[allow(clippy::unwrap_used)] // regex is hardcoded
-        static ref TOKEN: Regex = Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap();
+
+        static ref TOKEN: Regex = {
+            #[allow(clippy::unwrap_used)]
+            // Regex is hardcoded. As a meta-note, this whole expression
+            // is behind curly braces so that clippy can correctly pick
+            // up the annotation.
+            Regex::new(r"(\\?[%_])|[{}.*+?|()\[\]\\$^]").unwrap()
+        };
     }
     let mut re = if mode == CaseInsensitive {
         "(?i)^".to_string()
