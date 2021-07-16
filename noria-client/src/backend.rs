@@ -831,11 +831,10 @@ where
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        let datatype_params: Vec<DataType> = params
-            .into_iter()
-            .map(|p| p.value.into_datatype())
-            .collect::<Result<Vec<_>, _>>()?;
-
+        let mut datatype_params = Vec::new();
+        for p in params {
+            datatype_params.push(p?.value.into_datatype()?);
+        }
         let res = match self.execute(id, datatype_params).await {
             Ok(QueryResult::NoriaSelect {
                 data,

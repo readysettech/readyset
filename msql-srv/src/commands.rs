@@ -18,12 +18,16 @@ pub fn client_handshake(i: &[u8]) -> nom::IResult<&[u8], ClientHandshake<'_>> {
     let (i, _) = nom::bytes::complete::take(1u8)(i)?;
     let (i, auth_token_length) = nom::number::complete::le_u8(i)?;
     let (i, password) = nom::bytes::complete::take(auth_token_length)(i)?;
+
+    // bytes::complete::take is guaranteed to fill collation on Ok()
+    #[allow(clippy::indexing_slicing)]
+    let collation = u16::from(collation[0]);
     Ok((
         i,
         ClientHandshake {
             capabilities: CapabilityFlags::from_bits_truncate(cap),
             maxps,
-            collation: u16::from(collation[0]),
+            collation,
             username,
             password,
         },

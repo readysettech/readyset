@@ -24,6 +24,7 @@ impl From<Error> for ps::Error {
             }
             ReadySet(ReadySetError::Unsupported(s)) => ps::Error::Unsupported(s),
             ReadySet(e) => ps::Error::Unknown(e.to_string()),
+            MsqlSrv(e) => ps::Error::Unknown(e.to_string()),
         }
     }
 }

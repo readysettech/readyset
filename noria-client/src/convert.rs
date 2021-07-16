@@ -4,6 +4,7 @@ use noria::{DataType, ReadySetError, ReadySetResult};
 
 use arccstr::ArcCStr;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::sync::Arc;
 
 pub(crate) trait ToDataType {
@@ -51,8 +52,22 @@ impl<'a> ToDataType for Value<'a> {
             ValueInner::Int(i) => i.into(),
             ValueInner::UInt(i) => (i as i32).into(),
             ValueInner::Double(f) => DataType::try_from(f)?,
-            ValueInner::Datetime(_) => DataType::Timestamp(self.into()),
-            ValueInner::Time(_) => DataType::Time(Arc::new(self.into())),
+            ValueInner::Datetime(_) => DataType::Timestamp(self.try_into().map_err(|e| {
+                ReadySetError::DataTypeConversionError {
+                    val: format!("{:?}", self.into_inner()),
+                    src_type: "ValueInner::Datetime".to_string(),
+                    target_type: "DataType::Timestamp".to_string(),
+                    details: format!("{:?}", e),
+                }
+            })?),
+            ValueInner::Time(_) => DataType::Time(Arc::new(self.try_into().map_err(|e| {
+                ReadySetError::DataTypeConversionError {
+                    val: format!("{:?}", self.into_inner()),
+                    src_type: "ValueInner::Time".to_string(),
+                    target_type: "Datatype::Time".to_string(),
+                    details: format!("{:?}", e),
+                }
+            })?)),
             _ => unimplemented!(),
         })
     }

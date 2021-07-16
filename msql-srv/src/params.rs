@@ -1,4 +1,5 @@
 use crate::myc;
+use crate::MsqlSrvError;
 use crate::{StatementData, Value};
 use std::collections::HashMap;
 
@@ -27,7 +28,7 @@ impl<'a> ParamParser<'a> {
 
 impl<'a> IntoIterator for ParamParser<'a> {
     type IntoIter = Params<'a>;
-    type Item = ParamValue<'a>;
+    type Item = Result<ParamValue<'a>, MsqlSrvError>;
     fn into_iter(self) -> Params<'a> {
         Params {
             params: self.params,
@@ -59,7 +60,7 @@ pub struct ParamValue<'a> {
 }
 
 impl<'a> Iterator for Params<'a> {
-    type Item = ParamValue<'a>;
+    type Item = Result<ParamValue<'a>, MsqlSrvError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.nullmap.is_none() {
             let nullmap_len = (self.params as usize + 7) / 8;
@@ -67,14 +68,24 @@ impl<'a> Iterator for Params<'a> {
             self.nullmap = Some(nullmap);
             self.input = rest;
 
+            // first if condition guarantees that rest has at least one element
+            #[allow(clippy::indexing_slicing)]
             if !rest.is_empty() && rest[0] != 0x00 {
-                let (typmap, rest) = rest[1..].split_at(2 * self.params as usize);
+                let rest = rest.get(1..);
+                let (typmap, rest) = match rest {
+                    Some(rest) => rest.split_at(2 * self.params as usize),
+                    None => return Some(Err(MsqlSrvError::IndexingError)),
+                };
                 self.bound_types.clear();
                 for i in 0..self.params as usize {
-                    self.bound_types.push((
-                        myc::constants::ColumnType::from(typmap[2 * i as usize]),
-                        (typmap[2 * i as usize + 1] & 128) != 0,
-                    ));
+                    let bound_type_col = typmap.get(2 * i as usize);
+                    let bound_type_flag = typmap.get(2 * i as usize + 1);
+                    match (bound_type_col, bound_type_flag) {
+                        (None, _) | (_, None) => return Some(Err(MsqlSrvError::IndexingError)),
+                        (Some(col), Some(flag)) => self
+                            .bound_types
+                            .push((myc::constants::ColumnType::from(*col), ((flag & 128) != 0))),
+                    }
                 }
                 self.input = rest;
             }
@@ -83,8 +94,11 @@ impl<'a> Iterator for Params<'a> {
         if self.col >= self.params {
             return None;
         }
-        let pt = &self.bound_types[self.col as usize];
-
+        let pt = &self.bound_types.get(self.col as usize);
+        let pt = match pt {
+            Some(pt) => pt,
+            None => return Some(Err(MsqlSrvError::IndexingError)),
+        };
         // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
         // NULL-bitmap-byte = ((field-pos + offset) / 8)
         // NULL-bitmap-bit  = ((field-pos + offset) % 8)
@@ -93,26 +107,31 @@ impl<'a> Iterator for Params<'a> {
             if byte >= nullmap.len() {
                 return None;
             }
+            // bound checked before indexing into nullmap
+            #[allow(clippy::indexing_slicing)]
             if (nullmap[byte] & 1u8 << (self.col % 8)) != 0 {
                 self.col += 1;
-                return Some(ParamValue {
+                return Some(Ok(ParamValue {
                     value: Value::null(),
                     coltype: pt.0,
-                });
+                }));
             }
         } else {
-            unreachable!();
+            return Some(Err(MsqlSrvError::UnreachableError));
         }
 
         let v = if let Some(data) = self.long_data.get(&self.col) {
             Value::bytes(&data[..])
         } else {
-            Value::parse_from(&mut self.input, pt.0, pt.1).unwrap()
+            match Value::parse_from(&mut self.input, pt.0, pt.1) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(MsqlSrvError::from(e))),
+            }
         };
         self.col += 1;
-        Some(ParamValue {
+        Some(Ok(ParamValue {
             value: v,
             coltype: pt.0,
-        })
+        }))
     }
 }

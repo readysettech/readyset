@@ -8,6 +8,7 @@
 //!
 //! [0]: https://dev.mysql.com/doc/internals/en/secure-password-authentication.html
 
+use crate::error::MsqlSrvError;
 use getrandom::getrandom;
 use sha1::{Digest, Sha1};
 
@@ -20,10 +21,12 @@ fn xor_slice_mut<const N: usize>(b1: &mut [u8; N], b2: &[u8; N]) {
 
 /// Generate 20 random bytes of auth data for use as auth challenge data (see step 1 in the module
 /// level documentation)
-pub fn generate_auth_data() -> AuthData {
+pub fn generate_auth_data() -> Result<AuthData, MsqlSrvError> {
     let mut buf = [0u8; 20];
-    getrandom(&mut buf).unwrap();
-    buf
+    match getrandom(&mut buf) {
+        Ok(_) => Ok(buf),
+        Err(_) => Err(MsqlSrvError::GetRandomError),
+    }
 }
 
 fn sha1(input: &[u8]) -> [u8; 20] {

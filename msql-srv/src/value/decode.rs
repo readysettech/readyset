@@ -1,6 +1,8 @@
+use crate::error::MsqlSrvError;
 use crate::myc::constants::ColumnType;
 use crate::myc::io::ReadMysqlExt;
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::convert::TryFrom;
 use std::io;
 
 /// MySQL value as provided when executing prepared statements.
@@ -165,146 +167,178 @@ impl<'a> ValueInner<'a> {
     }
 }
 
-// NOTE: these should all be TryFrom
-macro_rules! impl_from {
-    ($t:ty, $($variant:path),*) => {
-        impl<'a> From<Value<'a>> for $t {
-            fn from(val: Value<'a>) -> Self {
+macro_rules! impl_try_from {
+    ($t:ty, $n:expr, $($variant:path),*) => {
+        impl<'a> TryFrom<Value<'a>> for $t {
+            type Error = MsqlSrvError;
+            fn try_from(val: Value<'a>) -> Result<Self, Self::Error> {
                 match val.0 {
-                    $($variant(v) => v as $t),*,
-                    v => panic!(concat!("invalid type conversion from {:?} to ", stringify!($t)), v)
+                    $($variant(v) => Ok(v as $t)),*,
+                    _ => Err(MsqlSrvError::InvalidConversion {target_type: $n , src_type: format!("{:?}",val) }),
                 }
             }
         }
     }
 }
 
-impl_from!(u8, ValueInner::UInt, ValueInner::Int);
-impl_from!(u16, ValueInner::UInt, ValueInner::Int);
-impl_from!(u32, ValueInner::UInt, ValueInner::Int);
-impl_from!(u64, ValueInner::UInt);
-impl_from!(i8, ValueInner::UInt, ValueInner::Int);
-impl_from!(i16, ValueInner::UInt, ValueInner::Int);
-impl_from!(i32, ValueInner::UInt, ValueInner::Int);
-impl_from!(i64, ValueInner::Int);
-impl_from!(f32, ValueInner::Double);
-impl_from!(f64, ValueInner::Double);
-impl_from!(&'a [u8], ValueInner::Bytes);
+impl_try_from!(u8, "u8".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(u16, "u16".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(u32, "u32".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(u64, "u64".to_string(), ValueInner::UInt);
+impl_try_from!(i8, "i8".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(i16, "i16".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(i32, "i32".to_string(), ValueInner::UInt, ValueInner::Int);
+impl_try_from!(i64, "i64".to_string(), ValueInner::Int);
+impl_try_from!(f32, "f32".to_string(), ValueInner::Double);
+impl_try_from!(f64, "f64".to_string(), ValueInner::Double);
+impl_try_from!(&'a [u8], "[u8]".to_string(), ValueInner::Bytes);
 
-impl<'a> From<Value<'a>> for &'a str {
-    fn from(val: Value<'a>) -> &'a str {
+impl<'a> TryFrom<Value<'a>> for &'a str {
+    type Error = MsqlSrvError;
+    fn try_from(val: Value<'a>) -> Result<&'a str, Self::Error> {
         if let ValueInner::Bytes(v) = val.0 {
-            ::std::str::from_utf8(v).unwrap()
+            match ::std::str::from_utf8(v) {
+                Ok(val) => Ok(val),
+                Err(e) => Err(MsqlSrvError::Utf8Error(e)),
+            }
         } else {
-            panic!("invalid type conversion from {:?} to string", val)
+            Err(MsqlSrvError::InvalidConversion {
+                target_type: "str".to_string(),
+                src_type: format!("{:?}", val),
+            })
         }
     }
 }
 
 use chrono::{NaiveDate, NaiveDateTime};
-impl<'a> From<Value<'a>> for NaiveDate {
-    fn from(val: Value<'a>) -> NaiveDate {
+impl<'a> TryFrom<Value<'a>> for NaiveDate {
+    type Error = MsqlSrvError;
+    fn try_from(val: Value<'a>) -> Result<NaiveDate, Self::Error> {
         if let ValueInner::Date(mut v) = val.0 {
-            assert_eq!(v.len(), 4);
-            NaiveDate::from_ymd(
-                i32::from(v.read_u16::<LittleEndian>().unwrap()),
-                u32::from(v.read_u8().unwrap()),
-                u32::from(v.read_u8().unwrap()),
-            )
+            if v.len() != 4 {
+                return Err(MsqlSrvError::InvalidDate);
+            }
+            Ok(NaiveDate::from_ymd(
+                i32::from(v.read_u16::<LittleEndian>()?),
+                u32::from(v.read_u8()?),
+                u32::from(v.read_u8()?),
+            ))
         } else {
-            panic!("invalid type conversion from {:?} to date", val)
+            Err(MsqlSrvError::InvalidConversion {
+                target_type: "NaiveDate".to_string(),
+                src_type: format!("{:?}", val),
+            })
         }
     }
 }
 
-impl<'a> From<Value<'a>> for NaiveDateTime {
-    fn from(val: Value<'a>) -> NaiveDateTime {
+impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
+    type Error = MsqlSrvError;
+    fn try_from(val: Value<'a>) -> Result<NaiveDateTime, Self::Error> {
         if let ValueInner::Datetime(mut v) = val.0 {
-            assert!(v.len() == 7 || v.len() == 11);
+            if !(v.len() == 7 || v.len() == 11) {
+                return Err(MsqlSrvError::InvalidDatetime);
+            }
             let d = NaiveDate::from_ymd(
-                i32::from(v.read_u16::<LittleEndian>().unwrap()),
-                u32::from(v.read_u8().unwrap()),
-                u32::from(v.read_u8().unwrap()),
+                i32::from(v.read_u16::<LittleEndian>()?),
+                u32::from(v.read_u8()?),
+                u32::from(v.read_u8()?),
             );
 
-            let h = u32::from(v.read_u8().unwrap());
-            let m = u32::from(v.read_u8().unwrap());
-            let s = u32::from(v.read_u8().unwrap());
+            let h = u32::from(v.read_u8()?);
+            let m = u32::from(v.read_u8()?);
+            let s = u32::from(v.read_u8()?);
 
             if v.len() == 11 {
-                let us = v.read_u32::<LittleEndian>().unwrap();
-                d.and_hms_micro(h, m, s, us)
+                let us = v.read_u32::<LittleEndian>()?;
+                Ok(d.and_hms_micro(h, m, s, us))
             } else {
-                d.and_hms(h, m, s)
+                Ok(d.and_hms(h, m, s))
             }
         } else {
-            panic!("invalid type conversion from {:?} to datetime", val)
+            Err(MsqlSrvError::InvalidConversion {
+                target_type: "NaiveDateTime".to_string(),
+                src_type: format!("{:?}", val),
+            })
         }
     }
 }
 
 use crate::MysqlTime;
 
-impl<'a> From<Value<'a>> for MysqlTime {
-    fn from(val: Value<'a>) -> MysqlTime {
+impl<'a> TryFrom<Value<'a>> for MysqlTime {
+    type Error = MsqlSrvError;
+    fn try_from(val: Value<'a>) -> Result<MysqlTime, Self::Error> {
         if let ValueInner::Time(mut v) = val.0 {
-            let is_positive = v.read_u8().unwrap() == 0; // sign: 1 negative, 0 positive
-            let d = v.read_u32::<LittleEndian>().unwrap() as u16;
-            let h = v.read_u8().unwrap() as u16;
-            let m = v.read_u8().unwrap();
-            let s = v.read_u8().unwrap();
+            let is_positive = v.read_u8()? == 0; // sign: 1 negative, 0 positive
+            let d = v.read_u32::<LittleEndian>()? as u16;
+            let h = v.read_u8()? as u16;
+            let m = v.read_u8()?;
+            let s = v.read_u8()?;
             let us = v.read_u32::<LittleEndian>().unwrap_or(0) as u64;
-            MysqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us)
+            Ok(MysqlTime::from_hmsus(is_positive, d * 24 + h, m, s, us))
         } else {
-            panic!("Invalid type conversion from {:?} to time", val)
+            Err(MsqlSrvError::InvalidConversion {
+                target_type: "MysqlTime".to_string(),
+                src_type: format!("{:?}", val),
+            })
         }
     }
 }
 
-impl From<MysqlTime> for myc::value::Value {
-    fn from(mysql_time: MysqlTime) -> Self {
+impl TryFrom<MysqlTime> for myc::value::Value {
+    type Error = std::convert::Infallible;
+    fn try_from(mysql_time: MysqlTime) -> Result<Self, Self::Error> {
         let total_hours = mysql_time.hour();
         let days = (total_hours / 24) as u32;
         let hours = (total_hours % 24) as u8;
-        myc::value::Value::Time(
+        Ok(myc::value::Value::Time(
             !mysql_time.is_positive(),
             days,
             hours,
             mysql_time.minutes(),
             mysql_time.seconds(),
             mysql_time.microseconds(),
-        )
+        ))
     }
 }
 
 use std::time::Duration;
 
-impl<'a> From<Value<'a>> for Duration {
-    fn from(val: Value<'a>) -> Duration {
+impl<'a> TryFrom<Value<'a>> for Duration {
+    type Error = MsqlSrvError;
+    fn try_from(val: Value<'a>) -> Result<Duration, Self::Error> {
         if let ValueInner::Time(mut v) = val.0 {
-            assert!(v.len() == 8 || v.len() == 12);
-
-            let neg = v.read_u8().unwrap();
-            if neg != 0u8 {
-                unimplemented!();
+            if !(v.len() == 8 || v.len() == 12) {
+                return Err(MsqlSrvError::InvalidDuration);
             }
 
-            let days = u64::from(v.read_u32::<LittleEndian>().unwrap());
-            let hours = u64::from(v.read_u8().unwrap());
-            let minutes = u64::from(v.read_u8().unwrap());
-            let seconds = u64::from(v.read_u8().unwrap());
+            let neg = v.read_u8()?;
+            if neg != 0u8 {
+                return Err(MsqlSrvError::Unimplemented {
+                    operation: "Negative durations".to_string(),
+                });
+            }
+
+            let days = u64::from(v.read_u32::<LittleEndian>()?);
+            let hours = u64::from(v.read_u8()?);
+            let minutes = u64::from(v.read_u8()?);
+            let seconds = u64::from(v.read_u8()?);
             let micros = if v.len() == 12 {
-                v.read_u32::<LittleEndian>().unwrap()
+                v.read_u32::<LittleEndian>()?
             } else {
                 0
             };
 
-            Duration::new(
+            Ok(Duration::new(
                 days * 86_400 + hours * 3_600 + minutes * 60 + seconds,
                 micros * 1_000,
-            )
+            ))
         } else {
-            panic!("invalid type conversion from {:?} to datetime", val)
+            Err(MsqlSrvError::InvalidConversion {
+                target_type: "Duration".to_string(),
+                src_type: format!("{:?}", val),
+            })
         }
     }
 }
@@ -318,6 +352,8 @@ mod tests {
     use crate::myc::io::WriteMysqlExt;
     use crate::{Column, ColumnFlags, ColumnType};
     use chrono::{self, TimeZone};
+    use std::convert::TryFrom;
+    use std::convert::TryInto;
     use std::time;
 
     macro_rules! rt {
@@ -340,9 +376,13 @@ mod tests {
                 }
 
                 let v: $t = $v;
-                data.write_bin_value(&myc::value::Value::from(v)).unwrap();
+                data.write_bin_value(
+                    &myc::value::Value::try_from(v).expect("try_from returned an error"),
+                )
+                .unwrap();
                 assert_eq!(
-                    Into::<$t>::into(Value::parse_from(&mut &data[..], $ct, !$sig).unwrap()),
+                    TryInto::<$t>::try_into(Value::parse_from(&mut &data[..], $ct, !$sig).unwrap())
+                        .expect("try_into returned an error"),
                     v
                 );
             }
