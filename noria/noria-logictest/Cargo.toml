@@ -27,7 +27,7 @@ query_generator = { path = "../../query_generator" }
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time", "net"] }
 itertools = "0.10.0"
 ascii_utils = "0.9.3"
-slog = { version = "2.7.0", features = ["max_level_trace"] }
+slog = { version = "2.7.0" }
 maplit = "1.0.2"
 chrono = "0.4.19"
 pretty_assertions = "0.7.2"
