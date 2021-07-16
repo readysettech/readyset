@@ -186,8 +186,8 @@ fn predicate_implies(
     (n_op, n_rhs): (BinaryOperator, &Expression),
     (e_op, e_rhs): (BinaryOperator, &Expression),
 ) -> Result<bool, ReadySetError> {
-    // use Finkelstein-style direct elimination to check if this NQG predicate
-    // implies the corresponding predicates in the EQG
+    // use Finkelstein-style direct elimination to check if this new query graph predicate
+    // implies the corresponding predicates in the existing query graph
     match n_rhs {
         Expression::Literal(Literal::String(nv)) => match e_rhs {
             Expression::Literal(Literal::String(ref ev)) => {
@@ -204,7 +204,14 @@ fn predicate_implies(
             _ => unsupported!(),
         },
         Expression::Literal(Literal::Null) => match e_rhs {
-            Expression::Literal(Literal::Null) => Ok(true),
+            Expression::Literal(Literal::Null)
+                if n_op != BinaryOperator::Is
+                    && e_op != BinaryOperator::Is
+                    && n_op != BinaryOperator::IsNot
+                    && e_op != BinaryOperator::IsNot =>
+            {
+                Ok(true)
+            }
             Expression::Literal(_) => Ok(false),
             _ => unsupported!(),
         },
@@ -388,5 +395,22 @@ mod tests {
         assert!(!complex_predicate_implies(&pb, &cp1).unwrap());
         assert!(complex_predicate_implies(&cp1, &pa).unwrap());
         assert!(complex_predicate_implies(&cp1, &pb).unwrap());
+    }
+
+    #[test]
+    fn is_null_does_not_imply_is_not_null() {
+        assert!(!complex_predicate_implies(
+            &Expression::BinaryOp {
+                lhs: Box::new(Expression::Column("t.a".into())),
+                op: BinaryOperator::Is,
+                rhs: Box::new(Expression::Literal(Literal::Null))
+            },
+            &Expression::BinaryOp {
+                lhs: Box::new(Expression::Column("t.a".into())),
+                op: BinaryOperator::IsNot,
+                rhs: Box::new(Expression::Literal(Literal::Null))
+            }
+        )
+        .unwrap())
     }
 }
