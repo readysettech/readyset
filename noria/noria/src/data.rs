@@ -661,6 +661,8 @@ impl Ord for DataType {
                 let b: &str = <&str>::try_from(other).unwrap();
                 a.cmp(&b)
             }
+            (&DataType::Text(..) | &DataType::TinyText(..), _) => Ordering::Greater,
+            (_, &DataType::Text(..) | &DataType::TinyText(..)) => Ordering::Less,
             (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(ref b)) => a.cmp(b),
             (&DataType::Int(a), &DataType::Int(b)) => a.cmp(&b),
@@ -690,13 +692,33 @@ impl Ord for DataType {
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
             (&DataType::None, &DataType::None) => Ordering::Equal,
 
+            // Convert ints to float and cmp against Real.
+            (&DataType::Int(..), &DataType::Real(b, ..))
+            | (&DataType::UnsignedInt(..), &DataType::Real(b, ..))
+            | (&DataType::BigInt(..), &DataType::Real(b, ..))
+            | (&DataType::UnsignedBigInt(..), &DataType::Real(b, ..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
+                let a: i128 = <i128>::try_from(self).unwrap();
+
+                (a as f64).total_cmp(&b)
+            }
             // order Ints, Reals, Text, Timestamps, None
             (&DataType::Int(..), _)
             | (&DataType::UnsignedInt(..), _)
             | (&DataType::BigInt(..), _)
             | (&DataType::UnsignedBigInt(..), _) => Ordering::Greater,
+            (&DataType::Real(a, ..), &DataType::Int(..))
+            | (&DataType::Real(a, ..), &DataType::UnsignedInt(..))
+            | (&DataType::Real(a, ..), &DataType::BigInt(..))
+            | (&DataType::Real(a, ..), &DataType::UnsignedBigInt(..)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
+                let b: i128 = <i128>::try_from(other).unwrap();
+
+                a.total_cmp(&(b as f64))
+            }
             (&DataType::Real(..), _) => Ordering::Greater,
-            (&DataType::Text(..), _) | (&DataType::TinyText(..), _) => Ordering::Greater,
             (&DataType::Timestamp(..) | DataType::Time(_), _) => Ordering::Greater,
             (&DataType::None, _) => Ordering::Greater,
         }
@@ -2384,6 +2406,19 @@ mod tests {
         assert_ne!(ulong.cmp(&time), Ordering::Equal);
         assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
+
+        // Test invariants
+        // 1. Text types always > everythign else
+        // 2. Real comparable directly with int
+        let int1 = DataType::Int(1);
+        let real1 = DataType::Real(1.2, 16);
+        let real2 = DataType::Real(0.8, 16);
+        assert_eq!(txt1.cmp(&int1), Ordering::Greater);
+        assert_eq!(int1.cmp(&txt1), Ordering::Less);
+        assert_eq!(txt1.cmp(&real1), Ordering::Greater);
+        assert_eq!(real1.cmp(&txt1), Ordering::Less);
+        assert_eq!(real1.cmp(&int1), Ordering::Greater);
+        assert_eq!(real2.cmp(&int1), Ordering::Less);
     }
 
     #[allow(clippy::eq_op)]
