@@ -7,7 +7,7 @@ docker volume create target
 docker volume create cargo-registry
 
 ## Setup for framework testing
-set -ex
+set -e
 mkdir -pv .buildkite/gen .buildkite/image
 buildkite-agent artifact download '.buildkite/gen/*' ./ || true
 buildkite-agent artifact download '.buildkite/image/**/*.tar.gz' ./ || true
