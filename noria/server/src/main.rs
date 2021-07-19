@@ -132,9 +132,9 @@ If specified, overrides the value of --external-address"))
                 .help("Frequency at which to check the state size against the memory limit [in seconds]."),
         )
         .arg(
-            Arg::with_name("noreuse")
-                .long("no-reuse")
-                .help("Disable reuse"),
+            Arg::with_name("enable-reuse")
+                .long("enable-reuse")
+                .help("Enable reuse"),
         )
         .arg(
             Arg::with_name("nopartial")
@@ -272,8 +272,8 @@ If specified, overrides the value of --external-address"))
     if matches.is_present("nopartial") {
         builder.disable_partial();
     }
-    if matches.is_present("noreuse") {
-        builder.set_reuse(ReuseConfigType::NoReuse);
+    if matches.is_present("enable-reuse") {
+        builder.set_reuse(ReuseConfigType::Finkelstein);
     }
 
     if let Some(r) = matches.value_of("region") {

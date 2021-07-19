@@ -232,9 +232,9 @@ struct Verify {
     #[clap(long, default_value = "sqllogictest")]
     mysql_db: String,
 
-    /// Disable query graph reuse
+    /// Enable query graph reuse
     #[clap(long)]
-    no_reuse: bool,
+    enable_reuse: bool,
 
     /// Enable logging in both noria and noria-mysql
     #[clap(long, short)]
@@ -420,7 +420,7 @@ impl From<&Verify> for RunOptions {
             mysql_port: verify.mysql_port,
             mysql_db: verify.mysql_db.clone(),
             verbose: verify.verbose,
-            disable_reuse: verify.no_reuse,
+            enable_reuse: verify.enable_reuse,
             binlog_url: verify.binlog_mysql.clone(),
             ..Self::default()
         }

@@ -113,13 +113,13 @@ impl SqlIncorporator {
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub(super) fn disable_reuse(&mut self) {
+    pub(crate) fn disable_reuse(&mut self) {
         self.reuse_type = ReuseConfigType::NoReuse;
     }
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
-    pub(super) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+    pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.reuse_type = reuse_type;
     }
 

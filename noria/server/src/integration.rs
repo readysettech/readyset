@@ -9,7 +9,7 @@ use crate::controller::recipe::Recipe;
 use crate::controller::sql::SqlIncorporator;
 use crate::get_col;
 use crate::integration_utils::*;
-use crate::{Builder, ReadySetError};
+use crate::{Builder, ReadySetError, ReuseConfigType};
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::identity::Identity;
@@ -2930,8 +2930,8 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, 
     // move needed for some funny lifetime reason
     g.migrate(move |mig| {
         let mut r = Recipe::blank(logger);
-        if !reuse {
-            r.disable_reuse();
+        if reuse {
+            r.enable_reuse(ReuseConfigType::Finkelstein);
         }
         let mut f = File::open(&file).unwrap();
         let mut s = String::new();

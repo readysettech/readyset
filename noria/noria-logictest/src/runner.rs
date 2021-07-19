@@ -66,7 +66,7 @@ pub struct RunOptions {
     pub mysql_port: u16,
     pub mysql_user: String,
     pub mysql_db: String,
-    pub disable_reuse: bool,
+    pub enable_reuse: bool,
     pub verbose: bool,
     pub binlog_url: Option<String>,
 }
@@ -80,7 +80,7 @@ impl Default for RunOptions {
             mysql_port: 3306,
             mysql_user: "root".to_string(),
             mysql_db: "sqllogictest".to_string(),
-            disable_reuse: false,
+            enable_reuse: false,
             verbose: false,
             binlog_url: None,
         }
@@ -390,8 +390,8 @@ impl TestScript {
             let mut builder = Builder::default();
             builder.log_with(run_opts.logger());
 
-            if run_opts.disable_reuse {
-                builder.set_reuse(ReuseConfigType::NoReuse)
+            if run_opts.enable_reuse {
+                builder.set_reuse(ReuseConfigType::Finkelstein)
             }
 
             if let Some(binlog_url) = &run_opts.binlog_url {
