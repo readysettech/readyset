@@ -76,11 +76,6 @@ SELECT table_1.column_1 AS alias_1, table_1.column_1 AS alias_2 FROM table_1 WHE
 1
 1
 
-statement ok
-SELECT table_1.column_1 AS alias_1, table_1.column_1 AS alias_2 FROM table_1 WHERE ((table_1.column_1 IS NOT NULL) OR (table_1.column_1 IS NOT NULL))
-
-graphviz
-
 query  nosort
 SELECT table_1.column_1 AS alias_1, table_1.column_1 AS alias_2 FROM table_1 WHERE ((table_1.column_1 IS NOT NULL) OR (table_1.column_1 IS NOT NULL))
 ----
