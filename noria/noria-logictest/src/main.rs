@@ -10,6 +10,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use colored::Colorize;
+use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
@@ -245,6 +246,10 @@ struct Verify {
     #[clap(long)]
     binlog_mysql: Option<String>,
 
+    /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
+    #[clap(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
+    tasks: usize,
+
     /// When tests are encountered that are expected to fail but do not, rename the test file from
     /// .fail.test to .test
     #[clap(long)]
@@ -318,15 +323,13 @@ impl Verify {
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
         let result = Arc::new(Mutex::new(VerifyResult::default()));
-        let mut tasks = futures::stream::futures_unordered::FuturesUnordered::new();
+        let mut tasks = FuturesUnordered::new();
 
         let max_tasks = if self.binlog_mysql.is_some() {
             // Can not parallelize tests when binlog is enabled, because each test reuses the same db
             1
         } else {
-            std::env::var("NORIA_LOGICTEST_TASKS")
-                .unwrap_or_else(|_| "32".to_string())
-                .parse()?
+            self.tasks
         };
 
         for InputFile {
