@@ -19,7 +19,7 @@ steps:
     key: logictest-generated
     command:
     - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest --release -- verify logictests/generated
+    - cargo run --bin noria-logictest --release -- verify logictests/generated -t 1
     depends_on:
     - build-image
     plugins:
