@@ -444,7 +444,7 @@ impl Default for Config {
             heartbeat_every: time::Duration::from_secs(1),
             healthcheck_every: time::Duration::from_secs(10),
             quorum: 1,
-            reuse: ReuseConfigType::Finkelstein,
+            reuse: ReuseConfigType::NoReuse,
             #[cfg(any(debug_assertions, test))]
             threads: Some(2),
             #[cfg(not(any(debug_assertions, test)))]

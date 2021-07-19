@@ -180,8 +180,9 @@ impl Recipe {
         self.inc.as_mut().unwrap().disable_reuse();
     }
 
-    /// Enable reuse
-    pub(super) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
+    /// Enable node reuse.
+    // crate viz for tests
+    pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
         self.inc.as_mut().unwrap().enable_reuse(reuse_type)
     }
 
