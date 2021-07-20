@@ -386,6 +386,8 @@ pub enum ColumnGenerationSpec {
         max: DataType,
         batch_size: Option<u32>,
     },
+    /// Generates a random value for the row.
+    Random,
 }
 
 impl ColumnGenerationSpec {
@@ -416,6 +418,7 @@ impl ColumnGenerationSpec {
                 batch_size: *opt_n,
                 pulled: HashSet::new(),
             }),
+            ColumnGenerationSpec::Random => ColumnGenerator::Random(col_type.into()),
         }
     }
 }
@@ -431,6 +434,8 @@ pub enum ColumnGenerator {
     /// Returns a randomly generated value between a min and
     /// max value.
     Uniform(UniformGenerator),
+    /// Returns a random value.
+    Random(RandomGenerator),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -534,6 +539,23 @@ impl UniformGenerator {
 
             val
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct RandomGenerator {
+    sql_type: SqlType,
+}
+
+impl From<SqlType> for RandomGenerator {
+    fn from(sql_type: SqlType) -> Self {
+        Self { sql_type }
+    }
+}
+
+impl RandomGenerator {
+    fn gen(&self) -> DataType {
+        random_value_of_type(&self.sql_type)
     }
 }
 
@@ -752,6 +774,7 @@ impl TableSpec {
                         _ if random => random_value_of_type(&col_type),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
+                        ColumnGenerator::Random(r) => r.gen(),
                     };
 
                     (col_name.clone(), value)
