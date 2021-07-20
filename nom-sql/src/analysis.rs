@@ -1,5 +1,6 @@
 use maplit::hashset;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::iter;
 
 use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
 
@@ -198,6 +199,92 @@ pub fn contains_aggregate(expr: &Expression) -> bool {
                     InValue::List(exprs) => exprs.iter().any(contains_aggregate),
                 }
         }
+    }
+}
+
+pub struct Subexpressions<'a> {
+    subexpr_iterators: VecDeque<Box<dyn Iterator<Item = &'a Expression> + 'a>>,
+}
+
+impl<'a> Iterator for Subexpressions<'a> {
+    type Item = &'a Expression;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(subexprs) = self.subexpr_iterators.front_mut() {
+            match subexprs.next() {
+                Some(expr) => {
+                    self.subexpr_iterators
+                        .push_back(expr.immediate_subexpressions());
+                    return Some(expr);
+                }
+                None => {
+                    self.subexpr_iterators.pop_front();
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Expression {
+    /// Construct an iterator over all the *immediate* subexpressions of the given Expression.
+    ///
+    /// # Examaples
+    ///
+    /// ```rust
+    /// use nom_sql::{Expression, UnaryOperator, Column};
+    ///
+    /// let expr = Expression::UnaryOp {
+    ///     op: UnaryOperator::Not,
+    ///     rhs: Box::new(Expression::Column("x".into()))
+    /// };
+    ///
+    /// let subexprs = expr.immediate_subexpressions().collect::<Vec<_>>();
+    /// assert_eq!(subexprs, vec![&Expression::Column("x".into())])
+    /// ````
+    pub fn immediate_subexpressions<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Expression> + 'a> {
+        match self {
+            Expression::Literal(_)
+            | Expression::Column(_)
+            | Expression::Exists(_)
+            | Expression::NestedSelect(_) => Box::new(iter::empty()) as _,
+            Expression::Call(fexpr) => Box::new(fexpr.arguments()) as _,
+            Expression::BinaryOp { lhs, rhs, .. } => {
+                Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _
+            }
+            Expression::UnaryOp { rhs, .. } => Box::new(iter::once(rhs.as_ref())) as _,
+            Expression::CaseWhen {
+                condition,
+                then_expr,
+                else_expr,
+            } => Box::new(
+                vec![condition, then_expr]
+                    .into_iter()
+                    .chain(else_expr)
+                    .map(AsRef::as_ref),
+            ) as _,
+            Expression::Between {
+                operand, min, max, ..
+            } => Box::new(vec![operand, min, max].into_iter().map(AsRef::as_ref)) as _,
+            Expression::In {
+                lhs,
+                rhs: InValue::List(exprs),
+                ..
+            } => Box::new(iter::once(lhs.as_ref()).chain(exprs)) as _,
+            Expression::In {
+                lhs,
+                rhs: InValue::Subquery(_),
+                ..
+            } => Box::new(iter::once(lhs.as_ref())) as _,
+        }
+    }
+
+    /// Construct an iterator over all *recursive* subexpressions of the given Expression, excluding
+    /// the expression itself. Iteration order is unspecified.
+    pub fn recursive_subexpressions(&self) -> Subexpressions {
+        let mut subexpr_iterators = VecDeque::with_capacity(1);
+        subexpr_iterators.push_back(self.immediate_subexpressions());
+        Subexpressions { subexpr_iterators }
     }
 }
 
