@@ -5,11 +5,9 @@ use noria::DataType;
 use noria::KeyComparison;
 use noria::ViewQuery;
 use rand::distributions::{Distribution, Uniform};
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
@@ -34,8 +32,8 @@ struct Reader {
     target_region: Option<String>,
 
     /// The amount of time to batch a set of requests for in ms. If
-    /// `batch_duration_ms` is not specified, no batching is performed.
-    #[clap(long, default_value = "0")]
+    /// `batch_duration_ms` is 0, no batching is performed.
+    #[clap(long, default_value = "1")]
     batch_duration_ms: u64,
 
     /// The maximum batch size for lookup requests.
@@ -47,7 +45,7 @@ struct Reader {
     threads: u64,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct ReaderThreadUpdate {
     // The id of the thread assinged by the parent.
     id: u32,
@@ -66,14 +64,13 @@ impl Reader {
         &self,
         id: u32,
         query_interval: Option<Duration>,
-        sender: Sender<ReaderThreadUpdate>,
+        sender: UnboundedSender<ReaderThreadUpdate>,
         authority: Arc<ZookeeperAuthority>,
     ) -> anyhow::Result<()> {
         let mut handle: ControllerHandle<ZookeeperAuthority> =
             ControllerHandle::new(authority).await?;
         handle.ready().await.unwrap();
 
-        let mut next_query = query_interval.map(|i| Instant::now() + i);
         let mut last_thread_update = Instant::now();
         let mut reader_update = ReaderThreadUpdate {
             id,
@@ -90,38 +87,48 @@ impl Reader {
         let mut batch_query_start = Vec::new();
         let mut batch_keys = Vec::new();
 
-        loop {
-            let now = Instant::now();
+        let mut qps_sent: u32 = 0;
+        let mut qps_start = Instant::now();
 
+        loop {
             // Update the aggregator process on this reader's state.
-            if now - last_thread_update >= THREAD_UPDATE_INTERVAL {
+            if last_thread_update.elapsed() >= THREAD_UPDATE_INTERVAL {
                 sender.send(reader_update.clone())?;
                 reader_update.queries.clear();
                 last_thread_update = Instant::now();
             }
 
+            let now = Instant::now();
+            let next_query = query_interval.map(|i| qps_start + i * qps_sent);
+
             // Throttle the thread if we are trying to hit a target qps.
             if let Some(t) = next_query {
-                if now < t {
-                    // Sleep for 1/10th the query interval so we don't miss any
-                    // intervals.
-                    sleep(Duration::from_nanos(
-                        (query_interval.as_ref().unwrap().as_nanos() / 10) as u64,
-                    ));
+                let remaining_interval = t.checked_duration_since(now).unwrap_or_default();
+                if remaining_interval > *query_interval.as_ref().unwrap() / 10
+                    && now > batch_start + batch_interval
+                {
+                    // Sleep for 1/2 of the remaining interval so we don't miss the desired send time
+                    tokio::time::sleep(remaining_interval / 2).await;
                     continue;
                 }
             }
 
             // A client is executing a query.
-            next_query = query_interval.map(|i| now + i);
             let id = self.generate_user_id();
 
             if batch_query_start.is_empty() {
-                batch_start = Instant::now();
+                batch_start = now;
             }
 
-            batch_query_start.push(Instant::now());
+            batch_query_start.push(now);
             batch_keys.push(id);
+            qps_sent += 1;
+
+            if qps_sent == 10_000_000 {
+                // Restart the counter to prevent error aggregation
+                qps_sent = 0;
+                qps_start = now;
+            }
 
             // Client executes a query but we have not reached the batch interval
             // so we keep adding queries.
@@ -135,13 +142,16 @@ impl Reader {
                 .iter()
                 .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(*k as i32))))
                 .collect();
+
             let vq = ViewQuery {
                 key_comparisons: keys,
                 block: true,
                 filter: None,
                 timestamp: None,
             };
-            let _ = view.raw_lookup(vq).await?;
+
+            let r = view.raw_lookup(vq).await?;
+            assert_eq!(r.len(), batch_query_start.len());
             let finish = Instant::now();
 
             for q_start in &batch_query_start {
@@ -154,7 +164,7 @@ impl Reader {
 
     async fn process_updates(
         &'static self,
-        receiver: Receiver<ReaderThreadUpdate>,
+        mut receiver: UnboundedReceiver<ReaderThreadUpdate>,
     ) -> anyhow::Result<()> {
         // Process updates from readers, calculate statistics to report. We
         // store each channel's message in a hashmap for each interval. If
@@ -162,31 +172,35 @@ impl Reader {
         // received a message from all threads, it's likely a thread has
         // failed.
         let mut updates = Vec::new();
-        let mut next_check = Instant::now() + THREAD_UPDATE_INTERVAL;
+        let mut last_check = Instant::now();
         loop {
-            let now = Instant::now();
-            if now > next_check {
-                self.process_thread_updates(&updates).unwrap();
+            let elapsed = last_check.elapsed();
+            if elapsed >= THREAD_UPDATE_INTERVAL {
+                last_check = Instant::now();
+                self.process_thread_updates(&mut updates, elapsed).unwrap();
                 updates.clear();
-                next_check = now + THREAD_UPDATE_INTERVAL;
             }
 
-            let r = receiver.recv_timeout(THREAD_UPDATE_INTERVAL * 2).unwrap();
-            updates.push(r);
+            let r = receiver.recv().await.unwrap();
+            updates.push(r.queries);
         }
     }
 
-    fn process_thread_updates(&'static self, updates: &[ReaderThreadUpdate]) -> anyhow::Result<()> {
+    fn process_thread_updates(
+        &'static self,
+        updates: &mut [Vec<u128>],
+        period: Duration,
+    ) -> anyhow::Result<()> {
         let mut query_latencies: Vec<u128> = Vec::new();
         for u in updates {
-            query_latencies.append(&mut u.queries.clone());
+            query_latencies.append(u);
         }
 
-        let qps = query_latencies.len() as f64 / THREAD_UPDATE_INTERVAL.as_secs() as f64;
+        let qps = query_latencies.len() as f64 / period.as_secs() as f64;
         let avg_latency =
             query_latencies.iter().sum::<u128>() as f64 / query_latencies.len() as f64;
 
-        println!("qps: {}\tavg_latency: {}", qps, avg_latency);
+        println!("qps: {}\tavg_latency: {:.4} ms", qps, avg_latency);
         Ok(())
     }
 
@@ -194,8 +208,7 @@ impl Reader {
         let query_issue_interval = self
             .target_qps
             .map(|t| Duration::from_nanos(1000000000 / t * self.threads));
-        let (tx, rx): (Sender<ReaderThreadUpdate>, Receiver<ReaderThreadUpdate>) = mpsc::channel();
-
+        let (tx, rx) = unbounded_channel();
         let authority = Arc::new(ZookeeperAuthority::new(&self.zookeeper_url)?);
 
         let mut handle: ControllerHandle<ZookeeperAuthority> =
