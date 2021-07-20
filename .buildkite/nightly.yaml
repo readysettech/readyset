@@ -34,3 +34,5 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
+    agents:
+      queue: nightly
