@@ -996,7 +996,8 @@ impl SqlIncorporator {
             .expand_stars(&self.view_schemas)
             .expand_implied_tables(&self.view_schemas)?
             .normalize_topk_with_aggregate()?
-            .rewrite_count_star(&self.view_schemas)
+            .rewrite_count_star(&self.view_schemas)?
+            .detect_problematic_self_joins()
     }
 
     fn nodes_for_named_query(

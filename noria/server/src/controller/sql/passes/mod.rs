@@ -1,5 +1,6 @@
 pub(crate) mod alias_removal;
 mod count_star_rewrite;
+mod detect_problematic_self_joins;
 mod implied_tables;
 mod key_def_coalescing;
 mod negation_removal;
@@ -11,6 +12,7 @@ pub(crate) mod subqueries;
 
 pub(crate) use alias_removal::AliasRemoval;
 pub(crate) use count_star_rewrite::CountStarRewrite;
+pub(crate) use detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub(crate) use implied_tables::ImpliedTableExpansion;
 pub(crate) use key_def_coalescing::KeyDefinitionCoalescing;
 pub(crate) use negation_removal::NegationRemoval;

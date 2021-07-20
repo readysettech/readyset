@@ -353,7 +353,7 @@
 //! - [id=1, title=Hello world, votes=42]
 //! + [id=1, title=Hello world, votes=43]
 //! ```
-#![feature(min_type_alias_impl_trait, box_patterns, try_find)]
+#![feature(min_type_alias_impl_trait, box_patterns, try_find, result_flattening)]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
 //#![deny(unreachable_pub)]
