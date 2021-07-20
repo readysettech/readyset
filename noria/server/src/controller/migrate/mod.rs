@@ -20,7 +20,7 @@
 //!
 //! This is split into two stages: the planning stage, where parts of the [`ControllerInner`] are
 //! cloned, and the list of new domains to spin up and messages to send to new and existing domains
-//! is built (via the [`FakeDomainHandles`]). If this completes without failing, a [`MigrationPlan`]
+//! is built (via the [`DomainMigrationPlan`]). If this completes without failing, a [`MigrationPlan`]
 //! is created and then applied to the running [`ControllerInner`].
 //!
 //! A failure during the planning stage is inconsequential, as no part of the running controller
@@ -52,7 +52,7 @@ mod sharding;
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
 ///
-/// Used as part of [`FakeDomainHandles`].
+/// Used as part of [`DomainMigrationPlan`].
 pub struct StoredDomainRequest {
     /// The index of the destination domain.
     pub domain: DomainIndex,
@@ -104,7 +104,7 @@ impl StoredDomainRequest {
 /// A request to place a new domain, corresponding to the arguments passed to
 /// [`ControllerInner::place_domain`].
 ///
-/// Used as part of [`FakeDomainHandles`].
+/// Used as part of [`DomainMigrationPlan`].
 #[derive(Debug)]
 pub struct PlaceRequest {
     /// The index the new domain will have.
