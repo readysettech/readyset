@@ -2,6 +2,7 @@ use nom_sql::SqlType;
 use noria::internal;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::iter;
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
@@ -108,22 +109,28 @@ impl Ingredient for Project {
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
 
-        // translate output columns to input columns
-        let mut in_cols = Cow::Borrowed(columns);
-        if let Some(ref emit) = self.emit {
-            in_cols = Cow::Owned(
-                columns
-                    .iter()
-                    .map(|&outi| {
-                        assert!(
-                            outi <= emit.len(),
-                            "should never be queried for generated columns"
-                        );
-                        emit[outi]
-                    })
-                    .collect(),
-            );
-        }
+        let in_cols = if let Some(ref emit) = self.emit {
+            let c = columns
+                .iter()
+                .map(|&outi| {
+                    if outi >= emit.len() {
+                        Err(ReadySetError::Internal(format!(
+                            "query_through should never be queried for
+                                                generated columns; columns: {:?}; self.emit: {:?}",
+                            columns, emit
+                        )))
+                    } else {
+                        Ok(emit[outi])
+                    }
+                })
+                .collect();
+            match c {
+                Ok(c) => Cow::Owned(c),
+                Err(e) => return Some(Some(Box::new(iter::once(Err(e))))),
+            }
+        } else {
+            Cow::Borrowed(columns)
+        };
 
         self.lookup(*self.src, &*in_cols, key, nodes, states)
             .map(|result| {

@@ -173,20 +173,24 @@ impl Union {
     ///
     /// When receiving an update from node `a`, a union will emit the columns selected in `emit[a]`.
     /// `emit` only supports omitting columns, not rearranging them.
+    ///
+    /// Invariants:
+    ///
+    /// * `emit` argument's values must be ordered lists already. Union does not support
+    /// re-arranging columns, only omitting them.
     pub fn new(
         emit: HashMap<NodeIndex, Vec<usize>>,
         duplicate_mode: DuplicateMode,
     ) -> ReadySetResult<Union> {
-        assert!(!emit.is_empty());
+        invariant!(!emit.is_empty());
         for emit in emit.values() {
             let mut last = &emit[0];
             for i in emit {
-                if i < last {
-                    unimplemented!(
-                        "union doesn't support column reordering; got emit = {:?}",
-                        emit
-                    );
-                }
+                invariant!(
+                    i >= last,
+                    "union doesn't support column reordering; got emit = {:?}",
+                    emit
+                );
                 last = i;
             }
         }
@@ -349,6 +353,7 @@ impl Ingredient for Union {
         })
     }
 
+    #[allow(clippy::unreachable, clippy::unimplemented)]
     fn on_input_raw(
         &mut self,
         ex: &mut dyn Executor,
@@ -411,6 +416,9 @@ impl Ingredient for Union {
                             ..Default::default()
                         }));
                     } else {
+                        // absorb_for_full will only be true if we've matched on this exactly. This
+                        // only appears to be here as a hack around the ownership system
+                        // regarding rs, so rs doesn't need to be cloned.
                         unreachable!();
                     }
                 }
@@ -565,30 +573,31 @@ impl Ingredient for Union {
                 // still emit 2 (i.e., not capture it), since it'll just be dropped by the target
                 // domain.
                 let mut rs = self.on_input(ex, from, rs, None, n, s)?.results;
-                if let FullWait::None = self.full_wait_state {
-                    if self.required == 1 {
-                        // no need to ever buffer
-                        return Ok(RawProcessingResult::FullReplay(rs, last));
-                    }
-
-                    debug!(
-                        log,
-                        "union captured start of full replay; has: {}, need: {}", 1, self.required
-                    );
-
-                    // we need to hold this back until we've received one from every ancestor
-                    let mut s = HashSet::new();
-                    s.insert(from);
-                    self.full_wait_state = FullWait::Ongoing {
-                        started: s,
-                        finished: if last { 1 } else { 0 },
-                        buffered: rs,
-                    };
-                    return Ok(RawProcessingResult::CapturedFull);
-                }
-
                 let exit;
                 match self.full_wait_state {
+                    FullWait::None => {
+                        if self.required == 1 {
+                            // no need to ever buffer
+                            return Ok(RawProcessingResult::FullReplay(rs, last));
+                        }
+
+                        debug!(
+                            log,
+                            "union captured start of full replay; has: {}, need: {}",
+                            1,
+                            self.required
+                        );
+
+                        // we need to hold this back until we've received one from every ancestor
+                        let mut s = HashSet::new();
+                        s.insert(from);
+                        self.full_wait_state = FullWait::Ongoing {
+                            started: s,
+                            finished: if last { 1 } else { 0 },
+                            buffered: rs,
+                        };
+                        return Ok(RawProcessingResult::CapturedFull);
+                    }
                     FullWait::Ongoing {
                         ref mut started,
                         ref mut finished,
@@ -637,7 +646,6 @@ impl Ingredient for Union {
                             return Ok(RawProcessingResult::CapturedFull);
                         }
                     }
-                    _ => unreachable!(),
                 }
 
                 // we only fall through here if we're done!
@@ -745,9 +753,13 @@ impl Ingredient for Union {
                             match replay_pieces_tmp.entry((tag, key.clone(), requesting_shard)) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
-                                        // got two upquery responses for the same key for the same
-                                        // downstream shard. waaaaaaat?
+                                        // This is a serious problem if we get two upquery
+                                        // responses for the same key for the same downstream
+                                        // shards. In this case we should panic with a stacktrace
+                                        // to diagnose how this could have possibly happened.
                                         unimplemented!(
+                                            // got two upquery responses for the same key for the same
+                                            // downstream shard. waaaaaaat?
                                             "downstream shard double-requested key (node: {}, src: {}, key cols: {:?})",
                                             me.unwrap().index(),
                                             if is_shard_merger {
