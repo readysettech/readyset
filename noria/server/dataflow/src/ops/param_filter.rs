@@ -1,3 +1,7 @@
+#![allow(clippy::todo, clippy::panic)]
+// ParamFilter is not implemented. This entire file is being ignored until it is either implemented
+// or removed.
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
