@@ -62,13 +62,24 @@ impl DataGenerator {
                     DataType::UnsignedInt(self.author_table_rows as u32),
                 ),
             ),
+            ("keywords".into(), ColumnGenerationSpec::Random),
+            ("title".into(), ColumnGenerationSpec::Random),
+            ("full_text".into(), ColumnGenerationSpec::Random),
+            ("short_text".into(), ColumnGenerationSpec::Random),
+            ("image_url".into(), ColumnGenerationSpec::Random),
+            ("url".into(), ColumnGenerationSpec::Random),
+            ("type".into(), ColumnGenerationSpec::Random),
         ]);
 
         let table = database_spec.table_spec("users");
         table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
 
         let table = database_spec.table_spec("authors");
-        table.set_column_generator_specs(&[("id".into(), ColumnGenerationSpec::Unique)]);
+        table.set_column_generator_specs(&[
+            ("id".into(), ColumnGenerationSpec::Unique),
+            ("name".into(), ColumnGenerationSpec::Random),
+            ("image_url".into(), ColumnGenerationSpec::Random),
+        ]);
 
         let table = database_spec.table_spec("recommendations");
         // For each user we will generate `self.per_user_recs` rows. Recommendations for
