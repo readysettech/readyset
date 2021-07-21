@@ -95,7 +95,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     external_addr: SocketAddr,
     config: Config,
     memory_limit: Option<usize>,
-    _memory_check_frequency: Option<time::Duration>,
+    memory_check_frequency: Option<time::Duration>,
     log: slog::Logger,
     region: Option<String>,
     replicator_url: Option<String>,
@@ -163,7 +163,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         election_state: None,
         // this initial duration doesn't matter; it gets set upon worker registration
         heartbeat_interval: tokio::time::interval(Duration::from_secs(10)),
-        evict_interval: None,
+        evict_interval: memory_check_frequency.map(|f| tokio::time::interval(f)),
         memory_limit,
         rx: worker_rx,
         coord: Arc::new(Default::default()),
