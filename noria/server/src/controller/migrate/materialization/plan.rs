@@ -349,10 +349,12 @@ impl<'a> Plan<'a> {
 
                 // the first domain in the chain may *only* have the source node
                 // in which case it doesn't need to know about the path
-                if locals.is_empty() {
+                let locals = if let Ok(locals) = Vec1::try_from(locals) {
+                    locals
+                } else {
                     assert_eq!(i, 0);
                     continue;
-                }
+                };
 
                 // build the message we send to this domain to tell it about this replay path.
                 let mut setup = DomainRequest::SetupReplayPath {
