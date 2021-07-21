@@ -146,6 +146,8 @@ impl MySqlReplicator {
         let mut row_stream = dumper.stream().await?;
         let mut rows = Vec::with_capacity(BATCH_SIZE);
 
+        info!(log, "Replication started");
+
         while let Some(row) = row_stream.next().await? {
             rows.push(row);
             cnt += 1;

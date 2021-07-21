@@ -8,7 +8,7 @@ use mysql_async as mysql;
 use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
-use slog::{error, info, o, Discard, Logger};
+use slog::{debug, error, info, o, Discard, Logger};
 use std::collections::{hash_map, HashMap};
 use std::convert::TryInto;
 use std::fmt::Display;
@@ -29,6 +29,7 @@ pub(crate) enum ReplicationAction {
     SchemaChange {
         ddl: String,
     },
+    LogPosition,
 }
 
 #[async_trait]
@@ -273,7 +274,6 @@ impl<A: Authority> NoriaAdapter<A> {
                     .extend_recipe_with_offset(&ddl, Some(pos))
                     .await?;
                 self.clear_mutator_cache();
-                Ok(())
             }
 
             ReplicationAction::TableAction {
@@ -295,10 +295,15 @@ impl<A: Authority> NoriaAdapter<A> {
                     timestamp.map.insert(table_mutator.node, tx);
                     table_mutator.update_timestamp(timestamp).await?;
                 }
+            }
 
-                Ok(())
+            ReplicationAction::LogPosition => {
+                // Update the log position
+                self.noria.extend_recipe_with_offset("", Some(pos)).await?;
             }
         }
+
+        Ok(())
     }
 
     /// Loop over the actions
@@ -307,7 +312,7 @@ impl<A: Authority> NoriaAdapter<A> {
             let (action, pos) = self.connector.next_action(position).await?;
             position = pos.clone();
 
-            info!(self.log, "{:?}", action);
+            debug!(self.log, "{:?}", action);
 
             if let Err(err) = self.handle_action(action, pos).await {
                 error!(self.log, "{}", err);

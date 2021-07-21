@@ -248,6 +248,8 @@ impl MySqlBinlogConnector {
                         // This should never happen, but better to panic than to get the wrong position
                         position: u32::try_from(ev.position()).unwrap(),
                     };
+
+                    return Ok((ReplicationAction::LogPosition, &self.next_position));
                 }
 
                 EventType::QUERY_EVENT => {
