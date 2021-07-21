@@ -588,29 +588,28 @@ mod tests {
             let mut t1 = noria.table("t1").await.unwrap();
             let mut t2 = noria.table("t2").await.unwrap();
 
-            t1.set_replication_offset(ReplicationOffset {
+            let mut offset = ReplicationOffset {
                 offset: 1,
                 replication_log_name: "binlog".to_owned(),
-            })
-            .await
-            .unwrap();
-            t2.set_replication_offset(ReplicationOffset {
-                offset: 7,
-                replication_log_name: "binlog".to_owned(),
-            })
-            .await
-            .unwrap();
+            };
+
+            t1.set_replication_offset(offset.clone()).await.unwrap();
+            offset.offset = 7;
+            t2.set_replication_offset(offset.clone()).await.unwrap();
 
             sleep().await;
 
-            let offset = noria.replication_offset().await.unwrap();
-            assert_eq!(
-                offset,
-                Some(ReplicationOffset {
-                    offset: 7,
-                    replication_log_name: "binlog".to_owned(),
-                })
-            );
+            assert_eq!(offset, noria.replication_offset().await.unwrap().unwrap());
+
+            // Check that storing replication offset via the adapter directly works too
+            offset.offset = 15;
+            noria
+                .set_replication_offset(Some(offset.clone()))
+                .await
+                .unwrap();
+
+            sleep().await;
+            assert_eq!(offset, noria.replication_offset().await.unwrap().unwrap());
         }
 
         #[tokio::test(flavor = "multi_thread")]

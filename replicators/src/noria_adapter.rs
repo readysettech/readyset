@@ -299,7 +299,7 @@ impl<A: Authority> NoriaAdapter<A> {
 
             ReplicationAction::LogPosition => {
                 // Update the log position
-                self.noria.extend_recipe_with_offset("", Some(pos)).await?;
+                self.noria.set_replication_offset(Some(pos)).await?;
             }
         }
 

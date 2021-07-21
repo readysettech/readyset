@@ -271,6 +271,12 @@ impl ControllerInner {
                     self.install_recipe(authority, args)
                         .map(|r| bincode::serialize(&r).unwrap())
                 }),
+            (Method::POST, "/set_replication_offset") => bincode::deserialize(&body)
+                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map(|args| {
+                    self.set_replication_offset(authority, args)
+                        .map(|r| bincode::serialize(&r).unwrap())
+                }),
             (Method::POST, "/set_security_config") => bincode::deserialize(&body)
                 .map_err(|_| StatusCode::BAD_REQUEST)
                 .map(|args| {
@@ -1416,6 +1422,26 @@ impl ControllerInner {
                 noria::internal!("failed to parse recipe: {:?}", e);
             }
         }
+    }
+
+    fn set_replication_offset<A: Authority + 'static>(
+        &mut self,
+        authority: &Arc<A>,
+        offset: Option<ReplicationOffset>,
+    ) -> Result<(), ReadySetError> {
+        self.replication_offset = offset.clone();
+
+        authority
+            .read_modify_write::<_, ControllerState, _>(STATE_KEY, |state| match state {
+                Some(mut state) => {
+                    state.replication_offset = offset.clone();
+                    Ok(state)
+                }
+                None => Err(internal_err("Empty state")),
+            })
+            .map_err(|_| internal_err("Unable to update state"))??;
+
+        Ok(())
     }
 
     fn graphviz(&self, detailed: bool) -> String {

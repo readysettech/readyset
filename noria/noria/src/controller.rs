@@ -530,6 +530,16 @@ impl<A: Authority + 'static> ControllerHandle<A> {
         self.rpc("install_recipe", request)
     }
 
+    /// Set the replication offset stored with the recipe
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn set_replication_offset(
+        &mut self,
+        replication_offset: Option<ReplicationOffset>,
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("set_replication_offset", replication_offset)
+    }
+
     /// Fetch a graphviz description of the dataflow graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
