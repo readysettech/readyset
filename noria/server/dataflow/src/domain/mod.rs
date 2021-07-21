@@ -91,11 +91,7 @@ enum TriggerEndpoint {
 pub(crate) struct ReplayPath {
     source: Option<LocalNodeIndex>,
     /// The nodes in the replay path.
-    ///
-    /// Invariant: path can never be empty
-    ///
-    /// TODO(grfn): make this a vec1?
-    path: Vec<ReplayPathSegment>,
+    path: Vec1<ReplayPathSegment>,
     notify_done: bool,
     pub(crate) partial_unicast_sharder: Option<NodeIndex>,
     trigger: TriggerEndpoint,
@@ -105,7 +101,7 @@ impl ReplayPath {
     /// Return a reference to the last [`ReplayPathSegment`] of this replay path
     pub(crate) fn last_segment(&self) -> &ReplayPathSegment {
         #[allow(clippy::unwrap_used)] // replay paths can't be empty
-        self.path.last().unwrap()
+        self.path.last()
     }
 }
 
@@ -1414,8 +1410,7 @@ impl Domain {
                 };
 
                 if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger {
-                    #[allow(clippy::unwrap_used)] // Replay paths are non-empty
-                    let last = path.last().unwrap();
+                    let last = path.last();
                     #[allow(clippy::unwrap_used)] // Replay path must have a partial key
                     self.replay_paths_by_dst
                         .entry(last.node)
@@ -2561,8 +2556,7 @@ impl Domain {
                     }
 
                     // let's collect some information about the destination of this replay
-                    #[allow(clippy::unwrap_used)] // replay paths are non-empty
-                    let dst = path.last().unwrap().node;
+                    let dst = path.last().node;
                     #[allow(clippy::indexing_slicing)] // dst came from a replay path
                     let dst_is_reader = self.nodes[dst]
                         .borrow()
@@ -2584,8 +2578,7 @@ impl Domain {
                         } = context
                         {
                             let had = for_keys.len();
-                            #[allow(clippy::unwrap_used)] // replay paths are non-empty
-                            let partial_keys = path.last().unwrap().partial_key.as_ref().unwrap();
+                            let partial_keys = path.last().partial_key.as_ref().unwrap();
                             if let Some(w) = self.waiting.get(dst) {
                                 let mut remapped_keys_to_holes = vec![];
                                 // Scan the list of active upquery maps to see if this replay is
@@ -2670,8 +2663,7 @@ impl Domain {
                                 // yet
                                 // We already know it's a partial replay path, so it must have a partial key
                                 #[allow(clippy::unwrap_used)]
-                                let partial_keys =
-                                    path.first().unwrap().partial_key.as_ref().unwrap();
+                                let partial_keys = path.first().partial_key.as_ref().unwrap();
                                 data.retain(|r| {
                                     for_keys.iter().any(|k| {
                                         k.contains(
@@ -3836,8 +3828,7 @@ impl Domain {
                     TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
                         // This path terminates inside the domain. Find the target node, evict
                         // from it, and then propagate the eviction further downstream.
-                        #[allow(clippy::unwrap_used)] // replay paths are non-empty
-                        let target = path.last().unwrap().node;
+                        let target = path.last().node;
                         // We've already evicted from readers in walk_path
                         #[allow(clippy::indexing_slicing)] // came from replay paths
                         if self.nodes[target].borrow().is_reader() {

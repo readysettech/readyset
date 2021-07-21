@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use crate::domain;
 use crate::prelude::*;
@@ -142,7 +143,7 @@ pub enum DomainRequest {
     SetupReplayPath {
         tag: Tag,
         source: Option<LocalNodeIndex>,
-        path: Vec<ReplayPathSegment>,
+        path: Vec1<ReplayPathSegment>,
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
