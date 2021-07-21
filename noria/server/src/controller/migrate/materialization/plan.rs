@@ -571,45 +571,42 @@ impl<'a> Plan<'a> {
 
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
-        let s = self.graph[self.node]
-            .with_reader(|r| {
-                if self.partial {
-                    assert!(r.is_materialized());
+        let s = if let Some(r) = self.graph[self.node].as_reader() {
+            if self.partial {
+                assert!(r.is_materialized());
 
-                    let last_domain = self.graph[self.node].domain();
-                    let num_shards = self.dmp.num_shards(last_domain).unwrap();
+                let last_domain = self.graph[self.node].domain();
+                let num_shards = self.dmp.num_shards(last_domain).unwrap();
 
-                    // since we're partially materializing a reader node,
-                    // we need to give it a way to trigger replays.
-                    InitialState::PartialGlobal {
-                        gid: self.node,
-                        cols: self.graph[self.node].fields().len(),
-                        key: Vec::from(r.key().unwrap()),
-                        trigger_domain: (last_domain, num_shards),
-                    }
-                } else {
-                    InitialState::Global {
-                        cols: self.graph[self.node].fields().len(),
-                        key: Vec::from(r.key().unwrap()),
-                        gid: self.node,
-                    }
+                // since we're partially materializing a reader node,
+                // we need to give it a way to trigger replays.
+                InitialState::PartialGlobal {
+                    gid: self.node,
+                    cols: self.graph[self.node].fields().len(),
+                    key: Vec::from(r.key().unwrap()),
+                    trigger_domain: (last_domain, num_shards),
                 }
-            })
-            .ok()
-            .unwrap_or_else(|| {
-                // not a reader
-                if self.partial {
-                    let indices = self
-                        .tags
-                        .drain()
-                        .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
-                        .collect();
-                    InitialState::PartialLocal(indices)
-                } else {
-                    let indices = self.tags.drain().map(|(k, _)| k).collect();
-                    InitialState::IndexedLocal(indices)
+            } else {
+                InitialState::Global {
+                    cols: self.graph[self.node].fields().len(),
+                    key: Vec::from(r.key().unwrap()),
+                    gid: self.node,
                 }
-            });
+            }
+        } else {
+            // not a reader
+            if self.partial {
+                let indices = self
+                    .tags
+                    .drain()
+                    .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
+                    .collect();
+                InitialState::PartialLocal(indices)
+            } else {
+                let indices = self.tags.drain().map(|(k, _)| k).collect();
+                InitialState::IndexedLocal(indices)
+            }
+        };
 
         self.dmp.add_message(
             self.graph[self.node].domain(),

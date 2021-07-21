@@ -1259,8 +1259,7 @@ mod tests {
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1]);
         })
         .await;
     }
@@ -1291,8 +1290,7 @@ mod tests {
             assert_eq!(node.description(true), "π[0, 1]");
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1])
         })
         .await;
     }
@@ -1341,8 +1339,7 @@ mod tests {
 
             // Check reader
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1]);
         })
         .await;
     }
@@ -1389,8 +1386,7 @@ mod tests {
 
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
         })
         .await;
     }
@@ -1437,8 +1433,7 @@ mod tests {
 
             // reader key column should be correct
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
         })
         .await;
     }
@@ -1646,8 +1641,7 @@ mod tests {
             assert_eq!(get_node(&inc, mig, &qfp.name).fields(), &["id", "name"]);
             // key columns should be in opposite order (i.e., the order of parameters in the query)
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1, 0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1, 0]);
         })
         .await;
     }
@@ -1798,8 +1792,7 @@ mod tests {
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
 
             // Add the same query again
             let ncount = mig.graph().node_count();
@@ -1833,8 +1826,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[1]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1]);
             // Check that the parent of the projection is the bogokey projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(top_node.ancestors(), [bogo_projection_address]);
@@ -1873,8 +1865,7 @@ mod tests {
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
 
             // Add the name query again, but with a parameter and project columns in a different
             // order.
@@ -1896,8 +1887,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Check that the parent of the projection is the base table, and NOT the earlier
             // bogokey projection.
@@ -1923,8 +1913,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
             // Check that the parent of the projection is the base table, and NOT the earlier
             // bogokey projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
@@ -1962,8 +1951,7 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Add a new "full table" query. The view is expected to contain projected columns plus
             // the special 'bogokey' literal column.
@@ -1976,8 +1964,7 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1, lit: 0]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
 
             // Check that the parent of the projection node is the base table, and NOT the earlier
             // parameterized projection.
@@ -2018,8 +2005,7 @@ mod tests {
             assert_eq!(projection.description(true), "π[0, 1]");
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Add a new "full table" query as a non leaf query. The view does not contain a
             // 'bogokey' literal column because it is for a non leaf query.
@@ -2085,8 +2071,7 @@ mod tests {
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
 
             // Add the same query again
             let ncount = mig.graph().node_count();
@@ -2122,8 +2107,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
             // Check that the parent of the top node is param filter
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(top_node.ancestors(), [param_filter_address]);
@@ -2150,8 +2134,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[3]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[3]);
             // Check that the parent of the top node is param filter
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
             assert_eq!(top_node.ancestors(), [param_filter_address]);
@@ -2331,8 +2314,7 @@ mod tests {
             let leaf = qfp.query_leaf;
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
 
             // Add a query with the same literal projection but a different parameter from the base
             // table.
@@ -2354,8 +2336,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check reader column
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[2]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
             // Check that the parent of the projection is the original table, NOT the earlier
             // projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
@@ -3165,8 +3146,7 @@ mod tests {
 
             // Check reader
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
         })
         .await;
     }
@@ -3212,8 +3192,7 @@ mod tests {
 
             // Check reader
             let n = get_reader(&inc, mig, &qfp.name);
-            n.with_reader(|r| assert_eq!(r.key().unwrap(), &[0]))
-                .unwrap();
+            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[0]);
         })
         .await;
     }

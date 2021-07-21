@@ -1135,14 +1135,19 @@ impl Domain {
                     .get(node)
                     .ok_or(ReadySetError::NoSuchNode(node))?
                     .borrow_mut();
-                n.with_egress_mut(move |e| {
-                    if let Some((node, local, addr)) = new_tx {
-                        e.add_tx(node, local, addr);
-                    }
-                    if let Some(new_tag) = new_tag {
-                        e.add_tag(new_tag.0, new_tag.1);
-                    }
-                });
+
+                let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
+                    node_index: node,
+                    expected_type: NodeType::Egress,
+                })?;
+
+                if let Some((node, local, addr)) = new_tx {
+                    e.add_tx(node, local, addr);
+                }
+
+                if let Some(new_tag) = new_tag {
+                    e.add_tag(new_tag.0, new_tag.1);
+                }
                 Ok(None)
             }
             DomainRequest::AddEgressFilter {
@@ -1154,21 +1159,26 @@ impl Domain {
                     .get(egress_node)
                     .ok_or(ReadySetError::NoSuchNode(egress_node))?
                     .borrow_mut();
-                n.with_egress_mut(move |e| {
-                    e.add_for_filtering(target_node);
-                });
+
+                n.as_mut_egress()
+                    .ok_or(ReadySetError::InvalidNodeType {
+                        node_index: egress_node,
+                        expected_type: NodeType::Egress,
+                    })?
+                    .add_for_filtering(target_node);
                 Ok(None)
             }
             DomainRequest::UpdateSharder { node, new_txs } => {
-                let mut n = self
-                    .nodes
+                self.nodes
                     .get(node)
                     .ok_or(ReadySetError::NoSuchNode(node))?
-                    .borrow_mut();
-                n.with_sharder_mut(move |s| {
-                    s.add_sharded_child(new_txs.0, new_txs.1);
-                    Ok(())
-                })?;
+                    .borrow_mut()
+                    .as_mut_sharder()
+                    .ok_or(ReadySetError::InvalidNodeType {
+                        node_index: node,
+                        expected_type: NodeType::Sharder,
+                    })?
+                    .add_sharded_child(new_txs.0, new_txs.1);
                 Ok(None)
             }
             DomainRequest::StateSizeProbe { node } => {
@@ -1218,7 +1228,10 @@ impl Domain {
                             .borrow()
                             .is_reader()
                         {
-                            return Err(ReadySetError::NotAReader(node));
+                            return Err(ReadySetError::InvalidNodeType {
+                                node_index: node,
+                                expected_type: NodeType::Reader,
+                            });
                         }
 
                         let k = key.clone(); // ugh
@@ -1290,23 +1303,23 @@ impl Domain {
 
                         #[allow(clippy::indexing_slicing)] // checked node exists above
                         let mut n = self.nodes[node].borrow_mut();
-                        #[allow(clippy::unwrap_used)] // checked it was a reader above
                         tokio::task::block_in_place(|| {
-                            n.with_reader_mut(|r| {
-                                r_part.post_lookup = r.post_lookup().clone();
+                            #[allow(clippy::unwrap_used)] // checked it was a reader above
+                            let r = n.as_mut_reader().unwrap();
+                            r_part.post_lookup = r.post_lookup().clone();
 
-                                assert!(self
-                                    .readers
-                                    .lock()
-                                    .unwrap()
-                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                    .is_none());
+                            #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
+                            #[allow(clippy::panic)] // registering the same reader twice is really bad
+                            assert!(self
+                                .readers
+                                .lock()
+                                .unwrap()
+                                .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                .is_none());
 
-                                // make sure Reader is actually prepared to receive state
-                                r.set_write_handle(w_part)
-                            })
+                            // make sure Reader is actually prepared to receive state
+                            r.set_write_handle(w_part)
                         })
-                        .unwrap();
                     }
                     InitialState::Global { gid, cols, key } => {
                         use crate::backlog;
@@ -1319,7 +1332,10 @@ impl Domain {
                             .borrow()
                             .is_reader()
                         {
-                            return Err(ReadySetError::NotAReader(node));
+                            return Err(ReadySetError::InvalidNodeType {
+                                node_index: node,
+                                expected_type: NodeType::Reader,
+                            });
                         }
 
                         let mut n = self
@@ -1328,23 +1344,21 @@ impl Domain {
                             .ok_or(ReadySetError::NoSuchNode(node))?
                             .borrow_mut();
 
-                        #[allow(clippy::unwrap_used)] // checked it was a reader above
                         tokio::task::block_in_place(|| {
-                            n.with_reader_mut(|r| {
-                                r_part.post_lookup = r.post_lookup().clone();
+                            #[allow(clippy::unwrap_used)] // checked it was a reader above
+                            let r = n.as_mut_reader().unwrap();
+                            r_part.post_lookup = r.post_lookup().clone();
 
-                                assert!(self
-                                    .readers
-                                    .lock()
-                                    .unwrap()
-                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                    .is_none());
+                            assert!(self
+                                .readers
+                                .lock()
+                                .unwrap()
+                                .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                .is_none());
 
-                                // make sure Reader is actually prepared to receive state
-                                r.set_write_handle(w_part)
-                            })
-                        })
-                        .unwrap();
+                            // make sure Reader is actually prepared to receive state
+                            r.set_write_handle(w_part)
+                        });
                     }
                 }
                 Ok(None)
@@ -1667,14 +1681,13 @@ impl Domain {
                 }
 
                 // swap replayed reader nodes to expose new state
-                let _ = // if it's not a reader, no-op
-                    node_ref.borrow_mut().with_reader_mut(|r| {
-                        if let Some(ref mut state) = r.writer_mut() {
-                            trace!(self.log, "swapping state"; "local" => node.id());
-                            state.swap();
-                            trace!(self.log, "state swapped"; "local" => node.id());
-                        }
-                    });
+                if let Some(r) = node_ref.borrow_mut().as_mut_reader() {
+                    if let Some(ref mut state) = r.writer_mut() {
+                        trace!(self.log, "swapping state"; "local" => node.id());
+                        state.swap();
+                        trace!(self.log, "state swapped"; "local" => node.id());
+                    }
+                }
 
                 Ok(None)
             }
@@ -1701,8 +1714,9 @@ impl Domain {
                         let time = self.process_times.num_nanoseconds(local_index);
                         let ptime = self.process_ptimes.num_nanoseconds(local_index);
                         let mem_size = n
-                            .with_reader(|r| r.state_size().unwrap_or(0))
-                            .unwrap_or_else(|_| {
+                            .as_reader()
+                            .map(|r| r.state_size().unwrap_or(0))
+                            .unwrap_or_else(|| {
                                 self.state
                                     .get(local_index)
                                     .map(|s| s.deep_size_of())
@@ -1710,7 +1724,8 @@ impl Domain {
                             });
 
                         let mat_state = n
-                            .with_reader(|r| {
+                            .as_reader()
+                            .map(|r| {
                                 if r.is_partial() {
                                     MaterializationStatus::Partial {
                                         beyond_materialization_frontier: n.purge,
@@ -1719,7 +1734,7 @@ impl Domain {
                                     MaterializationStatus::Full
                                 }
                             })
-                            .unwrap_or_else(|_| match self.state.get(local_index) {
+                            .unwrap_or_else(|| match self.state.get(local_index) {
                                 Some(ref s) => {
                                     if s.is_partial() {
                                         MaterializationStatus::Partial {
@@ -1870,63 +1885,45 @@ impl Domain {
                         cols,
                         node,
                     } => {
-                        if !self
+                        let start = time::Instant::now();
+                        self.total_replay_time.start();
+
+                        let mut n = self
                             .nodes
                             .get(node)
                             .ok_or(ReadySetError::NoSuchNode(node))?
-                            .borrow()
-                            .is_reader()
-                        {
-                            return Err(ReadySetError::NotAReader(node));
-                        }
+                            .borrow_mut();
 
-                        let start = time::Instant::now();
-                        self.total_replay_time.start();
+                        let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
+                            node_index: node,
+                            expected_type: NodeType::Reader,
+                        })?;
+
                         // the reader could have raced with us filling in the key after some
                         // *other* reader requested it, so let's double check that it indeed still
                         // misses!
-                        #[allow(clippy::indexing_slicing)] // we just checked node existed above
-                        self.nodes[node]
-                            .borrow_mut()
-                            .with_reader_mut::<_, ReadySetResult<()>>(|r| {
-                                let w = r.writer_mut().ok_or_else(|| {
-                                    internal_err(
-                                        "reader replay requested for non-materialized reader",
-                                    )
-                                })?;
-                                // ensure that all writes have been applied
-                                w.swap();
-                                Ok(())
-                            })
-                            .map_err(|_| {
-                                internal_err("reader replay requested for non-reader node")
-                            })??;
+                        let w = r.writer_mut().ok_or_else(|| {
+                            internal_err("reader replay requested for non-materialized reader")
+                        })?;
+                        // ensure that all writes have been applied
+                        w.swap();
 
                         // don't request keys that have been filled since the request was sent
-                        #[allow(clippy::indexing_slicing)] // we just checked node existed above
-                        #[allow(clippy::unwrap_used)]
-                        // checked it was a reader above
-                        self.nodes[node]
-                            .borrow_mut()
-                            .with_reader_mut::<_, ReadySetResult<()>>(|r| {
-                                let writer = r.writer().ok_or_else(|| {
-                                    internal_err(
-                                        "reader replay request for non-materialized reader",
-                                    )
-                                })?;
-                                let mut whoopsed = false;
-                                keys.retain(|key| {
-                                    !writer.contains(key).unwrap_or_else(|| {
-                                        whoopsed = true;
-                                        true
-                                    })
-                                });
-                                if whoopsed {
-                                    internal!("reader replay requested for non-ready reader")
-                                }
-                                Ok(())
+                        let writer = r.writer().ok_or_else(|| {
+                            internal_err("reader replay request for non-materialized reader")
+                        })?;
+                        let mut whoopsed = false;
+                        keys.retain(|key| {
+                            !writer.contains(key).unwrap_or_else(|| {
+                                whoopsed = true;
+                                true
                             })
-                            .unwrap()?;
+                        });
+                        if whoopsed {
+                            internal!("reader replay requested for non-ready reader")
+                        }
+
+                        drop(n); // NLL needs a little help. don't we all, sometimes?
 
                         // ensure that we haven't already requested a replay of this key
                         keys.retain(|key| {
@@ -2111,31 +2108,26 @@ impl Domain {
                         let mut node = self.nodes[tp.view].borrow_mut();
                         trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
                         #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
-                        node.with_reader_mut(|r| {
-                            if let Some(wh) = r.writer_mut() {
-                                for key in tp.keys {
-                                    wh.mark_hole(&key);
-                                }
-                                swap.insert(tp.view);
+                        let r = node.as_mut_reader().unwrap();
+                        if let Some(wh) = r.writer_mut() {
+                            for key in tp.keys {
+                                wh.mark_hole(&key);
                             }
-                        })
-                        .unwrap();
+                            swap.insert(tp.view);
+                        }
                     } else {
                         break;
                     }
                 }
                 for n in swap {
-                    #[allow(clippy::indexing_slicing)] // nodes in tp.view must reference nodes in self
-                    #[allow(clippy::unwrap_used)]
-                    // nodes in tp.view must reference readers
-                    self.nodes[n]
-                        .borrow_mut()
-                        .with_reader_mut(|r| {
-                            if let Some(wh) = r.writer_mut() {
-                                wh.swap();
-                            }
-                        })
-                        .unwrap();
+                    #[allow(clippy::indexing_slicing)]
+                    // nodes in tp.view must reference nodes in self
+                    let mut n = self.nodes[n].borrow_mut();
+                    #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
+                    let r = n.as_mut_reader().unwrap();
+                    if let Some(wh) = r.writer_mut() {
+                        wh.swap();
+                    }
                 }
 
                 if self.delayed_for_self.is_empty() {
@@ -2560,7 +2552,8 @@ impl Domain {
                     #[allow(clippy::indexing_slicing)] // dst came from a replay path
                     let dst_is_reader = self.nodes[dst]
                         .borrow()
-                        .with_reader(|r| r.is_materialized())
+                        .as_reader()
+                        .map(|r| r.is_materialized())
                         .unwrap_or(false);
                     let dst_is_target = !self
                         .nodes
@@ -2725,7 +2718,7 @@ impl Domain {
                         #[allow(clippy::indexing_slicing)]
                         // we know replay paths only contain real nodes
                         let mut n = self.nodes[segment.node].borrow_mut();
-                        let is_reader = n.with_reader(|r| r.is_materialized()).unwrap_or(false);
+                        let is_reader = n.as_reader().map(|r| r.is_materialized()).unwrap_or(false);
 
                         // keep track of whether we're filling any partial holes
                         let partial_key_cols = segment.partial_key.as_ref();
@@ -2763,19 +2756,17 @@ impl Domain {
                                         state.mark_filled(key.clone(), tag);
                                     }
                                 } else {
-                                    n.with_reader_mut(|r| {
-                                        // we must be filling a hole in a Reader. we need to ensure
-                                        // that the hole for the key we're replaying ends up being
-                                        // filled, even if that hole is empty!
-                                        if let Some(wh) = r.writer_mut() {
-                                            for key in backfill_keys.iter() {
-                                                wh.mark_filled(key.clone());
-                                            }
-                                        }
-                                    })
-                                    .map_err(|_| {
+                                    let r = n.as_mut_reader().ok_or_else(|| {
                                         internal_err("Trying to fill hole in non-materialized node")
                                     })?;
+                                    // we must be filling a hole in a Reader. we need to ensure
+                                    // that the hole for the key we're replaying ends up being
+                                    // filled, even if that hole is empty!
+                                    if let Some(wh) = r.writer_mut() {
+                                        for key in backfill_keys.iter() {
+                                            wh.mark_filled(key.clone());
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2836,25 +2827,19 @@ impl Domain {
                                     for miss in &missed_on {
                                         state.mark_hole(miss, tag);
                                     }
-                                } else {
-                                    let _ = // if there's no state, we don't need to worry about it
-                                        n.with_reader_mut(|r| {
-                                            if let Some(wh) = r.writer_mut() {
-                                                for miss in &missed_on {
-                                                    wh.mark_hole(miss);
-                                                }
-                                            }
-                                        });
-                                }
-                            } else if is_reader {
-                                // we filled a hole! swap the reader.
-                                #[allow(clippy::unwrap_used)] // we just checked it's a reader
-                                n.with_reader_mut(|r| {
+                                } else if let Some(r) = n.as_mut_reader() {
                                     if let Some(wh) = r.writer_mut() {
-                                        wh.swap();
+                                        for miss in &missed_on {
+                                            wh.mark_hole(miss);
+                                        }
                                     }
-                                })
-                                .unwrap();
+                                }
+                            } else if let Some(r) = n.as_mut_reader() {
+                                // we filled a hole! swap the reader.
+                                if let Some(wh) = r.writer_mut() {
+                                    wh.swap();
+                                }
+
                                 // and also unmark the replay request
                                 if let Some(ref mut prev) =
                                     self.reader_triggered.get_mut(segment.node)
@@ -2875,15 +2860,12 @@ impl Domain {
                                 for key in &process_result.captured {
                                     state.mark_hole(key, tag);
                                 }
-                            } else {
-                                let _ = // if there's no state, we don't need to worry about it
-                                    n.with_reader_mut(|r| {
-                                        if let Some(wh) = r.writer_mut() {
-                                            for key in &process_result.captured {
-                                                wh.mark_hole(key);
-                                            }
-                                        }
-                                    });
+                            } else if let Some(r) = n.as_mut_reader() {
+                                if let Some(wh) = r.writer_mut() {
+                                    for key in &process_result.captured {
+                                        wh.mark_hole(key);
+                                    }
+                                }
                             }
                         }
 
@@ -3679,14 +3661,19 @@ impl Domain {
                             let n = &*nd.borrow();
                             let local_index = n.local_addr();
 
-                            n.with_reader(|r| if r.is_partial() { r.state_size() } else { None })
-                                .unwrap_or_else(|_| {
-                                    self.state
-                                        .get(local_index)
-                                        .filter(|state| state.is_partial())
-                                        .map(|state| state.deep_size_of())
-                                })
-                                .map(|s| (local_index, s))
+                            if let Some(r) = n.as_reader() {
+                                if r.is_partial() {
+                                    r.state_size()
+                                } else {
+                                    None
+                                }
+                            } else {
+                                self.state
+                                    .get(local_index)
+                                    .filter(|state| state.is_partial())
+                                    .map(|state| state.deep_size_of())
+                            }
+                            .map(|s| (local_index, s))
                         })
                         .filter(|&(_, s)| s > 0)
                         .map(|(x, s)| (x, s as usize))
@@ -3739,13 +3726,11 @@ impl Domain {
                         // TODO: use (num_bytes - freed) / SOMETHING to compute # keys to evict
                         if n.is_dropped() {
                             break; // Node was dropped. Give up.
-                        } else if n.is_reader() {
-                            #[allow(clippy::unwrap_used)] // just checked it was a reader
-                            let freed_now = n.with_reader_mut(|r| r.evict_random_keys(16)).unwrap();
+                        } else if let Some(r) = n.as_mut_reader() {
+                            let freed_now = r.evict_random_keys(16);
 
                             freed += freed_now;
-                            #[allow(clippy::unwrap_used)] // just checked it was a reader
-                            if n.with_reader(|r| r.is_empty()).unwrap() {
+                            if r.is_empty() {
                                 trace!(
                                     self.log,
                                     "done evicting from now-empty reader node {:?}",
@@ -3880,7 +3865,7 @@ impl Domain {
                 let n = &*nd.borrow();
                 let local_index = n.local_addr();
 
-                n.with_reader(|r| {
+                if let Some(r) = n.as_reader() {
                     // We are a reader, which has its own kind of state
                     let mut size = 0;
                     if r.is_partial() {
@@ -3888,15 +3873,14 @@ impl Domain {
                         reader_size += size;
                     }
                     size
-                })
-                .unwrap_or_else(|_| {
+                } else {
                     // Not a reader, state is with domain
                     self.state
                         .get(local_index)
                         .filter(|state| state.is_partial())
                         .map(|s| s.deep_size_of())
                         .unwrap_or(0)
-                })
+                }
             })
             .sum();
 
