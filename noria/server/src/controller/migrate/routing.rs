@@ -109,9 +109,8 @@ pub fn add(
 
                 // the ingress is sharded the same way as its target, but with remappings of parent
                 // columns applied
-                let sharding = if graph[parent].is_sharder() {
-                    let parent_out_sharding =
-                        graph[parent].with_sharder(|s| Ok(s.sharded_by()))?.unwrap();
+                let sharding = if let Some(s) = graph[parent].as_sharder() {
+                    let parent_out_sharding = s.sharded_by();
                     // TODO(malte): below is ugly, but the only way to get the sharding width at
                     // this point; the sharder parent does not currently have the information.
                     // Change this once we support per-subgraph sharding widths and

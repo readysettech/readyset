@@ -2,7 +2,6 @@ use crate::domain;
 use crate::ops;
 use crate::prelude::*;
 use noria::consistency::Timestamp;
-use noria::ReadySetError;
 
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -293,58 +292,57 @@ impl Node {
 
 // derefs
 impl Node {
-    pub(crate) fn with_sharder_mut<F>(&mut self, f: F) -> Result<(), ReadySetError>
-    where
-        F: FnOnce(&mut special::Sharder) -> Result<(), ReadySetError>,
-    {
-        match self.inner {
-            NodeType::Sharder(ref mut s) => f(s),
-            _ => unreachable!(),
+    /// If this node is a [`special::Sharder`], return a reference to that sharder, otherwise return
+    /// None
+    pub fn as_sharder(&self) -> Option<&special::Sharder> {
+        match &self.inner {
+            NodeType::Sharder(r) => Some(r),
+            _ => None,
         }
     }
 
-    pub fn with_sharder<'a, F, R>(&'a self, f: F) -> Result<Option<R>, ReadySetError>
-    where
-        F: FnOnce(&'a special::Sharder) -> Result<R, ReadySetError>,
-        R: 'a,
-    {
-        match self.inner {
-            NodeType::Sharder(ref s) => Ok(Some(f(s)?)),
-            _ => Ok(None),
+    /// If this node is a [`special::Sharder`], return a mutable reference to that sharder, otherwise
+    /// return None
+    pub fn as_mut_sharder(&mut self) -> Option<&mut special::Sharder> {
+        match &mut self.inner {
+            NodeType::Sharder(r) => Some(r),
+            _ => None,
         }
     }
 
-    pub(crate) fn with_egress_mut<F>(&mut self, f: F)
-    where
-        F: FnOnce(&mut special::Egress),
-    {
-        match self.inner {
-            NodeType::Egress(Some(ref mut e)) => f(e),
-            _ => unreachable!(),
+    /// If this node is a [`special::Egress`], return a reference to that egress, otherwise return
+    /// None
+    pub fn as_egress(&self) -> Option<&special::Egress> {
+        match &self.inner {
+            NodeType::Egress(Some(r)) => Some(r),
+            _ => None,
         }
     }
 
-    #[allow(clippy::result_unit_err)]
-    pub fn with_reader_mut<'a, F, R>(&'a mut self, f: F) -> Result<R, ()>
-    where
-        F: FnOnce(&'a mut special::Reader) -> R,
-        R: 'a,
-    {
-        match self.inner {
-            NodeType::Reader(ref mut r) => Ok(f(r)),
-            _ => Err(()),
+    /// If this node is a [`special::Egress`], return a mutable reference to that egress, otherwise
+    /// return None
+    pub fn as_mut_egress(&mut self) -> Option<&mut special::Egress> {
+        match &mut self.inner {
+            NodeType::Egress(Some(r)) => Some(r),
+            _ => None,
         }
     }
 
-    #[allow(clippy::result_unit_err)]
-    pub fn with_reader<'a, F, R>(&'a self, f: F) -> Result<R, ()>
-    where
-        F: FnOnce(&'a special::Reader) -> R,
-        R: 'a,
-    {
-        match self.inner {
-            NodeType::Reader(ref r) => Ok(f(r)),
-            _ => Err(()),
+    /// If this node is a [`special::Reader`], return a reference to that reader, otherwise return
+    /// None
+    pub fn as_reader(&self) -> Option<&special::Reader> {
+        match &self.inner {
+            NodeType::Reader(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// If this node is a [`special::Reader`], return a mutable reference to that reader, otherwise
+    /// return None
+    pub fn as_mut_reader(&mut self) -> Option<&mut special::Reader> {
+        match &mut self.inner {
+            NodeType::Reader(r) => Some(r),
+            _ => None,
         }
     }
 
@@ -485,6 +483,10 @@ impl Node {
 
     pub fn is_reader(&self) -> bool {
         matches!(self.inner, NodeType::Reader { .. })
+    }
+
+    pub fn is_reader_for(&self, ni: NodeIndex) -> bool {
+        self.as_reader().map_or(false, |r| r.is_for() == ni)
     }
 
     pub fn is_ingress(&self) -> bool {

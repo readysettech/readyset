@@ -553,9 +553,8 @@ impl Migration {
         self.ensure_reader_for(n, None, Default::default());
         let ri = self.readers[&n];
 
-        self.ingredients[ri]
-            .with_reader_mut(|r| r.set_key(key))
-            .unwrap();
+        #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
+        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
 
         ri
     }
@@ -573,9 +572,8 @@ impl Migration {
         self.ensure_reader_for(n, None, post_lookup);
         let ri = self.readers[&n];
 
-        self.ingredients[ri]
-            .with_reader_mut(|r| r.set_key(key))
-            .unwrap();
+        #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
+        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
 
         ri
     }
@@ -588,9 +586,8 @@ impl Migration {
 
         let ri = self.readers[&n];
 
-        self.ingredients[ri]
-            .with_reader_mut(|r| r.set_key(key))
-            .unwrap();
+        #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
+        self.ingredients[ri].as_mut_reader().unwrap().set_key(key);
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.

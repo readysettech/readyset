@@ -546,38 +546,36 @@ impl ControllerInner {
             let mut bfs = Bfs::new(&self.ingredients, node_index);
             while let Some(child_index) = bfs.next(&self.ingredients) {
                 let child: &Node = &self.ingredients[child_index];
-                if child
-                    .with_reader(|r| r.is_for() == node_index)
-                    .unwrap_or(false)
-                    && child.name() == query_name
-                {
-                    // Now the child is the reader node of the query we are looking at.
-                    // Here, we extract its [`PostLookup`] and use it to create a new
-                    // mirror node.
-                    let post_lookup = child.with_reader(|r| r.post_lookup().clone()).unwrap();
-                    let mut reader_node = self.ingredients[node_index].named_mirror(
-                        node::special::Reader::new(node_index, post_lookup),
-                        child.name().to_string(),
-                    );
-                    // We also take the associated keys of the original reader node.
-                    let keys_opt = child.with_reader(|r| r.key()).unwrap_or(None);
-                    if let Some(keys) = keys_opt {
-                        // And set the keys to the replicated reader.
-                        reader_node.with_reader_mut(|r| r.set_key(keys)).unwrap();
+                if let Some(r) = child.as_reader() {
+                    if r.is_for() == node_index && child.name() == query_name {
+                        // Now the child is the reader node of the query we are looking at.
+                        // Here, we extract its [`PostLookup`] and use it to create a new
+                        // mirror node.
+                        let post_lookup = r.post_lookup().clone();
+                        let mut reader_node = self.ingredients[node_index].named_mirror(
+                            node::special::Reader::new(node_index, post_lookup),
+                            child.name().to_string(),
+                        );
+                        // We also take the associated keys of the original reader node.
+                        let keys_opt = child.as_reader().and_then(|r| r.key());
+                        if let Some(keys) = keys_opt {
+                            // And set the keys to the replicated reader.
+                            reader_node.as_mut_reader().unwrap().set_key(keys);
+                        }
+                        // We add the replicated reader to the graph.
+                        let reader_index = self.ingredients.add_node(reader_node);
+                        self.ingredients.add_edge(node_index, reader_index, ());
+                        // We keep track of the replicated reader and query node indexes, so
+                        // we can use them to run a migration.
+                        reader_nodes.push((node_index, reader_index));
+                        // We store the reader indexes by query, to use as a reply
+                        // to the user.
+                        new_readers
+                            .entry(query_name)
+                            .or_insert_with(Vec::new)
+                            .push(reader_index);
+                        break;
                     }
-                    // We add the replicated reader to the graph.
-                    let reader_index = self.ingredients.add_node(reader_node);
-                    self.ingredients.add_edge(node_index, reader_index, ());
-                    // We keep track of the replicated reader and query node indexes, so
-                    // we can use them to run a migration.
-                    reader_nodes.push((node_index, reader_index));
-                    // We store the reader indexes by query, to use as a reply
-                    // to the user.
-                    new_readers
-                        .entry(query_name)
-                        .or_insert_with(Vec::new)
-                        .push(reader_index);
-                    break;
                 }
             }
         }
@@ -919,13 +917,11 @@ impl ControllerInner {
             .externals(petgraph::EdgeDirection::Outgoing)
             .filter_map(|n| {
                 let name = self.ingredients[n].name().to_owned();
-                self.ingredients[n]
-                    .with_reader(|r| {
-                        // we want to give the the node address that is being materialized not that of
-                        // the reader node itself.
-                        (name, r.is_for())
-                    })
-                    .ok()
+                self.ingredients[n].as_reader().map(|r| {
+                    // we want to give the the node address that is being materialized not that of
+                    // the reader node itself.
+                    (name, r.is_for())
+                })
             })
             .collect()
     }
@@ -944,10 +940,7 @@ impl ControllerInner {
         let mut nodes: Vec<NodeIndex> = Vec::new();
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
-            if self.ingredients[child]
-                .with_reader(|r| r.is_for() == node)
-                .unwrap_or(false)
-                && self.ingredients[child].name() == name
+            if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
             {
                 // Check for any filter requirements we can satisfy when
                 // traversing the data flow graph, `filter`.
@@ -1480,7 +1473,7 @@ impl ControllerInner {
             let mut bfs = Bfs::new(&self.ingredients, leaf);
             while let Some(child) = bfs.next(&self.ingredients) {
                 let n = &self.ingredients[child];
-                if n.with_reader(|r| r.is_for() == leaf) == Ok(true) {
+                if n.is_reader_for(leaf) {
                     readers.push(child);
                 }
             }

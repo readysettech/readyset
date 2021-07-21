@@ -153,8 +153,8 @@ impl Materializations {
         for &ni in new {
             let n = &graph[ni];
 
-            let mut indices = if n.is_reader() {
-                if let Some(key) = n.with_reader(|r| r.key()).unwrap() {
+            let mut indices = if let Some(r) = n.as_reader() {
+                if let Some(key) = r.key() {
                     // for a reader that will get lookups, we'd like to have an index above us
                     // somewhere on our key so that we can make the reader partial
                     let mut i = HashMap::new();
@@ -379,7 +379,7 @@ impl Materializations {
                         stack.clear();
                         able = false
                     }
-                } else if let Ok(Some(_)) = graph[child].with_reader(|r| r.key()) {
+                } else if graph[child].as_reader().and_then(|r| r.key()).is_some() {
                     // reader child (which is effectively materialized)
                     if !self.partial.contains(&child) {
                         // reader is full, so we can't be partial
@@ -505,7 +505,10 @@ impl Materializations {
         node: &Node,
     ) -> MaterializationStatus {
         let is_materialized = self.have.contains_key(&index)
-            || node.with_reader(|r| r.is_materialized()).unwrap_or(false);
+            || node
+                .as_reader()
+                .map(|r| r.is_materialized())
+                .unwrap_or(false);
 
         if !is_materialized {
             MaterializationStatus::Not
@@ -965,12 +968,11 @@ impl Materializations {
 
         // if this node doesn't need to be materialized, then we're done.
         has_state = !index_on.is_empty();
-        n.with_reader(|r| {
+        if let Some(r) = n.as_reader() {
             if r.is_materialized() {
                 has_state = true;
             }
-        })
-        .unwrap_or(());
+        }
 
         if !has_state {
             debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());
@@ -1002,16 +1004,16 @@ impl Materializations {
         if index_on.is_empty() {
             // we must be reconstructing a Reader.
             // figure out what key that Reader is using
-            graph[ni]
-                .with_reader(|r| {
-                    assert!(r.is_materialized());
-                    if let Some(rk) = r.key() {
-                        // TODO(grfn): once the reader knows its own index type, ask it what that is
-                        // here
-                        index_on.insert(Index::hash_map(rk.to_vec()));
-                    }
-                })
-                .unwrap();
+            if let Some(r) = graph[ni].as_reader() {
+                invariant!(r.is_materialized());
+                if let Some(rk) = r.key() {
+                    // TODO(grfn): once the reader knows its own index type, ask it what that is
+                    // here
+                    index_on.insert(Index::hash_map(rk.to_vec()));
+                }
+            } else {
+                internal!("index_on cannot be empty for a non-Reader node")
+            }
         }
 
         // construct and disseminate a plan for each index

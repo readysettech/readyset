@@ -30,16 +30,15 @@ pub fn shard(
             // suggest_indexes is okay because `node` *must* be new, and therefore will return
             // global node indices.
             graph[node].suggest_indexes(node)
-        } else if graph[node].is_reader() {
+        } else if let Some(r) = graph[node].as_reader() {
             invariant_eq!(input_shardings.len(), 1);
             let ni = input_shardings.keys().next().cloned().unwrap();
             if input_shardings[&ni].is_none() {
                 continue;
             }
 
-            let s = graph[node]
-                .with_reader(|r| r.key())
-                .unwrap()
+            let s = r
+                .key()
                 .and_then(|c| {
                     if c.len() == 1 {
                         if graph[node].fields()[c[0]] == "bogokey" {
@@ -56,9 +55,7 @@ pub fn shard(
                 info!(log, "de-sharding prior to poorly keyed reader"; "node" => ?node);
             } else {
                 info!(log, "sharding reader"; "node" => ?node);
-                graph[node]
-                    .with_reader_mut(|r| r.shard(sharding_factor))
-                    .unwrap();
+                graph[node].as_mut_reader().unwrap().shard(sharding_factor);
             }
 
             if s != input_shardings[&ni] {
@@ -412,7 +409,7 @@ pub fn shard(
             invariant!(!graph[p].is_source());
 
             // and that its children must be sharded somehow (otherwise what is the sharder doing?)
-            let col = graph[n].with_sharder(|s| Ok(s.sharded_by()))?.unwrap();
+            let col = graph[n].as_sharder().unwrap().sharded_by();
             let by = Sharding::ByColumn(col, sharding_factor);
 
             // we can only push sharding above newly created nodes that are not already sharded.
@@ -505,7 +502,7 @@ pub fn shard(
             let mut remove = Vec::new();
             for c in graph.neighbors_directed(p, petgraph::EdgeDirection::Outgoing) {
                 // what does c shard by?
-                let col = graph[c].with_sharder(|s| Ok(s.sharded_by()))?;
+                let col = graph[c].as_sharder().map(|s| s.sharded_by());
                 if col.is_none() {
                     // lifting n would shard a node that isn't expecting to be sharded
                     // TODO: we *could* insert a de-shard here
@@ -753,25 +750,22 @@ pub fn validate(
 
         for in_ni in inputs {
             let in_node = &graph[in_ni];
-            if in_node.is_sharder() {
+            if let Some(s) = in_node.as_sharder() {
                 // ancestor is a sharder, so its output sharding must match ours
-                in_node.with_sharder(|s| {
-                    let in_sharding = remap(
-                        n,
-                        in_ni,
-                        Sharding::ByColumn(s.sharded_by(), sharding_factor),
-                    )?;
-                    if in_sharding != n.sharded_by() {
-                        internal!(
-                            "invalid sharding: {} shards to {:?} != {}'s {:?}",
-                            in_ni.index(),
-                            in_sharding,
-                            node.index(),
-                            n.sharded_by(),
-                        );
-                    }
-                    Ok(())
-                })?;
+                let in_sharding = remap(
+                    n,
+                    in_ni,
+                    Sharding::ByColumn(s.sharded_by(), sharding_factor),
+                )?;
+                if in_sharding != n.sharded_by() {
+                    internal!(
+                        "invalid sharding: {} shards to {:?} != {}'s {:?}",
+                        in_ni.index(),
+                        in_sharding,
+                        node.index(),
+                        n.sharded_by(),
+                    );
+                }
             } else {
                 // ancestor is an ordinary node, so it must have the same sharding
                 let in_sharding = remap(n, in_ni, in_node.sharded_by())?;

@@ -3,6 +3,7 @@
 use crate::channel::tcp::SendError;
 use crate::consensus::Epoch;
 use crate::internal::LocalNodeIndex;
+use derive_more::Display;
 use petgraph::graph::NodeIndex;
 use std::error::Error;
 use std::io;
@@ -37,6 +38,18 @@ pub fn wrap_boxed_error(
     boxed: Box<dyn std::error::Error + Send + Sync + 'static>,
 ) -> anyhow::Error {
     anyhow::Error::new(BoxedErrorWrapper(boxed))
+}
+
+/// An (inexhaustive, currently) enumeration of the types of Node in the graph, for use in
+/// [`ReadySetError::InvalidNodeType`]
+#[derive(Serialize, Deserialize, Debug, Display)]
+pub enum NodeType {
+    /// Egress nodes
+    Egress,
+    /// Reader nodes
+    Reader,
+    /// Sharder nodes
+    Sharder,
 }
 
 /// General error type to be used across all of the ReadySet codebase.
@@ -350,9 +363,14 @@ pub enum ReadySetError {
     #[error("Node {0:?} not found in domain")]
     NoSuchNode(LocalNodeIndex),
 
-    /// A reader-only operation was made on a node that is not a reader
-    #[error("Node {0:?} is not a reader")]
-    NotAReader(LocalNodeIndex),
+    /// An operation that is valid on only one type of node was made on a node that is not that type
+    #[error("Node {node_index:?} is not of type {expected_type}")]
+    InvalidNodeType {
+        /// The index of the node in question
+        node_index: LocalNodeIndex,
+        /// The type of node that the operation is supported on
+        expected_type: NodeType,
+    },
 
     /// A request was sent to a domain with a nonexistent or unknown replay path
     #[error("Replay path identified by Tag({0}) not found")]
