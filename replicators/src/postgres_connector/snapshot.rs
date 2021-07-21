@@ -351,7 +351,7 @@ impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
         // the exact value is not important, and the default value will just start the next
         // replication from the earlies possible point, which is the point the snapshot was created
         self.noria
-            .extend_recipe_with_offset("", Some(PostgresPosition::default().into()))
+            .set_replication_offset(Some(PostgresPosition::default().into()))
             .await?;
 
         Ok(())
