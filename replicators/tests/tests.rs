@@ -30,9 +30,9 @@ const fn tiny(text: &[u8]) -> DataType {
 }
 
 const SNAPSHOT_RESULT: &[&[DataType]] = &[
-    &[D::Int(1), tiny(b"abc"), D::Int(2), D::Int(0)],
-    &[D::Int(2), tiny(b"bcd"), D::Int(3), D::Int(0)],
-    &[D::Int(40), tiny(b"xyz"), D::Int(4), D::Int(0)],
+    &[D::Int(1), tiny(b"abc"), D::Int(2)],
+    &[D::Int(2), tiny(b"bcd"), D::Int(3)],
+    &[D::Int(40), tiny(b"xyz"), D::Int(4)],
 ];
 
 const TESTS: &[(&str, &str, &[&[DataType]])] = &[
@@ -40,39 +40,39 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
         "Test UPDATE key column replication",
         "UPDATE noria SET id=id+10",
         &[
-            &[D::Int(11), tiny(b"abc"), D::Int(2), D::Int(0)],
-            &[D::Int(12), tiny(b"bcd"), D::Int(3), D::Int(0)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4), D::Int(0)],
+            &[D::Int(11), tiny(b"abc"), D::Int(2)],
+            &[D::Int(12), tiny(b"bcd"), D::Int(3)],
+            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
         ],
     ),
     (
         "Test DELETE replication",
         "DELETE FROM noria WHERE string='bcd'",
         &[
-            &[D::Int(11), tiny(b"abc"), D::Int(2), D::Int(0)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4), D::Int(0)],
+            &[D::Int(11), tiny(b"abc"), D::Int(2)],
+            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
         ],
     ),
     (
         "Test INSERT replication",
         "INSERT INTO noria VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)",
         &[
-            &[D::Int(1), tiny(b"abc"), D::Int(2), D::Int(0)],
-            &[D::Int(2), tiny(b"bcd"), D::Int(3), D::Int(0)],
-            &[D::Int(11), tiny(b"abc"), D::Int(2), D::Int(0)],
-            &[D::Int(40), tiny(b"xyz"), D::Int(4), D::Int(0)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(4), D::Int(0)],
+            &[D::Int(1), tiny(b"abc"), D::Int(2)],
+            &[D::Int(2), tiny(b"bcd"), D::Int(3)],
+            &[D::Int(11), tiny(b"abc"), D::Int(2)],
+            &[D::Int(40), tiny(b"xyz"), D::Int(4)],
+            &[D::Int(50), tiny(b"xyz"), D::Int(4)],
         ],
     ),
     (
         "Test UPDATE non-key column replication",
         "UPDATE noria SET bignum=id+10",
         &[
-            &[D::Int(1), tiny(b"abc"), D::Int(11), D::Int(0)],
-            &[D::Int(2), tiny(b"bcd"), D::Int(12), D::Int(0)],
-            &[D::Int(11), tiny(b"abc"), D::Int(21), D::Int(0)],
-            &[D::Int(40), tiny(b"xyz"), D::Int(50), D::Int(0)],
-            &[D::Int(50), tiny(b"xyz"), D::Int(60), D::Int(0)],
+            &[D::Int(1), tiny(b"abc"), D::Int(11)],
+            &[D::Int(2), tiny(b"bcd"), D::Int(12)],
+            &[D::Int(11), tiny(b"abc"), D::Int(21)],
+            &[D::Int(40), tiny(b"xyz"), D::Int(50)],
+            &[D::Int(50), tiny(b"xyz"), D::Int(60)],
         ],
     ),
 ];
@@ -81,13 +81,13 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
 const DISCONNECT_QUERY: &str = "INSERT INTO noria VALUES (3, 'abc', 2), (5, 'xyz', 4)";
 /// Test result after replicator reconnects and catches up
 const RECONNECT_RESULT: &[&[DataType]] = &[
-    &[D::Int(1), tiny(b"abc"), D::Int(11), D::Int(0)],
-    &[D::Int(2), tiny(b"bcd"), D::Int(12), D::Int(0)],
-    &[D::Int(3), tiny(b"abc"), D::Int(2), D::Int(0)],
-    &[D::Int(5), tiny(b"xyz"), D::Int(4), D::Int(0)],
-    &[D::Int(11), tiny(b"abc"), D::Int(21), D::Int(0)],
-    &[D::Int(40), tiny(b"xyz"), D::Int(50), D::Int(0)],
-    &[D::Int(50), tiny(b"xyz"), D::Int(60), D::Int(0)],
+    &[D::Int(1), tiny(b"abc"), D::Int(11)],
+    &[D::Int(2), tiny(b"bcd"), D::Int(12)],
+    &[D::Int(3), tiny(b"abc"), D::Int(2)],
+    &[D::Int(5), tiny(b"xyz"), D::Int(4)],
+    &[D::Int(11), tiny(b"abc"), D::Int(21)],
+    &[D::Int(40), tiny(b"xyz"), D::Int(50)],
+    &[D::Int(50), tiny(b"xyz"), D::Int(60)],
 ];
 
 struct TestHandle {

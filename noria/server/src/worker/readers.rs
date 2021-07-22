@@ -56,7 +56,7 @@ impl serde::Serialize for SerializedReadReplyBatch {
 
 impl SerializedReadReplyBatch {
     fn empty() -> Self {
-        serialize(&[])
+        serialize(vec![])
     }
 }
 
@@ -143,7 +143,7 @@ pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: R
 
 fn serialize<'a, I>(rs: I) -> SerializedReadReplyBatch
 where
-    I: IntoIterator<Item = &'a Vec<DataType>>,
+    I: IntoIterator<Item = Vec<&'a DataType>>,
     I::IntoIter: ExactSizeIterator,
 {
     let mut it = rs.into_iter().peekable();
@@ -403,12 +403,8 @@ fn do_lookup(
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
-                serialize(
-                    reader
-                        .post_lookup
-                        .process(rs.into_iter(), filter)
-                        .collect::<Vec<_>>(),
-                )
+                let filtered = reader.post_lookup.process(rs.into_iter(), filter);
+                serialize(filtered)
             })
             .map(|r| r.0)
     } else {
@@ -418,8 +414,7 @@ fn do_lookup(
                 serialize(
                     reader
                         .post_lookup
-                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filter)
-                        .collect::<Vec<_>>(),
+                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filter),
                 )
             })
     }
@@ -588,7 +583,7 @@ mod readreply {
                 tag: 32,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
                     .iter()
-                    .map(|d| super::serialize(d))
+                    .map(|d| super::serialize(d.iter().map(|v| v.iter().collect::<Vec<_>>())))
                     .collect())),
             })
             .unwrap(),
@@ -721,7 +716,7 @@ mod readreply {
                 tag,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
                     .iter()
-                    .map(|d| super::serialize(d))
+                    .map(|d| super::serialize(d.iter().map(|v| v.iter().collect::<Vec<_>>())))
                     .collect())),
             })
             .await

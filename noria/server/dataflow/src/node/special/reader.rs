@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::convert::TryInto;
 
-use itertools::Either;
 use nom_sql::OrderType;
 use noria::util::like::LikePattern;
 use noria::ViewQueryFilter;
@@ -29,6 +28,9 @@ pub struct PostLookup {
     pub order_by: Option<Vec<(usize, OrderType)>>,
     /// Maximum number of records to return
     pub limit: Option<usize>,
+    /// Indices of the columns requested in the query. Reader will filter out all other projected
+    /// columns
+    pub returned_cols: Option<Vec<usize>>,
 }
 
 impl PostLookup {
@@ -38,15 +40,20 @@ impl PostLookup {
         &self,
         iter: I,
         filter: &Option<ViewQueryFilter>,
-    ) -> impl Iterator<Item = &'a Vec<DataType>>
+    ) -> Vec<Vec<&'a DataType>>
     where
         I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
     {
-        if self.order_by.is_none() && self.limit.is_none() && filter.is_none() {
-            return Either::Left(iter);
+        let data = iter.map(|r| r.iter().collect::<Vec<_>>());
+        if self.order_by.is_none()
+            && self.limit.is_none()
+            && filter.is_none()
+            && self.returned_cols.is_none()
+        {
+            return data.collect::<Vec<_>>();
         }
 
-        let ordered_limited = do_order_limit(iter, self.order_by.as_deref(), self.limit);
+        let ordered_limited = do_order_limit(data, self.order_by.as_deref(), self.limit);
         let like_pattern = filter.as_ref().map(
             |ViewQueryFilter {
                  value,
@@ -55,18 +62,29 @@ impl PostLookup {
              }| { (LikePattern::new(value, (*operator).into()), *column) },
         );
 
-        Either::Right(ordered_limited.filter(move |rec| {
+        let like_filtered = ordered_limited.filter(move |rec| {
             like_pattern
                 .as_ref()
                 .map(|(pat, col)| {
                     pat.matches(
-                        (&rec[*col])
+                        (rec[*col])
                             .try_into()
                             .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
                     )
                 })
                 .unwrap_or(true)
-        }))
+        });
+
+        let returned_cols = match &self.returned_cols {
+            Some(c) => c,
+            None => {
+                return like_filtered.collect::<Vec<_>>();
+            }
+        };
+
+        let col_filtered =
+            like_filtered.map(|row| returned_cols.iter().map(|i| row[*i]).collect::<Vec<_>>());
+        col_filtered.collect::<Vec<_>>()
     }
 }
 
@@ -74,7 +92,7 @@ impl PostLookup {
 ///
 /// This type exists to avoid having to return a `dyn Iterator` when applying an ORDER BY / LIMIT
 /// to the results of a query. It implements `Iterator` and `ExactSizeIterator` iff all of its
-/// type parameters implement `Iterator<Item = &Vec<DataType>>`.
+/// type parameters implement `Iterator<Item = Vec<&DataType>>`.
 enum OrderedLimitedIter<I, J, K, L> {
     Original(I),
     Ordered(J),
@@ -85,21 +103,21 @@ enum OrderedLimitedIter<I, J, K, L> {
 /// WARNING: This impl does NOT delegate calls to `len()` to the underlying iterators.
 impl<'a, I, J, K, L> ExactSizeIterator for OrderedLimitedIter<I, J, K, L>
 where
-    I: Iterator<Item = &'a Vec<DataType>>,
-    J: Iterator<Item = &'a Vec<DataType>>,
-    K: Iterator<Item = &'a Vec<DataType>>,
-    L: Iterator<Item = &'a Vec<DataType>>,
+    I: Iterator<Item = Vec<&'a DataType>>,
+    J: Iterator<Item = Vec<&'a DataType>>,
+    K: Iterator<Item = Vec<&'a DataType>>,
+    L: Iterator<Item = Vec<&'a DataType>>,
 {
 }
 
 impl<'a, I, J, K, L> Iterator for OrderedLimitedIter<I, J, K, L>
 where
-    I: Iterator<Item = &'a Vec<DataType>>,
-    J: Iterator<Item = &'a Vec<DataType>>,
-    K: Iterator<Item = &'a Vec<DataType>>,
-    L: Iterator<Item = &'a Vec<DataType>>,
+    I: Iterator<Item = Vec<&'a DataType>>,
+    J: Iterator<Item = Vec<&'a DataType>>,
+    K: Iterator<Item = Vec<&'a DataType>>,
+    L: Iterator<Item = Vec<&'a DataType>>,
 {
-    type Item = &'a Vec<DataType>;
+    type Item = Vec<&'a DataType>;
     fn next(&mut self) -> Option<Self::Item> {
         use self::OrderedLimitedIter::*;
         match self {
@@ -123,9 +141,9 @@ where
 fn do_order<'a, I>(
     iter: I,
     indices: &[(usize, OrderType)],
-) -> impl Iterator<Item = &'a Vec<DataType>>
+) -> impl Iterator<Item = Vec<&'a DataType>>
 where
-    I: Iterator<Item = &'a Vec<DataType>>,
+    I: Iterator<Item = Vec<&'a DataType>>,
 {
     // TODO(eta): is there a way to avoid buffering all the results?
     let mut results = iter.collect::<Vec<_>>();
@@ -139,7 +157,7 @@ where
         indices
             .iter()
             .map(|&(idx, order_type)| {
-                let ret = a[idx].cmp(&b[idx]);
+                let ret = a[idx].cmp(b[idx]);
                 match order_type {
                     OrderType::OrderAscending => ret,
                     OrderType::OrderDescending => ret.reverse(),
@@ -154,9 +172,9 @@ fn do_order_limit<'a, I>(
     iter: I,
     order_by: Option<&[(usize, OrderType)]>,
     limit: Option<usize>,
-) -> impl Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator
+) -> impl Iterator<Item = Vec<&'a DataType>> + ExactSizeIterator
 where
-    I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
+    I: Iterator<Item = Vec<&'a DataType>> + ExactSizeIterator,
 {
     match (order_by, limit) {
         (None, None) => OrderedLimitedIter::Original(iter),

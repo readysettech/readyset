@@ -12,7 +12,8 @@ use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
-    LimitClause, Literal, OrderClause, SelectStatement, TableKey, UnaryOperator,
+    FieldDefinitionExpression, LimitClause, Literal, OrderClause, SelectStatement, TableKey,
+    UnaryOperator,
 };
 
 use itertools::Itertools;
@@ -1848,6 +1849,35 @@ impl SqlToMirConverter {
                                 .collect()
                         }),
                         limit: st.limit.as_ref().map(|lc| lc.limit as usize),
+                        returned_cols: Some({
+                            let mut cols = st.fields
+                                .iter()
+                                .map(|expression| -> ReadySetResult<_> {
+                                    match expression {
+                                        FieldDefinitionExpression::All
+                                        | FieldDefinitionExpression::AllInTable(_) => {
+                                            internal!("All expression should have been desugared at this point")
+                                        }
+                                        FieldDefinitionExpression::Expression {
+                                            alias: Some(alias),
+                                            ..
+                                        } => {
+                                            Ok(Column::named(alias.clone()))
+                                        }
+                                        FieldDefinitionExpression::Expression {
+                                            expr: Expression::Column(c),
+                                            ..
+                                        } => Ok(Column::from(c)),
+                                        FieldDefinitionExpression::Expression {
+                                            expr,
+                                            ..
+                                        } => Ok(Column::named(expr.to_string())),
+                                    }
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+                            cols.retain(|e| e.name != "bogokey");
+                            cols
+                        }),
                     },
                     vec![leaf_project_node],
                     vec![],

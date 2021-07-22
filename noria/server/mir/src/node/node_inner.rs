@@ -98,6 +98,8 @@ pub enum MirNodeInner {
         order_by: Option<Vec<(Column, OrderType)>>,
         /// Optional limit for the set of results to lookups to this leaf
         limit: Option<usize>,
+        /// Optional set of expression columns requested in the original query
+        returned_cols: Option<Vec<Column>>,
     },
     /// Param Filter node
     ParamFilter {
@@ -116,6 +118,7 @@ impl MirNodeInner {
             keys,
             order_by: None,
             limit: None,
+            returned_cols: None,
         }
     }
 

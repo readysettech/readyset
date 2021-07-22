@@ -1,7 +1,8 @@
 use noria::consensus::Authority;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
-    ReadySetResult, Table, TableOperation, View, ViewQuery, ViewQueryFilter, ViewQueryOperator,
+    ReadySetResult, SchemaType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
+    ViewQueryOperator,
 };
 
 use msql_srv::{self, *};
@@ -651,9 +652,10 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
-        let schema = getter_schema.to_cols();
-
-        let mut key_types = getter_schema.col_types(key_column_indices)?;
+        let projected_schema = getter_schema.to_cols(SchemaType::ProjectedSchema);
+        let returned_schema = getter_schema.to_cols(SchemaType::ReturnedSchema);
+        let mut key_types =
+            getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
         trace!("select::lookup");
         let bogo = vec![vec1![DataType::from(0i32)].into()];
         let cols = Vec::from(getter.columns());
@@ -675,7 +677,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                         "LIKE/ILIKE not currently supported for more than one lookup key at a time"
                     );
                 }
-                let column = schema
+                let column = projected_schema
                     .iter()
                     .position(|x| x.column == col.name)
                     .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
@@ -742,18 +744,12 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
         let data = getter.raw_lookup(vq).await?;
         trace!("select::complete");
-        // The returned schema is the original schema, with the discardable entries removed
-        let schema = schema
-            .iter()
-            .cloned()
-            .filter(|c| !c.column.starts_with('-'))
-            .collect();
 
         Ok(QueryResult::NoriaSelect {
             data,
             select_schema: SelectSchema {
                 use_bogo,
-                schema,
+                schema: returned_schema,
                 columns: cols,
             },
         })
@@ -814,8 +810,10 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
-        let key_column_indices = getter_schema
-            .indices_for_cols(utils::select_statement_parameter_columns(&q).into_iter())?;
+        let key_column_indices = getter_schema.indices_for_cols(
+            utils::select_statement_parameter_columns(&q).into_iter(),
+            SchemaType::ProjectedSchema,
+        )?;
 
         trace!(%qname, "query::select::do");
         self.do_read(&qname, &q, keys, &key_column_indices, ticket)
@@ -857,10 +855,12 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
-        let key_column_indices = getter_schema.indices_for_cols(param_columns.iter())?;
+        let key_column_indices =
+            getter_schema.indices_for_cols(param_columns.iter(), SchemaType::ProjectedSchema)?;
         // now convert params to msql_srv types; we have to do this here because we don't have
         // access to the schema yet when we extract them above.
-        let mut params = getter_schema.to_cols_with_indices(&key_column_indices)?;
+        let mut params =
+            getter_schema.to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?;
         params.iter_mut().for_each(|mut c| c.table = qname.clone());
 
         trace!(id = statement_id, "select::registered");
@@ -871,7 +871,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
-        Ok((statement_id, params, getter_schema.to_cols()))
+        Ok((
+            statement_id,
+            params,
+            getter_schema.to_cols(SchemaType::ReturnedSchema),
+        ))
     }
 
     pub(crate) async fn execute_prepared_select(

@@ -844,12 +844,6 @@ where
                 let mut rw = results.start(&select_schema.schema).await?;
                 for resultsets in data {
                     for r in resultsets {
-                        let mut r: Vec<_> = r.into();
-                        if select_schema.use_bogo {
-                            // drop bogokey
-                            r.pop();
-                        }
-
                         for c in &select_schema.schema {
                             let coli = select_schema
                                 .columns
@@ -951,12 +945,6 @@ where
                 let mut rw = results.start(&select_schema.schema).await?;
                 for resultsets in data {
                     for r in resultsets {
-                        let mut r: Vec<_> = r.into();
-                        if select_schema.use_bogo {
-                            // drop bogokey
-                            r.pop();
-                        }
-
                         for c in &select_schema.schema {
                             let coli = select_schema
                                 .columns

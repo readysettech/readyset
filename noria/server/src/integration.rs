@@ -22,8 +22,8 @@ use itertools::Itertools;
 use nom_sql::OrderType;
 use noria::consensus::LocalAuthority;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, ViewQuery,
-    ViewQueryFilter, ViewQueryOperator, ViewRequest,
+    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, SchemaType,
+    ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
 use crate::errors::ReadySetError::MigrationApplyFailed;
@@ -748,18 +748,8 @@ async fn delete_row() {
     assert_eq!(
         all_rows.lookup(&[0.into()], true).await.unwrap(),
         vec![
-            vec![
-                DataType::from(4),
-                DataType::from(5),
-                DataType::from(6),
-                DataType::from(0)
-            ],
-            vec![
-                DataType::from(1),
-                DataType::from(2),
-                DataType::from(3),
-                DataType::from(0)
-            ],
+            vec![DataType::from(4), DataType::from(5), DataType::from(6)],
+            vec![DataType::from(1), DataType::from(2), DataType::from(3)],
         ]
     );
 }
@@ -1384,7 +1374,7 @@ async fn it_works_with_simple_arithmetic() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], 246.into());
+    assert_eq!(result[0][0], 246.into());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1407,9 +1397,9 @@ async fn it_works_with_multiple_arithmetic_expressions() {
     // Retrieve the result of the count query:
     let result = getter.lookup(&[id.clone()], true).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0][1], 100.into());
-    assert_eq!(result[0][2], 246.into());
-    assert_eq!(result[0][3], 1230.into());
+    assert_eq!(result[0][0], 100.into());
+    assert_eq!(result[0][1], 246.into());
+    assert_eq!(result[0][2], 1230.into());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1457,7 +1447,7 @@ async fn it_works_with_join_arithmetic() {
     let result = getter.lookup(&[id.into()], true).await.unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(
-        result[0][1],
+        result[0][0],
         DataType::try_from(f64::from(price) * fraction).unwrap()
     );
 }
@@ -2241,13 +2231,7 @@ async fn pkey_then_full_table_with_bogokey() {
 
     // Looking up all posts using a 0 bogokey should return all posts.
     let rows_with_bogokey: Vec<Vec<DataType>> = (0..10)
-        .map(|n| {
-            vec![
-                n.into(),
-                format!("post {}", n).try_into().unwrap(),
-                0.into(),
-            ]
-        })
+        .map(|n| vec![n.into(), format!("post {}", n).try_into().unwrap()])
         .collect();
     assert_eq!(
         all_posts.lookup(&[0.into()], true).await.unwrap(),
@@ -3402,9 +3386,7 @@ async fn between() {
 
     sleep().await;
 
-    let expected: Vec<Vec<DataType>> = (3..6)
-        .map(|i| vec![DataType::from(i), DataType::from(0)])
-        .collect();
+    let expected: Vec<Vec<DataType>> = (3..6).map(|i| vec![DataType::from(i)]).collect();
     let res = between_query.lookup(&[0.into()], true).await.unwrap();
     let rows: Vec<Vec<DataType>> = res.into();
     assert_eq!(rows, expected);
@@ -3530,7 +3512,7 @@ async fn topk_updates() {
     assert_eq!(
         rows,
         (1..=3)
-            .map(|i| vec![i.into(), i.into(), 0.into()])
+            .map(|i| vec![i.into(), i.into()])
             .collect::<Vec<_>>()
     );
 
@@ -3544,7 +3526,7 @@ async fn topk_updates() {
     assert_eq!(
         rows,
         (2..=4)
-            .map(|i| vec![i.into(), i.into(), 0.into()])
+            .map(|i| vec![i.into(), i.into()])
             .collect::<Vec<_>>()
     );
 }
@@ -3576,7 +3558,10 @@ async fn correct_nested_view_schema() {
         ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::Bigint(64))
             .convert_column(),
     ];
-    assert_eq!(q.schema().unwrap().to_cols(), &expected_schema[..]);
+    assert_eq!(
+        q.schema().unwrap().to_cols(SchemaType::ProjectedSchema),
+        &expected_schema[..]
+    );
 }
 
 // FIXME: The test is disabled because join column projection does not work correctly.
@@ -3863,7 +3848,7 @@ async fn self_join_basic() {
     // Check like_minded
 
     let mut query = g.view("like_minded").await.unwrap();
-    assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
+    assert_eq!(query.columns(), vec!["user", "agreer"]);
     let results: Vec<(i32, i32)> = query
         .lookup(&[0i32.into()], true)
         .await
@@ -3888,7 +3873,7 @@ async fn self_join_basic() {
     // Check follow_on
 
     let mut query = g.view("follow_on").await.unwrap();
-    assert_eq!(query.columns(), vec!["user", "agreer", "bogokey"]);
+    assert_eq!(query.columns(), vec!["user", "agreer"]);
     let results: Vec<(i32, i32)> = query
         .lookup(&[0i32.into()], true)
         .await
@@ -4170,16 +4155,8 @@ async fn same_table_columns_inequal() {
     assert_eq!(
         res,
         vec![
-            vec![
-                DataType::from(1i32),
-                DataType::from(2i32),
-                DataType::from(0i32)
-            ],
-            vec![
-                DataType::from(2i32),
-                DataType::from(3i32),
-                DataType::from(0i32)
-            ],
+            vec![DataType::from(1i32), DataType::from(2i32)],
+            vec![DataType::from(2i32), DataType::from(3i32)],
         ]
     );
 }
@@ -4384,8 +4361,8 @@ async fn post_join_filter() {
     assert_eq!(
         res,
         vec![
-            vec![1.into(), 1.into(), 1.into(), 0.into()],
-            vec![2.into(), 2.into(), 1.into(), 0.into()]
+            vec![1.into(), 1.into(), 1.into()],
+            vec![2.into(), 2.into(), 1.into()],
         ]
     );
 }
@@ -4438,8 +4415,8 @@ async fn duplicate_column_names() {
     assert_eq!(
         res,
         vec![
-            vec![1.into(), 1.into(), 1.into(), 0.into()],
-            vec![2.into(), 2.into(), 1.into(), 0.into()]
+            vec![1.into(), 1.into(), 1.into()],
+            vec![2.into(), 2.into(), 1.into()]
         ]
     );
 }
@@ -4745,17 +4722,11 @@ async fn overlapping_indices() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                get_col!(r, "s", i32),
-                get_col!(r, "id", i32),
-                get_col!(r, "b", i32),
-            )
-        })
+        .map(|r| (get_col!(r, "s", i32), get_col!(r, "id", i32)))
         .sorted()
-        .collect::<Vec<(i32, i32, i32)>>();
+        .collect::<Vec<(i32, i32)>>();
 
-    assert_eq!(res, vec![(7, 7, 3), (20, 6, 3)]);
+    assert_eq!(res, vec![(7, 7), (20, 6)]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6313,17 +6284,11 @@ async fn join_straddled_columns() {
 
     let res = rows
         .into_iter()
-        .map(|r| {
-            (
-                get_col!(r, "a1", i32),
-                get_col!(r, "a2", i32),
-                get_col!(r, "b2", i32),
-            )
-        })
+        .map(|r| (get_col!(r, "a1", i32), get_col!(r, "a2", i32)))
         .sorted()
-        .collect::<Vec<(i32, i32, i32)>>();
+        .collect::<Vec<(i32, i32)>>();
 
-    assert_eq!(res, vec![(1, 2, 1)]);
+    assert_eq!(res, vec![(1, 2)]);
 }
 
 // FIXME(fran): This test is ignored because the Controller

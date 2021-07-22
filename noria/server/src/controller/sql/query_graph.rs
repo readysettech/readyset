@@ -912,24 +912,22 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 }
                 (Some(_), None) => {
                     // This is a reference to a column in a table, we need to project it if it is not
-                    // yet projected in order to be able to execute `ORDER BY` post lookup, but also marking
-                    // as discardable (by prefixing with -)
+                    // yet projected in order to be able to execute `ORDER BY` post lookup.
                     if !qg.columns.iter().any(
                         |e| matches!(e, OutputColumn::Data {  column, .. } if column == ord_col),
                     ) {
                         // The projected column does not already contains that column, so add it
                         qg.columns.push(OutputColumn::Data {
-                            alias: format!("-{}", ord_col.name), // The prefix - denotes a column that is not part of the schema, and will be discared
+                            alias: ord_col.name.clone(),
                             column: ord_col.clone(),
                         })
                     }
                 }
                 (_, Some(box func)) => {
                     // This is a function call expression that we need to add to the list of projected columns
-                    // and mark as discardable (by prefixing with -)
                     let column = add_computed_column(&mut qg, func.clone(), ord_col.name.clone());
                     qg.columns.push(OutputColumn::Data {
-                        alias: format!("-{}", column.name),
+                        alias: column.name.clone(),
                         column,
                     })
                 }
