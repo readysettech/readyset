@@ -57,9 +57,25 @@ pub struct ColumnSchema {
 }
 
 /// A `ViewSchema` is used to desribe the columns of a stored Noria
-/// view as a vector of columns
+/// view as a vector of columns. The ViewSchema contains a vector with all
+/// projected columns and a vector with columns returned to the client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ViewSchema(pub Vec<ColumnSchema>);
+pub struct ViewSchema {
+    /// The set of columns returned to the client when executing this query.
+    returned_cols: Vec<ColumnSchema>,
+    /// The set of columns projected at the noria flowgraph reader node.
+    projected_cols: Vec<ColumnSchema>,
+}
+
+/// SchemaType is passed to most ViewSchema functions to select between the two
+/// schemas contained in the ViewSchema struct.
+pub enum SchemaType {
+    /// Used to select the schema returned to the client when executing this
+    /// query.
+    ReturnedSchema,
+    /// Used to select the schema projected at the noria flowgraph reader node.
+    ProjectedSchema,
+}
 
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
@@ -92,35 +108,53 @@ impl Service<()> for Endpoint {
 }
 
 impl ViewSchema {
+    /// Get the schema specified by the schema type
+    fn get_schema(&self, schema_type: SchemaType) -> &Vec<ColumnSchema> {
+        match schema_type {
+            SchemaType::ReturnedSchema => &self.returned_cols,
+            SchemaType::ProjectedSchema => &self.projected_cols,
+        }
+    }
+    /// Create a ViewSchema from returned and projected column schema vectors
+    pub fn new(returned_cols: Vec<ColumnSchema>, projected_cols: Vec<ColumnSchema>) -> ViewSchema {
+        ViewSchema {
+            returned_cols,
+            projected_cols,
+        }
+    }
     /// Return a vector specifiying the types of the columns for the
     /// requested indices
-    pub fn col_types(&self, indices: &[usize]) -> ReadySetResult<Vec<&SqlType>> {
+    pub fn col_types(
+        &self,
+        indices: &[usize],
+        schema_type: SchemaType,
+    ) -> ReadySetResult<Vec<&SqlType>> {
+        let schema = self.get_schema(schema_type);
         indices
             .iter()
-            .map(|i| self.0.get(*i).map(|c| &c.spec.sql_type))
+            .map(|i| schema.get(*i).map(|c| &c.spec.sql_type))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
 
-    /// Convert the schema to a `Vec` of [`msql_srv::Column`], excluding "bogokey" columns
-    pub fn to_cols(&self) -> Vec<msql_srv::Column> {
-        self.0
-            .iter()
-            .filter_map(|c| {
-                if c.spec.column.name == "bogokey" {
-                    None
-                } else {
-                    Some(c.spec.convert_column())
-                }
-            })
-            .collect()
+    /// Convert the schema to a `Vec` of [`msql_srv::Column`]
+    pub fn to_cols(&self, schema_type: SchemaType) -> Vec<msql_srv::Column> {
+        let schema = self.get_schema(schema_type);
+
+        schema.iter().map(|c| c.spec.convert_column()).collect()
     }
 
     /// Convert the schema to a `Vec` of [`msql_srv::Column`], for the speicified indices
-    pub fn to_cols_with_indices(&self, indices: &[usize]) -> ReadySetResult<Vec<msql_srv::Column>> {
+    pub fn to_cols_with_indices(
+        &self,
+        indices: &[usize],
+        schema_type: SchemaType,
+    ) -> ReadySetResult<Vec<msql_srv::Column>> {
+        let schema = self.get_schema(schema_type);
+
         indices
             .iter()
-            .map(|i| self.0.get(*i).map(|c| c.spec.convert_column()))
+            .map(|i| schema.get(*i).map(|c| c.spec.convert_column()))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
@@ -128,32 +162,24 @@ impl ViewSchema {
     /// Get the indices of the columns in the schema that correspond to the list of provided
     /// [`nom_sql::Column`]. The columns match if either the column name matches (the alias)
     /// or the real base name
-    pub fn indices_for_cols<'a, T>(&self, cols: T) -> ReadySetResult<Vec<usize>>
+    pub fn indices_for_cols<'a, T>(
+        &self,
+        cols: T,
+        schema_type: SchemaType,
+    ) -> ReadySetResult<Vec<usize>>
     where
         T: Iterator<Item = &'a nom_sql::Column>,
     {
+        let schema = self.get_schema(schema_type);
+
         cols.map(|c| {
-            self.0.iter().position(|e| {
+            schema.iter().position(|e| {
                 e.spec.column.name == c.name
                     || e.base.as_ref().map(|b| b.column == c.name).unwrap_or(false)
             })
         })
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| internal_err("Schema expects all columns to be present"))
-    }
-
-    /// Get the index for one column in the schema, possibly by alias or base name
-    pub fn index_for_col(&self, column: &str, table: Option<&str>) -> ReadySetResult<usize> {
-        self.0
-            .iter()
-            .position(|e| {
-                e.spec.column.name == column
-                    || e.base
-                        .as_ref()
-                        .map(|b| b.column == column && Some(b.table.as_str()) == table)
-                        .unwrap_or(false)
-            })
-            .ok_or_else(|| internal_err("Schema expects the column to be present"))
     }
 }
 

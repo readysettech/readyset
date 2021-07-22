@@ -321,7 +321,7 @@ pub use crate::table::{PacketData, PacketPayload};
 
 #[doc(hidden)]
 pub use crate::view::{
-    KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, ViewQuery, ViewQueryFilter,
+    KeyComparison, ReadQuery, ReadReply, ReadReplyBatch, SchemaType, ViewQuery, ViewQueryFilter,
     ViewQueryOperator,
 };
 use url::Url;

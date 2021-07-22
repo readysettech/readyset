@@ -339,7 +339,7 @@ async fn reader_replication() {
         .unwrap()
         .into();
     records.sort();
-    assert_eq!(records, vec![vec![1.into(), 2.into(), 3.into(), 0.into()]]);
+    assert_eq!(records, vec![vec![1.into(), 2.into(), 3.into()]]);
     for (domain, nodes) in readers.get("q").unwrap().iter() {
         assert!(domains_pre_replication.get(domain).is_none());
         let domain_nodes_opt = domains_from_worker.get(domain);

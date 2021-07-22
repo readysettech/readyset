@@ -1008,8 +1008,28 @@ impl ControllerInner {
         for r in readers {
             #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
             let domain_index = self.ingredients[r].domain();
+            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+            let reader =
+                self.ingredients[r]
+                    .as_reader()
+                    .ok_or_else(|| ReadySetError::InvalidNodeType {
+                        node_index: self.ingredients[r].local_addr(),
+                        expected_type: NodeType::Reader,
+                    })?;
+            #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
+            let returned_cols = reader
+                .post_lookup()
+                .returned_cols
+                .clone()
+                .unwrap_or_else(|| (0..self.ingredients[r].fields().len()).collect());
             #[allow(clippy::indexing_slicing)] // just came from self
-            let columns = self.ingredients[r].fields().to_vec();
+            let fields = self.ingredients[r].fields();
+            let columns = returned_cols
+                .iter()
+                .map(|idx| fields.get(*idx).cloned())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
+
             let schema = self.view_schema(r)?;
             let domain =
                 self.domains
@@ -1058,14 +1078,38 @@ impl ControllerInner {
                 .ok_or_else(|| ReadySetError::NodeNotFound {
                     index: view_ni.index(),
                 })?;
-        let schema: Vec<_> = (0..n.fields().len())
-            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
-            .collect::<Result<Vec<_>, ReadySetError>>()?;
+        let reader = n
+            .as_reader()
+            .ok_or_else(|| ReadySetError::InvalidNodeType {
+                node_index: n.local_addr(),
+                expected_type: NodeType::Reader,
+            })?;
+        let returned_cols = reader
+            .post_lookup()
+            .returned_cols
+            .clone()
+            .unwrap_or_else(|| (0..n.fields().len()).collect());
 
-        Ok(schema
+        let projected_schema = (0..n.fields().len())
+            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
+            .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
-            .collect::<Option<Vec<_>>>()
-            .map(ViewSchema))
+            .collect::<Option<Vec<_>>>();
+
+        let returned_schema = returned_cols
+            .iter()
+            .map(|idx| {
+                schema::column_schema(&self.ingredients, view_ni, &self.recipe, *idx, &self.log)
+            })
+            .collect::<Result<Vec<_>, ReadySetError>>()?
+            .into_iter()
+            .collect::<Option<Vec<_>>>();
+
+        match (projected_schema, returned_schema) {
+            (None, _) => Ok(None),
+            (_, None) => Ok(None),
+            (Some(p), Some(r)) => Ok(Some(ViewSchema::new(r, p))),
+        }
     }
 
     /// Obtain a TableBuilder that can be used to construct a Table to perform writes and deletes

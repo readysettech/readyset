@@ -238,12 +238,13 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref keys,
                     ref order_by,
                     limit,
+                    ref returned_cols,
                     ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
                     #[allow(clippy::indexing_slicing)] // checked by above invariant
                     let parent = mir_node.ancestors[0].clone();
-                    let post_lookup = make_post_lookup(&parent, order_by, limit)?;
+                    let post_lookup = make_post_lookup(&parent, order_by, limit, returned_cols)?;
                     materialize_leaf_node(&parent, name, keys, mig, post_lookup)?;
                     // TODO(malte): below is yucky, but required to satisfy the type system:
                     // each match arm must return a `FlowNode`, so we use the parent's one
@@ -1107,6 +1108,7 @@ fn make_post_lookup(
     parent: &MirNodeRef,
     order_by: &Option<Vec<(Column, OrderType)>>,
     limit: Option<usize>,
+    returned_cols: &Option<Vec<Column>>,
 ) -> ReadySetResult<PostLookup> {
     let order_by = order_by.as_ref().map(|order| {
         order
@@ -1114,7 +1116,16 @@ fn make_post_lookup(
             .map(|(col, ot)| (parent.borrow().column_id_for_column(col), *ot))
             .collect()
     });
-    Ok(PostLookup { order_by, limit })
+    let returned_cols = returned_cols.as_ref().map(|col| {
+        col.iter()
+            .map(|col| (parent.borrow().column_id_for_column(col)))
+            .collect()
+    });
+    Ok(PostLookup {
+        order_by,
+        limit,
+        returned_cols,
+    })
 }
 
 fn materialize_leaf_node(
