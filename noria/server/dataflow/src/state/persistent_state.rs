@@ -266,7 +266,9 @@ impl State for PersistentState {
         })
     }
 
+    /// Panics if partial is Some
     fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
+        #[allow(clippy::panic)] // This should definitely never happen!
         assert!(partial.is_none(), "Bases can't be partial");
         let columns = &index.columns;
         let existing = self
@@ -348,22 +350,32 @@ impl State for PersistentState {
         false
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn mark_filled(&mut self, _: KeyComparison, _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn mark_hole(&mut self, _: &KeyComparison, _: Tag) {
         unreachable!("PersistentState can't be partial")
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn evict_random_keys(&mut self, _: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
         unreachable!("can't evict keys from PersistentState")
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<(&[usize], u64)> {
         unreachable!("can't evict keys from PersistentState")
     }
 
+    /// Panics if called
+    #[allow(clippy::unreachable)] // this should never happen!
     fn clear(&mut self) {
         unreachable!("can't clear PersistentState")
     }
