@@ -880,7 +880,7 @@ impl SqlToMirConverter {
 
         let mknode = |over: &Column, t: GroupedNodeType, distinct: bool| {
             if distinct {
-                let new_name = name.to_owned() + "_distinct";
+                let new_name = format!("{}_d{}", name, out_nodes.len());
                 let mut dist_col = vec![over];
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
@@ -2018,7 +2018,7 @@ impl SqlToMirConverter {
                 let name = if has_leaf {
                     format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat)
                 } else {
-                    String::from(name)
+                    format!("{}_d{}", name, new_node_count)
                 };
                 let distinct_node = self.make_distinct_node(
                     &name,
