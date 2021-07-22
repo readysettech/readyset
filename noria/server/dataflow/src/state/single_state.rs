@@ -9,17 +9,42 @@ use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use vec1::Vec1;
 
+/// A single index of a [`MemoryState`].
+///
+/// SingleState, which is a wrapper around [`KeyedState`] with extra information about keys and
+/// partial, are associative maps from some subset of the columns in a row, to those rows
+/// themselves. Internally, as specified by the [`Index`] passed at construction, KeyedState (and
+/// hence SingleState) can be backed by either a [`BTreeMap`](std::collections::BTreeMap) or an
+/// [`IndexMap`](indexmap::IndexMap) (which is similar to a [`HashMap`](std::collections::HashMap)).
+///
+/// Any operations on a SingleState that are unsupported by the index type, such as inserting or
+/// looking up ranges in a [`HashMap`](noria::IndexType::HashMap) index, will panic, as mixing up
+/// index types is an unrecoverable violation of a broad system invariant.
 pub(super) struct SingleState {
+    /// The column indices that this index is keyed on
     key: Vec<usize>,
+
+    /// The map containing the state itself.
+    ///
+    /// Invariant: The length of keys supported by `state` must be equal to `key.len()`
     state: KeyedState,
+
+    /// Is this state partial?
+    ///
+    /// If this is `false`, lookups (via [`lookup`] or [`lookup_range`]) can never return misses
     partial: bool,
+
+    /// Denormalized cache of the number of rows stored in this index
     rows: usize,
 }
 
 impl SingleState {
+    /// Construct a new, empty [`SingleState`] for the given `index`. If `partial`
     pub(super) fn new(index: &Index, partial: bool) -> Self {
         let mut state = KeyedState::from(index);
         if !partial && index.index_type == IndexType::BTreeMap {
+            // For fully materialized indices, we never miss - so mark that the full range of keys
+            // has been filled.
             state.insert_range((Bound::Unbounded, Bound::Unbounded))
         }
         Self {
@@ -330,6 +355,11 @@ impl SingleState {
         }
     }
 
+    /// Remove all rows for the given `key`, and return the amount of memory freed in bytes
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
     pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> u64 {
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
@@ -418,7 +448,11 @@ impl SingleState {
                         ))
                         .flat_map(|(_, rows)| rows),
                     ),
-                    _ => panic!("mark_hole with a range key called on a HashMap SingleState"),
+                    _ =>
+                    #[allow(clippy::panic)] // Documented invariant
+                    {
+                        panic!("mark_hole with a range key called on a HashMap SingleState")
+                    }
                 }
             }
         };

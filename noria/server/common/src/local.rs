@@ -155,6 +155,7 @@ pub enum KeyType<'a> {
     Multi(Vec<DataType>),
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl<'a> KeyType<'a> {
     pub fn get(&self, idx: usize) -> Option<&DataType> {
         use tuple::TupleElements;
@@ -205,6 +206,23 @@ impl<'a> KeyType<'a> {
                 more().clone(),
             )),
             x => KeyType::Multi((0..x).map(|_| more().clone()).collect()),
+        }
+    }
+
+    /// Return the length of this key
+    ///
+    /// # Invariants
+    ///
+    /// This function will never return 0
+    pub fn len(&self) -> usize {
+        match self {
+            KeyType::Single(_) => 1,
+            KeyType::Double(_) => 2,
+            KeyType::Tri(_) => 3,
+            KeyType::Quad(_) => 4,
+            KeyType::Quin(_) => 5,
+            KeyType::Sex(_) => 6,
+            KeyType::Multi(k) => k.len(),
         }
     }
 }
@@ -274,6 +292,7 @@ pub enum RangeKey<'a> {
     Multi((Bound<&'a [DataType]>, Bound<&'a [DataType]>)),
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl<'a> RangeKey<'a> {
     /// Build a [`RangeKey`] from a type that implements [`RangeBounds`] over a vector of keys.
     ///
@@ -339,6 +358,25 @@ impl<'a> RangeKey<'a> {
                 "RangeKey cannot be built from keys of length greater than 6 (got {})",
                 n
             ),
+        }
+    }
+
+    /// Return the length of this range key, or None if the key is Unbounded
+    pub fn len(&self) -> Option<usize> {
+        match self {
+            RangeKey::Unbounded | RangeKey::Multi((Bound::Unbounded, Bound::Unbounded)) => None,
+            RangeKey::Single(_) => Some(1),
+            RangeKey::Double(_) => Some(2),
+            RangeKey::Tri(_) => Some(3),
+            RangeKey::Quad(_) => Some(4),
+            RangeKey::Quin(_) => Some(5),
+            RangeKey::Sex(_) => Some(6),
+            RangeKey::Multi(
+                (Bound::Included(k), _)
+                | (Bound::Excluded(k), _)
+                | (_, Bound::Included(k))
+                | (_, Bound::Excluded(k)),
+            ) => Some(k.len()),
         }
     }
 }

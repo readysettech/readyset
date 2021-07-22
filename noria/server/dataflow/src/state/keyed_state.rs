@@ -14,9 +14,9 @@ use launchpad::intervals::into_bound_endpoint;
 
 /// A map containing a single index into the state of a node.
 ///
-/// KeyedStates are associative (key-value) maps from lists of [`DataType`]s of length between 1 and
-/// 6 inclusive to [lists of reference-counted pointers to rows](Rows), and can be backed by either
-/// a [`BTreeMap`](std::collections::BTreeMap) or an [`IndexMap`], according to an
+/// KeyedStates are associative (key-value) maps from lists of [`DataType`]s of length of at least 1
+/// to [lists of reference-counted pointers to rows](Rows), and can be backed by either a
+/// [`BTreeMap`](std::collections::BTreeMap) or an [`IndexMap`], according to an
 /// [`IndexType`](noria::IndexType).
 ///
 /// Any operations on a KeyedState that are unsupported by the index type, such as inserting or
@@ -52,6 +52,12 @@ pub(super) enum KeyedState {
 }
 
 impl KeyedState {
+    /// Look up all the rows corresponding to the given `key` and return them, or return None if no
+    /// rows exist for the given key
+    ///
+    /// # Panics
+    ///
+    /// Panics if the length of `key` is different than the length of this `KeyedState`
     pub(super) fn lookup<'a>(&'a self, key: &KeyType) -> Option<&'a Rows> {
         match (self, key) {
             (&KeyedState::SingleBTree(ref m), &KeyType::Single(k)) => m.get(k),
@@ -72,10 +78,22 @@ impl KeyedState {
             (&KeyedState::MultiHash(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
                 m.get(k)
             }
-            _ => panic!("Invalid key type for KeyedState, got: {:?}", key),
+            _ =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!(
+                    "Invalid key type for KeyedState, got key of length {}",
+                    key.len()
+                )
+            }
         }
     }
 
+    /// Mark the given range of keys as filled
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `KeyedState` is backed by a HashMap index
     pub(super) fn insert_range(&mut self, range: (Bound<Vec1<DataType>>, Bound<Vec1<DataType>>)) {
         match self {
             KeyedState::SingleBTree(ref mut map) => map.insert_range((
@@ -105,10 +123,21 @@ impl KeyedState {
             {
                 map.insert_range((range.0.map(Vec1::into_vec), range.1.map(Vec1::into_vec)))
             }
-            _ => panic!("insert_range called on a HashMap KeyedState"),
+            _ =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!("insert_range called on a HashMap KeyedState")
+            }
         };
     }
 
+    /// Look up all the keys in the given range `key`, and return either iterator over all the rows
+    /// or a set of [`Misses`] indicating that some keys are not present
+    ///
+    /// # Panics
+    ///
+    /// * Panics if the length of `key` is different than the length of this `KeyedState`
+    /// * Panics if this `KeyedState` is backed by a HashMap index
     pub(super) fn lookup_range<'a>(
         &'a self,
         key: &RangeKey,
@@ -187,8 +216,19 @@ impl KeyedState {
                 | KeyedState::SexHash(_)
                 | KeyedState::MultiHash(..),
                 _,
-            ) => panic!("lookup_range called on a HashMap KeyedState"),
-            _ => panic!("Invalid key type for KeyedState, got: {:?}", key),
+            ) =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!("lookup_range called on a HashMap KeyedState")
+            }
+            _ =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!(
+                    "Invalid key type for KeyedState, got key of length {:?}",
+                    key.len()
+                )
+            }
         }
     }
 
@@ -319,6 +359,12 @@ impl KeyedState {
         .unwrap_or(0)
     }
 
+    /// Evict all rows in the given range of keys from this KeyedState, and return the amount of
+    /// memory freed in bytes
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `KeyedState` is backed by a HashMap index
     pub(super) fn evict_range<R>(&mut self, range: &R) -> u64
     where
         R: RangeBounds<Vec1<DataType>>,
@@ -355,7 +401,11 @@ impl KeyedState {
                         .sum()
                 })
                 .sum(),
-            _ => panic!("evict_range called on a HashMap KeyedState"),
+            _ =>
+            #[allow(clippy::panic)] // documented invariant
+            {
+                panic!("evict_range called on a HashMap KeyedState")
+            }
         }
     }
 }
