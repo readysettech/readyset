@@ -3,7 +3,6 @@ use std::ops::RangeBounds;
 use super::{key_to_double, key_to_single, Key};
 use crate::prelude::*;
 use ahash::RandomState;
-use launchpad::intervals::BoundFunctor;
 use noria::consistency::Timestamp;
 
 pub(super) enum Handle {

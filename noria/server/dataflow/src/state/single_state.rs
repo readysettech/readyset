@@ -3,7 +3,6 @@ use super::{partial_map, RangeLookupResult};
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
-use launchpad::intervals::BoundFunctor;
 use noria::KeyComparison;
 use rand::prelude::*;
 use std::ops::{Bound, RangeBounds};

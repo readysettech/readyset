@@ -9,17 +9,17 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq)]
 pub enum TableAliasRewrite {
     /// An alias to a base table was rewritten
-    ToTable { from: String, to_table: String },
+    Table { from: String, to_table: String },
 
     /// An alias to a view was rewritten
-    ToView {
+    View {
         from: String,
         to_view: String,
         for_table: String,
     },
 
     /// An alias to a common table expression was rewritten
-    ToCTE {
+    Cte {
         from: String,
         to_view: String,
         for_statement: Box<SelectStatement>, // box for perf
@@ -77,8 +77,8 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
             then_expr,
             else_expr,
         } => Expression::CaseWhen {
-            condition: Box::new(rewrite_expression(col_table_remap, &condition)),
-            then_expr: Box::new(rewrite_expression(col_table_remap, &then_expr)),
+            condition: Box::new(rewrite_expression(col_table_remap, condition)),
+            then_expr: Box::new(rewrite_expression(col_table_remap, then_expr)),
             else_expr: else_expr
                 .as_ref()
                 .map(|e| Box::new(rewrite_expression(col_table_remap, e))),
@@ -229,7 +229,7 @@ impl AliasRemoval for SqlQuery {
                     [Some(ref alias)] => {
                         // The table is only ever referred to using one specific alias. Rewrite
                         // to remove the alias and refer to the table itself.
-                        vec![TableAliasRewrite::ToTable {
+                        vec![TableAliasRewrite::Table {
                             from: alias.clone(),
                             to_table: name,
                         }]
@@ -243,7 +243,7 @@ impl AliasRemoval for SqlQuery {
                             // table. Create a globally unique view name, derived from the
                             // query name, and rewrite to remove the alias and refer to this
                             // view.
-                            TableAliasRewrite::ToView {
+                            TableAliasRewrite::View {
                                 from: alias.clone(),
                                 to_view: format!("__{}__{}", query_name, alias),
                                 for_table: name.clone(),
@@ -254,13 +254,13 @@ impl AliasRemoval for SqlQuery {
                 .chain(
                     sq.ctes
                         .drain(..)
-                        .map(|CommonTableExpression { name, statement }| {
-                            TableAliasRewrite::ToCTE {
+                        .map(
+                            |CommonTableExpression { name, statement }| TableAliasRewrite::Cte {
                                 to_view: format!("__{}__{}", query_name, name),
                                 from: name,
                                 for_statement: Box::new(statement),
-                            }
-                        }),
+                            },
+                        ),
                 )
                 .collect();
 
@@ -285,15 +285,11 @@ impl AliasRemoval for SqlQuery {
             let col_table_remap = table_alias_rewrites
                 .iter()
                 .map(|r| match r {
-                    TableAliasRewrite::ToTable { from, to_table } => {
-                        (from.clone(), to_table.clone())
-                    }
-                    TableAliasRewrite::ToView { from, to_view, .. } => {
+                    TableAliasRewrite::Table { from, to_table } => (from.clone(), to_table.clone()),
+                    TableAliasRewrite::View { from, to_view, .. } => {
                         (from.clone(), to_view.clone())
                     }
-                    TableAliasRewrite::ToCTE { from, to_view, .. } => {
-                        (from.clone(), to_view.clone())
-                    }
+                    TableAliasRewrite::Cte { from, to_view, .. } => (from.clone(), to_view.clone()),
                 })
                 .chain(universe_rewrite.into_iter())
                 .collect();
@@ -347,7 +343,7 @@ impl AliasRemoval for SqlQuery {
             let table_remap = table_alias_rewrites
                 .iter()
                 .filter_map(|r| match r {
-                    TableAliasRewrite::ToView { from, to_view, .. } => {
+                    TableAliasRewrite::View { from, to_view, .. } => {
                         Some((from.clone(), to_view.clone()))
                     }
                     _ => None,
@@ -372,9 +368,7 @@ impl AliasRemoval for SqlQuery {
                             JoinRightSide::Table(rewrite_table(&table_remap, t))
                         }
                         JoinRightSide::Tables(ts) => JoinRightSide::Tables(
-                            ts.iter()
-                                .map(|ref t| rewrite_table(&table_remap, t))
-                                .collect(),
+                            ts.iter().map(|t| rewrite_table(&table_remap, t)).collect(),
                         ),
                         JoinRightSide::NestedJoin(_) => unimplemented!(),
                         r => r,
@@ -481,7 +475,7 @@ mod tests {
 
         assert_eq!(
             rewrites,
-            vec![TableAliasRewrite::ToTable {
+            vec![TableAliasRewrite::Table {
                 from: String::from("t"),
                 to_table: String::from("PaperTag")
             }]
@@ -570,7 +564,7 @@ mod tests {
 
         assert_eq!(
             rewrites,
-            vec![TableAliasRewrite::ToTable {
+            vec![TableAliasRewrite::Table {
                 from: String::from("t"),
                 to_table: String::from("PaperTag")
             }]
@@ -629,12 +623,12 @@ mod tests {
         assert_eq!(
             rewrites,
             vec![
-                TableAliasRewrite::ToView {
+                TableAliasRewrite::View {
                     from: String::from("t1"),
                     to_view: String::from("__query_name__t1"),
                     for_table: String::from("tab")
                 },
-                TableAliasRewrite::ToView {
+                TableAliasRewrite::View {
                     from: String::from("t2"),
                     to_view: String::from("__query_name__t2"),
                     for_table: String::from("tab")

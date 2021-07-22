@@ -645,8 +645,7 @@ named!(between_expr(&[u8]) -> Expression, do_parse!(
 ));
 
 named!(exists_expr(&[u8]) -> Expression, do_parse!(
-    not: opt!(terminated!(tag_no_case!("not"), multispace1))
-        >> tag_no_case!("exists")
+    tag_no_case!("exists")
         >> multispace0
         >> char!('(')
         >> multispace0

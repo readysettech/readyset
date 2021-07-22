@@ -32,8 +32,7 @@ impl Sharder {
     }
 
     pub fn take(&mut self) -> Self {
-        use std::mem;
-        let txs = mem::replace(&mut self.txs, Vec::new());
+        let txs = std::mem::take(&mut self.txs);
         Self {
             txs,
             sharded: VecMap::default(),

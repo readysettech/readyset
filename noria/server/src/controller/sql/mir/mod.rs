@@ -300,7 +300,7 @@ impl SqlToMirConverter {
     pub(super) fn get_flow_node_address(&self, name: &str, version: usize) -> Option<NodeIndex> {
         match self.nodes.get(&(name.to_string(), version)) {
             None => None,
-            Some(ref node) => node
+            Some(node) => node
                 .borrow()
                 .flow_node
                 .as_ref()
@@ -323,7 +323,7 @@ impl SqlToMirConverter {
         match *query {
             SqlQuery::CreateTable(ref ctq) => {
                 invariant_eq!(name, ctq.table.name);
-                let n = self.make_base_node(&name, &ctq.fields, ctq.keys.as_ref())?;
+                let n = self.make_base_node(name, &ctq.fields, ctq.keys.as_ref())?;
                 let node_id = (String::from(name), self.schema_version);
                 use std::collections::hash_map::Entry;
                 if let Entry::Vacant(e) = self.nodes.entry(node_id) {
@@ -397,7 +397,7 @@ impl SqlToMirConverter {
         ReadySetError,
     > {
         let (sec, nodes, table_mapping, base_name) =
-            self.make_nodes_for_selection(&name, sq, qg, has_leaf, universe)?;
+            self.make_nodes_for_selection(name, sq, qg, has_leaf, universe)?;
         let mut roots = Vec::new();
         let mut leaves = Vec::new();
         for mn in nodes.into_iter() {
@@ -671,9 +671,7 @@ impl SqlToMirConverter {
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
-                if selected_cols.contains(&ac.name)
-                    && acols.iter().find(|c| ac.name == *c.name).is_none()
-                {
+                if selected_cols.contains(&ac.name) && !acols.iter().any(|c| ac.name == c.name) {
                     acols.push(ac.clone());
                 }
             }
@@ -758,9 +756,7 @@ impl SqlToMirConverter {
         for ancestor in ancestors.iter() {
             let mut acols: Vec<Column> = Vec::new();
             for ac in ancestor.borrow().columns() {
-                if selected_cols.contains(&ac.name)
-                    && acols.iter().find(|c| ac.name == *c.name).is_none()
-                {
+                if selected_cols.contains(&ac.name) && !acols.iter().any(|c| ac.name == c.name) {
                     acols.push(ac.clone());
                 }
             }
@@ -885,24 +881,17 @@ impl SqlToMirConverter {
                 dist_col.extend(group_cols.clone());
                 let node = self.make_distinct_node(&new_name, parent, dist_col.clone());
                 out_nodes.push(node.clone());
-                out_nodes.push(self.make_grouped_node(
-                    name,
-                    &func_col,
-                    (node, &over),
-                    group_cols,
-                    t,
-                ));
-                out_nodes
+                out_nodes.push(self.make_grouped_node(name, func_col, (node, over), group_cols, t));
             } else {
                 out_nodes.push(self.make_grouped_node(
                     name,
-                    &func_col,
-                    (parent, &over),
+                    func_col,
+                    (parent, over),
                     group_cols,
                     t,
                 ));
-                out_nodes
             }
+            out_nodes
         };
 
         let func = func_col.function.as_ref().unwrap();
@@ -919,7 +908,7 @@ impl SqlToMirConverter {
             ),
             Sum { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
+                &Column::named(projected_exprs[expr].clone()),
                 GroupedNodeType::Aggregation(Aggregation::Sum),
                 distinct,
             ),
@@ -947,7 +936,7 @@ impl SqlToMirConverter {
                 count_nulls,
             } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
+                &Column::named(projected_exprs[expr].clone()),
                 GroupedNodeType::Aggregation(Aggregation::Count { count_nulls }),
                 distinct,
             ),
@@ -961,7 +950,7 @@ impl SqlToMirConverter {
             ),
             Avg { ref expr, distinct } => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
+                &Column::named(projected_exprs[expr].clone()),
                 GroupedNodeType::Aggregation(Aggregation::Avg),
                 distinct,
             ),
@@ -974,7 +963,7 @@ impl SqlToMirConverter {
             ),
             Max(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
+                &Column::named(projected_exprs[expr].clone()),
                 GroupedNodeType::Extremum(Extremum::Max),
                 false,
             ),
@@ -985,7 +974,7 @@ impl SqlToMirConverter {
             ),
             Min(ref expr) => mknode(
                 // TODO(celine): replace with ParentRef
-                &Column::named(projected_exprs[&expr].clone()),
+                &Column::named(projected_exprs[expr].clone()),
                 GroupedNodeType::Extremum(Extremum::Min),
                 false,
             ),
@@ -1191,12 +1180,6 @@ impl SqlToMirConverter {
         // TODO(eta): why was this commented out?
         //assert!(proj_cols.iter().all(|c| c.table == parent_name));
 
-        let names: Vec<String> = expressions
-            .iter()
-            .map(|&(ref n, _)| n.clone())
-            .chain(literals.iter().map(|&(ref n, _)| n.clone()))
-            .collect();
-
         let fields = proj_cols
             .clone()
             .into_iter()
@@ -1209,13 +1192,19 @@ impl SqlToMirConverter {
                 }
                 c
             })
-            .chain(names.into_iter().map(|n| {
-                if is_leaf {
-                    Column::new(Some(&name), &n)
-                } else {
-                    Column::new(None, &n)
-                }
-            }))
+            .chain(
+                expressions
+                    .iter()
+                    .map(|&(ref n, _)| n.clone())
+                    .chain(literals.iter().map(|&(ref n, _)| n.clone()))
+                    .map(|n| {
+                        if is_leaf {
+                            Column::new(Some(name), &n)
+                        } else {
+                            Column::new(None, &n)
+                        }
+                    }),
+            )
             .collect();
 
         let emit_cols = proj_cols.into_iter().cloned().collect();
@@ -1593,7 +1582,7 @@ impl SqlToMirConverter {
             let expressions_above_grouped = make_expressions_above_grouped(
                 self,
                 &format!("q_{:x}{}", qg.signature().hash, uformat),
-                &qg,
+                qg,
                 new_node_count,
                 &mut prev_node,
             );
@@ -1630,7 +1619,7 @@ impl SqlToMirConverter {
                 make_predicates_above_grouped(
                     self,
                     &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
+                    qg,
                     &node_for_rel,
                     new_node_count,
                     &column_to_predicates,
@@ -1746,7 +1735,7 @@ impl SqlToMirConverter {
                 // 6. Determine literals and expressions that global predicates depend
                 //    on and add them here; remembering that we've already added them-
                 if let Some(projected) =
-                    self.make_value_project_node(&qg, prev_node.clone(), new_node_count, &uformat)?
+                    self.make_value_project_node(qg, prev_node.clone(), new_node_count, &uformat)?
                 {
                     new_node_count += 1;
                     nodes_added.push(projected.clone());
@@ -1787,12 +1776,12 @@ impl SqlToMirConverter {
                 let mut func_nodes: Vec<MirNodeRef> = make_grouped(
                     self,
                     &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
+                    qg,
                     &node_for_rel,
                     new_node_count,
                     &mut prev_node,
                     false,
-                    &&expressions_above_grouped,
+                    &expressions_above_grouped,
                 )?;
 
                 new_node_count += func_nodes.len();
@@ -1869,7 +1858,7 @@ impl SqlToMirConverter {
 
                 let (nodes, tables, union_base_node_name) = self.reconcile(
                     &format!("q_{:x}{}", qg.signature().hash, uformat),
-                    &qg,
+                    qg,
                     &ancestors,
                     new_node_count,
                     sec_round,

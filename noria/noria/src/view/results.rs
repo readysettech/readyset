@@ -153,7 +153,7 @@ impl<'a> IntoIterator for &'a Results {
 impl<'a> Iterator for ResultIter<'a> {
     type Item = ResultRow<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.next()?, &self.columns))
+        Some(ResultRow::new(self.results.next()?, self.columns))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -164,11 +164,11 @@ impl<'a> Iterator for ResultIter<'a> {
 impl ExactSizeIterator for ResultIter<'_> {}
 impl DoubleEndedIterator for ResultIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.next_back()?, &self.columns))
+        Some(ResultRow::new(self.results.next_back()?, self.columns))
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        Some(ResultRow::new(self.results.nth_back(n)?, &self.columns))
+        Some(ResultRow::new(self.results.nth_back(n)?, self.columns))
     }
 }
 

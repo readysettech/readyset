@@ -187,7 +187,7 @@ impl Recipe {
     }
 
     pub(in crate::controller) fn resolve_alias(&self, alias: &str) -> Option<&str> {
-        self.aliases.get(alias).map(|ref qid| {
+        self.aliases.get(alias).map(|qid| {
             let (ref internal_qn, _, _) = self.expressions[qid];
             internal_qn.as_ref().unwrap().as_str()
         })
@@ -200,7 +200,7 @@ impl Recipe {
                 // `name` might be an alias for another identical query, so resolve if needed
                 let na = match self.resolve_alias(name) {
                     None => inc.get_query_address(name),
-                    Some(ref internal_qn) => inc.get_query_address(internal_qn),
+                    Some(internal_qn) => inc.get_query_address(internal_qn),
                 };
                 match na {
                     None => Err(format!(
@@ -221,7 +221,7 @@ impl Recipe {
             None => {
                 let s = match self.resolve_alias(name) {
                     None => inc.get_view_schema(name),
-                    Some(ref internal_qn) => inc.get_view_schema(internal_qn),
+                    Some(internal_qn) => inc.get_view_schema(internal_qn),
                 };
                 s.map(Schema::View)
             }
@@ -619,7 +619,7 @@ impl Recipe {
                 // remove inline comments, too
                 match l.find('#') {
                     None => l.trim(),
-                    Some(pos) => &l[0..pos - 1].trim(),
+                    Some(pos) => l[0..pos - 1].trim(),
                 }
             })
             .collect();
@@ -629,13 +629,12 @@ impl Recipe {
         let linecount = lines.len();
         let mut i = 1;
         for l in lines {
+            q.push_str(l);
             if !l.ends_with(';') && i < linecount {
-                q.push_str(l);
                 q.push(' ');
             } else {
                 // either line ends with semicolor, or it does not and this is the last line
                 // in both cases, we're at the end of the query
-                q.push_str(l);
                 query_strings.push(q);
                 q = String::new();
             }

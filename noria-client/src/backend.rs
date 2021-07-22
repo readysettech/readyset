@@ -331,9 +331,9 @@ impl<A: 'static + Authority> Backend<A> {
         match self.reader.mysql_connector {
             Some(ref mut connector) => {
                 let (res, id) = if is_read {
-                    (connector.handle_select(&query).await?, None)
+                    (connector.handle_select(query).await?, None)
                 } else {
-                    connector.handle_write(&query, false).await?
+                    connector.handle_write(query, false).await?
                 };
                 Ok((res, id))
             }
@@ -491,7 +491,7 @@ impl<A: 'static + Authority> Backend<A> {
             }
         }
 
-        return res;
+        res
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
@@ -861,7 +861,7 @@ where
                                         c.column, select_schema.columns
                                     ))
                                 })?;
-                            write_column(&mut rw, &r[coli], &c).await?;
+                            write_column(&mut rw, &r[coli], c).await?;
                         }
                         rw.end_row().await?;
                     }
@@ -911,7 +911,7 @@ where
     ) -> std::result::Result<(), Error> {
         if self.static_responses {
             for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
-                if pattern.is_match(&query) {
+                if pattern.is_match(query) {
                     trace!("sending static response");
                     let cols: Vec<_> = columns
                         .iter()
@@ -923,8 +923,8 @@ where
                         })
                         .collect();
                     let mut writer = results.start(&cols[..]).await?;
-                    for &(_, ref r) in columns {
-                        writer.write_col(String::from(*r)).await?;
+                    for &(_, r) in columns {
+                        writer.write_col(String::from(r)).await?;
                     }
                     return Ok(writer.end_row().await?);
                 }
@@ -968,7 +968,7 @@ where
                                         c.column, select_schema.columns
                                     ))
                                 })?;
-                            write_column(&mut rw, &r[coli], &c).await?;
+                            write_column(&mut rw, &r[coli], c).await?;
                         }
                         rw.end_row().await?;
                     }

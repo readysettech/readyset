@@ -120,7 +120,7 @@ pub async fn container_exists(name: &str) -> bool {
     let docker = Docker::new();
     // Inspects a container, this will return a 404 error
     // if the container does not exist.
-    !docker.containers().get(name).inspect().await.is_err()
+    docker.containers().get(name).inspect().await.is_ok()
 }
 
 // These tests currently require that a docker daemon is already setup

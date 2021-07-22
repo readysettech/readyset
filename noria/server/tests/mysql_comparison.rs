@@ -95,7 +95,7 @@ fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
         .to_owned();
 
         let (file, line) = match info.location() {
-            Some(ref l) => (l.file().to_owned(), l.line()),
+            Some(l) => (l.file().to_owned(), l.line()),
             None => ("[unknown]".to_owned(), 0),
         };
         *panic_state.lock().unwrap() = Some(PanicState {
@@ -321,7 +321,7 @@ async fn check_query(
             })
             .collect();
 
-        if let Some(diff) = compare_results(&target_results, &query_results) {
+        if let Some(diff) = compare_results(target_results, &query_results) {
             return Err(format!(
                 "MySQL and Soup results do not match for ? = {:?}\n{}",
                 query_parameter, diff

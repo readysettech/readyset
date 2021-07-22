@@ -17,12 +17,12 @@ async fn main() -> anyhow::Result<()> {
                 SELECT * FROM employees;
         ";
 
-    let authority = ZookeeperAuthority::new(&"127.0.0.1:2181/myapp")?;
+    let authority = ZookeeperAuthority::new("127.0.0.1:2181/myapp")?;
     let mut noria = ControllerHandle::new(authority).await?;
 
     println!("Waiting for noria");
     noria.install_recipe(test_sql_string).await.unwrap();
-    let mut getter = noria.view(&"testQuery").await.unwrap();
+    let mut getter = noria.view("testQuery").await.unwrap();
 
     let results = getter.lookup(&[0.into()], true).await.unwrap();
     println!("Results: {:?}", results);

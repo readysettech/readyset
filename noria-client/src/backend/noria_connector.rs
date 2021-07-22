@@ -282,10 +282,10 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                     .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
                 // unwrap: safe because we always pass in Some(params) so don't hit None path of coerce_params
                 let coerced_params =
-                    utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), &schema)
+                    utils::coerce_params(Some(params), &SqlQuery::Insert(q.clone()), schema)
                         .unwrap()
                         .unwrap();
-                return self.do_insert(&q, vec![coerced_params]).await;
+                return self.do_insert(q, vec![coerced_params]).await;
             }
             _ => {
                 internal!(
@@ -534,7 +534,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             let mut default_value_columns: Vec<_> = schema
                 .fields
                 .iter()
-                .filter_map(|ref c| {
+                .filter_map(|c| {
                     for cc in &c.constraints {
                         if let ColumnConstraint::DefaultValue(ref v) = *cc {
                             return Some((c.column.clone(), v.clone()));
@@ -546,7 +546,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
             trace!("insert::construct ops");
 
-            for (ri, ref row) in data.iter().enumerate() {
+            for (ri, row) in data.iter().enumerate() {
                 if let Some(col) = auto_increment_columns.get(0) {
                     let idx = schema
                         .fields
@@ -647,10 +647,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         trace!("select::access view");
-        let getter = self
-            .inner
-            .ensure_getter(&qname, self.region.clone())
-            .await?;
+        let getter = self.inner.ensure_getter(qname, self.region.clone()).await?;
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
@@ -684,7 +681,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                     .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
                 let value = String::try_from(
                     &key.remove(idx)
-                        .coerce_to(&key_types.remove(idx))
+                        .coerce_to(key_types.remove(idx))
                         .unwrap()
                         .into_owned(),
                 )?;
@@ -780,7 +777,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 unsupported!();
             };
             let coerced_params =
-                utils::coerce_params(params, &SqlQuery::Update(q.clone()), &schema)?;
+                utils::coerce_params(params, &SqlQuery::Update(q.clone()), schema)?;
             utils::extract_update(q, coerced_params.map(|p| p.into_iter()), schema)?
         };
 

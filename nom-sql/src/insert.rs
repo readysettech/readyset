@@ -34,7 +34,7 @@ impl fmt::Display for InsertStatement {
                 " ({})",
                 fields
                     .iter()
-                    .map(|ref col| col.name.to_owned())
+                    .map(|col| col.name.to_owned())
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;

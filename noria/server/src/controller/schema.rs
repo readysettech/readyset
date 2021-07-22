@@ -181,9 +181,9 @@ pub(super) fn column_schema(
     let mut col_base = None;
     for ref p in paths {
         trace!(log, "considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(&p, graph, recipe, log)? {
+        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log)? {
             col_type = t;
-            col_base = get_base_for_column(&p, graph, recipe)?;
+            col_base = get_base_for_column(p, graph, recipe)?;
         }
     }
 

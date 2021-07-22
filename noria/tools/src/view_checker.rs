@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
                 .help("Query to visualize."),
         )
         .get_matches();
-    let authority = ZookeeperAuthority::new(&"127.0.0.1:2181/myapp")?;
+    let authority = ZookeeperAuthority::new("127.0.0.1:2181/myapp")?;
     let mut noria = ControllerHandle::new(authority).await?;
 
     println!("Waiting for noria");

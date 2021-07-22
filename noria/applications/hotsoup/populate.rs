@@ -31,9 +31,9 @@ async fn populate_table(backend: &mut Backend, data: &Path, use_txn: bool) -> us
     let mut i = 0;
     while reader.read_line(&mut s).unwrap() > 0 {
         {
-            let fields: Vec<&str> = s.split('\t').map(str::trim).collect();
-            let rec: Vec<DataType> = fields
-                .into_iter()
+            let rec: Vec<DataType> = s
+                .split('\t')
+                .map(str::trim)
                 .map(|s| match i64::from_str(s) {
                     Ok(v) => v.into(),
                     Err(_) => DataType::try_from(s).unwrap(),

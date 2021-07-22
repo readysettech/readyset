@@ -20,7 +20,7 @@ maintenance = { status = "experimental" }
 [dependencies]
 assert_infrequent = "0.1.0"
 anyhow = "1.0"
-thiserror = "1.0.23"
+thiserror = "1.0.26"
 hyper = { version = "0.14.4", features = [ "stream" ] }
 nom-sql = { version = "0.0.11", path = "../../nom-sql" }
 maths = { version = "0.0.1", path = "../../maths" }

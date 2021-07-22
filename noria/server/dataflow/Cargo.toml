@@ -58,7 +58,7 @@ msql-srv = { path = "../../../msql-srv" }
 noria = { version = "0.7.0", path = "../../noria" }
 unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
-thiserror = "1.0.24"
+thiserror = "1.0.26"
 test-strategy = "0.1.1"
 
 [dev-dependencies]

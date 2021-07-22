@@ -48,6 +48,7 @@ impl fmt::Display for DropBehavior {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::enum_variant_names)]
 pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
     AlterColumn {

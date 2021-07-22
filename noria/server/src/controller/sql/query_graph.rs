@@ -78,12 +78,12 @@ impl Ord for OutputColumn {
                     ..
                 }) => {
                     if table.is_some() && other_table.is_some() {
-                        match table.cmp(&other_table) {
-                            Ordering::Equal => name.cmp(&other_name),
+                        match table.cmp(other_table) {
+                            Ordering::Equal => name.cmp(other_name),
                             x => x,
                         }
                     } else {
-                        name.cmp(&other_name)
+                        name.cmp(other_name)
                     }
                 }
             },
@@ -133,12 +133,12 @@ impl PartialOrd for OutputColumn {
                     ..
                 }) => {
                     if table.is_some() && other_table.is_some() {
-                        match table.cmp(&other_table) {
-                            Ordering::Equal => Some(name.cmp(&other_name)),
+                        match table.cmp(other_table) {
+                            Ordering::Equal => Some(name.cmp(other_name)),
                             x => Some(x),
                         }
                     } else if table.is_none() && other_table.is_none() {
-                        Some(name.cmp(&other_name))
+                        Some(name.cmp(other_name))
                     } else {
                         None
                     }
@@ -404,7 +404,7 @@ fn classify_conditionals(
             join.extend(new_join);
             params.extend(new_params);
         }
-        Expression::BinaryOp { lhs, op, rhs } if is_predicate(&op) => {
+        Expression::BinaryOp { lhs, op, rhs } if is_predicate(op) => {
             // atomic selection predicate
             match **rhs {
                 // right-hand side is a column, so this could be a comma join
@@ -711,22 +711,18 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                 // add edge for join
                 // FIXME(eta): inefficient cloning!
-                if !qg
-                    .edges
-                    .contains_key(&(left_table.clone(), right_table.clone()))
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    qg.edges.entry((left_table.clone(), right_table.clone()))
                 {
-                    qg.edges.insert(
-                        (left_table.clone(), right_table.clone()),
-                        match jc.operator {
-                            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
-                                QueryGraphEdge::LeftJoin { on: join_preds }
-                            }
-                            JoinOperator::Join | JoinOperator::InnerJoin => {
-                                QueryGraphEdge::Join { on: join_preds }
-                            }
-                            _ => unsupported!("join operator not supported"),
-                        },
-                    );
+                    e.insert(match jc.operator {
+                        JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin => {
+                            QueryGraphEdge::LeftJoin { on: join_preds }
+                        }
+                        JoinOperator::Join | JoinOperator::InnerJoin => {
+                            QueryGraphEdge::Join { on: join_preds }
+                        }
+                        _ => unsupported!("join operator not supported"),
+                    });
                 }
             }
             _ => internal!(),

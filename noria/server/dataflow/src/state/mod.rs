@@ -192,7 +192,7 @@ impl<'a> RecordResult<'a> {
         F: Fn(&[DataType]) -> bool,
     {
         match *self {
-            RecordResult::Borrowed(ref rs) => {
+            RecordResult::Borrowed(rs) => {
                 if !rs.is_empty() {
                     *self = RecordResult::References(rs.iter().filter(|x| func(x)).collect());
                 }

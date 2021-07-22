@@ -263,7 +263,7 @@ impl DomainMigrationPlan {
             )?;
             mainline.domains.insert(place.idx, d);
         }
-        for req in std::mem::replace(&mut self.stored, Vec::new()) {
+        for req in std::mem::take(&mut self.stored) {
             req.apply(log, mainline)?;
         }
         Ok(())
@@ -819,7 +819,7 @@ impl Migration {
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
-        let mut fdh = DomainMigrationPlan::new(&mainline);
+        let mut fdh = DomainMigrationPlan::new(mainline);
 
         for domain in changed_domains {
             if mainline.domains.contains_key(&domain) {

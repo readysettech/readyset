@@ -8,56 +8,6 @@ use std::ops::{Bound, RangeBounds};
 use Bound::*;
 use Ordering::*;
 
-/// Allow `map` on a [`Bound`]
-///
-/// please sir, can I have some GATs?
-pub trait BoundFunctor {
-    /// The type parameter for this bound
-    type Inner;
-
-    /// Map a function over the endpoint of this bound
-    ///
-    /// ```rust
-    /// use launchpad::intervals::BoundFunctor;
-    /// use std::ops::Bound::*;
-    ///
-    /// assert_eq!(Included(1).map(|x: i32| x + 1), Included(2));
-    /// assert_eq!(Excluded(1).map(|x: i32| x + 1), Excluded(2));
-    /// assert_eq!(Unbounded.map(|x: i32| x + 1), Unbounded);
-    /// ```
-    fn map<F, B>(self, f: F) -> Bound<B>
-    where
-        F: FnMut(Self::Inner) -> B;
-}
-
-impl<A> BoundFunctor for Bound<A> {
-    type Inner = A;
-    fn map<F, B>(self, mut f: F) -> Bound<B>
-    where
-        F: FnMut(Self::Inner) -> B,
-    {
-        match self {
-            Included(a) => Included(f(a)),
-            Excluded(a) => Excluded(f(a)),
-            Unbounded => Unbounded,
-        }
-    }
-}
-
-impl<'a, A> BoundFunctor for &'a Bound<A> {
-    type Inner = &'a A;
-    fn map<F, B>(self, mut f: F) -> Bound<B>
-    where
-        F: FnMut(Self::Inner) -> B,
-    {
-        match self {
-            Included(ref a) => Included(f(a)),
-            Excluded(ref a) => Excluded(f(a)),
-            Unbounded => Unbounded,
-        }
-    }
-}
-
 /// Converts a `Bound<A>` into an `Option<A>`, which is `None` if the `Bound` is `Unbounded`
 /// and `Some` otherwise.
 pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {

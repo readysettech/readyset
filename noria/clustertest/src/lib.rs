@@ -334,7 +334,7 @@ fn start_server(
     }
     let region = server_params.region.as_ref();
     if let Some(region) = region {
-        runner.set_region(&region);
+        runner.set_region(region);
     }
     if let Some(region) = primary_region.as_ref() {
         runner.set_primary_region(region);

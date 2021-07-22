@@ -441,6 +441,7 @@ fn make_base_node(
         })
         .collect::<Result<Vec<DataType>, _>>()?;
 
+    #[allow(clippy::cmp_owned)]
     let base = if !pkey_columns.is_empty() {
         let pkey_column_ids = pkey_columns
             .iter()
@@ -762,7 +763,7 @@ fn make_join_aggregates_node(
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            if let Some(j) = right_map.get(&c) {
+            if let Some(j) = right_map.get(c) {
                 // If the column was found in both, it's a group_by column and gets added as
                 // JoinSource::B.
                 JoinSource::B(i, *j)
@@ -780,7 +781,7 @@ fn make_join_aggregates_node(
                 .filter_map(|(i, c)| {
                     // If column is in left, don't do anything it's already been added.
                     // If it's in right, add it with right index.
-                    if left_map.contains_key(&c) {
+                    if left_map.contains_key(c) {
                         None
                     } else {
                         // Column exclusively in right parent, so gets added as JoinSource::R.

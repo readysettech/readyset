@@ -543,11 +543,7 @@ macro_rules! get_metric {
         $(, $label:expr => $value:expr)*
     ) => {
         {
-            #[allow(unused_mut)]
-            let mut labels = Vec::new();
-            $(
-                labels.push(($label, $value));
-            )*
+            let labels = vec![$(($label, $value),)*];
             $metrics_dump.metric_with_labels($metrics_name, labels.as_slice())
         }
     };

@@ -8,7 +8,7 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::StreamExt, stream::TryStreamExt,
 };
-use launchpad::intervals::{BoundFunctor, BoundPair};
+use launchpad::intervals::BoundPair;
 use nom_sql::SqlType;
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use petgraph::graph::NodeIndex;
@@ -289,9 +289,11 @@ impl KeyComparison {
     pub fn contains(&self, key: &[DataType]) -> bool {
         match self {
             Self::Equal(equal) => key == equal.as_slice(),
-            Self::Range((lower, upper)) => {
-                (lower.map(Vec1::as_slice), upper.map(Vec1::as_slice)).contains(key)
-            }
+            Self::Range((lower, upper)) => (
+                lower.as_ref().map(Vec1::as_slice),
+                upper.as_ref().map(Vec1::as_slice),
+            )
+                .contains(key),
         }
     }
 

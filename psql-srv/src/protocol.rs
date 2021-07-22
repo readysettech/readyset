@@ -598,7 +598,7 @@ mod tests {
             params: &[DataValue],
         ) -> Result<QueryResponse<Self::Resultset>, Error> {
             self.last_execute_id = Some(statement_id);
-            self.last_execute_params = Some(params.iter().cloned().collect());
+            self.last_execute_params = Some(params.to_vec());
             if self.is_query_err {
                 Err(Error::InternalError("error requested".to_string()))
             } else if self.is_query_read {

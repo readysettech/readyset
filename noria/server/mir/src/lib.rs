@@ -1,5 +1,6 @@
 #![warn(clippy::dbg_macro)]
 #![deny(unused_extern_crates)]
+#![feature(stmt_expr_attributes)]
 
 #[macro_use]
 extern crate slog;

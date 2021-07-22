@@ -170,7 +170,7 @@ pub fn is_aggregate(function: &FunctionExpression) -> bool {
 /// aggregate
 pub fn contains_aggregate(expr: &Expression) -> bool {
     match expr {
-        Expression::Call(f) => is_aggregate(f) || f.arguments().any(|arg| contains_aggregate(&arg)),
+        Expression::Call(f) => is_aggregate(f) || f.arguments().any(contains_aggregate),
         Expression::Literal(_) => false,
         Expression::Column { .. } => false,
         Expression::CaseWhen {

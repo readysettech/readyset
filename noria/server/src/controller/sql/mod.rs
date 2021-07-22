@@ -219,7 +219,7 @@ impl SqlIncorporator {
         let qg_hash = qg.signature().hash;
         match self.mir_queries.get(&(qg_hash, universe.clone())) {
             None => (),
-            Some(ref mir_query) => {
+            Some(mir_query) => {
                 let existing_qg = self
                     .query_graphs
                     .get(&qg_hash)
@@ -567,7 +567,7 @@ impl SqlIncorporator {
             source: Box::new(e),
         };
         let (qg, reuse) = self
-            .consider_query_graph(&query_name, is_name_required, mig.universe(), sq, is_leaf)
+            .consider_query_graph(query_name, is_name_required, mig.universe(), sq, is_leaf)
             .map_err(on_err)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(name, mn) => {
@@ -582,19 +582,19 @@ impl SqlIncorporator {
             }
             QueryGraphReuse::ExtendExisting(mqs) => {
                 let qfp = self
-                    .extend_existing_query(&query_name, sq, qg, mqs, is_leaf, mig)
+                    .extend_existing_query(query_name, sq, qg, mqs, is_leaf, mig)
                     .map_err(on_err)?;
                 (qfp, None)
             }
             QueryGraphReuse::ReaderOntoExisting(mn, project_columns, params) => {
                 let qfp = self
-                    .add_leaf_to_existing_query(&query_name, &params, mn, project_columns, mig)
+                    .add_leaf_to_existing_query(query_name, &params, mn, project_columns, mig)
                     .map_err(on_err)?;
                 (qfp, None)
             }
             QueryGraphReuse::None => {
                 let (qfp, mir) = self
-                    .add_query_via_mir(&query_name, sq, qg, is_leaf, mig)
+                    .add_query_via_mir(query_name, sq, qg, is_leaf, mig)
                     .map_err(on_err)?;
                 (qfp, Some(mir))
             }
@@ -670,44 +670,25 @@ impl SqlIncorporator {
         })?;
         let mir = &self.mir_queries[&(qg_hash, mig.universe())];
 
+        // TODO(malte): implement this
+        self.mir_converter.remove_query(query_name, mir)?;
+
+        // clean up local state
+        self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+        self.query_graphs.remove(&qg_hash).unwrap();
+        self.view_schemas.remove(query_name).unwrap();
+
         // traverse self.leaf__addresses
-        Ok(
-            if self
-                .leaf_addresses
-                .values()
-                .find(|&id| *id == nodeid)
-                .is_none()
-            {
-                // ok to remove
+        if !self.leaf_addresses.values().any(|id| *id == nodeid) {
+            // ok to remove
 
-                // remove local state for query
-
-                // traverse and remove MIR nodes
-                // TODO(malte): implement this
-                self.mir_converter.remove_query(query_name, mir)?;
-
-                // clean up local state
-                self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
-                self.query_graphs.remove(&qg_hash).unwrap();
-                self.view_schemas.remove(query_name).unwrap();
-
-                // trigger reader node removal
-                Some(nodeid)
-            } else {
-                // more than one query uses this leaf
-                // don't remove node yet!
-
-                // TODO(malte): implement this
-                self.mir_converter.remove_query(query_name, mir)?;
-
-                // clean up state for this query
-                self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
-                self.query_graphs.remove(&qg_hash).unwrap();
-                self.view_schemas.remove(query_name).unwrap();
-
-                None
-            },
-        )
+            // trigger reader node removal
+            Ok(Some(nodeid))
+        } else {
+            // more than one query uses this leaf
+            // don't remove node yet!
+            Ok(None)
+        }
     }
 
     pub(super) fn remove_base(&mut self, name: &str) -> ReadySetResult<()> {
@@ -804,7 +785,7 @@ impl SqlIncorporator {
                 continue;
             }
             let mq = &self.mir_queries[&m];
-            let res = merge_mir_for_queries(&self.log, &reused_mir, &mq);
+            let res = merge_mir_for_queries(&self.log, &reused_mir, mq);
             reused_mir = res.0;
             if res.1 > num_reused_nodes {
                 num_reused_nodes = res.1;
@@ -872,12 +853,12 @@ impl SqlIncorporator {
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         for sq in q.extract_subqueries() {
-            use self::passes::subqueries::{query_from_expr, Subquery};
+            use self::passes::subqueries::{query_from_expr, SubqueryPosition};
             use nom_sql::JoinRightSide;
             let default_name = format!("q_{}", self.num_queries);
             match sq {
-                Subquery::InExpr(expr) => {
-                    let (sq, column) = query_from_expr(&expr);
+                SubqueryPosition::Expr(expr) => {
+                    let (sq, column) = query_from_expr(expr);
 
                     let qfp = self
                         .nodes_for_named_query(sq, default_name, false, false, mig)
@@ -888,7 +869,7 @@ impl SqlIncorporator {
                         ..column
                     });
                 }
-                Subquery::InIn(in_val) => {
+                SubqueryPosition::In(in_val) => {
                     let (sq, column) = match in_val {
                         InValue::Subquery(stmt) => {
                             let col = stmt
@@ -917,7 +898,7 @@ impl SqlIncorporator {
                         ..column
                     })])
                 }
-                Subquery::InJoin(join_right_side) => {
+                SubqueryPosition::Join(join_right_side) => {
                     *join_right_side = match *join_right_side {
                         JoinRightSide::NestedSelect(ref ns, ref alias) => {
                             // Ensure the specified name is actually used for the subquery. This is
@@ -955,7 +936,7 @@ impl SqlIncorporator {
         let table_alias_rewrites = q.rewrite_table_aliases(query_name, mig.context());
         for r in table_alias_rewrites {
             match r {
-                TableAliasRewrite::ToView {
+                TableAliasRewrite::View {
                     to_view, for_table, ..
                 } => {
                     let query = SqlQuery::Select(SelectStatement {
@@ -969,7 +950,7 @@ impl SqlIncorporator {
                     let is_name_required = true;
                     self.nodes_for_named_query(query, to_view, is_name_required, false, mig)?;
                 }
-                TableAliasRewrite::ToCTE {
+                TableAliasRewrite::Cte {
                     to_view,
                     for_statement,
                     ..
@@ -977,7 +958,7 @@ impl SqlIncorporator {
                     let query = SqlQuery::Select(*for_statement);
                     self.nodes_for_named_query(query, to_view, true, false, mig)?;
                 }
-                TableAliasRewrite::ToTable { .. } => {}
+                TableAliasRewrite::Table { .. } => {}
             }
         }
 
@@ -1069,7 +1050,7 @@ impl SqlIncorporator {
                 self.add_select_query(&query_name, is_name_required, &sq, is_leaf, mig)?
                     .0
             }
-            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, &q, mig)?,
+            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig)?,
             q => internal!("unhandled query type in recipe: {:?}", q),
         };
 

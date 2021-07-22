@@ -259,6 +259,7 @@ impl MirNode {
         c: &Column,
         table_mapping: Option<&HashMap<(String, Option<String>), String>>,
     ) -> usize {
+        #[allow(clippy::cmp_owned)]
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
             // columns). We use the column specifications here, which track a tuple of (column
@@ -371,7 +372,7 @@ impl MirNode {
                 let parent = self.ancestors.first().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
-                    if !columns.contains(&c) {
+                    if !columns.contains(c) {
                         columns.push(c.clone());
                     }
                 }
@@ -382,7 +383,7 @@ impl MirNode {
                 ..
             } => {
                 for c in emit {
-                    if !columns.contains(&c) {
+                    if !columns.contains(c) {
                         columns.push(c.clone());
                     }
                 }
@@ -627,7 +628,7 @@ mod tests {
             let condition_expression = Expression::BinaryOp {
                 lhs: Box::new(Expression::Column(cols[cond.0].clone())),
                 op: BinaryOperator::Equal,
-                rhs: Box::new(cond.1.clone()),
+                rhs: Box::new(cond.1),
             };
 
             let parent = MirNode::new(

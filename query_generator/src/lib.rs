@@ -60,8 +60,6 @@
 //! [2]: TableSpec::fresh_column
 //! [3]: QueryOperation::permute
 
-#![feature(duration_zero, option_insert)]
-
 use anyhow::anyhow;
 use chrono::{NaiveDate, NaiveTime};
 use clap::Clap;
@@ -771,7 +769,7 @@ impl TableSpec {
                             .nth(index / 2 % expected_values.len())
                             .unwrap()
                             .clone(),
-                        _ if random => random_value_of_type(&col_type),
+                        _ if random => random_value_of_type(col_type),
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
@@ -2166,7 +2164,7 @@ where
 
     let lower = T::from_str(lower_s)?;
 
-    if let Some(without_equals) = upper_s.strip_prefix("=") {
+    if let Some(without_equals) = upper_s.strip_prefix('=') {
         Ok((Included(lower), Included(T::from_str(without_equals)?)))
     } else {
         Ok((Included(lower), Excluded(T::from_str(upper_s)?)))

@@ -635,7 +635,7 @@ mod test {
             let ni = NodeIndex::new(3);
 
             let mut keys_by_col_index = HashMap::new();
-            keys_by_col_index.insert(column_indexes.clone(), keys.clone());
+            keys_by_col_index.insert(column_indexes.clone(), keys);
 
             let mut whitelist = HashMap::new();
             whitelist.insert(

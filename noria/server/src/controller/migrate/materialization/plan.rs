@@ -300,7 +300,7 @@ impl<'a> Plan<'a> {
                 //  a domain may appear multiple times in this list if a path crosses into the same
                 //  domain more than once. currently, that will cause a deadlock.
                 if seen.contains(&domain) {
-                    println!("{}", graphviz(&self.graph, true, &self.m));
+                    println!("{}", graphviz(self.graph, true, self.m));
                     crit!(self.m.log, "detected a-b-a domain replay path");
                     unimplemented!();
                 }

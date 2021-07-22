@@ -26,7 +26,7 @@ vec1 = "1.6.0"
 itertools = "0.9"
 derive_more = "0.99.11"
 async-trait = "0.1.49"
-thiserror = "1.0"
+thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 metrics = "0.14.2"
 noria-client-metrics = { version = "0.1.0", path = "metrics" }

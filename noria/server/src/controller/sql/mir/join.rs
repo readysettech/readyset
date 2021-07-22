@@ -43,7 +43,7 @@ pub(super) fn make_joins(
     let mut node_count = node_count;
 
     for jref in qg.join_order.iter() {
-        let (join_type, jps) = from_join_ref(jref, &qg);
+        let (join_type, jps) = from_join_ref(jref, qg);
         let (left_chain, right_chain) =
             pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
 

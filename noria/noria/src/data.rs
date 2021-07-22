@@ -657,7 +657,7 @@ impl Ord for DataType {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
                 #[allow(clippy::unwrap_used)]
                 let b: &str = <&str>::try_from(other).unwrap();
-                a.cmp(&b)
+                a.cmp(b)
             }
             (&DataType::Text(..) | &DataType::TinyText(..), _) => Ordering::Greater,
             (_, &DataType::Text(..) | &DataType::TinyText(..)) => Ordering::Less,
@@ -1922,7 +1922,7 @@ mod tests {
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
-        assert_eq!(format!("{:?}", text), "Text(\"I contain \\' and \\\"\")");
+        assert_eq!(format!("{:?}", text), "Text(\"I contain ' and \\\"\")");
         assert_eq!(format!("{:?}", real), "Real(-0.05)");
         assert_eq!(
             format!("{:?}", timestamp),

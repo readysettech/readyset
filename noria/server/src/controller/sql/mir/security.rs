@@ -60,14 +60,14 @@ impl SecurityBoundary for SqlToMirConverter {
             (
                 Some(self.make_union_node(
                     &format!("{}_n{}", name, node_count),
-                    &ancestors,
+                    ancestors,
                     union::DuplicateMode::UnionAll,
                 )?),
                 None,
             )
         } else {
             let (u, m) =
-                self.make_union_node_sec(&format!("{}_n{}", name, node_count), &ancestors)?;
+                self.make_union_node_sec(&format!("{}_n{}", name, node_count), ancestors)?;
             (Some(u), m)
         };
 
@@ -83,7 +83,7 @@ impl SecurityBoundary for SqlToMirConverter {
                 let grouped = make_grouped(
                     self,
                     name,
-                    &qg,
+                    qg,
                     &HashMap::new(), // we only care about this, if no parent node is specified.
                     node_count,
                     &mut Some(node),

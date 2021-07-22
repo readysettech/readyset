@@ -147,7 +147,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldDefinitionExpression::from(Column::from("id")),
-                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1))),
             ],
             ..Default::default()
         };
@@ -212,7 +212,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldDefinitionExpression::from(Column::from("id")),
-                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1))),
             ],
             ..Default::default()
         };
@@ -227,8 +227,8 @@ mod tests {
         let third_select = SelectStatement {
             tables: vec![Table::from("Vote")],
             fields: vec![
-                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(42).into())),
-                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(5).into())),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(42))),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(5))),
             ],
             ..Default::default()
         };
@@ -255,7 +255,7 @@ mod tests {
             tables: vec![Table::from("Vote")],
             fields: vec![
                 FieldDefinitionExpression::from(Column::from("id")),
-                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1).into())),
+                FieldDefinitionExpression::from(Expression::Literal(Literal::Integer(1))),
             ],
             ..Default::default()
         };

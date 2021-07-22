@@ -138,10 +138,10 @@ impl BenchmarkApplication {
         println!("Mysql found {:?} dept_emp", mysql_dept_emp_count);
         println!("Mysql found {:?} salaries", mysql_salary_count);
 
-        let mut emp_view = self.g.view(&"select_employee").await.unwrap();
-        let mut manager_view = self.g.view(&"employee_dept_manager").await.unwrap();
-        let mut dept_emp_view = self.g.view(&"employee_dept").await.unwrap();
-        let mut salary_view = self.g.view(&"employee_salary_history").await.unwrap();
+        let mut emp_view = self.g.view("select_employee").await.unwrap();
+        let mut manager_view = self.g.view("employee_dept_manager").await.unwrap();
+        let mut dept_emp_view = self.g.view("employee_dept").await.unwrap();
+        let mut salary_view = self.g.view("employee_salary_history").await.unwrap();
 
         let noria_warmup_start = time::Instant::now();
         for i in employee_ids_to_query.clone() {
@@ -184,7 +184,7 @@ impl BenchmarkApplication {
         let noria_smart_start = time::Instant::now();
         let noria_lookup: Vec<_> = employee_ids_to_query
             .iter()
-            .map(|e_id| vec1![e_id.clone().into()].into())
+            .map(|e_id| vec1![(*e_id).into()].into())
             .collect();
         emp_view
             .multi_lookup(noria_lookup.clone(), true)

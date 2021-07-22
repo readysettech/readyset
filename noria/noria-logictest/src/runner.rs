@@ -211,8 +211,8 @@ impl TestScript {
     /// Run the test script on Noria server
     pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
         let authority = Arc::new(LocalAuthority::default());
-        let mut noria_handle = self.start_noria_server(&opts, Arc::clone(&authority)).await;
-        let (adapter_task, conn_opts) = self.setup_mysql_adapter(&opts, authority).await;
+        let mut noria_handle = self.start_noria_server(opts, Arc::clone(&authority)).await;
+        let (adapter_task, conn_opts) = self.setup_mysql_adapter(opts, authority).await;
 
         let mut conn = mysql::Conn::new(conn_opts)
             .await

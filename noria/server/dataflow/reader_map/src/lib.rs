@@ -201,7 +201,7 @@
 // This _should_ detect if we ever accidentally leak aliasing::NoDrop.
 // But, currently, it does not..
 #![deny(unreachable_pub)]
-#![feature(bound_cloned, btree_drain_filter)]
+#![feature(btree_drain_filter)]
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;
