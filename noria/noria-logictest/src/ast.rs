@@ -371,7 +371,7 @@ impl QueryResults {
     pub fn hash(vals: &[Value]) -> Self {
         Self::Hash {
             count: vals.len(),
-            digest: Value::hash_results(&vals),
+            digest: Value::hash_results(vals),
         }
     }
 }

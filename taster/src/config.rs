@@ -10,22 +10,22 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    IOError(#[from] io::Error),
+    IO(#[from] io::Error),
 
     #[error("Error parsing taster config as TOML: {0}")]
-    ParseError(#[from] toml::de::Error),
+    Parse(#[from] toml::de::Error),
 
     #[error("Error deserializing taster config: {0}")]
-    DeserializeError(String),
+    Deserialize(String),
 }
 
 impl Error {
     fn missing_key(k: &str) -> Self {
-        Self::DeserializeError(format!("Missing key \"{}\"", k))
+        Self::Deserialize(format!("Missing key \"{}\"", k))
     }
 
     fn invalid_type(k: &str, expected_type: &str) -> Self {
-        Self::DeserializeError(format!(
+        Self::Deserialize(format!(
             "Key \"{}\" has invalid type, expected {}",
             k, expected_type
         ))
@@ -84,13 +84,13 @@ impl OutputFormat {
                 },
                 improvement_threshold: match val.get("improvement_threshold") {
                     None => def_imp_threshold,
-                    Some(ref it) => it
+                    Some(it) => it
                         .as_float()
                         .ok_or_else(|| Error::invalid_type("improvement_threshold", "float"))?,
                 },
                 regression_threshold: match val.get("regression_threshold") {
                     None => def_reg_threshold,
-                    Some(ref rt) => rt
+                    Some(rt) => rt
                         .as_float()
                         .ok_or_else(|| Error::invalid_type("regression_threshold", "float"))?,
                 },
@@ -144,7 +144,7 @@ impl OutputFormat {
                     .collect::<Result<Vec<_>, Error>>()?,
             })
         } else {
-            Err(Error::DeserializeError(
+            Err(Error::Deserialize(
                 "All benchmarks must have either a \"regexs\" key or a valid \"format\"".to_owned(),
             ))
         }

@@ -1,6 +1,6 @@
 use ahash::RandomState;
 use common::DataType;
-use launchpad::intervals::{BoundFunctor, BoundPair};
+use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use reader_map::{
@@ -193,7 +193,7 @@ impl Handle {
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
                 unsafe {
-                    let tuple_key = slice_to_2_tuple(&key);
+                    let tuple_key = slice_to_2_tuple(key);
                     let map = h.enter().ok_or(NotReady)?;
                     let m = *map.meta();
                     let v = map
@@ -226,7 +226,7 @@ impl Handle {
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
                 unsafe {
-                    let tuple_key = slice_to_2_tuple(&key);
+                    let tuple_key = slice_to_2_tuple(key);
                     let map = h.enter()?;
                     let res = map.contains_key(&tuple_key);
                     mem::forget(tuple_key);

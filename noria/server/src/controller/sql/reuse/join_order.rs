@@ -104,7 +104,7 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
     // finds predicates that are not present in any chain and add them
     // to the end.
     for jref in order.iter() {
-        if !new_order.contains(&jref) {
+        if !new_order.contains(jref) {
             new_order.push(jref.clone());
         }
     }
@@ -117,7 +117,7 @@ fn chains_to_order(chains: Vec<JoinChain>, order: &mut Vec<JoinRef>) {
 
 fn predicates_for_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> &'a [JoinPredicate] {
     match qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join { ref on } | QueryGraphEdge::LeftJoin { ref on } => &on,
+        QueryGraphEdge::Join { ref on } | QueryGraphEdge::LeftJoin { ref on } => on,
         QueryGraphEdge::GroupBy(_) => unreachable!(),
     }
 }
@@ -146,12 +146,12 @@ pub(super) fn reorder_joins(
                 continue;
             }
 
-            let ejps = predicates_for_join_ref(&existing_jref, eqg);
+            let ejps = predicates_for_join_ref(existing_jref, eqg);
 
             // look in the new query graph for an equivalent join predicate.
             let mut found = false;
             for new_jref in qg.join_order.iter() {
-                let njps = predicates_for_join_ref(&new_jref, qg);
+                let njps = predicates_for_join_ref(new_jref, qg);
                 // if we find an equivalent join, add it to the new query's join chains
                 if join_predicates_are_equivalent(njps, ejps)? {
                     extend_chains(&mut shared_join_chains, new_jref);

@@ -559,7 +559,7 @@ impl Materializations {
                 }
 
                 if let Some(pi) = any_partial(self, graph, ni) {
-                    println!("{}", graphviz(graph, true, &self));
+                    println!("{}", graphviz(graph, true, self));
                     crit!(self.log, "partial materializations above full materialization";
                               "full" => ni.index(),
                               "partial" => pi.index());
@@ -650,7 +650,7 @@ impl Materializations {
                                                     columns
                                                         .iter()
                                                         .cloned()
-                                                        .find(|c| !index.columns.contains(&c))
+                                                        .find(|c| !index.columns.contains(c))
                                                 });
                                             if let Some(not_shared) = unshared {
                                                 // This might be fine if we also have the child's index in
@@ -667,7 +667,7 @@ impl Materializations {
                                                 // parent by the same key as the child, which really should
                                                 // never happen.
                                                 // This code should probably just be taken out soon.
-                                                println!("{}", graphviz(graph, true, &self));
+                                                println!("{}", graphviz(graph, true, self));
                                                 crit!(self.log, "partially overlapping partial indices";
                                                           "parent" => node.index(),
                                                           "pcols" => ?index,
@@ -794,7 +794,7 @@ impl Materializations {
         }
         while let Some(ni) = non_purge.pop() {
             if graph[ni].purge {
-                println!("{}", graphviz(graph, true, &self));
+                println!("{}", graphviz(graph, true, self));
                 internal!("found purge node {} above non-purge node", ni.index())
             }
             if self.have.contains_key(&ni) {
@@ -852,7 +852,7 @@ impl Materializations {
                             != self.have.get(&child).map(|i| i.len()).unwrap_or(0)
                         {
                             // node was previously materialized!
-                            println!("{}", graphviz(graph, true, &self));
+                            println!("{}", graphviz(graph, true, self));
                             crit!(
                                 self.log,
                                 "attempting to make old non-materialized node with children partial";

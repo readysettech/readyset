@@ -3,7 +3,6 @@ use nom_sql::{Column, Expression, FieldDefinitionExpression, SqlQuery};
 use itertools::Either;
 use std::collections::HashMap;
 use std::iter;
-use std::mem;
 
 pub trait StarExpansion {
     fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> SqlQuery;
@@ -27,7 +26,7 @@ impl StarExpansion for SqlQuery {
         };
 
         if let SqlQuery::Select(ref mut sq) = self {
-            let old_fields = mem::replace(&mut sq.fields, vec![]);
+            let old_fields = std::mem::take(&mut sq.fields);
             sq.fields = old_fields
                 .into_iter()
                 .flat_map(|field| match field {

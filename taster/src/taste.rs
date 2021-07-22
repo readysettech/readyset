@@ -343,13 +343,13 @@ pub fn taste_commit(
         Err(e) => {
             warn!("Error parsing taster.toml from commit {}: {}", commit.id, e);
             match e {
-                config::Error::IOError(ioe) if ioe.kind() == io::ErrorKind::NotFound => {
+                config::Error::IO(ioe) if ioe.kind() == io::ErrorKind::NotFound => {
                     warn!(
                         "Skipping commit {} which doesn't have a Taster config.",
                         commit.id
                     );
                 }
-                config::Error::ParseError(_) | config::Error::DeserializeError(_) => {
+                config::Error::Parse(_) | config::Error::Deserialize(_) => {
                     warn!(
                         "Skipping commit {} which has an invalid Taster config.",
                         commit.id

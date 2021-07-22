@@ -9,7 +9,7 @@ use noria_client::backend::Reader;
 use noria_psql::backend::Backend;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use postgres::{config::Config, Client, NoTls, SimpleQueryMessage};
-use psql_srv;
+
 use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
@@ -969,7 +969,7 @@ fn absurdly_simple_select() {
         .iter()
         .map(|r| (r.get::<usize, i32>(0), r.get::<usize, i32>(1)))
         .collect();
-    rows.sort();
+    rows.sort_unstable();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
 }
 
@@ -996,7 +996,7 @@ fn order_by_basic() {
         .iter()
         .map(|r| (r.get::<usize, i32>(0), r.get::<usize, i32>(1)))
         .collect();
-    rows.sort();
+    rows.sort_unstable();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn
         .query("SELECT * FROM test ORDER BY x DESC", &[])
@@ -1044,7 +1044,7 @@ fn order_by_limit_basic() {
         .iter()
         .map(|r| (r.get::<usize, i32>(0), r.get::<usize, i32>(1)))
         .collect();
-    rows.sort();
+    rows.sort_unstable();
     assert_eq!(rows, vec![(1, 3), (2, 4), (4, 2)]);
     let rows: Vec<(i32, i32)> = conn
         .query("SELECT * FROM test ORDER BY x DESC LIMIT 3", &[])

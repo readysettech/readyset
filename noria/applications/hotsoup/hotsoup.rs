@@ -80,7 +80,7 @@ impl Backend {
                 rs.push('\n');
                 rs.push_str(
                     &s.lines()
-                        .filter(|ref l| {
+                        .filter(|l| {
                             // make sure to skip blacklisted queries
                             for q in blacklist {
                                 if l.contains(q) || l.contains("LIKE") || l.contains("like") {
@@ -281,7 +281,7 @@ async fn main() {
         } else {
             Some(qf.1.to_str().unwrap())
         };
-        if let Err(e) = backend.migrate(&sf.1.to_str().unwrap(), queries).await {
+        if let Err(e) = backend.migrate(sf.1.to_str().unwrap(), queries).await {
             let graph_fname = format!("{}/failed_hotcrp_{}.gv", gloc.unwrap(), schema_version);
             let mut gf = File::create(graph_fname).unwrap();
             assert!(write!(gf, "{}", backend.g.graphviz().await.unwrap()).is_ok());

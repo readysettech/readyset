@@ -16,7 +16,6 @@
 //! [0]: https://rocksdb.org/
 
 use itertools::Itertools;
-use launchpad::intervals::BoundFunctor;
 use noria::{KeyComparison, ReplicationOffset};
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
@@ -189,7 +188,7 @@ impl State for PersistentState {
         let index_id = self.index_id(columns);
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
-            let prefix = Self::serialize_prefix(&key);
+            let prefix = Self::serialize_prefix(key);
             let data = if index_id == 0 && self.has_unique_index {
                 // This is a primary key, so we know there's only one row to retrieve
                 // (no need to use prefix_iterator).
@@ -294,7 +293,7 @@ impl State for PersistentState {
                 for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
                     let mut batch = WriteBatch::default();
                     for (ref pk, ref value) in chunk {
-                        let row: Vec<DataType> = bincode::deserialize(&value).unwrap();
+                        let row: Vec<DataType> = bincode::deserialize(value).unwrap();
                         let index_key = Self::build_key(&row, columns);
                         let key = Self::serialize_secondary(&index_key, pk);
                         let cf = db.cf_handle(&index_id).unwrap();
@@ -323,7 +322,7 @@ impl State for PersistentState {
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         self.all_rows()
-            .map(|(_, ref value)| bincode::deserialize(&value).unwrap())
+            .map(|(_, ref value)| bincode::deserialize(value).unwrap())
             .collect()
     }
 
@@ -406,7 +405,7 @@ impl PersistentState {
                 column_families
                     .iter()
                     .map(|cf| {
-                        ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, &params))
+                        ColumnFamilyDescriptor::new(cf.clone(), Self::build_options(&name, params))
                     })
                     .collect()
             };
@@ -680,7 +679,7 @@ impl PersistentState {
             // Then insert primary key pointers for all the secondary indices:
             for index in self.indices[1..].iter() {
                 // Construct a key with the index values, and serialize it with bincode:
-                let key = Self::build_key(&r, &index.columns);
+                let key = Self::build_key(r, &index.columns);
                 let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
                 let cf = db.cf_handle(&index.column_family).unwrap();
                 batch.put_cf(cf, &serialized_key, &serialized_row);
@@ -699,14 +698,14 @@ impl PersistentState {
 
                 // Then delete any references that point _exactly_ to that row:
                 for index in self.indices[1..].iter() {
-                    let key = Self::build_key(&r, &index.columns);
+                    let key = Self::build_key(r, &index.columns);
                     let serialized_key = Self::serialize_secondary(&key, primary_key);
                     let cf = db.cf_handle(&index.column_family).unwrap();
                     batch.delete_cf(cf, &serialized_key);
                 }
             };
 
-            let pk = Self::build_key(&r, &pk_index.columns);
+            let pk = Self::build_key(r, &pk_index.columns);
             let prefix = Self::serialize_prefix(&pk);
             if self.has_unique_index {
                 if cfg!(debug_assertions) {
@@ -1390,12 +1389,12 @@ mod tests {
         let r = KeyType::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
         let prefix = prefix_transform(&k);
-        let size: u64 = bincode::deserialize(&prefix).unwrap();
+        let size: u64 = bincode::deserialize(prefix).unwrap();
         assert_eq!(size, bincode::serialized_size(&data).unwrap());
 
         // prefix_extractor requirements:
         // 1) key.starts_with(prefix(key))
-        assert!(k.starts_with(&prefix));
+        assert!(k.starts_with(prefix));
 
         // 2) Compare(prefix(key), key) <= 0.
         assert!(prefix <= &k[..]);
@@ -1407,7 +1406,7 @@ mod tests {
         assert!(prefix <= other_prefix);
 
         // 4) prefix(prefix(key)) == prefix(key)
-        assert_eq!(prefix, prefix_transform(&prefix));
+        assert_eq!(prefix, prefix_transform(prefix));
     }
 
     mod lookup_range {

@@ -54,7 +54,7 @@ impl SlackNotifier {
         }
         let payload = PayloadBuilder::new()
             .text(text.as_slice())
-            .attachments(self.result_to_attachments(&res))
+            .attachments(self.result_to_attachments(res))
             .channel(self.channel.clone())
             .username("taster")
             .icon_emoji(":tea:")

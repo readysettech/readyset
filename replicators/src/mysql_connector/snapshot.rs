@@ -77,7 +77,7 @@ impl MySqlReplicator {
 
         // Append `CREATE TABLE` statements
         for table in self.tables.as_ref().unwrap() {
-            let create = create_for_table(q, &table, TableKind::BaseTable).await?;
+            let create = create_for_table(q, table, TableKind::BaseTable).await?;
             recipe.push_str(&create);
             recipe.push_str(";\n");
         }
@@ -279,8 +279,8 @@ impl MySqlReplicator {
 
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
-            let dumper = self.dump_table(&table_name).await?;
-            let table_mutator = noria.table(&table_name).await?;
+            let dumper = self.dump_table(table_name).await?;
+            let table_mutator = noria.table(table_name).await?;
 
             let log = self.log.new(slog::o!("table" => table_name.clone()));
             debug!(log, "Replicating table");

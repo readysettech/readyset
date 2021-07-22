@@ -436,7 +436,7 @@ where
             }
             Operation::RemoveValue(ref key, ref value) => {
                 if let Some(e) = self.data.get_mut(key) {
-                    e.swap_remove(&value);
+                    e.swap_remove(value);
                 }
             }
             Operation::RemoveRange(ref range) => {
@@ -466,10 +466,10 @@ where
             },
             Operation::Reserve(ref key, additional) => match self.data.entry(key.clone()) {
                 Entry::Occupied(mut entry) => {
-                    entry.get_mut().reserve(additional, &hasher);
+                    entry.get_mut().reserve(additional, hasher);
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(ValuesInner::with_capacity_and_hasher(additional, &hasher));
+                    entry.insert(ValuesInner::with_capacity_and_hasher(additional, hasher));
                 }
             },
             Operation::MarkReady => {

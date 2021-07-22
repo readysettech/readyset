@@ -97,7 +97,7 @@ pub(super) fn pull_required_base_columns(
 
         let mut found: Vec<&Column> = Vec::new();
         match table_mapping {
-            Some(ref map) => {
+            Some(map) => {
                 for ancestor in mn.borrow().ancestors() {
                     if ancestor.borrow().ancestors().is_empty() {
                         // base, do nothing

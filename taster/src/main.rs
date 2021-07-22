@@ -102,7 +102,7 @@ impl Notifier {
 
     fn notify_pending(&self, push: &Push, commit: &Commit) {
         if let Some(gn) = &self.github_notifier {
-            if let Err(e) = gn.notify_pending(&push, &commit) {
+            if let Err(e) = gn.notify_pending(push, commit) {
                 error!("failed to deliver GitHub status notification: {:?}", e)
             }
         }
@@ -196,7 +196,7 @@ impl Taster {
                         ws.fetch()?;
                         let head_res = taste::taste_commit(
                             &ws,
-                            &self.persistence,
+                            self.persistence,
                             &push,
                             &push.head_commit,
                             self.improvement_threshold,
@@ -229,7 +229,7 @@ impl Taster {
                                         // taste
                                         let res = taste::taste_commit(
                                             &ws,
-                                            &self.persistence,
+                                            self.persistence,
                                             &push,
                                             &cur_c,
                                             self.improvement_threshold,
@@ -452,7 +452,7 @@ pub fn main() {
                 };
                 let res = taste::taste_commit(
                     &ws,
-                    &persistence,
+                    persistence,
                     &push,
                     &push.head_commit,
                     improvement_threshold,
@@ -506,7 +506,7 @@ pub fn main() {
 
                 let res = taste::taste_commit(
                     &ws,
-                    &persistence,
+                    persistence,
                     &push,
                     &push.head_commit,
                     improvement_threshold,

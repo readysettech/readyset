@@ -208,7 +208,7 @@ pub(crate) fn get_primary_key(schema: &CreateTableStatement) -> Vec<(usize, &Col
         .fields
         .iter()
         .enumerate()
-        .filter(|&(_, ref cs)| {
+        .filter(|&(_, cs)| {
             cs.constraints.contains(&ColumnConstraint::PrimaryKey)
                 || match schema.keys {
                     // Try finding PRIMARY KEY constraints in keys as well:

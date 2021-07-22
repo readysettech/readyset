@@ -443,7 +443,7 @@ impl Node {
                 for parent in self.parents() {
                     match self.timestamps.get(parent) {
                         Some(t) => {
-                            parent_timestamps.push(&t);
+                            parent_timestamps.push(t);
                         }
                         None => {
                             parent_without_timestamp = true;

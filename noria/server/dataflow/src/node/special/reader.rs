@@ -160,10 +160,10 @@ where
 {
     match (order_by, limit) {
         (None, None) => OrderedLimitedIter::Original(iter),
-        (Some(indices), None) => OrderedLimitedIter::Ordered(do_order(iter, &indices)),
+        (Some(indices), None) => OrderedLimitedIter::Ordered(do_order(iter, indices)),
         (None, Some(lim)) => OrderedLimitedIter::Limited(iter.take(lim)),
         (Some(indices), Some(lim)) => {
-            OrderedLimitedIter::OrderedLimited(do_order(iter, &indices).take(lim))
+            OrderedLimitedIter::OrderedLimited(do_order(iter, indices).take(lim))
         }
     }
 }

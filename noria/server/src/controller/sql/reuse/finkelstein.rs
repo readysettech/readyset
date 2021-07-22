@@ -25,7 +25,7 @@ impl ReuseConfiguration for Finkelstein {
                 .signature()
                 .is_generalization_of(&qg.signature())
             {
-                if let Some(reuse) = Self::check_compatibility(&qg, &existing_qg)? {
+                if let Some(reuse) = Self::check_compatibility(qg, existing_qg)? {
                     // QGs are compatible, we can reuse `existing_qg` as part of `qg`!
                     reuse_candidates.push((reuse, (*sig, existing_qg)));
                 }

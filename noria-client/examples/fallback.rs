@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicUsize, Arc, RwLock},
-    time::Duration,
 };
 
 use nom_sql::SelectStatement;

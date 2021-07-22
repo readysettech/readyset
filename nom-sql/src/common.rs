@@ -1141,17 +1141,16 @@ mod tests {
             .iter()
             .map(|t| type_identifier(t.as_bytes()).unwrap().1)
             .collect();
-        let res_not_ok: Vec<_> = not_ok
-            .iter()
-            .map(|t| type_identifier(t.as_bytes()).is_ok())
-            .collect();
 
         assert_eq!(
             res_ok,
             vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime(16)]
         );
 
-        assert!(res_not_ok.into_iter().all(|r| !r));
+        assert!(not_ok
+            .iter()
+            .map(|t| type_identifier(t.as_bytes()).is_ok())
+            .all(|r| !r));
     }
 
     #[test]

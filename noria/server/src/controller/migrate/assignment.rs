@@ -132,7 +132,7 @@ pub fn assign(
                 .collect();
 
             let mut assignment = None;
-            for &(_, ref p) in &parents {
+            for &(_, p) in &parents {
                 if p.is_sharder() {
                     // we're a child of a sharder (which currently has to be unsharded). we
                     // can't be in the same domain as the sharder (because we're starting a new

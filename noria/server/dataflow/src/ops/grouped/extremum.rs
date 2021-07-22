@@ -268,7 +268,7 @@ mod tests {
 
         // Insertion into a different group should be independent.
         let out = c.narrow_one_row(vec![2.into(), 15.into()], true);
-        assert_positive_record(2, 15.into(), out);
+        assert_positive_record(2, 15, out);
 
         // Smaller than last value, but not smallest in group.
         let rs = c.narrow_one_row(vec![key.into(), 8.into()], true);

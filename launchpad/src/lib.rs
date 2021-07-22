@@ -2,7 +2,7 @@
 //! in all crates in this workspace.
 #![deny(missing_docs, missing_crate_level_docs)]
 #![warn(clippy::dbg_macro)]
-#![feature(or_patterns, step_trait, step_trait_ext, bound_as_ref)]
+#![feature(step_trait, bound_as_ref, bound_map)]
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, HashMap};

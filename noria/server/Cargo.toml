@@ -26,7 +26,7 @@ profiling = ["timekeeper/default"]
 [dependencies]
 clap = "2.25.0"
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "1.0.26"
 ahash = "0.3"
 futures-core = "0.3.14"
 futures-util = "0.3.14"

@@ -394,7 +394,7 @@ fn do_lookup(
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
-            .try_find_and(&*equal, |rs| {
+            .try_find_and(*equal, |rs| {
                 serialize(
                     reader
                         .post_lookup

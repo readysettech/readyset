@@ -303,7 +303,7 @@ impl MySqlBinlogConnector {
 
                     let mut inserted_rows = Vec::new();
 
-                    for row in ev.rows(&tme) {
+                    for row in ev.rows(tme) {
                         // For each row in the event we produce a vector of Noria types that represent that row
                         inserted_rows.push(noria::TableOperation::Insert(binlog_row_to_noria_row(
                             &row?.1.ok_or("Missing data in WRITE_ROWS_EVENT")?,
@@ -336,7 +336,7 @@ impl MySqlBinlogConnector {
 
                     let mut updated_rows = Vec::new();
 
-                    for row in ev.rows(&tme) {
+                    for row in ev.rows(tme) {
                         // For each row in the event we produce a pair of Noria table operations to
                         // delete the previous entry and insert the new one
                         let row = &row?;
@@ -384,7 +384,7 @@ impl MySqlBinlogConnector {
 
                     let mut deleted_rows = Vec::new();
 
-                    for row in ev.rows(&tme) {
+                    for row in ev.rows(tme) {
                         // For each row in the event we produce a vector of Noria types that represent that row
                         deleted_rows.push(noria::TableOperation::DeleteRow {
                             row: binlog_row_to_noria_row(

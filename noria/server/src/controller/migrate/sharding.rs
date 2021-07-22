@@ -449,7 +449,7 @@ pub fn shard(
                 let mut cs = graph
                     .neighbors_directed(n, petgraph::EdgeDirection::Outgoing)
                     .detach();
-                while let Some((_, c)) = cs.next(&graph) {
+                while let Some((_, c)) = cs.next(graph) {
                     // undo the swap that inserting the sharder in the first place generated
                     swaps.remove(&(c, p)).unwrap();
                     // unwire the child from the sharder and wire to the base directly
@@ -535,7 +535,7 @@ pub fn shard(
                 let mut grandc = graph
                     .neighbors_directed(c, petgraph::EdgeDirection::Outgoing)
                     .detach();
-                while let Some((_, gc)) = grandc.next(&graph) {
+                while let Some((_, gc)) = grandc.next(graph) {
                     let e = graph.find_edge(c, gc).unwrap();
                     graph.remove_edge(e).unwrap();
                     // undo any swaps as well

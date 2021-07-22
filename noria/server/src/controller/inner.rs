@@ -223,8 +223,11 @@ impl ControllerInner {
                 // to individual query variables unfortunately. We'll probably want to factor this
                 // out into a helper method.
                 let nodes = if let Some(query) = query {
-                    let vars: Vec<_> = query.split('&').map(String::from).collect();
-                    if let Some(n) = &vars.into_iter().find(|v| v.starts_with("w=")) {
+                    if let Some(n) = &query
+                        .split('&')
+                        .map(String::from)
+                        .find(|v| v.starts_with("w="))
+                    {
                         self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
                     } else {
                         self.nodes_on_worker(None)
@@ -1138,7 +1141,7 @@ impl ControllerInner {
     fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
         self.workers
             .iter()
-            .map(|(id, ref status)| (id.clone(), status.healthy, status.last_heartbeat.elapsed()))
+            .map(|(id, status)| (id.clone(), status.healthy, status.last_heartbeat.elapsed()))
             .collect()
     }
 
@@ -1280,13 +1283,15 @@ impl ControllerInner {
                 // now remove bases
                 for base in removed_bases {
                     // TODO(malte): support removing bases that still have children?
-                    let children: Vec<NodeIndex> = self
-                        .ingredients
-                        .neighbors_directed(base, petgraph::EdgeDirection::Outgoing)
-                        .collect();
+
                     // TODO(malte): what about domain crossings? can ingress/egress nodes be left
                     // behind?
-                    assert_eq!(children.len(), 0);
+                    assert_eq!(
+                        self.ingredients
+                            .neighbors_directed(base, petgraph::EdgeDirection::Outgoing)
+                            .count(),
+                        0
+                    );
                     debug!(
                         self.log,
                         "Removing base \"{}\"",
@@ -1320,7 +1325,7 @@ impl ControllerInner {
         let new = mem::replace(&mut self.recipe, Recipe::blank(None));
         let add_txt = add_txt_spec.recipe;
 
-        match new.extend(&add_txt) {
+        match new.extend(add_txt) {
             Ok(new) => match self.apply_recipe(new) {
                 Ok(x) => {
                     if let Some(offset) = &add_txt_spec.replication_offset {
@@ -1372,7 +1377,7 @@ impl ControllerInner {
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
 
-        match Recipe::from_str(&r_txt, Some(self.log.clone())) {
+        match Recipe::from_str(r_txt, Some(self.log.clone())) {
             Ok(r) => {
                 let _old = self.recipe.clone();
                 let old = mem::replace(&mut self.recipe, Recipe::blank(None));

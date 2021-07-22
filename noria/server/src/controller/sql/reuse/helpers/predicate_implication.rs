@@ -114,9 +114,9 @@ pub fn join_predicates_are_equivalent(
             expr => unsupported!("Unsupported join predicate on non-column {}", expr),
         };
         Ok(if l_col < r_col {
-            (&l_col, &r_col)
+            (l_col, r_col)
         } else {
-            (&r_col, &l_col)
+            (r_col, l_col)
         })
     }
 
@@ -169,9 +169,9 @@ pub fn complex_predicate_implies(np: &Expression, ep: &Expression) -> Result<boo
             {
                 match n_op {
                     BinaryOperator::And => Ok(complex_predicate_implies(n_lhs, ep)?
-                        || complex_predicate_implies(&n_rhs, ep)?),
-                    BinaryOperator::Or => Ok(complex_predicate_implies(&n_lhs, ep)?
-                        && complex_predicate_implies(&n_rhs, ep)?),
+                        || complex_predicate_implies(n_rhs, ep)?),
+                    BinaryOperator::Or => Ok(complex_predicate_implies(n_lhs, ep)?
+                        && complex_predicate_implies(n_rhs, ep)?),
                     _ => Ok(n_lhs == e_lhs && predicate_implies((*n_op, n_rhs), (*e_op, e_rhs))?),
                 }
             } else {

@@ -99,7 +99,7 @@ async fn describe_table_test() {
     let descriptor = table.get(0).unwrap();
     let cols = descriptor.columns_ref();
     let cols = cols
-        .into_iter()
+        .iter()
         .map(|c| c.name_ref())
         .into_iter()
         .collect::<Vec<_>>();
@@ -114,12 +114,12 @@ async fn describe_table_test() {
         "Extra".as_bytes(),
     ];
     let vals_truth = vec![
-        Value::Bytes("uid".as_bytes().iter().cloned().collect()),
-        Value::Bytes("int".as_bytes().iter().cloned().collect()),
-        Value::Bytes("NO".as_bytes().iter().cloned().collect()),
-        Value::Bytes("".as_bytes().iter().cloned().collect()),
+        Value::Bytes("uid".as_bytes().to_vec()),
+        Value::Bytes("int".as_bytes().to_vec()),
+        Value::Bytes("NO".as_bytes().to_vec()),
+        Value::Bytes("".as_bytes().to_vec()),
         Value::NULL,
-        Value::Bytes("".as_bytes().iter().cloned().collect()),
+        Value::Bytes("".as_bytes().to_vec()),
     ];
 
     deployment.teardown().await.unwrap();

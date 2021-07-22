@@ -1,12 +1,11 @@
 #![warn(clippy::dbg_macro)]
 #![feature(
-    bound_cloned,
     iter_order_by,
     trait_alias,
     btree_drain_filter,
-    or_patterns,
     option_result_contains,
     bound_as_ref,
+    bound_map,
     stmt_expr_attributes
 )]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it

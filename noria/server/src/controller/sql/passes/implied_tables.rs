@@ -222,7 +222,7 @@ fn rewrite_selection(
                     }
                     None
                 }
-                None => find_table(&col, tables_in_query),
+                None => find_table(col, tables_in_query),
             }
         }
     };

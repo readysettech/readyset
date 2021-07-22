@@ -10,7 +10,7 @@ use super::partial_map::PartialMap;
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
-use launchpad::intervals::{into_bound_endpoint, BoundFunctor};
+use launchpad::intervals::into_bound_endpoint;
 
 /// A map containing a single index into the state of a node.
 ///

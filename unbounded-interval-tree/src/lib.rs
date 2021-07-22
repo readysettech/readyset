@@ -30,7 +30,7 @@
 //! - Every node's upper bound is less than or equal to its parent's max bound
 //! - The max bound of each node is equal to the upper bound of either that node, or one of that
 //!   node's descendants
-#![feature(bound_cloned, or_patterns, bound_as_ref)]
+#![feature(bound_as_ref)]
 
 use std::cmp::{max, Ordering};
 use std::fmt;
@@ -1352,11 +1352,11 @@ mod tests {
     fn node_children<Q: Clone + Ord>(node: &Node<Q>) -> Vec<Node<Q>> {
         let mut res = vec![node.clone()];
         if let Some(left) = &node.left {
-            res.extend(node_children(&left));
+            res.extend(node_children(left));
         }
 
         if let Some(right) = &node.right {
-            res.extend(node_children(&right));
+            res.extend(node_children(right));
         }
         res
     }

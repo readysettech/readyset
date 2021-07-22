@@ -170,7 +170,7 @@ where
             put_u8(ERROR_RESPONSE_V_FIELD, dst);
             put_str(severity, dst);
             put_u8(ERROR_RESPONSE_C_FIELD, dst);
-            put_str(&sqlstate.code(), dst);
+            put_str(sqlstate.code(), dst);
             put_u8(ERROR_RESPONSE_M_FIELD, dst);
             put_str(&message, dst);
             put_u8(ERROR_RESPONSE_TERMINATOR, dst);

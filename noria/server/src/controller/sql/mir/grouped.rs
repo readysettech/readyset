@@ -43,7 +43,7 @@ pub(super) fn make_predicates_above_grouped<'a>(
 
                     let new_mpns = mir_converter.predicates_above_group_by(
                         &format!("{}_n{}", name, node_count),
-                        &column_to_predicates,
+                        column_to_predicates,
                         col,
                         parent,
                         &mut created_predicates,
@@ -79,7 +79,7 @@ pub(super) fn make_expressions_above_grouped(
         .iter()
         .flat_map(|cgn| &cgn.columns)
         .filter_map(|c| c.function.as_ref())
-        .filter(|f| is_aggregate(&f))
+        .filter(|f| is_aggregate(f))
         .flat_map(|f| f.arguments())
         // We don't need to do any work for bare column expressions
         .filter(|arg| !matches!(arg, Expression::Column(_)))
@@ -225,21 +225,20 @@ pub(super) fn make_grouped(
                         .collect()
                 });
                 // combine and dedup
+                #[allow(clippy::needless_collect)] // necessary to avoid cloning param_cols
                 let dedup_gb_cols: Vec<_> = gb_cols
                     .into_iter()
                     .filter(|gbc| !param_cols.contains(gbc))
                     .collect();
-                let gb_and_param_cols: Vec<Column> = dedup_gb_cols
+                let gb_and_param_cols = dedup_gb_cols
                     .into_iter()
                     .chain(param_cols.into_iter())
-                    .map(Column::from)
-                    .collect();
+                    .map(Column::from);
 
                 let mut have_parent_cols = HashSet::new();
                 // we cannot have duplicate columns at the data-flow level, as it confuses our
                 // migration analysis code.
                 let gb_and_param_cols = gb_and_param_cols
-                    .into_iter()
                     .filter_map(|mut c| {
                         let pn = parent_node.borrow();
                         let pc = pn.columns().iter().position(|pc| *pc == c);

@@ -286,7 +286,7 @@ async fn main() {
     }
 
     println!("Loading TPC-W recipe from {}", rloc);
-    let mut backend = make(&rloc, parallel_prepop, single_query, disable_partial).await;
+    let mut backend = make(rloc, parallel_prepop, single_query, disable_partial).await;
 
     println!("Prepopulating from data files in {}", ploc);
     let (item_write, author_write, order_line_write) = match write_to {
@@ -296,29 +296,29 @@ async fn main() {
         _ => unreachable!(),
     };
 
-    let num_addr = populate_addresses(&mut backend, &ploc).await;
+    let num_addr = populate_addresses(&mut backend, ploc).await;
     backend.prepop_counts.insert("addresses".into(), num_addr);
-    let num_authors = populate_authors(&mut backend, &ploc, author_write, true).await;
+    let num_authors = populate_authors(&mut backend, ploc, author_write, true).await;
     backend.prepop_counts.insert("authors".into(), num_authors);
-    let num_countries = populate_countries(&mut backend, &ploc).await.unwrap();
+    let num_countries = populate_countries(&mut backend, ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("countries".into(), num_countries);
-    let num_customers = populate_customers(&mut backend, &ploc).await.unwrap();
+    let num_customers = populate_customers(&mut backend, ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("customers".into(), num_customers);
-    let num_items = populate_items(&mut backend, &ploc, item_write, true)
+    let num_items = populate_items(&mut backend, ploc, item_write, true)
         .await
         .unwrap();
     backend.prepop_counts.insert("items".into(), num_items);
-    let num_orders = populate_orders(&mut backend, &ploc).await.unwrap();
+    let num_orders = populate_orders(&mut backend, ploc).await.unwrap();
     backend.prepop_counts.insert("orders".into(), num_orders);
-    let num_cc_xacts = populate_cc_xacts(&mut backend, &ploc).await.unwrap();
+    let num_cc_xacts = populate_cc_xacts(&mut backend, ploc).await.unwrap();
     backend
         .prepop_counts
         .insert("cc_xacts".into(), num_cc_xacts);
-    let num_order_line = populate_order_line(&mut backend, &ploc, order_line_write, true)
+    let num_order_line = populate_order_line(&mut backend, ploc, order_line_write, true)
         .await
         .unwrap();
     backend
@@ -339,10 +339,10 @@ async fn main() {
         use std::io::Write;
 
         println!("Migrating individual queries...");
-        let queries = get_queries(&rloc, random);
+        let queries = get_queries(rloc, random);
 
         for (i, q) in queries.iter().enumerate() {
-            backend.extend(&q).await;
+            backend.extend(q).await;
 
             if gloc.is_some() {
                 let graph_fname = format!("{}/tpcw_{}.gv", gloc.unwrap(), i);
@@ -354,7 +354,7 @@ async fn main() {
 
     if read_scale > 0.0 {
         println!("Reading...");
-        let mut keys = SampleKeys::new(&ploc, item_write, order_line_write);
+        let mut keys = SampleKeys::new(ploc, item_write, order_line_write);
         let item_queries = [
             "getBestSellers",
             "getMostRecentOrderLines",
@@ -395,11 +395,11 @@ async fn main() {
     }
 
     match write_to {
-        "item" => populate_items(&mut backend, &ploc, write, false)
+        "item" => populate_items(&mut backend, ploc, write, false)
             .await
             .unwrap(),
-        "author" => populate_authors(&mut backend, &ploc, write, false).await,
-        "order_line" => populate_order_line(&mut backend, &ploc, write, false)
+        "author" => populate_authors(&mut backend, ploc, write, false).await,
+        "order_line" => populate_order_line(&mut backend, ploc, write, false)
             .await
             .unwrap(),
         _ => unreachable!(),

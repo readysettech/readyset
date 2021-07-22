@@ -80,7 +80,7 @@ fn where_in_to_placeholders(
     if list.is_empty() {
         unsupported!("Spotted empty WHERE IN ()");
     }
-    let list_iter = mem::replace(list, Vec::new()).into_iter(); // Take the list to free the mutable reference
+    let list_iter = std::mem::take(list).into_iter(); // Take the list to free the mutable reference
     let literals = list_iter
         .map(|e| match e {
             Expression::Literal(lit) => Ok(lit),

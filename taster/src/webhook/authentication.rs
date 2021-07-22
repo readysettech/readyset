@@ -7,9 +7,9 @@ pub fn authenticate_payload(secret: &[u8], payload: &[u8], signature: &[u8]) -> 
     let sans_prefix = &signature[5..signature.len()];
     Vec::from_hex(sans_prefix).map_or(false, |sigbytes| {
         let sbytes = secret;
-        let mut mac = Hmac::<Sha1>::new_from_slice(&sbytes).unwrap();
+        let mut mac = Hmac::<Sha1>::new_from_slice(sbytes).unwrap();
         let pbytes = payload;
-        mac.update(&pbytes);
+        mac.update(pbytes);
         mac.verify(&sigbytes).is_ok()
     })
 }

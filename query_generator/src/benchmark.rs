@@ -401,7 +401,7 @@ impl Benchmark {
             .insert_many(data.into_iter().map(|mut row| {
                 columns
                     .iter()
-                    .map(|col| row.remove(&col).unwrap())
+                    .map(|col| row.remove(col).unwrap())
                     .collect::<Vec<_>>()
             }))
             .await?;

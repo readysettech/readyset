@@ -1,4 +1,3 @@
-use launchpad::intervals::BoundFunctor;
 use noria::internal::LocalNodeIndex;
 use noria::DataType;
 use petgraph::graph::NodeIndex;
@@ -210,7 +209,7 @@ impl<'a> KeyType<'a> {
     }
 }
 
-#[allow(clippy::clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
 pub enum RangeKey<'a> {
     /// Key-length-polymorphic double-unbounded range key
@@ -304,12 +303,12 @@ impl<'a> RangeKey<'a> {
         use Bound::*;
         let len = match (range.start_bound(), range.end_bound()) {
             (Unbounded, Unbounded) => return RangeKey::Unbounded,
-            (Included(ref start) | Excluded(ref start), Included(ref end) | Excluded(ref end)) => {
+            (Included(start) | Excluded(start), Included(end) | Excluded(end)) => {
                 assert_eq!(start.len(), end.len());
                 start.len()
             }
-            (Included(ref start) | Excluded(ref start), Unbounded) => start.len(),
-            (Unbounded, Included(ref end) | Excluded(ref end)) => end.len(),
+            (Included(start) | Excluded(start), Unbounded) => start.len(),
+            (Unbounded, Included(end) | Excluded(end)) => end.len(),
         };
 
         macro_rules! make {

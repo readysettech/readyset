@@ -68,7 +68,7 @@ impl ReuseConfig {
         let (_, group) = universe;
 
         // Find one universe that belongs to the same group
-        if let Some(ref uids) = universes.get(&group) {
+        if let Some(uids) = universes.get(&group) {
             let grouped = uids.first().unwrap().clone();
             reuse_universes.push(grouped);
         }
