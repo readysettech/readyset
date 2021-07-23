@@ -160,8 +160,8 @@ impl Node {
                                 },
                             ..
                         } => {
-                            assert!(!ignore);
-                            assert!(keyed_by.is_some());
+                            invariant!(!ignore);
+                            invariant!(keyed_by.is_some());
                             (
                                 data,
                                 ReplayContext::Partial {
@@ -378,11 +378,11 @@ impl Node {
             let mut new_parent: Option<IndexPair> = None;
             for col in miss.lookup_idx.iter_mut() {
                 let parents = node.resolve(*col).unwrap();
-                assert_eq!(parents.len(), 1, "query_through with more than one parent");
+                invariant_eq!(parents.len(), 1, "query_through with more than one parent");
 
                 let (parent_global, parent_col) = parents[0];
                 if let Some(p) = new_parent {
-                    assert_eq!(
+                    invariant_eq!(
                         p.as_global(),
                         parent_global,
                         "query_through from different parents"
@@ -392,20 +392,28 @@ impl Node {
                         .iter()
                         .filter_map(|(i, n)| {
                             match n.try_borrow() {
-                                Ok(n) => Some(n),
+                                Ok(n) => Some(Ok(n)),
                                 Err(_) => {
                                     // 'self' can be skipped. It cannot be its own ancestor and
                                     // is expected to already be mutably borrowed.
-                                    assert_eq!(i, self.local_addr(), "unexpected borrow failure");
-                                    assert_ne!(
-                                        self.global_addr(),
-                                        parent_global,
-                                        "rerouting back to self requested"
-                                    );
-                                    None
+                                    if self.local_addr() != i {
+                                        Some(Err(ReadySetError::Internal(
+                                            "unexpected borrow failure".to_string(),
+                                        )))
+                                    } else if self.global_addr() == parent_global {
+                                        Some(Err(ReadySetError::Internal(
+                                            "rerouting back to self requested".to_string(),
+                                        )))
+                                    } else {
+                                        None
+                                    }
                                 }
                             }
                         })
+                        // TODO(peter): Do we want to incur this perf cost just so we can return
+                        // errors here?
+                        .collect::<ReadySetResult<Vec<_>>>()?
+                        .into_iter()
                         .find(|n| n.global_addr() == parent_global)
                         .unwrap();
                     let mut pair: IndexPair = parent_global.into();
