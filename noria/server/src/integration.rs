@@ -3840,6 +3840,7 @@ async fn test_join_with_reused_column_name_with_param() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore] // ENG-411
 async fn self_join_basic() {
     let mut g = start_simple("self_join_basic").await;
     g.install_recipe(

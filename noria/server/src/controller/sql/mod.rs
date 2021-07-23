@@ -836,7 +836,7 @@ impl SqlIncorporator {
     /// Runs some standard rewrite passes on the query.
     fn rewrite_query(
         &mut self,
-        mut q: SqlQuery,
+        q: SqlQuery,
         query_name: &str,
         mig: &mut Migration,
     ) -> Result<SqlQuery, ReadySetError> {
@@ -844,6 +844,17 @@ impl SqlIncorporator {
 
         use passes::alias_removal::TableAliasRewrite;
         use passes::*;
+
+        let mut q = q
+            .rewrite_between()
+            .remove_negation()?
+            .strip_post_filters()
+            .coalesce_key_definitions()
+            .expand_stars(&self.view_schemas)
+            .expand_implied_tables(&self.view_schemas)?
+            .normalize_topk_with_aggregate()?
+            .rewrite_count_star(&self.view_schemas)?
+            .detect_problematic_self_joins()?;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,
@@ -987,17 +998,7 @@ impl SqlIncorporator {
             }
         }
 
-        // Run some standard rewrite passes on the query. This makes the later work easier,
-        // as we no longer have to consider complications like aliases.
-        q.rewrite_between()
-            .remove_negation()?
-            .strip_post_filters()
-            .coalesce_key_definitions()
-            .expand_stars(&self.view_schemas)
-            .expand_implied_tables(&self.view_schemas)?
-            .normalize_topk_with_aggregate()?
-            .rewrite_count_star(&self.view_schemas)?
-            .detect_problematic_self_joins()
+        Ok(q)
     }
 
     fn nodes_for_named_query(
@@ -3199,8 +3200,7 @@ mod tests {
                      FROM articles \
                      JOIN (SELECT * FROM users) AS nested_users \
                      ON (nested_users.id = articles.author);";
-            let q = inc.add_query(q, None, mig);
-            assert!(q.is_ok());
+            let q = inc.add_query(q, None, mig).unwrap();
             let qid = query_id_hash(
                 &["articles", "nested_users"],
                 &[
@@ -3216,7 +3216,7 @@ mod tests {
             let new_join_view = get_node(&inc, mig, &format!("q_{:x}_n0", qid));
             assert_eq!(new_join_view.fields(), &["id", "author", "title", "name"]);
             // leaf node
-            let new_leaf_view = get_node(&inc, mig, &q.unwrap().name);
+            let new_leaf_view = get_node(&inc, mig, &q.name);
             assert_eq!(new_leaf_view.fields(), &["name", "title", "bogokey"]);
             assert_eq!(new_leaf_view.description(true), "π[3, 2, lit: 0]");
         })

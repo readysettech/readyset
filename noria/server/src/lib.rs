@@ -370,7 +370,8 @@
     try_find,
     stmt_expr_attributes,
     result_cloned,
-    result_flattening
+    result_flattening,
+    bindings_after_at
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
