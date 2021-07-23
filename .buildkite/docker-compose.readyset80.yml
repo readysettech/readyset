@@ -8,6 +8,25 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
+  mysql:
+    image: mysql:8.0
+    expose:
+      - 3306
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: root
+    # doesn't actually depend on zookeeper, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # noria-server waits on both zookeeper and mysql for fallback.
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: "mysqladmin ping"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
   noria-server:
     image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
     expose:
@@ -15,12 +34,16 @@ services:
       #   32768	60999
       - "32768-60999"
     environment:
-      - ZOOKEEPER_HOST=zookeeper
-      - LISTEN_ADDRESS=0.0.0.0
-      - EXTERNAL_ADDRESS=noria-server
-      - DEPLOYMENT=frameworktests
+      ZOOKEEPER_HOST: zookeeper
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: noria-server
+      DEPLOYMENT: frameworktests
+      REPLICATION_URL: mysql://root:root@mysql/test
+    links:
+      - mysql
+      - zookeeper
     depends_on:
-      zookeeper:
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
@@ -31,18 +54,21 @@ services:
   db:
     image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
     expose:
-      - 3306
+      - 3333
     environment:
-      - ZOOKEEPER_HOST=zookeeper
-      - ADDRESS=0.0.0.0:3306
-      - DEPLOYMENT=frameworktests
+      ZOOKEEPER_HOST: zookeeper
+      ADDRESS: 0.0.0.0:3333
+      DEPLOYMENT: frameworktests
+      MYSQL_URL: mysql://root:root@mysql/test
     links:
       - noria-server
+      - mysql
+      - zookeeper
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1"]
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333"]
       interval: 10s
-      timeout: 2s
-      retries: 5
+      timeout: 10s
+      retries: 2
       start_period: 5s
     depends_on:
       noria-server:

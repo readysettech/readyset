@@ -46,9 +46,9 @@ test_template = """
             - FRAMEWORK=${FRAMEWORK}
             - RS_USERNAME=root
             - RS_PASSWORD=root
-            - RS_DATABASE=testing
+            - RS_DATABASE=test
             - RS_HOST=db
-            - RS_PORT=3306
+            - RS_PORT=3333
             - RS_NUM_SHARDS=${NUM_SHARDS}
             - RS_DIALECT=mysql${DIALECT_SHORT}
         ecr#v2.2.0:

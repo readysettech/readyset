@@ -3,10 +3,11 @@ services:
   db:
     image: mysql:8.0
     expose:
-      - 3306
+      - 3333
     environment:
-      MYSQL_DATABASE: testing
+      MYSQL_DATABASE: test
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_TCP_PORT: 3333
     healthcheck:
       test: "mysqladmin ping"
       start_period: 10s
