@@ -117,7 +117,7 @@ impl Sharder {
                 dest = Destination::All;
             }
         } else {
-            assert!(is_last_sharder_for_tag.is_none());
+            invariant!(is_last_sharder_for_tag.is_none());
         }
 
         match dest {
@@ -172,7 +172,7 @@ impl Sharder {
         is_sharded: bool,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
-        assert!(!is_sharded);
+        invariant!(!is_sharded);
 
         if key_columns.len() == 1 && key_columns[0] == self.shard_by {
             // Send only to the shards that must evict something.
@@ -203,8 +203,8 @@ impl Sharder {
                 }
             }
         } else {
-            assert_eq!(!key_columns.len(), 0);
-            assert!(!key_columns.contains(&self.shard_by));
+            invariant_eq!(!key_columns.len(), 0);
+            invariant!(!key_columns.contains(&self.shard_by));
 
             // send to all shards
             for &mut (dst, addr) in self.txs.iter_mut() {
