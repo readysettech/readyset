@@ -33,9 +33,7 @@ impl serde::ser::Serialize for DataType {
                 tv.serialize_field(prec)?;
                 tv.end()
             }
-            DataType::Text(v) => {
-                serializer.serialize_newtype_variant("DataType", 3, "Text", v.to_bytes())
-            }
+            DataType::Text(v) => serializer.serialize_newtype_variant("DataType", 3, "Text", v),
             DataType::TinyText(v) => {
                 let vu8 = match v.split(|&i| i == 0).next() {
                     Some(slice) => slice,
@@ -205,8 +203,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     (Field::Timestamp, variant) => VariantAccess::newtype_variant::<i128>(variant)
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
-                        .map(Arc::new)
-                        .map(DataType::Time),
+                        .map(|v| DataType::Time(Arc::new(v))),
                 }
             }
         }

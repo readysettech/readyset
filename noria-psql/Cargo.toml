@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-arccstr = "1.1.0"
+arccstr = { version = "1.3.0", features = ["serde"] }
 async-trait = "0.1"
 msql-srv = { version = "0.8.7", path = "../msql-srv" }
 noria = { version = "0.7", path = "../noria/noria/" }
