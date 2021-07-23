@@ -632,6 +632,37 @@ macro_rules! invariant_eq {
     };
 }
 
+/// Return a [`ReadySetError::Internal`] from the current function, if and only if
+/// the two arguments are equal.
+///
+/// This is intended to be used wherever [`assert_ne!`] was used previously.
+#[macro_export]
+macro_rules! invariant_ne {
+    ($expr:expr, $expr2:expr, $($tt:tt)*) => {
+        if $expr == $expr2 {
+            $crate::internal!(
+                "assertion failed: {} != {} ({});\nleft = {:?};\nright = {:?}",
+                std::stringify!($expr),
+                std::stringify!($expr2),
+                format_args!($($tt)*),
+                $expr,
+                $expr2
+            )
+        }
+    };
+    ($expr:expr, $expr2:expr) => {
+        if $expr == $expr2 {
+            $crate::internal!(
+                "assertion failed: {} != {};\nleft = {:?};\nright = {:?}",
+                std::stringify!($expr),
+                std::stringify!($expr2),
+                $expr,
+                $expr2
+            )
+        }
+    };
+}
+
 /// Standard issue [`Result`] alias.
 pub type ReadySetResult<T> = ::std::result::Result<T, ReadySetError>;
 

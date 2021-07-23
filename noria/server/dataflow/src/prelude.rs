@@ -38,7 +38,7 @@ pub use crate::processing::{ColumnRef, ColumnSource};
 pub use crate::DurabilityMode;
 pub use crate::PersistenceParameters;
 pub use noria::errors::*;
-pub use noria::{internal, invariant, invariant_eq, unsupported};
+pub use noria::{internal, invariant, invariant_eq, invariant_ne, unsupported};
 pub use vec1::vec1;
 
 /// Channel coordinator type specialized for domains
