@@ -284,6 +284,7 @@ impl Reader {
         }
     }
 
+    #[allow(clippy::unreachable)]
     pub(in crate::node) fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();
@@ -303,7 +304,15 @@ impl Reader {
                                 // so we can safely keep it up to date.
                                 true
                             }
-                            Err(_) => unreachable!(),
+                            Err(_) => {
+                                // If we got here it means we got a `NotReady` error type. This is
+                                // impossible, because when readers are instantiated we issue a
+                                // commit to the underlying map, which makes it Ready.
+                                unreachable!(
+                                    "somehow found a NotReady reader even though we've
+                                    already initialized it with a commit"
+                                )
+                            }
                         }
                     });
                 });
