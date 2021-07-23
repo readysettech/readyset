@@ -41,10 +41,18 @@ task_local! {
     >>;
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
 #[repr(transparent)]
-#[serde(transparent)]
 struct SerializedReadReplyBatch(Vec<u8>);
+
+impl serde::Serialize for SerializedReadReplyBatch {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
 
 impl SerializedReadReplyBatch {
     fn empty() -> Self {
