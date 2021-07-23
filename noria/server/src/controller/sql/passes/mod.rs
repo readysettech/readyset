@@ -21,3 +21,39 @@ pub(crate) use rewrite_between::RewriteBetween;
 pub(crate) use star_expansion::StarExpansion;
 pub(crate) use strip_post_filters::StripPostFilters;
 pub(crate) use subqueries::SubQueries;
+
+use nom_sql::{
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
+    JoinRightSide, SelectStatement,
+};
+use std::collections::HashMap;
+
+fn field_names(statement: &SelectStatement) -> impl Iterator<Item = &str> {
+    statement.fields.iter().filter_map(|field| match &field {
+        FieldDefinitionExpression::Expression {
+            alias: Some(alias), ..
+        } => Some(alias.as_str()),
+        FieldDefinitionExpression::Expression {
+            expr: Expression::Column(Column { name, .. }),
+            ..
+        } => Some(name.as_str()),
+        _ => None,
+    })
+}
+
+/// Returns a map from subquery aliases to vectors of the fields in those subqueries.
+///
+/// Takes only the CTEs and join clause so that it doesn't have to borrow the entire statement.
+pub(self) fn subquery_schemas<'a>(
+    ctes: &'a [CommonTableExpression],
+    join: &'a [JoinClause],
+) -> HashMap<&'a str, Vec<&'a str>> {
+    ctes.iter()
+        .map(|cte| (cte.name.as_str(), &cte.statement))
+        .chain(join.iter().filter_map(|join| match &join.right {
+            JoinRightSide::NestedSelect(stmt, Some(name)) => Some((name.as_str(), stmt.as_ref())),
+            _ => None,
+        }))
+        .map(|(name, stmt)| (name, field_names(stmt).collect()))
+        .collect()
+}

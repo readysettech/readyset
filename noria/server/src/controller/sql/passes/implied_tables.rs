@@ -1,11 +1,12 @@
 use nom_sql::{
-    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinRightSide,
-    SelectStatement, SqlQuery, Table,
+    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
+    InValue, JoinClause, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use crate::errors::ReadySetResult;
 use crate::internal;
 use std::collections::HashMap;
+use std::mem;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(
@@ -14,9 +15,9 @@ pub trait ImpliedTableExpansion {
     ) -> ReadySetResult<SqlQuery>;
 }
 
-fn rewrite_expression<F>(expand_columns: &F, expr: &mut Expression, avail_tables: &[Table])
+fn rewrite_expression<F>(expand_columns: &F, expr: &mut Expression)
 where
-    F: Fn(&mut Column, &[Table]),
+    F: Fn(&mut Column),
 {
     match expr {
         Expression::Call(f)
@@ -32,11 +33,11 @@ where
             | FunctionExpression::Min(box expr)
             | FunctionExpression::GroupConcat { box expr, .. }
             | FunctionExpression::Cast(box expr, _) => {
-                rewrite_expression(expand_columns, expr, avail_tables);
+                rewrite_expression(expand_columns, expr);
             }
             FunctionExpression::Call { arguments, .. } => {
                 for expr in arguments.iter_mut() {
-                    rewrite_expression(expand_columns, expr, avail_tables);
+                    rewrite_expression(expand_columns, expr);
                 }
             }
         },
@@ -46,36 +47,36 @@ where
             then_expr,
             else_expr,
         } => {
-            rewrite_expression(expand_columns, condition, avail_tables);
-            rewrite_expression(expand_columns, then_expr, avail_tables);
+            rewrite_expression(expand_columns, condition);
+            rewrite_expression(expand_columns, then_expr);
             if let Some(else_expr) = else_expr {
-                rewrite_expression(expand_columns, else_expr, avail_tables);
+                rewrite_expression(expand_columns, else_expr);
             }
         }
         Expression::Column(col) => {
-            expand_columns(col, avail_tables);
+            expand_columns(col);
         }
         Expression::BinaryOp { lhs, rhs, .. } => {
-            rewrite_expression(expand_columns, lhs, avail_tables);
-            rewrite_expression(expand_columns, rhs, avail_tables);
+            rewrite_expression(expand_columns, lhs);
+            rewrite_expression(expand_columns, rhs);
         }
         Expression::UnaryOp { rhs, .. } => {
-            rewrite_expression(expand_columns, rhs, avail_tables);
+            rewrite_expression(expand_columns, rhs);
         }
         Expression::Between {
             operand, min, max, ..
         } => {
-            rewrite_expression(expand_columns, operand, avail_tables);
-            rewrite_expression(expand_columns, min, avail_tables);
-            rewrite_expression(expand_columns, max, avail_tables);
+            rewrite_expression(expand_columns, operand);
+            rewrite_expression(expand_columns, min);
+            rewrite_expression(expand_columns, max);
         }
         Expression::In { lhs, rhs, .. } => {
-            rewrite_expression(expand_columns, lhs, avail_tables);
+            rewrite_expression(expand_columns, lhs);
             match rhs {
                 InValue::Subquery(_) => {}
                 InValue::List(exprs) => {
                     for expr in exprs {
-                        rewrite_expression(expand_columns, expr, avail_tables);
+                        rewrite_expression(expand_columns, expr);
                     }
                 }
             }
@@ -110,30 +111,65 @@ fn rewrite_selection(
 ) -> ReadySetResult<SelectStatement> {
     use nom_sql::FunctionExpression::*;
 
+    // Expand within CTEs
+    sq.ctes = mem::take(&mut sq.ctes)
+        .into_iter()
+        .map(|cte| -> ReadySetResult<_> {
+            Ok(CommonTableExpression {
+                statement: rewrite_selection(cte.statement, write_schemas)?,
+                ..cte
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Expand within subqueries in joins
+    sq.join = mem::take(&mut sq.join)
+        .into_iter()
+        .map(|join| -> ReadySetResult<_> {
+            Ok(JoinClause {
+                right: match join.right {
+                    JoinRightSide::NestedSelect(stmt, name) => JoinRightSide::NestedSelect(
+                        Box::new(rewrite_selection(*stmt, write_schemas)?),
+                        name,
+                    ),
+                    right => right,
+                },
+                ..join
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut tables: Vec<&str> = sq.tables.iter().map(|t| t.name.as_str()).collect();
+    // Keep track of fields that have aliases so we will not assign tables to alias references later
+    let mut known_aliases: Vec<&str> = Vec::new();
+    // tables mentioned in JOINs are also available for expansion
+    for jc in sq.join.iter() {
+        match &jc.right {
+            JoinRightSide::Table(Table { name, .. }) => tables.push(name),
+            JoinRightSide::Tables(join_tables) => {
+                tables.extend(join_tables.iter().map(|t| t.name.as_str()))
+            }
+            JoinRightSide::NestedSelect(_, Some(name)) => tables.push(name),
+            _ => {}
+        }
+    }
+
+    let subquery_schemas = super::subquery_schemas(&sq.ctes, &sq.join);
+
     // Tries to find a table with a matching column in the `tables_in_query` (information
     // passed as `write_schemas`; this is not something the parser or the expansion pass can
     // know on their own). Panics if no match is found or the match is ambiguous.
-    let find_table = |f: &Column, tables_in_query: &[Table]| -> Option<String> {
+    let find_table = |f: &Column| -> Option<String> {
         let mut matches = write_schemas
             .iter()
-            .filter(|&(t, _)| {
-                if !tables_in_query.is_empty() {
-                    for qt in tables_in_query {
-                        if qt.name == *t {
-                            return true;
-                        }
-                    }
-                    false
-                } else {
-                    // preserve all tables if there are no tables in the query
-                    true
-                }
-            })
+            .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
+            .chain(subquery_schemas.iter().map(|(k, v)| (*k, v.clone())))
+            .filter(|&(t, _)| tables.is_empty() || tables.contains(&t))
             .filter_map(|(t, ws)| {
                 let num_matching = ws.iter().filter(|c| **c == f.name).count();
                 assert!(num_matching <= 1);
                 if num_matching == 1 {
-                    Some((*t).clone())
+                    Some(t.to_owned())
                 } else {
                     None
                 }
@@ -160,7 +196,7 @@ fn rewrite_selection(
     // Traverses a query and calls `find_table` on any column that has no explicit table set,
     // including computed columns. Should not be used for CREATE TABLE and INSERT queries,
     // which can use the simpler `set_table`.
-    let expand_columns = |col: &mut Column, tables_in_query: &[Table]| {
+    let expand_columns = |col: &mut Column| {
         if col.table.is_none() {
             col.table = match col.function {
                 Some(ref mut f) => {
@@ -204,7 +240,7 @@ fn rewrite_selection(
                             ..
                         } => {
                             if fe.table.is_none() {
-                                fe.table = find_table(fe, tables_in_query);
+                                fe.table = find_table(fe);
                             }
                         }
                         Call {
@@ -213,7 +249,7 @@ fn rewrite_selection(
                             for arg in arguments.iter_mut() {
                                 if let Expression::Column(ref mut fe) = arg {
                                     if fe.table.is_none() {
-                                        fe.table = find_table(fe, tables_in_query);
+                                        fe.table = find_table(fe);
                                     }
                                 }
                             }
@@ -222,22 +258,11 @@ fn rewrite_selection(
                     }
                     None
                 }
-                None => find_table(col, tables_in_query),
+                None => find_table(col),
             }
         }
     };
 
-    let mut tables: Vec<Table> = sq.tables.clone();
-    // Keep track of fields that have aliases so we will not assign tables to alias references later
-    let mut known_aliases: Vec<&str> = Vec::new();
-    // tables mentioned in JOINs are also available for expansion
-    for jc in sq.join.iter() {
-        match jc.right {
-            JoinRightSide::Table(ref join_table) => tables.push(join_table.clone()),
-            JoinRightSide::Tables(ref join_tables) => tables.extend(join_tables.clone()),
-            _ => unimplemented!(),
-        }
-    }
     // Expand within field list
     for field in sq.fields.iter_mut() {
         match *field {
@@ -248,7 +273,7 @@ fn rewrite_selection(
                 ref mut expr,
                 ref alias,
             } => {
-                rewrite_expression(&expand_columns, expr, &tables);
+                rewrite_expression(&expand_columns, expr);
                 if let Some(alias) = alias.as_deref() {
                     known_aliases.push(alias);
                 }
@@ -258,16 +283,16 @@ fn rewrite_selection(
 
     // Expand within WHERE clause
     if let Some(wc) = &mut sq.where_clause {
-        rewrite_expression(&expand_columns, wc, &tables);
+        rewrite_expression(&expand_columns, wc);
     }
 
     // Expand within GROUP BY clause
     if let Some(gbc) = &mut sq.group_by {
         for col in &mut gbc.columns {
-            expand_columns(col, &tables)
+            expand_columns(col)
         }
         if let Some(hc) = &mut gbc.having {
-            rewrite_expression(&expand_columns, hc, &tables)
+            rewrite_expression(&expand_columns, hc)
         }
     }
 
@@ -275,7 +300,7 @@ fn rewrite_selection(
     if let Some(oc) = &mut sq.order {
         for (col, _) in &mut oc.columns {
             if col.function.is_some() || !known_aliases.contains(&col.name.as_str()) {
-                expand_columns(col, &tables);
+                expand_columns(col);
             }
         }
     }
@@ -410,5 +435,59 @@ mod tests {
 
         let res = orig.expand_implied_tables(&schema).unwrap();
         assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn in_cte() {
+        let orig = parse_query(
+            "With votes AS (SELECT COUNT(id), story_id FROM votes GROUP BY story_id )
+             SELECT title FROM stories JOIN votes ON stories.id = votes.story_id",
+        )
+        .unwrap();
+        let expected = parse_query(
+            "With votes AS(SELECT COUNT(votes.id), votes.story_id FROM votes GROUP BY votes.story_id )
+             SELECT stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
+        )
+        .unwrap();
+        let schema = hashmap! {
+            "votes".into() => vec![
+                "story_id".into(),
+                "id".into(),
+            ],
+            "stories".into() => vec![
+                "id".into(),
+                "title".into(),
+            ]
+        };
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn referencing_cte() {
+        let orig = parse_query(
+            "With votes AS (SELECT COUNT(id) as count, story_id FROM votes GROUP BY story_id )
+             SELECT count, title FROM stories JOIN votes ON stories.id = votes.story_id",
+        )
+        .unwrap();
+        let expected = parse_query(
+            "With votes AS (SELECT COUNT(votes.id) as count, votes.story_id FROM votes GROUP BY votes.story_id )
+             SELECT votes.count, stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
+        )
+        .unwrap();
+        let schema = hashmap! {
+            "votes".into() => vec![
+                "story_id".into(),
+                "id".into(),
+            ],
+            "stories".into() => vec![
+                "id".into(),
+                "title".into(),
+            ]
+        };
+
+        let res = orig.expand_implied_tables(&schema).unwrap();
+        assert_eq!(res, expected, "{} != {}", res, expected);
     }
 }

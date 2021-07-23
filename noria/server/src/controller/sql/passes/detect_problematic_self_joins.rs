@@ -77,6 +77,10 @@ fn check_select_statement<'a>(
                             expr,
                             alias: Some(alias),
                         } if *alias == col_name => Some(expr),
+                        FieldDefinitionExpression::Expression {
+                            expr: expr @ Expression::Column(Column { name, .. }),
+                            alias: None,
+                        } if *name == col_name => Some(expr),
                         _ => None,
                     })
                     .ok_or_else(|| {
@@ -288,6 +292,24 @@ mod tests {
                    sq2 AS (SELECT t3.y, sq1.x AS x FROM t3 JOIN sq1 ON t2.id = sq1.id)
                  SELECT t1.x FROM t1 JOIN sq2 ON t1.x = sq2.x",
             );
+        }
+
+        #[test]
+        fn cte_with_topk() {
+            is_unsupported(
+                "WITH alias_2 AS (
+                     SELECT table_1.column_1 AS alias_1
+                     FROM table_1
+                     ORDER BY table_1.column_1 ASC
+                     LIMIT 10
+                 )
+                 SELECT table_1.column_1 AS alias_3
+                 FROM table_1
+                 INNER JOIN alias_2
+                 ON (table_1.column_1 = alias_2.alias_1)
+                 ORDER BY table_1.column_1 ASC
+                 LIMIT 10",
+            )
         }
     }
 
