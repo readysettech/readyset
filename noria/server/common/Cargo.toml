@@ -15,7 +15,7 @@ keywords = ["internal"]
 maintenance = { status = "experimental" }
 
 [dependencies]
-arccstr = "1.2.0"
+arccstr = { version = "1.3.0", features = ["serde"] }
 noria = { version = "0.7.0", path = "../../noria" }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde_derive = "1.0.8"

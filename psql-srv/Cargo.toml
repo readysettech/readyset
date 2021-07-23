@@ -9,7 +9,7 @@ readme = "README.md"
 authors = ["Readyset"]
 
 [dependencies]
-arccstr = "1.3.0"
+arccstr = { version = "1.3.0", features = ["serde"] }
 async-trait = "0.1"
 bytes = "1.0.1"
 chrono = "0.4.19"
