@@ -20,7 +20,7 @@ fn type_for_internal_column(
 ) -> ReadySetResult<Option<SqlType>> {
     // column originates at internal view: literal, aggregation output
     // FIXME(malte): return correct type depending on what column does
-    match *(*node) {
+    match *(node.as_internal().ok_or(ReadySetError::NonInternalNode)?) {
         ops::NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
             Ok(
                 column_schema(graph, next_node_on_path, recipe, parent_col, log)?

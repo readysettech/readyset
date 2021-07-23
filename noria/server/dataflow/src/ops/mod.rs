@@ -418,16 +418,18 @@ pub mod test {
             let mut res = {
                 let id = self.nut.unwrap();
                 let mut n = self.nodes[*id].borrow_mut();
-                n.on_input_raw(
-                    &mut Ex,
-                    *src,
-                    u.into(),
-                    replay,
-                    &self.nodes,
-                    &self.states,
-                    &self.logger,
-                )
-                .unwrap()
+                n.as_mut_internal()
+                    .unwrap()
+                    .on_input_raw(
+                        &mut Ex,
+                        *src,
+                        u.into(),
+                        replay,
+                        &self.nodes,
+                        &self.states,
+                        &self.logger,
+                    )
+                    .unwrap()
             };
 
             if !remember || !self.states.contains_key(*self.nut.unwrap()) {

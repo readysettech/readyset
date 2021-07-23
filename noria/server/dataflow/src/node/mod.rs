@@ -4,7 +4,6 @@ use crate::prelude::*;
 use noria::consistency::Timestamp;
 
 use std::collections::{HashMap, HashSet};
-use std::ops::{Deref, DerefMut};
 
 mod process;
 #[cfg(test)]
@@ -111,7 +110,9 @@ impl Node {
     /// All its ancestors are present, but this node and its children may not have been connected
     /// yet.
     pub fn on_connected(&mut self, graph: &Graph) {
-        Ingredient::on_connected(&mut **self, graph)
+        if let Some(n) = self.as_mut_internal() {
+            Ingredient::on_connected(n, graph)
+        }
     }
 
     pub fn on_commit(&mut self, remap: &HashMap<NodeIndex, IndexPair>) {
@@ -125,15 +126,21 @@ impl Node {
     /// May return a set of nodes such that *one* of the given ancestors *must* be the one to be
     /// replayed if this node's state is to be initialized.
     pub fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
-        Ingredient::must_replay_among(&**self)
+        self.as_internal().and_then(Ingredient::must_replay_among)
     }
 
     /// Provide information about where the `cols` come from for the materialization planner
     /// (among other things) to make use of.
     ///
     /// See [`Ingredient::column_source`] for full documentation.
+    ///
+    /// # Invariants
+    ///
+    /// * self must have a self.inner of NodeType::Internal or this will panic
+    /// We can't know the column_source if we aren't an internal node.
     pub fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        let ret = Ingredient::column_source(&**self, cols);
+        #[allow(clippy::unwrap_used)] // Documented invariant.
+        let ret = Ingredient::column_source(self.as_internal().unwrap(), cols);
         // in debug builds, double-check API invariants are maintained
         match ret {
             ColumnSource::ExactCopy(ColumnRef { ref columns, .. }) => {
@@ -156,7 +163,14 @@ impl Node {
     ///
     /// See [`Ingredient::handle_upquery`] for full documentation.
     pub fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
-        Ingredient::handle_upquery(&mut **self, miss)
+        if self.taken {
+            return Err(ReadySetError::NodeAlreadyTaken);
+        };
+        Ingredient::handle_upquery(
+            self.as_mut_internal()
+                .ok_or(ReadySetError::NonInternalNode)?,
+            miss,
+        )
     }
 
     /// Translate a column in this ingredient into the corresponding column(s) in
@@ -206,27 +220,34 @@ impl Node {
 
     /// Returns true if this operator requires a full materialization
     pub fn requires_full_materialization(&self) -> bool {
-        Ingredient::requires_full_materialization(&**self)
+        self.as_internal()
+            .map_or(false, Ingredient::requires_full_materialization)
     }
 
     pub fn can_query_through(&self) -> bool {
-        Ingredient::can_query_through(&**self)
+        self.as_internal()
+            .map_or(false, Ingredient::can_query_through)
     }
 
-    pub fn is_join(&self) -> bool {
-        Ingredient::is_join(&**self)
+    pub fn is_join(&self) -> ReadySetResult<bool> {
+        Ok(Ingredient::is_join(
+            self.as_internal().ok_or(ReadySetError::NonInternalNode)?,
+        ))
     }
 
-    pub fn ancestors(&self) -> Vec<NodeIndex> {
-        Ingredient::ancestors(&**self)
+    pub fn ancestors(&self) -> ReadySetResult<Vec<NodeIndex>> {
+        Ok(Ingredient::ancestors(
+            self.as_internal().ok_or(ReadySetError::NonInternalNode)?,
+        ))
     }
 
     /// Produce a compact, human-readable description of this node for Graphviz.
     ///
-    /// If `detailed` is true, emit more info.
+    /// If `detailed` is true, and `self.inner` has is variant `NodeType::Internal`, emit more info.
     ///
     ///  Symbol   Description
     /// --------|-------------
+    ///    ⊥    |  Source
     ///    B    |  Base
     ///    ||   |  Concat
     ///    ⧖    |  Latest
@@ -236,8 +257,13 @@ impl Node {
     ///    ⋈    |  Join
     ///    ⋉    |  Left join
     ///    ⋃    |  Union
+    ///    →|   |  Ingress
+    ///    |→   |  Egress
+    ///    ÷    |  Dropped
+    ///    R    |  Reader
+    ///    ☒    |  Dropped
     pub fn description(&self, detailed: bool) -> String {
-        Ingredient::description(&**self, detailed)
+        self.inner.description(detailed)
     }
 }
 
@@ -301,6 +327,24 @@ impl Node {
         }
     }
 
+    /// If this node is a [`Internal`], return a reference to the operator, otherwise return
+    /// None
+    pub fn as_internal(&self) -> Option<&ops::NodeOperator> {
+        match &self.inner {
+            NodeType::Internal(i) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// If this node is a [`Internal`], return a mutable reference to the operator, otherwise return
+    /// None
+    pub fn as_mut_internal(&mut self) -> Option<&mut ops::NodeOperator> {
+        match &mut self.inner {
+            NodeType::Internal(i) if !self.taken => Some(i),
+            _ => None,
+        }
+    }
+
     /// If this node is a [`special::Sharder`], return a mutable reference to that sharder, otherwise
     /// return None
     pub fn as_mut_sharder(&mut self) -> Option<&mut special::Sharder> {
@@ -359,26 +403,6 @@ impl Node {
             NodeType::Internal(ref i) => i.suggest_indexes(n),
             NodeType::Base(ref b) => b.suggest_indexes(n),
             _ => HashMap::new(),
-        }
-    }
-}
-
-impl Deref for Node {
-    type Target = ops::NodeOperator;
-    fn deref(&self) -> &Self::Target {
-        match self.inner {
-            NodeType::Internal(ref i) => i,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl DerefMut for Node {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        assert!(!self.taken);
-        match self.inner {
-            NodeType::Internal(ref mut i) => i,
-            _ => unreachable!(),
         }
     }
 }

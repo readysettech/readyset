@@ -421,8 +421,8 @@ where
                 #[allow(clippy::indexing_slicing)] // Node must exist to have gotten here.
                 let parent = nodes[parent].borrow();
 
-                if parent.is_internal() {
-                    parent.query_through(columns, key, nodes, states)
+                if let Some(n) = parent.as_internal() {
+                    n.query_through(columns, key, nodes, states)
                 } else {
                     None
                 }

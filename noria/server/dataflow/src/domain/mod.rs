@@ -828,7 +828,7 @@ impl Domain {
 
             // normally, we ignore misses during regular forwarding.
             // however, we have to be a little careful in the case of joins.
-            let evictions = if n.is_internal() && n.is_join() && !misses.is_empty() {
+            let evictions = if n.is_internal() && n.is_join()? && !misses.is_empty() {
                 // there are two possible cases here:
                 //
                 //  - this is a write that will hit a hole in every downstream materialization.
@@ -1745,7 +1745,7 @@ impl Domain {
                                 None => MaterializationStatus::Not,
                             });
 
-                        let probe_result = if n.is_internal() {
+                        let probe_result = if let Some(n) = n.as_internal() {
                             n.probe()
                         } else {
                             Default::default()

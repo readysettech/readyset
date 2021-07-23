@@ -471,7 +471,7 @@ pub fn shard(
             let src_cols = graph[p].parent_columns(col);
             // FIXME(eta): since joins now return only one parent after the column_source redesign,
             //             we have to hackily special-case them out here; see ENG-216
-            if graph[p].is_join() || src_cols.len() != 1 {
+            if graph[p].is_join()? || src_cols.len() != 1 {
                 // TODO: technically we could push the sharder to all parents here
                 continue;
             }
