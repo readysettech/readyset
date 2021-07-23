@@ -423,10 +423,17 @@ impl Node {
         self.domain.is_some()
     }
 
+    /// Retrieves the index of the domain.
+    ///
+    /// Invariants:
+    ///
+    /// * Must call on_connected prior to using this helper function.
+    #[allow(clippy::unreachable)]
     pub fn domain(&self) -> domain::Index {
         match self.domain {
             Some(domain) => domain,
             None => {
+                // Documented invariant.
                 unreachable!(
                     "asked for unset domain for {:?} {}",
                     self,
@@ -436,17 +443,33 @@ impl Node {
         }
     }
 
+    /// Retrieves the local address for this node.
+    ///
+    /// Invariants:
+    ///
+    /// * Must call on_connected prior to using this helper function.
+    #[allow(clippy::unreachable)]
     pub fn local_addr(&self) -> LocalNodeIndex {
         match self.index {
             Some(idx) if idx.has_local() => *idx,
-            Some(_) | None => unreachable!("asked for unset addr for {:?}", self),
+            Some(_) | None => {
+                // Documented Invariant.
+                unreachable!("asked for unset addr for {:?}", self)
+            }
         }
     }
 
+    /// Retrieves the global address for this node.
+    ///
+    /// Invariants:
+    ///
+    /// * Must call on_connected prior to using this helper function.
+    #[allow(clippy::unreachable)]
     pub fn global_addr(&self) -> NodeIndex {
         match self.index {
             Some(ref index) => index.as_global(),
             None => {
+                // Documented Invariant.
                 unreachable!("asked for unset index for {:?}", self);
             }
         }
