@@ -269,8 +269,8 @@ impl Node {
 // events
 impl Node {
     pub fn take(&mut self) -> DanglingDomainNode {
-        assert!(!self.taken);
-        assert!(
+        debug_assert!(!self.taken);
+        debug_assert!(
             (!self.is_internal() && !self.is_base()) || self.domain.is_some(),
             "tried to take unassigned node"
         );
@@ -461,8 +461,8 @@ impl Node {
     }
 
     pub fn add_to(&mut self, domain: domain::Index) {
-        assert_eq!(self.domain, None);
-        assert!(!self.is_dropped());
+        debug_assert_eq!(self.domain, None);
+        debug_assert!(!self.is_dropped());
         self.domain = Some(domain);
     }
 
