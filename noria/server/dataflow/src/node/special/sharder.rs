@@ -12,7 +12,7 @@ pub struct Sharder {
 
 impl Clone for Sharder {
     fn clone(&self) -> Self {
-        assert!(self.txs.is_empty());
+        debug_assert!(self.txs.is_empty());
 
         Sharder {
             txs: Vec::new(),
@@ -41,7 +41,7 @@ impl Sharder {
     }
 
     pub fn add_sharded_child(&mut self, dst: LocalNodeIndex, txs: Vec<ReplicaAddr>) {
-        assert_eq!(self.txs.len(), 0);
+        debug_assert_eq!(self.txs.len(), 0);
         // TODO: add support for "shared" sharder?
         for tx in txs {
             self.txs.push((dst, tx));

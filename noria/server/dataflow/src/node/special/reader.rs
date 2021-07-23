@@ -182,7 +182,7 @@ pub struct Reader {
 
 impl Clone for Reader {
     fn clone(&self) -> Self {
-        assert!(self.writer.is_none());
+        debug_assert!(self.writer.is_none());
         Reader {
             writer: None,
             state: self.state.clone(),
@@ -237,7 +237,7 @@ impl Reader {
     }
 
     pub(crate) fn set_write_handle(&mut self, wh: backlog::WriteHandle) {
-        assert!(self.writer.is_none());
+        debug_assert!(self.writer.is_none());
         self.writer = Some(wh);
     }
 
@@ -247,7 +247,7 @@ impl Reader {
 
     pub fn set_key(&mut self, key: &[usize]) {
         if let Some(ref skey) = self.state {
-            assert_eq!(&skey[..], key);
+            debug_assert_eq!(&skey[..], key);
         } else {
             self.state = Some(Vec::from(key));
         }
