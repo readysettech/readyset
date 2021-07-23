@@ -26,8 +26,8 @@ impl NodeType {
             NodeType::Sharder(ref mut s) => NodeType::Sharder(s.take()),
             NodeType::Ingress => NodeType::Ingress,
             NodeType::Internal(ref mut i) => NodeType::Internal(i.take()),
-            NodeType::Source => unreachable!(),
-            NodeType::Dropped => unreachable!(),
+            NodeType::Source => NodeType::Source,
+            NodeType::Dropped => NodeType::Dropped,
         }
     }
 }
