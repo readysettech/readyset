@@ -16,18 +16,18 @@ services:
       cache_from:
         - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
     environment:
-      - ZOOKEEPER_HOST=zookeeper
-      - LISTEN_ADDRESS=0.0.0.0
-      - EXTERNAL_ADDRESS=noria-server
-      - DEPLOYMENT=jstests
+      ZOOKEEPER_HOST: zookeeper
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: noria-server
+      DEPLOYMENT: jstests
     depends_on:
       zookeeper:
         condition: service_healthy
   node:
     image: node:15.12.0
     environment:
-      - ZOOKEEPER_HOST=zookeeper
-      - DEPLOYMENT=jstests
+      ZOOKEEPER_HOST: zookeeper
+      DEPLOYMENT: jstests
     volumes:
       - ../..:/js-client
     depends_on:
