@@ -160,6 +160,7 @@ impl Sharder {
         }
     }
 
+    #[allow(clippy::unreachable)]
     pub fn process_eviction(
         &mut self,
         key_columns: &[usize],
@@ -168,7 +169,7 @@ impl Sharder {
         src: LocalNodeIndex,
         is_sharded: bool,
         output: &mut dyn Executor,
-    ) {
+    ) -> ReadySetResult<()> {
         assert!(!is_sharded);
 
         if key_columns.len() == 1 && key_columns[0] == self.shard_by {
@@ -185,7 +186,11 @@ impl Sharder {
                     });
                     match **p {
                         Packet::EvictKeys { ref mut keys, .. } => keys.push(key.clone()),
-                        _ => unreachable!(),
+                        _ => {
+                            // TODO: Scoped for a future refactor:
+                            // https://readysettech.atlassian.net/browse/ENG-455
+                            unreachable!("received a non EvictKey packed in process_eviction")
+                        }
                     }
                 }
             }
@@ -211,5 +216,7 @@ impl Sharder {
                 )
             }
         }
+
+        Ok(())
     }
 }

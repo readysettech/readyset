@@ -48,7 +48,7 @@ impl NodeProcessingResult {
 }
 
 impl Node {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::unreachable)]
     pub(crate) fn process(
         &mut self,
         m: &mut Option<Box<Packet>>,
@@ -111,15 +111,20 @@ impl Node {
                     }
                     Some(ref p) => {
                         // TODO: replays?
+                        // TODO: Scoped for a future refactor:
+                        // https://readysettech.atlassian.net/browse/ENG-455
                         unreachable!("base received non-input packet {:?}", p);
                     }
-                    None => unreachable!(),
+                    None => {
+                        // The domain should never pass a None.
+                        unreachable!("the domain should never pass a None packet to process")
+                    }
                 }
             }
             NodeType::Reader(ref mut r) => {
                 r.process(m, swap);
             }
-            NodeType::Egress(None) => unreachable!(),
+            NodeType::Egress(None) => internal!("tried to process through taken egress"),
             NodeType::Egress(Some(ref mut e)) => {
                 e.process(m, keyed_by.map(Vec::as_slice), on_shard.unwrap_or(0), ex)?;
             }
@@ -130,7 +135,7 @@ impl Node {
                     on_shard.is_some(),
                     replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
                     ex,
-                );
+                )?;
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
@@ -174,7 +179,11 @@ impl Node {
                             ..
                         } => (data, ReplayContext::Full { last }),
                         Packet::Message { ref mut data, .. } => (data, ReplayContext::None),
-                        _ => unreachable!(),
+                        _ => {
+                            // TODO: Scoped for a future refactor:
+                            // https://readysettech.atlassian.net/browse/ENG-455
+                            unreachable!("internal dataflow node received an invalid packet type")
+                        }
                     };
 
                     let mut set_replay_last = None;
@@ -210,7 +219,9 @@ impl Node {
                             {
                                 *for_keys = emitted_keys;
                             } else {
-                                unreachable!();
+                                // TODO: Scope for future refactor:
+                                // https://readysettech.atlassian.net/browse/ENG-455
+                                unreachable!("only a ReplayPiece can release a ReplayPiece")
                             }
                         }
                         RawProcessingResult::FullReplay(rs, last) => {
@@ -229,7 +240,9 @@ impl Node {
                         {
                             *last = new_last;
                         } else {
-                            unreachable!();
+                            // TODO: Scope for future refactor:
+                            // https://readysettech.atlassian.net/browse/ENG-455
+                            unreachable!("only a ReplayPiece can release a ReplayPiece")
                         }
                     }
 
@@ -339,7 +352,7 @@ impl Node {
                 )?;
             }
             NodeType::Sharder(ref mut s) => {
-                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex);
+                s.process_eviction(key_columns, tag, keys, addr, on_shard.is_some(), ex)?;
             }
             NodeType::Internal(ref mut i) => {
                 i.on_eviction(from, tag, keys);
