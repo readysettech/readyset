@@ -63,7 +63,7 @@ impl Node {
         // current replay path tag
         materialize_into_all: bool,
         log: &Logger,
-    ) -> Result<NodeProcessingResult, ReadySetError> {
+    ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
         match self.inner {
@@ -372,7 +372,7 @@ impl Node {
     // When we miss in can_query_through, that miss is *really* in the can_query_through node's
     // ancestor. We need to ensure that a replay is done to there, not the query_through node
     // itself, by translating the Miss into the right parent.
-    fn reroute_miss(&self, nodes: &DomainNodes, miss: &mut Miss) -> Result<(), ReadySetError> {
+    fn reroute_miss(&self, nodes: &DomainNodes, miss: &mut Miss) -> ReadySetResult<()> {
         let node = nodes[miss.on].borrow();
         if node.is_internal() && node.can_query_through() {
             let mut new_parent: Option<IndexPair> = None;

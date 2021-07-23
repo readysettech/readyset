@@ -110,7 +110,7 @@ impl Materializations {
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
-    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) -> Result<(), ReadySetError> {
+    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) -> ReadySetResult<()> {
         // this code used to be a mess, and will likely be a mess this time around too.
         // but, let's try to start out in a principled way...
         //
@@ -200,11 +200,7 @@ impl Materializations {
         }
 
         // map all the indices to the corresponding columns in the parent
-        fn map_indices(
-            n: &Node,
-            parent: NodeIndex,
-            indices: &Indices,
-        ) -> Result<Indices, ReadySetError> {
+        fn map_indices(n: &Node, parent: NodeIndex, indices: &Indices) -> ReadySetResult<Indices> {
             indices
                 .iter()
                 .map(|index| {
@@ -237,7 +233,7 @@ impl Materializations {
                                     ))
                                 })
                             })
-                            .collect::<Result<Vec<usize>, ReadySetError>>()?,
+                            .collect::<ReadySetResult<Vec<usize>>>()?,
                     ))
                 })
                 .collect()

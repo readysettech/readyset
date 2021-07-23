@@ -192,7 +192,7 @@ impl SqlIncorporator {
         is_name_required: bool,
         st: &SelectStatement,
         is_leaf: bool,
-    ) -> Result<(QueryGraph, QueryGraphReuse), ReadySetError> {
+    ) -> ReadySetResult<(QueryGraph, QueryGraphReuse)> {
         debug!(self.log, "Making QG for \"{}\"", query_name);
         trace!(self.log, "Query \"{}\": {:#?}", query_name, st);
 

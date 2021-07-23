@@ -226,7 +226,7 @@ pub fn replay_paths_for_nonstop(
 fn trace(
     graph: &Graph,
     mut path: Vec<(NodeIndex, Vec<Option<usize>>)>,
-) -> Result<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>, ReadySetError> {
+) -> ReadySetResult<Vec<Vec<(NodeIndex, Vec<Option<usize>>)>>> {
     // figure out what node/column we're looking up
     let (node, columns) = path.last().cloned().unwrap();
     let cols = columns.len();
