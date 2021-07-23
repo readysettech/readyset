@@ -464,6 +464,14 @@ pub enum ReadySetError {
     /// A `Vec1` was constructed from a 0-length vector.
     #[error("Vector length was unexpectedly zero")]
     Size0Error,
+
+    /// Expected NodeType to be `Internal` but it's not.
+    #[error("Not an internal node")]
+    NonInternalNode,
+
+    /// Node has already been taken, so we can't execute whatever action we need to.
+    #[error("Node already taken")]
+    NodeAlreadyTaken,
 }
 
 impl ReadySetError {

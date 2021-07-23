@@ -30,6 +30,39 @@ impl NodeType {
             NodeType::Dropped => NodeType::Dropped,
         }
     }
+
+    /// Produce a compact, human-readable description of this node for Graphviz.
+    ///
+    /// If `detailed` is true, and node type is `Internal`,  emit more info.
+    ///  Symbol   Description
+    /// --------|-------------
+    ///    ⊥    |  Source
+    ///    B    |  Base
+    ///    ||   |  Concat
+    ///    ⧖    |  Latest
+    ///    γ    |  Group by
+    ///   |*|   |  Count
+    ///    𝛴    |  Sum
+    ///    ⋈    |  Join
+    ///    ⋉    |  Left join
+    ///    ⋃    |  Union
+    ///    →|   |  Ingress
+    ///    |→   |  Egress
+    ///    ÷    |  Sharder
+    ///    R    |  Reader
+    ///    ☒    |  Dropped
+    pub(super) fn description(&self, detailed: bool) -> String {
+        match self {
+            NodeType::Base(_) => "B".to_string(),
+            NodeType::Egress(_) => "|→".to_string(),
+            NodeType::Reader(_) => "R".to_string(),
+            NodeType::Sharder(_) => "÷".to_string(),
+            NodeType::Ingress => "→|".to_string(),
+            NodeType::Internal(ref i) => Ingredient::description(i, detailed),
+            NodeType::Source => "⊥".to_string(),
+            NodeType::Dropped => "☒".to_string(),
+        }
+    }
 }
 
 impl ToString for NodeType {

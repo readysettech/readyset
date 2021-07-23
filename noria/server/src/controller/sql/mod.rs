@@ -1819,7 +1819,7 @@ mod tests {
             // Check that the parent of the projection is the base table, and NOT the earlier
             // bogokey projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
 
             // Add a query with a parameter on a new field
             let ncount = mig.graph().node_count();
@@ -1844,7 +1844,7 @@ mod tests {
             // Check that the parent of the projection is the base table, and NOT the earlier
             // bogokey projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
         })
         .await;
     }
@@ -1896,7 +1896,7 @@ mod tests {
             // Check that the parent of the projection node is the base table, and NOT the earlier
             // parameterized projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
         })
         .await;
     }
@@ -1952,7 +1952,7 @@ mod tests {
             assert_ne!(qfp.query_leaf, leaf);
             // Check that the parent of the identity is the paramaterized query.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [param_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [param_address]);
         })
         .await;
     }
@@ -2037,7 +2037,7 @@ mod tests {
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[2]);
             // Check that the parent of the top node is param filter
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [param_filter_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [param_filter_address]);
 
             // Add a query with an additional field projected
             let ncount = mig.graph().node_count();
@@ -2064,7 +2064,7 @@ mod tests {
             assert_eq!(n.as_reader().unwrap().key().unwrap(), &[3]);
             // Check that the parent of the top node is param filter
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [param_filter_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [param_filter_address]);
         })
         .await;
     }
@@ -2100,7 +2100,7 @@ mod tests {
             assert_eq!(qfp.new_nodes.len(), 2);
             // Check that the parent of the top node is the base table
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base]);
+            assert_eq!(top_node.ancestors().unwrap(), [base]);
 
             // Add a query with a LIKE parameter on a different field.
             let res = inc.add_query(
@@ -2115,7 +2115,7 @@ mod tests {
             // Check that the parent of the top node is the base table
             // (ie is not a view node created by a query above)
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base]);
+            assert_eq!(top_node.ancestors().unwrap(), [base]);
 
             // Add a query with a (different) ILIKE parameter on the original field.
             let res = inc.add_query(
@@ -2130,7 +2130,7 @@ mod tests {
             // Check that the parent of the top node is the base table
             // (ie is not a view node created by a query above)
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base]);
+            assert_eq!(top_node.ancestors().unwrap(), [base]);
 
             // Add a query with a simple equality parameter on the original field.
             let res = inc.add_query(
@@ -2145,7 +2145,7 @@ mod tests {
             // Check that the parent of the top node is the base table
             // (ie is not a view node created by a query above)
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base]);
+            assert_eq!(top_node.ancestors().unwrap(), [base]);
         })
         .await;
     }
@@ -2267,7 +2267,7 @@ mod tests {
             // Check that the parent of the projection is the original table, NOT the earlier
             // projection.
             let top_node = mig.graph().node_weight(qfp.new_nodes[0]).unwrap();
-            assert_eq!(top_node.ancestors(), [base_address]);
+            assert_eq!(top_node.ancestors().unwrap(), [base_address]);
         })
         .await;
     }

@@ -377,7 +377,9 @@ impl Migration {
     {
         let mut i = node::Node::new(name.to_string(), fields, i.into());
         i.on_connected(&self.ingredients);
-        let parents = i.ancestors();
+        // TODO(peter): Should we change this function signature to return a ReadySetResult?
+        #[allow(clippy::unwrap_used)]
+        let parents = i.ancestors().unwrap();
         assert!(!parents.is_empty());
 
         // add to the graph
