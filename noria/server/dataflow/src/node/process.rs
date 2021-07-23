@@ -319,7 +319,9 @@ impl Node {
             NodeType::Dropped => {
                 *m = None;
             }
-            NodeType::Source => unreachable!(),
+            NodeType::Source => {
+                internal!("you can't process through a source node")
+            }
         }
         Ok(Default::default())
     }

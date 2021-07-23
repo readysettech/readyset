@@ -5,6 +5,8 @@ mod reader;
 mod sharder;
 
 pub struct Ingress;
+/// The root node in the graph. There is a single outgoing edge from
+/// Source to all base table nodes.
 pub struct Source;
 
 pub use self::base::Base;

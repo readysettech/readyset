@@ -11,6 +11,8 @@ pub enum NodeType {
     Egress(Option<special::Egress>),
     Sharder(special::Sharder),
     Reader(special::Reader),
+    /// The root node in the graph. There is a single outgoing edge from Source to all base table
+    /// nodes.
     Source,
     Dropped,
 }

@@ -59,6 +59,7 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// occur at any given point in time.
 pub struct ControllerInner {
     pub(super) ingredients: Graph,
+    /// ID for the root node in the graph. This is used to retrieve a list of base tables.
     pub(super) source: NodeIndex,
     pub(super) ndomains: usize,
     pub(super) sharding: Option<usize>,
@@ -642,6 +643,7 @@ impl ControllerInner {
     /// Construct `ControllerInner` with a specified listening interface
     pub(super) fn new(log: slog::Logger, state: ControllerState, controller_uri: Url) -> Self {
         let mut g = petgraph::Graph::new();
+        // Create the root node in the graph.
         let source = g.add_node(node::Node::new(
             "source",
             &["because-type-inference"],
