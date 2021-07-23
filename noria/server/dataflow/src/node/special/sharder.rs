@@ -69,7 +69,7 @@ impl Sharder {
         is_sharded: bool,
         is_last_sharder_for_tag: Option<bool>,
         output: &mut dyn Executor,
-    ) {
+    ) -> ReadySetResult<()> {
         // we need to shard the records inside `m` by their key,
         let mut m = m.take().unwrap();
         for record in m.take_data() {
@@ -148,7 +148,7 @@ impl Sharder {
             // solves half the problem. the destination shard domains will then recieve *multiple*
             // replay pieces for each incoming replay piece, and needs to combine them somehow.
             // it's unclear how we do that.
-            unimplemented!();
+            unsupported!("we don't know how to shard a shard");
         }
 
         for (i, &mut (dst, addr)) in self.txs.iter_mut().enumerate() {
@@ -158,6 +158,8 @@ impl Sharder {
                 output.send(addr, shard);
             }
         }
+
+        Ok(())
     }
 
     #[allow(clippy::unreachable)]
