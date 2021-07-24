@@ -19,7 +19,7 @@ noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "1.8.1", features = ["full"] }
 maplit = "1.0.2"
 serde_json = "1.0.2"
-arccstr = { version = "1.3.0", features = ["serde"] }
+arccstr = "1.3.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 
 [dependencies.neon]
