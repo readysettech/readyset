@@ -29,7 +29,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-          config: build/docker-compose.ci-test.yaml
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
       - ecr#v2.2.0:
           login: true
     env:

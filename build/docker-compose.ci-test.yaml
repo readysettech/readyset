@@ -1,33 +1,11 @@
-version: '2'
-
-volumes:
-  target:
-    external: true
-  cargo-registry:
-    external: true
+version: '3.8'
+# Depends on `docker-compose.yml` from the root of the repository.
+# As such, context is now at root.
 
 services:
-  zookeeper:
-    image: zookeeper
-  redis:
-    image: redis:6.2
-  mysql:
-    image: mysql
-    environment:
-    - MYSQL_ROOT_PASSWORD=noria
-    - MYSQL_DATABASE=noria
-  postgres:
-    image: postgres
-    environment:
-    - POSTGRES_PASSWORD=noria
-    - POSTGRES_DB=noria
-    command:
-    - "postgres"
-    - "-c"
-    - "wal_level=logical"
   app:
     build:
-      context: ..
+      context: .
       dockerfile: build/Dockerfile
       cache_from:
       - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-client-build:latest
@@ -35,12 +13,20 @@ services:
     volumes:
     - 'target:/workdir/target'
     - 'cargo-registry:/usr/local/cargo/registry'
-    - '..:/workdir'
+    - '.:/workdir'
     environment:
     - ZOOKEEPER_HOST=zookeeper
     - REDIS_URL=redis://redis:6379/
+    - MYSQL_HOST=mysql
+    - PGHOST=postgres
     depends_on:
     - zookeeper
     - redis
     - mysql
     - postgres
+
+volumes:
+  target:
+    external: true
+  cargo-registry:
+    external: true

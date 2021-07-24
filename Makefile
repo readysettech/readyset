@@ -28,7 +28,7 @@ nightly-tests:
 	cargo run --bin noria-logictest -- verify logictests/generated
 	
 docker-nightly-tests:
-	docker-compose -f build/docker-compose.ci-test.yaml run app cargo run --bin noria-logictest -- verify logictests/generated
+	docker-compose -f docker-compose.yml -f build/docker-compose.ci-test.yaml run app cargo run --bin noria-logictest -- verify logictests/generated
 
 docker-tests:
-	docker-compose -f build/docker-compose.ci-test.yaml run app cargo test --all --exclude clustertest -- --skip integration_serial && cargo test -p noria-server integration_serial -- --test-threads=1
+	docker-compose -f docker-compose.yml -f build/docker-compose.ci-test.yaml run app cargo test --all --exclude clustertest -- --skip integration_serial && cargo test -p noria-server integration_serial -- --test-threads=1

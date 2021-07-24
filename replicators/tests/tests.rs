@@ -4,10 +4,8 @@ use noria::{consensus::LocalAuthority, ControllerHandle, DataType, ReadySetResul
 use noria_server::Builder;
 use replicators::NoriaAdapter;
 use slog::{o, Discard, Logger};
+use std::env;
 use std::sync::Arc;
-
-const PGSQL_URL: &str = "postgresql://postgres:noria@postgres:5432/noria";
-const MYSQL_URL: &str = "mysql://root:noria@mysql:3306/noria";
 
 const CREATE_SCHEMA: &str = "
     DROP TABLE IF EXISTS noria CASCADE;
@@ -116,7 +114,7 @@ impl DbConnection {
             let client = mysql_async::Conn::new(opts).await?;
             Ok(DbConnection::MySQL(client))
         } else if url.starts_with("postgresql") {
-            let (client, conn) = tokio_postgres::connect(PGSQL_URL, tokio_postgres::NoTls)
+            let (client, conn) = tokio_postgres::connect(&pgsql_url(), tokio_postgres::NoTls)
                 .await
                 .unwrap();
             let connection_handle = tokio::spawn(async move { conn.await.map_err(Into::into) });
@@ -263,12 +261,28 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     Ok(())
 }
 
+fn pgsql_url() -> String {
+    format!(
+        "postgresql://postgres:noria@{}:{}/noria",
+        env::var("PGHOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
+    )
+}
+
+fn mysql_url() -> String {
+    format!(
+        "mysql://root:noria@{}:{}/noria",
+        env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
+    )
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn pgsql_replication() -> ReadySetResult<()> {
-    replication_test_inner(PGSQL_URL).await
+    replication_test_inner(&pgsql_url()).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mysql_replication() -> ReadySetResult<()> {
-    replication_test_inner(MYSQL_URL).await
+    replication_test_inner(&mysql_url()).await
 }
