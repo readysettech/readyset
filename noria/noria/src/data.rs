@@ -2259,8 +2259,12 @@ mod tests {
             dt.hash(&mut s);
             s.finish()
         };
-        let json_serialize = |dt: &DataType| serde_json::to_string(dt).unwrap();
-        let bincode_serialize = |dt: &DataType| bincode::serialize(dt).unwrap();
+        let json_serialize = |dt: &DataType| -> DataType {
+            serde_json::from_str(&serde_json::to_string(dt).unwrap()).unwrap()
+        };
+        let bincode_serialize = |dt: &DataType| -> DataType {
+            bincode::deserialize(&bincode::serialize(dt).unwrap()).unwrap()
+        };
         _data_type_fungibility_test_eq(&|x: &DataType| x.clone());
         _data_type_fungibility_test_eq(&hash);
         _data_type_fungibility_test_eq(&json_serialize);

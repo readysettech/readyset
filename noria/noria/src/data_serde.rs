@@ -4,7 +4,7 @@ use msql_srv::MysqlTime;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use std::borrow::{Borrow, Cow};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::sync::Arc;
 
@@ -34,19 +34,22 @@ impl serde::ser::Serialize for DataType {
                 tv.end()
             }
             DataType::Text(v) => serializer.serialize_newtype_variant("DataType", 3, "Text", v),
-            DataType::TinyText(v) => {
-                let vu8 = match v.split(|&i| i == 0).next() {
-                    Some(slice) => slice,
-                    None => v,
-                };
-                serializer.serialize_newtype_variant("DataType", 3, "Text", &vu8)
-            }
             DataType::Timestamp(v) => {
                 // We serialize the NaiveDateTime as seconds in the low 64 bits of i128 and subsec nanos in the high 64 bits
                 let ts = v.timestamp() as i128 + ((v.timestamp_subsec_nanos() as i128) << 64);
                 serializer.serialize_newtype_variant("DataType", 4, "Timestamp", &ts)
             }
             DataType::Time(v) => serializer.serialize_newtype_variant("DataType", 5, "Time", &v),
+            DataType::TinyText(v) => {
+                let mut b = [0u8; 16];
+                b[..v.len()].copy_from_slice(v);
+                serializer.serialize_newtype_variant(
+                    "DataType",
+                    6,
+                    "TinyText",
+                    &i128::from_le_bytes(b),
+                )
+            }
         }
     }
 }
@@ -63,6 +66,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             Text,
             Timestamp,
             Time,
+            TinyText,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -81,6 +85,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     3u64 => Ok(Field::Text),
                     4u64 => Ok(Field::Timestamp),
                     5u64 => Ok(Field::Time),
+                    6u64 => Ok(Field::TinyText),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
                         &"variant index 0 <= i < 5",
@@ -98,6 +103,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "Text" => Ok(Field::Text),
                     "Timestamp" => Ok(Field::Timestamp),
                     "Time" => Ok(Field::Time),
+                    "TinyText" => Ok(Field::TinyText),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -112,6 +118,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"Text" => Ok(Field::Text),
                     b"Timestamp" => Ok(Field::Timestamp),
                     b"Time" => Ok(Field::Time),
+                    b"TinyText" => Ok(Field::TinyText),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -204,6 +211,8 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
                         .map(|v| DataType::Time(Arc::new(v))),
+                    (Field::TinyText, variant) => VariantAccess::newtype_variant::<i128>(variant)
+                        .map(|r| DataType::TinyText(r.to_le_bytes()[..15].try_into().unwrap())),
                 }
             }
         }
@@ -211,13 +220,11 @@ impl<'de> serde::Deserialize<'de> for DataType {
         const VARIANTS: &[&str] = &[
             "None",
             "Int",
-            "UnsignedInt",
-            "BigInt",
-            "UnsignedBigInt",
             "Real",
             "Text",
             "Timestamp",
             "Time",
+            "TinyText",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }
