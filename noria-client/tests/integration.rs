@@ -61,8 +61,8 @@ fn sleep() {
 fn zk_addr() -> String {
     format!(
         "{}:{}",
-        env::var("ZOOKEEPER_HOST").unwrap_or("127.0.0.1".into()),
-        env::var("ZOOKEEPER_PORT").unwrap_or("2181".into()),
+        env::var("ZOOKEEPER_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+        env::var("ZOOKEEPER_PORT").unwrap_or_else(|_| "2181".into()),
     )
 }
 
