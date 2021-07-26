@@ -57,6 +57,27 @@ pub enum NodeOperator {
     Trigger(trigger::Trigger),
 }
 
+impl ToString for NodeOperator {
+    fn to_string(&self) -> String {
+        match *self {
+            NodeOperator::Aggregation(_) => "Aggregation",
+            NodeOperator::Extremum(_) => "Extermum",
+            NodeOperator::Concat(_) => "Concat",
+            NodeOperator::Join(_) => "Join",
+            NodeOperator::ParamFilter(_) => "ParamFilter",
+            NodeOperator::Latest(_) => "Latest",
+            NodeOperator::Project(_) => "Project",
+            NodeOperator::Union(_) => "Union",
+            NodeOperator::Identity(_) => "Identity",
+            NodeOperator::Filter(_) => "Filter",
+            NodeOperator::TopK(_) => "TopK",
+            NodeOperator::Trigger(_) => "Trigger",
+            NodeOperator::Rewrite(_) => "Rewrite",
+        }
+        .to_string()
+    }
+}
+
 macro_rules! impl_ingredient_fn_mut {
     ($self:ident, $fn:ident, $( $arg:ident ),* ) => {
         match *$self {

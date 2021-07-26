@@ -67,17 +67,16 @@ impl NodeType {
 
 impl ToString for NodeType {
     fn to_string(&self) -> String {
-        match *self {
-            NodeType::Ingress => "Ingress",
-            NodeType::Base(_) => "Base",
-            NodeType::Internal(_) => "Internal",
-            NodeType::Egress(_) => "Egress",
-            NodeType::Sharder(_) => "Sharder",
-            NodeType::Reader(_) => "Reader",
-            NodeType::Source => "Source",
-            NodeType::Dropped => "Dropped",
+        match self {
+            NodeType::Ingress => "Ingress".to_string(),
+            NodeType::Base(_) => "Base".to_string(),
+            NodeType::Internal(o) => format!("Internal ({})", o.to_string()),
+            NodeType::Egress(_) => "Egress".to_string(),
+            NodeType::Sharder(_) => "Sharder".to_string(),
+            NodeType::Reader(_) => "Reader".to_string(),
+            NodeType::Source => "Source".to_string(),
+            NodeType::Dropped => "Dropped".to_string(),
         }
-        .to_string()
     }
 }
 

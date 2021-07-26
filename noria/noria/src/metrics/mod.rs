@@ -348,6 +348,7 @@ pub mod recorded {
     /// | --- | ----------- |
     /// | domain | The index of the domain. |
     /// | ntype | The dataflow node type. |
+    /// | node  | The index of the dataflow node. |
     pub const DOMAIN_NODE_ADDED: &str = "domain.node_added";
 }
 
