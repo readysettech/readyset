@@ -350,6 +350,14 @@ pub mod recorded {
     /// | ntype | The dataflow node type. |
     /// | node  | The index of the dataflow node. |
     pub const DOMAIN_NODE_ADDED: &str = "domain.node_added";
+
+    /// Counter: The number of times a dataflow packet has been propagated
+    /// for each domain.
+    ///
+    /// | Tag | Description |
+    /// | domain | The index of the domain. |
+    /// | packet_type | The type of packet |
+    pub const DOMAIN_PACKET_SENT: &str = "domain.packet_sent";
 }
 
 /// A dumped metric's kind.

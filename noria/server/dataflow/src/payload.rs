@@ -387,6 +387,24 @@ impl Packet {
     }
 }
 
+impl ToString for Packet {
+    fn to_string(&self) -> String {
+        match self {
+            Packet::Input { .. } => "Input",
+            Packet::Message { .. } => "Message",
+            Packet::RequestReaderReplay { .. } => "RequestReaderReplay",
+            Packet::RequestPartialReplay { .. } => "RequestPartialReplay",
+            Packet::ReplayPiece { .. } => "ReplayPiece",
+            Packet::EvictKeys { .. } => "EvictKeys",
+            Packet::Timestamp { .. } => "Timestamp",
+            Packet::Finish { .. } => "Finish",
+            Packet::Spin { .. } => "Spin",
+            Packet::Evict { .. } => "Evict",
+        }
+        .to_string()
+    }
+}
+
 impl fmt::Debug for Packet {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
