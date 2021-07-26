@@ -6,6 +6,7 @@ use crate::worker::replica::WrappedDomainRequest;
 use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
+use launchpad::select;
 use metrics::{counter, gauge};
 use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
@@ -392,7 +393,7 @@ impl Worker {
                 }
             };
 
-            tokio::select! {
+            select! {
                 req = self.rx.recv() => {
                     if let Some(req) = req {
                         self.process_worker_request(req).await;

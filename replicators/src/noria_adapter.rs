@@ -4,6 +4,7 @@ use crate::postgres_connector::{
 };
 use async_trait::async_trait;
 use futures::FutureExt;
+use launchpad::select;
 use mysql_async as mysql;
 use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
@@ -23,7 +24,7 @@ pub(crate) enum ReplicationAction {
         /// The transaction id of a table write operation. Each
         /// table write operation within a transaction should be assigned
         /// the same transaction id. These id's should be monotonically
-        /// increasing across transactions.         
+        /// increasing across transactions.
         txid: Option<u64>,
     },
     SchemaChange {
@@ -237,7 +238,7 @@ impl<A: Authority> NoriaAdapter<A> {
             let mut replicator =
                 PostgresReplicator::new(&mut client, &mut noria, None, log.clone()).await?;
 
-            futures::select! {
+            select! {
                 s = replicator.snapshot_to_noria(snapshot).fuse() => s?,
                 c = connection_handle.fuse() => c.unwrap()?,
             }

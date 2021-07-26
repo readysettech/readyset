@@ -7,7 +7,7 @@ use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
-use hyper::{self};
+use launchpad::select;
 use noria::ControllerDescriptor;
 use noria::{
     consensus::{Authority, Epoch, STATE_KEY},
@@ -343,7 +343,7 @@ where
             // produces a value when the `Valve` is closed
             let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
 
-            tokio::select! {
+            select! {
                 req = self.handle_rx.recv() => {
                     if let Some(req) = req {
                         self.handle_handle_request(req).await?;

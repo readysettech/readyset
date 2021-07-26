@@ -12,3 +12,4 @@ anyhow = "1.0.38"
 proptest = "1.0.0"
 reqwest = "0.11.1"
 chrono = { version = "0.4.0", features = ["serde"] }
+tokio = { version = "1.8.1", features = ["full"] }

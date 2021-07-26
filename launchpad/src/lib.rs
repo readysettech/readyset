@@ -1,6 +1,6 @@
 //! This crate provides miscellanious utilities and extensions to the Rust standard library, for use
 //! in all crates in this workspace.
-#![deny(missing_docs, missing_crate_level_docs)]
+#![deny(missing_docs, rustdoc::missing_crate_level_docs)]
 #![warn(clippy::dbg_macro)]
 #![feature(step_trait, bound_as_ref, bound_map)]
 
@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
 pub mod arbitrary;
+pub mod futures;
 pub mod hash;
 pub mod intervals;
 
