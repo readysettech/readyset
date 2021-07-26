@@ -179,11 +179,18 @@ pub enum DomainRequest {
     },
 }
 
+/// The primary unit of communication between nodes in the dataflow graph.
+///
+/// FIXME(grfn): This should be refactored to be an enum-of-enums so that the various parts of
+/// dataflow code that only know how to handle one kind of packet don't have to panic if they
+/// receive the wrong kind of packet. See
+/// [ENG-455](https://readysettech.atlassian.net/browse/ENG-455)
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages
     //
+    /// A write received to the base table
     Input {
         inner: LocalOrNot<PacketData>,
         src: Option<SourceChannelIdentifier>,
@@ -251,6 +258,11 @@ pub enum Packet {
     },
 }
 
+// Getting rid of the various unreachables on the accessor functions in this impl requires
+// refactoring Packet to be an enum-of-enums, and then moving the accessor functions themselves to
+// the smaller enums (or having them return Options). This is scoped for a larger refactor - see
+// https://readysettech.atlassian.net/browse/ENG-455.
+#[allow(clippy::unreachable)]
 impl Packet {
     pub(crate) fn src(&self) -> LocalNodeIndex {
         match *self {
