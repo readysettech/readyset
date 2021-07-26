@@ -363,8 +363,7 @@ impl Replica {
                         // let's not bother the user with it
                         continue;
                     }
-                    Err(e).context("poll_next")?;
-                    unreachable!();
+                    return Err(e).context("poll_next");
                 }
             };
             let is_base = tag == CONNECTION_FROM_BASE;
@@ -733,45 +732,38 @@ impl Future for Replica {
             self.out.dirty = false;
             loop {
                 let mut this = self.as_mut().project();
-                match this.domain.on_event(this.out, PollEvent::ResumePolling) {
-                    Ok(ProcessResult::KeepPolling(timeout)) => {
-                        if let Some(timeout) = timeout {
-                            if timeout == Duration::new(0, 0) {
-                                *this.timed_out = true;
-                            } else {
-                                this.timeout.set(Box::new(tokio::time::sleep(timeout)));
-                            }
-
-                            // we need to poll the timer to ensure we'll get woken up
-                            match self.as_mut().try_timeout(cx) {
-                                Ok(timed_out) => {
-                                    if timed_out {
-                                        // a timeout occurred, so we may have to set a new timer
-                                        if self.out.dirty {
-                                            // if we're already dirty, we'll re-do processing anyway
-                                        } else {
-                                            // try to resume polling again
-                                            continue;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    return Poll::Ready(Err(e.into()));
-                                }
-                            }
-                        }
-
-                        if self.out.dirty {
-                            // more stuff appeared in our outboxes
-                            // can't yield yet -- we need to try to send it
-                            continue 'process;
-                        }
+                if let Some(timeout) = this.domain.resume_polling() {
+                    if timeout == Duration::new(0, 0) {
+                        *this.timed_out = true;
+                    } else {
+                        this.timeout.set(Box::new(tokio::time::sleep(timeout)));
                     }
-                    pr => {
-                        // TODO: just have resume_polling be a method...
-                        unreachable!("unexpected ResumePolling result {:?}", pr)
+
+                    // we need to poll the timer to ensure we'll get woken up
+                    match self.as_mut().try_timeout(cx) {
+                        Ok(timed_out) => {
+                            if timed_out {
+                                // a timeout occurred, so we may have to set a new timer
+                                if self.out.dirty {
+                                    // if we're already dirty, we'll re-do processing anyway
+                                } else {
+                                    // try to resume polling again
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Poll::Ready(Err(e.into()));
+                        }
                     }
                 }
+
+                if self.out.dirty {
+                    // more stuff appeared in our outboxes
+                    // can't yield yet -- we need to try to send it
+                    continue 'process;
+                }
+
                 break;
             }
 
