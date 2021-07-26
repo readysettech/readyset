@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Error, Formatter};
 
 use dataflow::ops;
@@ -233,33 +232,21 @@ impl MirNode {
 
     /// Finds the source of a child column within the node.
     /// This is currently used for locating the source of a projected column.
-    pub fn find_source_for_child_column(
-        &self,
-        child: &Column,
-        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    ) -> Option<usize> {
+    pub fn find_source_for_child_column(&self, child: &Column) -> Option<usize> {
         // we give the alias preference here because in a query like
         // SELECT table1.column1 AS my_alias
         // my_alias will be the column name and "table1.column1" will be the alias.
         // This is slightly backwards from what intuition suggests when you first look at the
         // column struct but means its the "alias" that will exist in the parent node,
         // not the column name.
-        let parent_index = if child.aliases.is_empty() {
+        if child.aliases.is_empty() {
             self.columns.iter().position(|c| c == child)
         } else {
             self.columns.iter().position(|c| child.aliases.contains(c))
-        };
-        // TODO : ideally, we would prioritize the alias when using the table mapping if we are looking
-        // for a child column. However, I am not sure this case is totally possible so for now,
-        // we are leaving it as is.
-        parent_index.or_else(|| self.get_column_id_from_table_mapping(child, table_mapping))
+        }
     }
 
-    pub fn column_id_for_column(
-        &self,
-        c: &Column,
-        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    ) -> usize {
+    pub fn column_id_for_column(&self, c: &Column) -> usize {
         #[allow(clippy::cmp_owned)]
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
@@ -282,21 +269,15 @@ impl MirNode {
                     .1
                     .expect("must have an absolute column ID on base"),
             },
-            MirNodeInner::Reuse { ref node } => {
-                node.borrow().column_id_for_column(c, table_mapping)
-            }
+            MirNodeInner::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
             _ => match self.columns.iter().position(|cc| cc == c) {
                 Some(id) => id,
-                None => self
-                    .get_column_id_from_table_mapping(c, table_mapping)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "tried to look up non-existent column {:?} on node \
+                None => panic!(
+                    "tried to look up non-existent column {:?} on node \
                                  \"{}\" (columns: {:?})",
-                            c, self.name, self.columns
-                        );
-                    }),
+                    c, self.name, self.columns
+                ),
             },
         }
     }
@@ -308,34 +289,6 @@ impl MirNode {
             } => column_specs.as_slice(),
             _ => panic!("non-base MIR nodes don't have column specifications!"),
         }
-    }
-
-    fn get_column_id_from_table_mapping(
-        &self,
-        c: &Column,
-        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-    ) -> Option<usize> {
-        let get_column_index = |c: &Column, t_name: &str| -> Option<usize> {
-            let mut ac = c.clone();
-            ac.table = Some(t_name.to_owned());
-            self.columns.iter().position(|cc| *cc == ac)
-        };
-        // See if table mapping was passed in
-        table_mapping.and_then(|map|
-            // if mapping was passed in, then see if c has an associated table, and check
-            // the mapping for a key based on this
-            match c.table {
-                Some(ref table) => {
-                    let key = (c.name.clone(), Some(table.clone()));
-                    match map.get(&key) {
-                        Some(t_name) => get_column_index(c, t_name),
-                        None => map.get(&(c.name.clone(), None)).and_then(|t_name| get_column_index(c, t_name)),
-                    }
-                }
-                None => map.get(&(c.name.clone(), None))
-                    .and_then(|t_name| get_column_index(c, t_name)),
-            }
-        )
     }
 
     pub fn flow_node_addr(&self) -> ReadySetResult<NodeIndex> {
@@ -491,9 +444,7 @@ mod tests {
 
             let child_column = Column::from("c3");
 
-            let idx = a
-                .find_source_for_child_column(&child_column, Option::None)
-                .unwrap();
+            let idx = a.find_source_for_child_column(&child_column).unwrap();
             assert_eq!(2, idx);
         }
 
@@ -555,9 +506,7 @@ mod tests {
                 flow_node: None,
             };
 
-            let idx = a
-                .find_source_for_child_column(&child_column, Option::None)
-                .unwrap();
+            let idx = a.find_source_for_child_column(&child_column).unwrap();
             assert_eq!(2, idx);
         }
 
@@ -608,10 +557,7 @@ mod tests {
                 flow_node: None,
             };
 
-            assert_eq!(
-                a.find_source_for_child_column(&child_column, Option::None),
-                None
-            );
+            assert_eq!(a.find_source_for_child_column(&child_column), None);
         }
     }
 

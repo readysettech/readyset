@@ -1,12 +1,11 @@
 use crate::controller::sql::query_graph::QueryGraph;
 use crate::controller::sql::reuse::join_order::reorder_joins;
-use crate::controller::sql::UniverseId;
 use crate::{ReadySetResult, ReuseConfigType};
-use dataflow::prelude::DataType;
+
 use nom_sql::Table;
 use noria::ReadySetError;
 use std::collections::HashMap;
-use std::convert::TryFrom;
+
 use std::vec::Vec;
 
 mod finkelstein;
@@ -53,27 +52,6 @@ impl ReuseConfig {
     ) -> ReadySetResult<()> {
         reorder_joins(qg, reuse_candidates)?;
         Ok(())
-    }
-
-    // Return which universes are available for reuse opportunities
-    pub(in crate::controller) fn reuse_universes(
-        &self,
-        universe: UniverseId,
-        universes: &HashMap<Option<DataType>, Vec<UniverseId>>,
-    ) -> Vec<UniverseId> {
-        // It is safe to transform the String "global" into a DataType.
-        #[allow(clippy::unwrap_used)]
-        let global = (DataType::try_from("global").unwrap(), None);
-        let mut reuse_universes = vec![global, universe.clone()];
-        let (_, group) = universe;
-
-        // Find one universe that belongs to the same group
-        if let Some(uids) = universes.get(&group) {
-            let grouped = uids.first().unwrap().clone();
-            reuse_universes.push(grouped);
-        }
-
-        reuse_universes
     }
 
     pub(in crate::controller) fn new(reuse_type: ReuseConfigType) -> ReuseConfig {

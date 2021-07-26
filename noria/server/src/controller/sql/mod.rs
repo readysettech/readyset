@@ -8,7 +8,7 @@ use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;
 use ::mir::Column;
 use ::mir::MirNodeRef;
-use dataflow::prelude::DataType;
+
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
@@ -35,14 +35,11 @@ mod query_graph;
 mod query_signature;
 pub(crate) mod query_utils;
 mod reuse;
-pub(super) mod security;
-
-type UniverseId = (DataType, Option<DataType>);
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse<'a> {
     ExactMatch(&'a str, MirNodeRef),
-    ExtendExisting(Vec<(u64, UniverseId)>),
+    ExtendExisting(Vec<u64>),
     /// (node, columns to re-project if necessary, parameters)
     ReaderOntoExisting(MirNodeRef, Option<Vec<Column>>, Vec<Column>),
     None,
@@ -61,7 +58,7 @@ pub(crate) struct SqlIncorporator {
     named_queries: HashMap<String, u64>,
     query_graphs: HashMap<u64, QueryGraph>,
     base_mir_queries: HashMap<String, MirQuery>,
-    mir_queries: HashMap<(u64, UniverseId), MirQuery>,
+    mir_queries: HashMap<u64, MirQuery>,
     num_queries: usize,
 
     base_schemas: HashMap<String, CreateTableStatement>,
@@ -70,10 +67,6 @@ pub(crate) struct SqlIncorporator {
     schema_version: usize,
 
     reuse_type: ReuseConfigType,
-
-    /// Active universes mapped to the group they belong to.
-    /// If an user universe, mapped to None.
-    universes: HashMap<Option<DataType>, Vec<UniverseId>>,
 }
 
 impl Default for SqlIncorporator {
@@ -95,7 +88,6 @@ impl Default for SqlIncorporator {
             schema_version: 0,
 
             reuse_type: ReuseConfigType::Finkelstein,
-            universes: HashMap::default(),
         }
     }
 }
@@ -198,7 +190,6 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         is_name_required: bool,
-        universe: UniverseId,
         st: &SelectStatement,
         is_leaf: bool,
     ) -> Result<(QueryGraph, QueryGraphReuse), ReadySetError> {
@@ -214,10 +205,10 @@ impl SqlIncorporator {
             return Ok((qg, QueryGraphReuse::None));
         }
 
-        // Do we already have this exact query or a subset of it in the same universe?
+        // Do we already have this exact query or a subset of it
         // TODO(malte): make this an O(1) lookup by QG signature
         let qg_hash = qg.signature().hash;
-        match self.mir_queries.get(&(qg_hash, universe.clone())) {
+        match self.mir_queries.get(&(qg_hash)) {
             None => (),
             Some(mir_query) => {
                 let existing_qg = self
@@ -236,9 +227,7 @@ impl SqlIncorporator {
                     // in exactly the same order
                     info!(
                         self.log,
-                        "An exact match for query \"{}\" already exists in universe \"{}\", reusing it",
-                        query_name,
-                        universe.0.to_string(),
+                        "An exact match for query \"{}\" already exists, reusing it", query_name,
                     );
 
                     trace!(
@@ -430,20 +419,12 @@ impl SqlIncorporator {
                 reuse_candidates
             );
 
-            let mut mir_queries = Vec::new();
-            for uid in reuse_config.reuse_universes(universe, &self.universes) {
-                let mqs: Vec<_> = reuse_candidates
-                    .iter()
-                    .map(|c| {
-                        let sig = (c.1).0;
-                        (sig, uid.clone())
-                    })
-                    .collect();
-
-                mir_queries.extend(mqs);
-            }
-
-            return Ok((qg, QueryGraphReuse::ExtendExisting(mir_queries)));
+            return Ok((
+                qg,
+                QueryGraphReuse::ExtendExisting(
+                    reuse_candidates.iter().map(|(_, (sig, _))| *sig).collect(),
+                ),
+            ));
         } else {
             info!(self.log, "No reuse opportunity, adding fresh query");
         }
@@ -472,9 +453,9 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
 
-        self.register_query(query_name, None, &mir, mig.universe());
+        self.register_query(query_name, None, &mir);
 
         Ok(qfp)
     }
@@ -493,7 +474,7 @@ impl SqlIncorporator {
         // no optimization, because standalone base nodes can't be optimized
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
 
         // remember the schema in case we need it later
         // on base table schema change, we will overwrite the existing schema here.
@@ -505,7 +486,7 @@ impl SqlIncorporator {
             unimplemented!();
         }
 
-        self.register_query(query_name, None, &mir, mig.universe());
+        self.register_query(query_name, None, &mir);
 
         Ok(qfp)
     }
@@ -545,9 +526,9 @@ impl SqlIncorporator {
             is_leaf,
         )?;
 
-        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig, None)?;
+        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig)?;
 
-        self.register_query(query_name, None, &combined_mir_query, mig.universe());
+        self.register_query(query_name, None, &combined_mir_query);
 
         Ok(qfp)
     }
@@ -567,7 +548,7 @@ impl SqlIncorporator {
             source: Box::new(e),
         };
         let (qg, reuse) = self
-            .consider_query_graph(query_name, is_name_required, mig.universe(), sq, is_leaf)
+            .consider_query_graph(query_name, is_name_required, sq, is_leaf)
             .map_err(on_err)?;
         Ok(match reuse {
             QueryGraphReuse::ExactMatch(name, mn) => {
@@ -610,16 +591,11 @@ impl SqlIncorporator {
         mut mig: &mut Migration,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         use ::mir::visualize::GraphViz;
-        let universe = mig.universe();
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let (sec, og_mir, table_mapping, base_name) = self.mir_converter.named_query_to_mir(
-            query_name,
-            query,
-            &qg,
-            is_leaf,
-            universe.clone(),
-        )?;
+        let og_mir = self
+            .mir_converter
+            .named_query_to_mir(query_name, query, &qg, is_leaf)?;
 
         trace!(
             self.log,
@@ -628,26 +604,15 @@ impl SqlIncorporator {
         );
 
         // run MIR-level optimizations
-        let mut mir = og_mir.optimize(table_mapping.as_ref(), sec);
+        let mut mir = og_mir.optimize();
 
         trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
 
-        if sec {
-            match table_mapping {
-                Some(ref x) => {
-                    mir = mir.make_universe_naming_consistent(x, base_name);
-                }
-                None => {
-                    panic!("Missing table mapping when reconciling universe table names!");
-                }
-            }
-        }
-
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig, None)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
 
         // register local state
-        self.register_query(query_name, Some(qg), &mir, universe);
+        self.register_query(query_name, Some(qg), &mir);
 
         Ok((qfp, mir))
     }
@@ -655,7 +620,7 @@ impl SqlIncorporator {
     pub(super) fn remove_query(
         &mut self,
         query_name: &str,
-        mig: &Migration,
+        _mig: &Migration,
     ) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
@@ -668,13 +633,13 @@ impl SqlIncorporator {
                 query_name
             ))
         })?;
-        let mir = &self.mir_queries[&(qg_hash, mig.universe())];
+        let mir = &self.mir_queries[&(qg_hash)];
 
         // TODO(malte): implement this
         self.mir_converter.remove_query(query_name, mir)?;
 
         // clean up local state
-        self.mir_queries.remove(&(qg_hash, mig.universe())).unwrap();
+        self.mir_queries.remove(&(qg_hash)).unwrap();
         self.query_graphs.remove(&qg_hash).unwrap();
         self.view_schemas.remove(query_name).unwrap();
 
@@ -707,13 +672,7 @@ impl SqlIncorporator {
         self.mir_converter.remove_base(name, mir)
     }
 
-    fn register_query(
-        &mut self,
-        query_name: &str,
-        qg: Option<QueryGraph>,
-        mir: &MirQuery,
-        universe: UniverseId,
-    ) {
+    fn register_query(&mut self, query_name: &str, qg: Option<QueryGraph>, mir: &MirQuery) {
         // TODO(malte): we currently need to remember these for local state, but should figure out
         // a better plan (see below)
         let fields = mir
@@ -735,7 +694,7 @@ impl SqlIncorporator {
             Some(qg) => {
                 let qg_hash = qg.signature().hash;
                 self.query_graphs.insert(qg_hash, qg);
-                self.mir_queries.insert((qg_hash, universe), mir.clone());
+                self.mir_queries.insert(qg_hash, mir.clone());
                 self.named_queries.insert(query_name.to_owned(), qg_hash);
             }
             None => {
@@ -750,19 +709,18 @@ impl SqlIncorporator {
         query_name: &str,
         query: &SelectStatement,
         qg: QueryGraph,
-        reuse_mirs: Vec<(u64, UniverseId)>,
+        reuse_mirs: Vec<u64>,
         is_leaf: bool,
         mut mig: &mut Migration,
     ) -> Result<QueryFlowParts, ReadySetError> {
         use ::mir::reuse::merge_mir_for_queries;
         use ::mir::visualize::GraphViz;
-        let universe = mig.universe();
 
         // no QG-level reuse possible, so we'll build a new query.
         // first, compute the MIR representation of the SQL query
-        let (sec, new_query_mir, table_mapping, base_name) = self
+        let new_query_mir = self
             .mir_converter
-            .named_query_to_mir(query_name, query, &qg, is_leaf, universe.clone())?;
+            .named_query_to_mir(query_name, query, &qg, is_leaf)?;
 
         trace!(
             self.log,
@@ -770,7 +728,7 @@ impl SqlIncorporator {
             new_query_mir.to_graphviz().unwrap()
         );
 
-        let new_opt_mir = new_query_mir.optimize(table_mapping.as_ref(), sec);
+        let new_opt_mir = new_query_mir.optimize();
         trace!(
             self.log,
             "Optimized MIR:\n{}",
@@ -791,21 +749,7 @@ impl SqlIncorporator {
                 num_reused_nodes = res.1;
             }
         }
-
-        // traverse universe subgraph and update table names for
-        // internal consistency using the table mapping as guidance
-        if sec {
-            match table_mapping {
-                Some(ref x) => {
-                    reused_mir = reused_mir.make_universe_naming_consistent(x, base_name);
-                }
-                None => {
-                    panic!("Missing table mapping when reconciling universe table names!");
-                }
-            }
-        }
-
-        let qfp = mir_query_to_flow_parts(&mut reused_mir, &mut mig, table_mapping.as_ref())?;
+        let qfp = mir_query_to_flow_parts(&mut reused_mir, &mut mig)?;
 
         info!(
             self.log,
@@ -813,7 +757,7 @@ impl SqlIncorporator {
         );
 
         // register local state
-        self.register_query(query_name, Some(qg), &reused_mir, universe);
+        self.register_query(query_name, Some(qg), &reused_mir);
 
         Ok(qfp)
     }
@@ -1038,7 +982,6 @@ impl SqlIncorporator {
 
         let q = self.rewrite_query(q, &query_name, mig)?;
 
-        // TODO(larat): extend existing should handle policy nodes
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension
         let qfp = match q {
@@ -1635,6 +1578,7 @@ mod tests {
         let mut g = integration_utils::start_simple("it_reuses_identical_query").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
+            inc.enable_reuse(crate::ReuseConfigType::Finkelstein);
             // Establish a base write type
             assert!(inc
                 .add_query("CREATE TABLE users (id int, name varchar(40));", None, mig)

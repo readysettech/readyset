@@ -297,18 +297,6 @@ impl ControllerInner {
                 let ret = self.set_replication_offset(authority, body)?;
                 return_serialized!(ret);
             }
-            #[cfg(debug_assertions)] // not shipping universes in prod ~eta
-            (Method::POST, "/set_security_config") => {
-                let body = bincode::deserialize(&body)?;
-                let ret = self.set_security_config(body)?;
-                return_serialized!(ret);
-            }
-            #[cfg(debug_assertions)] // not shipping universes in prod ~eta
-            (Method::POST, "/create_universe") => {
-                let body = bincode::deserialize(&body)?;
-                let ret = self.create_universe(body)?;
-                return_serialized!(ret);
-            }
             (Method::POST, "/replicate_readers") => {
                 let body = bincode::deserialize(&body)?;
                 let ret = self.replicate_readers(body)?;
@@ -878,35 +866,6 @@ impl ControllerInner {
         self.materializations.set_logger(&self.log);
     }
 
-    /// Adds a new user universe.
-    /// User universes automatically enforce security policies.
-    fn add_universe<F, T>(
-        &mut self,
-        context: HashMap<String, DataType>,
-        f: F,
-    ) -> Result<T, ReadySetError>
-    where
-        F: FnOnce(&mut Migration) -> ReadySetResult<T>,
-    {
-        info!(self.log, "starting migration: new soup universe");
-        let miglog = self.log.new(o!());
-        let ingredients = self.ingredients.clone();
-        let mut m = Migration {
-            ingredients,
-            source: self.source,
-            added: Default::default(),
-            columns: Default::default(),
-            readers: Default::default(),
-            worker: None,
-            context,
-            start: time::Instant::now(),
-            log: miglog,
-        };
-        let r = f(&mut m)?;
-        m.commit(self)?;
-        Ok(r)
-    }
-
     /// Perform a new query schema migration.
     // crate viz for tests
     pub(crate) fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
@@ -1283,65 +1242,6 @@ impl ControllerInner {
         );
 
         Ok(total_evicted)
-    }
-
-    #[cfg(debug_assertions)] // not shipping universes in prod ~eta
-    pub(super) fn create_universe(
-        &mut self,
-        context: HashMap<String, DataType>,
-    ) -> ReadySetResult<()> {
-        let log = self.log.clone();
-        let mut r = self.recipe.clone();
-        let groups = self.recipe.security_groups();
-
-        let mut universe_groups = HashMap::new();
-
-        let uid = context
-            .get("id")
-            .ok_or_else(|| bad_request_err("Universe context must have id"))?
-            .clone();
-        let uid = &[uid];
-        if context.get("group").is_none() {
-            let x = Arc::new(std::sync::Mutex::new(HashMap::new()));
-            for g in groups {
-                // TODO: this should use external APIs through noria::ControllerHandle
-                // TODO: can this move to the client entirely?
-                let view_req = ViewRequest {
-                    name: g.clone(),
-                    filter: None,
-                };
-                let rgb: Option<ViewBuilder> = self.view_builder(view_req)?;
-                // TODO: using block_on here _only_ works because View::lookup just waits on a
-                // channel, which doesn't use anything except the pure executor
-                #[allow(clippy::unwrap_used)]
-                let mut view = rgb.map(|rgb| rgb.build(None, x.clone())).unwrap()?;
-                #[allow(clippy::unwrap_used)]
-                #[allow(clippy::indexing_slicing)]
-                let my_groups: Vec<DataType> = futures_executor::block_on(view.lookup(uid, true))
-                    .unwrap()
-                    .iter()
-                    .map(|v| v[1].clone())
-                    .collect();
-                universe_groups.insert(g, my_groups);
-            }
-        }
-
-        self.add_universe(context, |mut mig| {
-            r.next();
-            let ar = r.create_universe(&mut mig, universe_groups)?;
-            info!(log, "{} expressions added", ar.expressions_added);
-            info!(log, "{} expressions removed", ar.expressions_removed);
-            Ok(())
-        })?;
-
-        self.recipe = r;
-        Ok(())
-    }
-
-    #[cfg(debug_assertions)] // not shipping universes in prod ~eta
-    fn set_security_config(&mut self, p: String) -> Result<(), ReadySetError> {
-        self.recipe.set_security_config(&p);
-        Ok(())
     }
 
     fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, ReadySetError> {

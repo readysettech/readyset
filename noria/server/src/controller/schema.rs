@@ -35,7 +35,7 @@ fn type_for_internal_column(
                 } else {
                     // if none, output column type is same as over column type
                     let over_columns = grouped_op.over_columns();
-                    assert_eq!(over_columns.len(), 1);
+                    invariant_eq!(over_columns.len(), 1);
                     // use type of the "over" column
                     Ok(
                         column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
@@ -51,7 +51,7 @@ fn type_for_internal_column(
         }
         ops::NodeOperator::Extremum(ref o) => {
             let over_columns = o.over_columns();
-            assert_eq!(over_columns.len(), 1);
+            invariant_eq!(over_columns.len(), 1);
             // use type of the "over" column
             Ok(
                 column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?

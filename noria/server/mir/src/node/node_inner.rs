@@ -99,12 +99,6 @@ pub enum MirNodeInner {
         /// Optional limit for the set of results to lookups to this leaf
         limit: Option<usize>,
     },
-    /// Rewrite node
-    Rewrite {
-        value: String,
-        column: String,
-        key: String,
-    },
     /// Param Filter node
     ParamFilter {
         col: Column,
@@ -364,18 +358,6 @@ impl MirNodeInner {
                 } => emit == our_emit && our_duplicate_mode == duplicate_mode,
                 _ => false,
             },
-            MirNodeInner::Rewrite {
-                value: ref our_value,
-                key: ref our_key,
-                column: ref our_col,
-            } => match *other {
-                MirNodeInner::Rewrite {
-                    ref value,
-                    ref key,
-                    ref column,
-                } => (value == our_value && our_key == key && our_col == column),
-                _ => false,
-            },
             MirNodeInner::ParamFilter {
                 col: ref our_col,
                 emit_key: ref our_emit_key,
@@ -575,7 +557,6 @@ impl Debug for MirNodeInner {
 
                 write!(f, "{}", cols)
             }
-            MirNodeInner::Rewrite { ref column, .. } => write!(f, "Rw [{}]", column),
             MirNodeInner::ParamFilter {
                 ref col,
                 ref emit_key,

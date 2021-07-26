@@ -278,9 +278,6 @@ impl GraphViz for MirNodeInner {
 
                 write!(out, "{}", cols)?;
             }
-            MirNodeInner::Rewrite { ref column, .. } => {
-                write!(out, "Rw | column: {}", column)?;
-            }
             MirNodeInner::ParamFilter {
                 ref col,
                 ref emit_key,
