@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 //! Implementation of an interval tree that works with inclusive/exclusive
 //! bounds, as well as unbounded intervals. It is based on the
 //! data structure described in Cormen et al.
@@ -30,7 +29,8 @@
 //! - Every node's upper bound is less than or equal to its parent's max bound
 //! - The max bound of each node is equal to the upper bound of either that node, or one of that
 //!   node's descendants
-#![feature(bound_as_ref)]
+#![warn(clippy::dbg_macro)]
+#![feature(bound_as_ref, stmt_expr_attributes)]
 
 use std::cmp::{max, Ordering};
 use std::fmt;
@@ -516,9 +516,14 @@ where
                         to_insert.push(Box::new(Node::new(below)));
                         to_insert.push(Box::new(Node::new(above)));
                     }
-                    (None, None) => unreachable!(
+                    (None, None) =>
+                    #[allow(clippy::unreachable)]
+                    // actually unreachable - and there's a proptest covering it!
+                    {
+                        unreachable!(
                         "fully covered node should have already been removed in maybe_replace_node",
-                    ),
+                    )
+                    }
                 }
 
                 if let Some(left) = node.left.take() {
