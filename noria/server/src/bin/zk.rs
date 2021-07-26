@@ -1,8 +1,4 @@
-extern crate clap;
-extern crate noria;
-extern crate serde_json;
-extern crate zookeeper;
-
+use anyhow::bail;
 use noria::consensus::{CONTROLLER_KEY, STATE_KEY};
 use serde_json::Value;
 use std::process;
@@ -20,7 +16,7 @@ impl Watcher for EventWatcher {
     }
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     use clap::{App, Arg};
     let matches = App::new("zkUtil")
         .version("0.0.1")
@@ -70,7 +66,7 @@ fn main() {
             Err(e) => match e {
                 ZkError::NoNode => {
                     println!("no current Soup controller in Zookeeper!");
-                    return;
+                    return Ok(());
                 }
                 _ => panic!("{:?}", e),
             },
@@ -78,13 +74,8 @@ fn main() {
 
         let (ref current_data, ref _stat) = match zk.get_data(STATE_KEY, false) {
             Ok(data) => data,
-            Err(e) => match e {
-                ZkError::NoNode => {
-                    println!("no current Soup configuration in Zookeeper!");
-                    return;
-                }
-                _ => panic!("{:?}", e),
-            },
+            Err(ZkError::NoNode) => bail!("no current Soup configuration in Zookeeper!"),
+            Err(e) => return Err(e.into()),
         };
 
         let controller: Value = serde_json::from_slice(current_ctrl).unwrap();
@@ -113,4 +104,5 @@ fn main() {
             Err(e) => println!("Failed to clean: {:?}", e),
         }
     }
+    Ok(())
 }
