@@ -4052,7 +4052,7 @@ dependencies = [
  "backtrace",
  "bincode",
  "chrono",
- "clap 2.33.3",
+ "clap 3.0.0-beta.2",
  "crossbeam 0.8.1",
  "diff",
  "futures 0.3.15",

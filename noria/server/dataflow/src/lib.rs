@@ -37,8 +37,10 @@ mod processing;
 use derivative::Derivative;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time;
+use thiserror::Error;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
 pub use msql_srv::MysqlTime;
@@ -82,6 +84,23 @@ pub enum DurabilityMode {
     DeleteOnExit,
     /// Persist updates to disk, and don't delete them later.
     Permanent,
+}
+
+#[derive(Debug, Error)]
+#[error("Invalid durability mode; expected one of persistent, ephemeral, or memory")]
+pub struct InvalidDurabilityMode;
+
+impl FromStr for DurabilityMode {
+    type Err = InvalidDurabilityMode;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "persistent" => Ok(Self::Permanent),
+            "ephemeral" => Ok(Self::DeleteOnExit),
+            "memory" => Ok(Self::MemoryOnly),
+            _ => Err(InvalidDurabilityMode),
+        }
+    }
 }
 
 /// Parameters to control the operation of GroupCommitQueue.

@@ -26,36 +26,34 @@ fn main() {
         .version("0.0.1")
         .about("Soup Zookeeper utility. Dumps and optionally cleans configuration stored in Zk.")
         .arg(
-            Arg::with_name("zookeeper")
-                .short("z")
+            Arg::new("zookeeper")
+                .short('z')
                 .long("zookeeper")
                 .takes_value(true)
                 .default_value("127.0.0.1:2181")
-                .help("Zookeeper connection info."),
+                .about("Zookeeper connection info."),
         )
         .arg(
-            Arg::with_name("deployment")
+            Arg::new("deployment")
                 .long("deployment")
-                .short("d")
+                .short('d')
                 .required(true)
                 .takes_value(true)
-                .help("Soup deployment ID."),
+                .about("Soup deployment ID."),
         )
         .arg(
-            Arg::with_name("clean")
-                .short("c")
+            Arg::new("clean")
+                .short('c')
                 .long("clean")
                 .takes_value(false)
-                .required_unless("show")
-                .help("Remove existing configuration."),
+                .about("Remove existing configuration."),
         )
         .arg(
-            Arg::with_name("show")
-                .short("s")
+            Arg::new("show")
+                .short('s')
                 .long("show")
                 .takes_value(false)
-                .required_unless("clean")
-                .help("Print current configuration to stdout."),
+                .about("Print current configuration to stdout."),
         )
         .get_matches();
 
