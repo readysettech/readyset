@@ -33,14 +33,12 @@ use crate::{DomainRequest, Readers};
 
 #[derive(Debug)]
 pub enum PollEvent {
-    ResumePolling,
     Process(Box<Packet>),
     Timeout,
 }
 
 #[derive(Debug)]
 pub enum ProcessResult {
-    KeepPolling(Option<time::Duration>),
     Processed,
     StopPolling,
 }
@@ -3932,6 +3930,42 @@ impl Domain {
             })
     }
 
+    pub fn resume_polling(&mut self) -> Option<time::Duration> {
+        // when do we need to be woken up again?
+        let now = time::Instant::now();
+        let opt1 = self
+            .buffered_replay_requests
+            .iter()
+            .filter(|&(_, &(_, ref keys, _))| !keys.is_empty())
+            .map(|(_, &(first, _, _))| {
+                self.replay_batch_timeout
+                    .checked_sub(now.duration_since(first))
+                    .unwrap_or_else(|| time::Duration::from_millis(0))
+            })
+            .min();
+        let opt2 = self.group_commit_queues.duration_until_flush();
+        let opt3 = self.timed_purges.front().map(|tp| {
+            if tp.time > now {
+                tp.time - now
+            } else {
+                time::Duration::from_millis(0)
+            }
+        });
+
+        let mut timeout = opt1.or(opt2).or(opt3);
+        // timeout is based on opt2, so if opt2 is Some so is timeout
+        #[allow(clippy::unwrap_used)]
+        if let Some(opt2) = opt2 {
+            timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
+        }
+        // timeout is based on opt3, so if opt3 is Some so is timeout
+        #[allow(clippy::unwrap_used)]
+        if let Some(opt3) = opt3 {
+            timeout = Some(std::cmp::min(timeout.unwrap(), opt3));
+        }
+        timeout
+    }
+
     pub fn on_event(
         &mut self,
         executor: &mut dyn Executor,
@@ -3943,41 +3977,6 @@ impl Domain {
         //self.total_time.start();
         //self.total_ptime.start();
         let res = match event {
-            PollEvent::ResumePolling => {
-                // when do we need to be woken up again?
-                let now = time::Instant::now();
-                let opt1 = self
-                    .buffered_replay_requests
-                    .iter()
-                    .filter(|&(_, &(_, ref keys, _))| !keys.is_empty())
-                    .map(|(_, &(first, _, _))| {
-                        self.replay_batch_timeout
-                            .checked_sub(now.duration_since(first))
-                            .unwrap_or_else(|| time::Duration::from_millis(0))
-                    })
-                    .min();
-                let opt2 = self.group_commit_queues.duration_until_flush();
-                let opt3 = self.timed_purges.front().map(|tp| {
-                    if tp.time > now {
-                        tp.time - now
-                    } else {
-                        time::Duration::from_millis(0)
-                    }
-                });
-
-                let mut timeout = opt1.or(opt2).or(opt3);
-                // timeout is based on opt2, so if opt2 is Some so is timeout
-                #[allow(clippy::unwrap_used)]
-                if let Some(opt2) = opt2 {
-                    timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
-                }
-                // timeout is based on opt3, so if opt3 is Some so is timeout
-                #[allow(clippy::unwrap_used)]
-                if let Some(opt3) = opt3 {
-                    timeout = Some(std::cmp::min(timeout.unwrap(), opt3));
-                }
-                Ok(ProcessResult::KeepPolling(timeout))
-            }
             PollEvent::Process(packet) => {
                 // TODO: Initialize tracer here, and when flushing group commit
                 // queue.
