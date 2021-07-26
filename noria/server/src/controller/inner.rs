@@ -39,7 +39,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{cell, time};
 use vec1::Vec1;
@@ -1302,7 +1302,7 @@ impl ControllerInner {
             .clone();
         let uid = &[uid];
         if context.get("group").is_none() {
-            let x = Arc::new(Mutex::new(HashMap::new()));
+            let x = Arc::new(std::sync::Mutex::new(HashMap::new()));
             for g in groups {
                 // TODO: this should use external APIs through noria::ControllerHandle
                 // TODO: can this move to the client entirely?
