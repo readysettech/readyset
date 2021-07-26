@@ -715,7 +715,8 @@ impl Migration {
                     recorded::DOMAIN_NODE_ADDED,
                     1,
                     "domain" => domain.index().to_string(),
-                    "ntype" => (&ingredients[ni]).node_type_string()
+                    "ntype" => (&ingredients[ni]).node_type_string(),
+                    "node" => nnodes.to_string()
                 );
 
                 let mut ip: IndexPair = ni.into();
