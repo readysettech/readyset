@@ -71,21 +71,8 @@ impl MirQuery {
     // merging certain nodes together, and return it.
     // Also return a list of any new nodes created so that the
     // caller can add them to any other internal representations.
-    pub fn optimize(
-        mut self,
-        table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-        sec: bool,
-    ) -> MirQuery {
-        super::rewrite::pull_required_base_columns(&mut self, table_mapping, sec);
-        self
-    }
-
-    pub fn make_universe_naming_consistent(
-        mut self,
-        table_mapping: &HashMap<(String, Option<String>), String>,
-        base_name: String,
-    ) -> MirQuery {
-        super::rewrite::make_universe_naming_consistent(&mut self, table_mapping, base_name);
+    pub fn optimize(mut self) -> MirQuery {
+        super::rewrite::pull_required_base_columns(&mut self);
         self
     }
 }

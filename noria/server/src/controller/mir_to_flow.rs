@@ -36,7 +36,6 @@ use petgraph::graph::NodeIndex;
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<QueryFlowParts> {
     use std::collections::VecDeque;
 
@@ -64,14 +63,13 @@ pub(super) fn mir_query_to_flow_parts(
             let n = n.borrow_mut();
             (n.name.clone(), n.from_version)
         };
-        let flow_node =
-            mir_node_to_flow_parts(&mut n.borrow_mut(), mig, table_mapping).map_err(|e| {
-                ReadySetError::MirNodeCreationFailed {
-                    name,
-                    from_version,
-                    source: Box::new(e),
-                }
-            })?;
+        let flow_node = mir_node_to_flow_parts(&mut n.borrow_mut(), mig).map_err(|e| {
+            ReadySetError::MirNodeCreationFailed {
+                name,
+                from_version,
+                source: Box::new(e),
+            }
+        })?;
         match flow_node {
             FlowNode::New(na) => new_nodes.push(na),
             FlowNode::Existing(na) => reused_nodes.push(na),
@@ -107,11 +105,7 @@ pub(super) fn mir_query_to_flow_parts(
     })
 }
 
-fn mir_node_to_flow_parts(
-    mir_node: &mut MirNode,
-    mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
-) -> ReadySetResult<FlowNode> {
+fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadySetResult<FlowNode> {
     let name = mir_node.name.clone();
     Ok(match mir_node.flow_node {
         None => {
@@ -133,7 +127,6 @@ fn mir_node_to_flow_parts(
                         group_by,
                         GroupedNodeType::Aggregation(kind.clone()),
                         mig,
-                        table_mapping,
                     )?
                 }
                 MirNodeInner::Base {
@@ -166,7 +159,6 @@ fn mir_node_to_flow_parts(
                         group_by,
                         GroupedNodeType::Extremum(kind.clone()),
                         mig,
-                        table_mapping,
                     )?
                 }
                 MirNodeInner::Filter { ref conditions } => {
@@ -234,7 +226,6 @@ fn mir_node_to_flow_parts(
                         emit_key,
                         operator,
                         mig,
-                        table_mapping,
                     )?
                 }
                 MirNodeInner::Latest { ref group_by } => {
@@ -303,7 +294,6 @@ fn mir_node_to_flow_parts(
                         expressions,
                         literals,
                         mig,
-                        table_mapping,
                     )?
                 }
                 MirNodeInner::Reuse { ref node } => {
@@ -331,7 +321,6 @@ fn mir_node_to_flow_parts(
                         mir_node.ancestors(),
                         duplicate_mode,
                         mig,
-                        table_mapping,
                     )?
                 }
                 MirNodeInner::Distinct { ref group_by } => {
@@ -357,28 +346,6 @@ fn mir_node_to_flow_parts(
                         group_by,
                         *k,
                         *offset,
-                        mig,
-                    )?
-                }
-                MirNodeInner::Rewrite {
-                    ref value,
-                    ref column,
-                    ref key,
-                } => {
-                    invariant_eq!(mir_node.ancestors.len(), 2);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let src = mir_node.ancestors[0].clone();
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let should_rewrite = mir_node.ancestors[1].clone();
-
-                    make_rewrite_node(
-                        &name,
-                        src,
-                        should_rewrite,
-                        mir_node.columns.as_slice(),
-                        value,
-                        column,
-                        key,
                         mig,
                     )?
                 }
@@ -520,7 +487,6 @@ fn make_union_node(
     ancestors: &[MirNodeRef],
     duplicate_mode: ops::union::DuplicateMode,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -533,7 +499,7 @@ fn make_union_node(
             .get(i)
             .ok_or_else(|| internal_err(format!("no index {} in emit cols {:?}", i, emit)))?
             .iter()
-            .map(|c| n.borrow().column_id_for_column(c, table_mapping))
+            .map(|c| n.borrow().column_id_for_column(c))
             .collect::<Vec<_>>();
 
         let ni = n.borrow().flow_node_addr()?;
@@ -545,36 +511,6 @@ fn make_union_node(
         ops::union::Union::new(emit_column_id, duplicate_mode)?,
     );
 
-    Ok(FlowNode::New(node))
-}
-
-fn make_rewrite_node(
-    name: &str,
-    src: MirNodeRef,
-    should_rewrite: MirNodeRef,
-    columns: &[Column],
-    value: &str,
-    rewrite_col: &str,
-    key: &str,
-    mig: &mut Migration,
-) -> ReadySetResult<FlowNode> {
-    let src_na = src.borrow().flow_node_addr()?;
-    let should_rewrite_na = should_rewrite.borrow().flow_node_addr()?;
-    let column_names = columns.iter().map(|c| &c.name).collect::<Vec<_>>();
-    let rewrite_col = column_names
-        .iter()
-        .rposition(|c| *c == rewrite_col)
-        .ok_or_else(|| internal_err("could not find rewrite col"))?;
-    let key = column_names
-        .iter()
-        .rposition(|c| *c == key)
-        .ok_or_else(|| internal_err("could not find rewrite col key"))?;
-
-    let node = mig.add_ingredient(
-        String::from(name),
-        column_names.as_slice(),
-        ops::rewrite::Rewrite::new(src_na, should_rewrite_na, rewrite_col, value.into(), key),
-    );
     Ok(FlowNode::New(node))
 }
 
@@ -605,16 +541,15 @@ fn make_grouped_node(
     group_by: &[Column],
     kind: GroupedNodeType,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
     let parent_na = parent.borrow().flow_node_addr()?;
     let parent_node = parent.borrow();
     let column_names = column_names(columns);
-    let over_col_indx = parent_node.column_id_for_column(on, table_mapping);
+    let over_col_indx = parent_node.column_id_for_column(on);
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent_node.column_id_for_column(c, table_mapping))
+        .map(|c| parent_node.column_id_for_column(c))
         .collect::<Vec<_>>();
     invariant!(!group_col_indx.is_empty());
 
@@ -874,14 +809,13 @@ fn make_param_filter_node(
     emit_key: &Column,
     operator: &BinaryOperator,
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
     use nom_sql::BinaryOperator as nom_op;
     use ops::param_filter::Operator as pf_op;
 
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
-    let col = parent.borrow().column_id_for_column(col, table_mapping);
+    let col = parent.borrow().column_id_for_column(col);
     let emit_key = column_names
         .iter()
         .rposition(|c| *c == emit_key.name)
@@ -911,7 +845,7 @@ fn make_latest_node(
 
     let group_col_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, None))
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     // latest doesn't support compound group by
@@ -962,7 +896,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
         Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
             parent
                 .borrow()
-                .column_id_for_column(&Column::new(table.as_deref(), &name), None),
+                .column_id_for_column(&Column::new(table.as_deref(), &name)),
         )),
         Expression::BinaryOp { lhs, op, rhs } => Ok(DataflowExpression::Op {
             op,
@@ -1039,7 +973,6 @@ fn make_project_node(
     expressions: &[(String, Expression)],
     literals: &[(String, DataType)],
     mig: &mut Migration,
-    table_mapping: Option<&HashMap<(String, Option<String>), String>>,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(source_columns);
@@ -1049,7 +982,7 @@ fn make_project_node(
         .map(|c| {
             parent
                 .borrow()
-                .find_source_for_child_column(c, table_mapping)
+                .find_source_for_child_column(c)
                 .ok_or_else(|| {
                     internal_err(format!("could not find source for child column: {:?}", c))
                 })
@@ -1090,12 +1023,12 @@ fn make_distinct_node(
         // no query parameters, so we index on the first column
         columns
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c, None))
+            .map(|c| parent.borrow().column_id_for_column(c))
             .collect::<Vec<_>>()
     } else {
         group_by
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c, None))
+            .map(|c| parent.borrow().column_id_for_column(c))
             .collect::<Vec<_>>()
     };
 
@@ -1136,7 +1069,7 @@ fn make_topk_node(
 
     let group_by_indx = group_by
         .iter()
-        .map(|c| parent.borrow().column_id_for_column(c, None))
+        .map(|c| parent.borrow().column_id_for_column(c))
         .collect::<Vec<_>>();
 
     let cmp_rows = match *order {
@@ -1152,10 +1085,7 @@ fn make_topk_node(
                         OrderType::OrderAscending => OrderType::OrderDescending,
                         OrderType::OrderDescending => OrderType::OrderAscending,
                     };
-                    (
-                        parent.borrow().column_id_for_column(c, None),
-                        reversed_order_type,
-                    )
+                    (parent.borrow().column_id_for_column(c), reversed_order_type)
                 })
                 .collect();
 
@@ -1181,7 +1111,7 @@ fn make_post_lookup(
     let order_by = order_by.as_ref().map(|order| {
         order
             .iter()
-            .map(|(col, ot)| (parent.borrow().column_id_for_column(col, None), *ot))
+            .map(|(col, ot)| (parent.borrow().column_id_for_column(col), *ot))
             .collect()
     });
     Ok(PostLookup { order_by, limit })
@@ -1206,7 +1136,7 @@ fn materialize_leaf_node(
     if !key_cols.is_empty() {
         let key_cols: Vec<_> = key_cols
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c, None))
+            .map(|c| parent.borrow().column_id_for_column(c))
             .collect();
         mig.maintain(name, na, &key_cols[..], post_lookup);
     } else {
