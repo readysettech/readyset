@@ -1,9 +1,10 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
 use crossbeam::queue::ArrayQueue;
-use metrics::{GaugeValue, SetRecorderError, Unit};
+use metrics::{GaugeValue, Unit};
 
 use noria::metrics::Key;
+use thiserror::Error;
 
 pub use crate::metrics::buffered_recorder::BufferedRecorder;
 pub use crate::metrics::composite_recorder::CompositeMetricsRecorder;
@@ -32,17 +33,32 @@ enum MetricsOp {
 
 type OpQueue = ArrayQueue<MetricsOp>;
 
+/// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.
+///
+/// Essentially identical to [`metrics::SetRecorderError`], except that can't be constructed so we
+/// define our own version here.
+#[derive(Debug, Error)]
+#[error("Metrics recorder installed twice!")]
+pub struct RecorderInstalledTwice;
+
+impl From<metrics::SetRecorderError> for RecorderInstalledTwice {
+    fn from(_: metrics::SetRecorderError) -> Self {
+        RecorderInstalledTwice
+    }
+}
+
 /// Installs a new global recorder
 ///
 /// # Safety
 ///
 /// This function is unsafe to call when there are multiple threads; it MUST be called before
 /// other threads are created.
-pub unsafe fn install_global_recorder(rec: GlobalRecorder) -> Result<(), SetRecorderError> {
+pub unsafe fn install_global_recorder(rec: GlobalRecorder) -> Result<(), RecorderInstalledTwice> {
+    #[allow(clippy::panic)] // documented panic
     if std::mem::replace(&mut METRICS_RECORDER, Some(rec)).is_some() {
-        panic!("metrics recorder installed twice!")
+        return Err(RecorderInstalledTwice);
     }
-    metrics::set_recorder_racy(METRICS_RECORDER.as_ref().unwrap())
+    metrics::set_recorder_racy(METRICS_RECORDER.as_ref().unwrap()).map_err(|e| e.into())
 }
 
 /// Gets a static reference to the installed metrics recorder.
