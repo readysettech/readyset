@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use futures::FutureExt;
+use launchpad::select;
 use noria::{ReadySetError, ReadySetResult, ReplicationOffset, TableOperation};
 use slog::{debug, error};
 use tokio_postgres as pgsql;
@@ -152,7 +153,7 @@ impl PostgresWalConnector {
         } = self;
 
         if let Some(reader) = reader.as_mut() {
-            futures::select! {
+            select! {
                 ev = reader.next_event().fuse() => ev,
                 err = connection_handle.fuse() => match err.unwrap() { // This unwrap is ok, because it is on the handle
                     Ok(_) => unreachable!(), // Unrechable because it runs in infinite loop unless errors
