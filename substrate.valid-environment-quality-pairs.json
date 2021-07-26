@@ -8,18 +8,6 @@
 		{
 			"Environment": "sandbox",
 			"Quality": "default"
-		},
-		{
-			"Environment": "dev",
-			"Quality": "default"
-		},
-		{
-			"Environment": "stage",
-			"Quality": "default"
-		},
-		{
-			"Environment": "prod",
-			"Quality": "default"
 		}
 	],
 	"SubstrateVersion": "2021.05"

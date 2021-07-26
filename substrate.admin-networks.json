@@ -13,6 +13,30 @@
 			"Environment": "admin",
 			"Quality": "default",
 			"IPv4": "192.168.8.0/21"
+		},
+		{
+			"Region": "ap-east-1",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.16.0/21"
+		},
+		{
+			"Region": "ap-northeast-1",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.24.0/21"
+		},
+		{
+			"Region": "eu-west-1",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.32.0/21"
+		},
+		{
+			"Region": "sa-east-1",
+			"Environment": "admin",
+			"Quality": "default",
+			"IPv4": "192.168.40.0/21"
 		}
 	],
 	"RFC1918": "192.168.0.0/16",
