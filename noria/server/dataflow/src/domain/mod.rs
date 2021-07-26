@@ -1817,6 +1817,14 @@ impl Domain {
             self.wait_time.stop();
         }
 
+        // Count of each packet sent from a domain.
+        counter!(
+            recorded::DOMAIN_PACKET_SENT,
+            1,
+            "domain" => self.index.index().to_string(),
+            "packet_type" => m.to_string()
+        );
+
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
