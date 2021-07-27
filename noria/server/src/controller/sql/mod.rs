@@ -808,50 +808,63 @@ impl SqlIncorporator {
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
         for sq in q.extract_subqueries() {
-            use self::passes::subqueries::{query_from_expr, SubqueryPosition};
+            use self::passes::subqueries::SubqueryPosition;
             use nom_sql::JoinRightSide;
             let default_name = format!("q_{}", self.num_queries);
+
+            let mut subquery_column = |stmt: &SelectStatement| -> ReadySetResult<_> {
+                if stmt.fields.len() != 1 {
+                    unsupported!("Operand must contain exactly 1 column")
+                }
+
+                #[allow(clippy::unwrap_used)] // just checked len is 1 above
+                let field = stmt.fields.first().unwrap();
+
+                let col_name = match field {
+                    FieldDefinitionExpression::Expression {
+                        alias: Some(name), ..
+                    }
+                    | FieldDefinitionExpression::Expression {
+                        expr: Expression::Column(nom_sql::Column { name, .. }),
+                        alias: None,
+                    } => name.clone(),
+                    FieldDefinitionExpression::Expression { expr, .. } => expr.to_string(),
+                    FieldDefinitionExpression::All | FieldDefinitionExpression::AllInTable(_) => {
+                        internal!("extract_subqueries must be run after expand_stars")
+                    }
+                };
+
+                let qfp = self.nodes_for_named_query(
+                    SqlQuery::Select(stmt.clone()),
+                    default_name.clone(),
+                    false,
+                    false,
+                    mig,
+                )?;
+
+                Ok(nom_sql::Column {
+                    name: col_name,
+                    table: Some(qfp.name),
+                    function: None,
+                })
+            };
+
             match sq {
                 SubqueryPosition::Expr(expr) => {
-                    let (sq, column) = query_from_expr(expr);
-
-                    let qfp = self
-                        .nodes_for_named_query(sq, default_name, false, false, mig)
-                        .expect("failed to add subquery");
-
-                    *expr = Expression::Column(nom_sql::Column {
-                        table: Some(qfp.name.clone()),
-                        ..column
-                    });
-                }
-                SubqueryPosition::In(in_val) => {
-                    let (sq, column) = match in_val {
-                        InValue::Subquery(stmt) => {
-                            let col = stmt
-                                .fields
-                                .iter()
-                                .map(|fe| match fe {
-                                    FieldDefinitionExpression::Expression {
-                                        expr: Expression::Column(c),
-                                        ..
-                                    } => c.clone(),
-                                    _ => unreachable!(),
-                                })
-                                .next()
-                                .unwrap();
-                            (SqlQuery::Select((**stmt).clone()), col)
-                        }
-                        _ => unreachable!(),
+                    let column = match expr {
+                        Expression::NestedSelect(stmt) => subquery_column(stmt)?,
+                        _ => internal!("SubqueryPosition::Expression should never contain anything other than Expression::NestedQuery"),
                     };
 
-                    let qfp = self
-                        .nodes_for_named_query(sq, default_name, false, false, mig)
-                        .expect("failed to add subquery");
+                    *expr = Expression::Column(column);
+                }
+                SubqueryPosition::In(in_val) => {
+                    let column = match in_val {
+                        InValue::Subquery(stmt) => subquery_column(stmt)?,
+                        _ => internal!("SubqueryPosition::In should never contain anything other than InValue::Subquery"),
+                    };
 
-                    *in_val = InValue::List(vec![Expression::Column(nom_sql::Column {
-                        table: Some(qfp.name.clone()),
-                        ..column
-                    })])
+                    *in_val = InValue::List(vec![Expression::Column(column)])
                 }
                 SubqueryPosition::Join(join_right_side) => {
                     *join_right_side = match *join_right_side {
@@ -879,7 +892,7 @@ impl SqlIncorporator {
                                 schema: None,
                             })
                         }
-                        _ => unreachable!(),
+                        _ => internal!("SubqueryPosition::Join should never contain anything other than JoinRightSide::NestedSelect"),
                     }
                 }
             }
