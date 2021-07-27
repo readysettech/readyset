@@ -3,85 +3,93 @@ use nom_sql::{
     JoinRightSide, SelectStatement, SqlQuery,
 };
 
-use itertools::Either;
+use noria::{ReadySetError, ReadySetResult};
 use std::collections::HashMap;
-use std::{iter, mem};
+use std::mem;
 
-pub trait StarExpansion {
-    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> Self;
+pub trait StarExpansion: Sized {
+    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> ReadySetResult<Self>;
 }
 
 impl StarExpansion for SelectStatement {
-    fn expand_stars(mut self, write_schemas: &HashMap<String, Vec<String>>) -> Self {
+    fn expand_stars(
+        mut self,
+        write_schemas: &HashMap<String, Vec<String>>,
+    ) -> ReadySetResult<Self> {
         self.ctes = mem::take(&mut self.ctes)
             .into_iter()
-            .map(|cte| CommonTableExpression {
-                name: cte.name,
-                statement: cte.statement.expand_stars(write_schemas),
+            .map(|cte| -> ReadySetResult<_> {
+                Ok(CommonTableExpression {
+                    name: cte.name,
+                    statement: cte.statement.expand_stars(write_schemas)?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.join = mem::take(&mut self.join)
             .into_iter()
-            .map(|join| JoinClause {
-                right: match join.right {
-                    JoinRightSide::NestedSelect(stmt, name) => JoinRightSide::NestedSelect(
-                        Box::new(stmt.expand_stars(write_schemas)),
-                        name,
-                    ),
-                    r => r,
-                },
-                ..join
+            .map(|join| -> ReadySetResult<_> {
+                Ok(JoinClause {
+                    right: match join.right {
+                        JoinRightSide::NestedSelect(stmt, name) => JoinRightSide::NestedSelect(
+                            Box::new(stmt.expand_stars(write_schemas)?),
+                            name,
+                        ),
+                        r => r,
+                    },
+                    ..join
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let fields = mem::take(&mut self.fields);
         let subquery_schemas = super::subquery_schemas(&self.ctes, &self.join);
 
-        let expand_table = move |table_name: String| {
-            write_schemas
+        let expand_table = move |table_name: String| -> ReadySetResult<_> {
+            Ok(write_schemas
                 .get(&table_name)
                 .map(|fs| fs.iter().map(String::as_str).collect())
                 .or_else(|| subquery_schemas.get(table_name.as_str()).cloned())
-                // TODO(eta): check that this panic can never fire
-                .unwrap_or_else(|| panic!("table name `{}` does not exist", table_name))
+                .ok_or_else(|| ReadySetError::TableNotFound(table_name.clone()))?
                 .into_iter()
                 .map(move |f| FieldDefinitionExpression::Expression {
                     expr: Expression::Column(Column::from(
                         format!("{}.{}", table_name, f).as_ref(),
                     )),
                     alias: None,
-                })
+                }))
         };
 
-        self.fields = fields
-            .into_iter()
-            .flat_map(|field| match field {
-                FieldDefinitionExpression::All => Either::Left(
-                    self.tables
-                        .iter()
-                        .map(|t| t.name.clone())
-                        .flat_map(&expand_table),
-                ),
+        for field in fields {
+            match field {
+                FieldDefinitionExpression::All => {
+                    for table in &self.tables {
+                        for field in expand_table(table.name.clone())? {
+                            self.fields.push(field);
+                        }
+                    }
+                }
                 FieldDefinitionExpression::AllInTable(t) => {
-                    Either::Right(Either::Left(expand_table(t)))
+                    for field in expand_table(t)? {
+                        self.fields.push(field);
+                    }
                 }
                 e @ FieldDefinitionExpression::Expression { .. } => {
-                    Either::Right(Either::Right(iter::once(e)))
+                    self.fields.push(e);
                 }
-            })
-            .collect();
+            }
+        }
 
-        self
+        Ok(self)
     }
 }
 
 impl StarExpansion for SqlQuery {
-    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> Self {
-        match self {
-            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_stars(write_schemas)),
+    fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> ReadySetResult<Self> {
+        Ok(match self {
+            SqlQuery::Select(sq) => SqlQuery::Select(sq.expand_stars(write_schemas)?),
             _ => self,
-        }
+        })
     }
 }
 
@@ -96,7 +104,7 @@ mod tests {
             let q = parse_query($source).unwrap();
             let expected = parse_query($expected).unwrap();
             let schema = hashmap!($($schema)*);
-            let res = q.expand_stars(&schema);
+            let res = q.expand_stars(&schema).unwrap();
             assert_eq!(res, expected, "{} != {}", res, expected);
         }};
     }
