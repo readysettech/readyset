@@ -58,7 +58,7 @@ impl Relaxed {
     ) -> Result<Option<ReuseType>, ReadySetError> {
         // 1. NQG's nodes is subset of EQG's nodes
         // -- already established via signature check
-        assert!(existing_qg
+        debug_assert!(existing_qg
             .signature()
             .is_weak_generalization_of(&new_qg.signature()));
 

@@ -1,8 +1,26 @@
+use std::convert::TryFrom;
+
 use crate::controller::sql::query_graph::JoinPredicate;
-use crate::controller::sql::query_utils::is_logical_op;
 use crate::ReadySetResult;
 use nom_sql::{BinaryOperator, Expression, Expression::*, Literal};
 use noria::{internal, unsupported, ReadySetError};
+
+enum LogicalOp {
+    And,
+    Or,
+}
+
+impl TryFrom<BinaryOperator> for LogicalOp {
+    type Error = BinaryOperator;
+
+    fn try_from(value: BinaryOperator) -> Result<Self, Self::Error> {
+        match value {
+            BinaryOperator::And => Ok(Self::And),
+            BinaryOperator::Or => Ok(Self::Or),
+            _ => Err(value),
+        }
+    }
+}
 
 fn direct_elimination(
     op1: BinaryOperator,
@@ -137,7 +155,7 @@ pub fn complex_predicate_implies(np: &Expression, ep: &Expression) -> Result<boo
             rhs: e_rhs,
             op: e_op,
         } => {
-            if is_logical_op(e_op) {
+            if let Ok(logical_op) = LogicalOp::try_from(*e_op) {
                 {
                     if let BinaryOp {
                         lhs: n_lhs,
@@ -153,12 +171,11 @@ pub fn complex_predicate_implies(np: &Expression, ep: &Expression) -> Result<boo
                         }
                     }
 
-                    match e_op {
-                        BinaryOperator::And => Ok(complex_predicate_implies(np, &*e_lhs)?
+                    match logical_op {
+                        LogicalOp::And => Ok(complex_predicate_implies(np, &*e_lhs)?
                             && complex_predicate_implies(np, &*e_rhs)?),
-                        BinaryOperator::Or => Ok(complex_predicate_implies(np, &*e_lhs)?
+                        LogicalOp::Or => Ok(complex_predicate_implies(np, &*e_lhs)?
                             || complex_predicate_implies(np, &*e_rhs)?),
-                        _ => unreachable!("Already checked logical_op above"),
                     }
                 }
             } else if let BinaryOp {

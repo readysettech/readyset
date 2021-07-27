@@ -60,7 +60,11 @@ impl Finkelstein {
                 ReuseType::BackjoinRequired(_) => {
                     score += qg.relations.len() + 3 * qg.edges.len();
                 }
-                _ => unreachable!(),
+                ReuseType::PrefixReuse =>
+                #[allow(clippy::unreachable)] // Finkelstein reuse can never produce PrefixReuse
+                {
+                    unreachable!()
+                }
             }
 
             if score > best_score {
