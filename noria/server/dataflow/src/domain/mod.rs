@@ -2762,7 +2762,7 @@ impl Domain {
                                     // filled, even if that hole is empty!
                                     if let Some(wh) = r.writer_mut() {
                                         for key in backfill_keys.iter() {
-                                            wh.mark_filled(key.clone());
+                                            wh.mark_filled(key.clone())?;
                                         }
                                     }
                                 }
