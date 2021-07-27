@@ -463,11 +463,11 @@ impl SqlIncorporator {
     fn add_base_via_mir(
         &mut self,
         query_name: &str,
-        query: &SqlQuery,
+        stmt: CreateTableStatement,
         mut mig: &mut Migration,
     ) -> ReadySetResult<QueryFlowParts> {
         // first, compute the MIR representation of the SQL query
-        let mut mir = self.mir_converter.named_base_to_mir(query_name, query)?;
+        let mut mir = self.mir_converter.named_base_to_mir(query_name, &stmt)?;
 
         trace!(self.log, "Base node MIR: {:#?}", mir);
 
@@ -480,11 +480,7 @@ impl SqlIncorporator {
         // on base table schema change, we will overwrite the existing schema here.
         // TODO(malte): this means that requests for this will always return the *latest* schema
         // for a base.
-        if let SqlQuery::CreateTable(ref ctq) = query {
-            self.base_schemas.insert(query_name.to_owned(), ctq.clone());
-        } else {
-            unimplemented!();
-        }
+        self.base_schemas.insert(query_name.to_owned(), stmt);
 
         self.register_query(query_name, None, &mir);
 
@@ -1008,7 +1004,7 @@ impl SqlIncorporator {
                 self.add_select_query(&query_name, is_name_required, &sq, is_leaf, mig)?
                     .0
             }
-            ref q @ SqlQuery::CreateTable { .. } => self.add_base_via_mir(&query_name, q, mig)?,
+            SqlQuery::CreateTable(stmt) => self.add_base_via_mir(&query_name, stmt, mig)?,
             q => internal!("unhandled query type in recipe: {:?}", q),
         };
 
