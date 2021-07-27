@@ -1,3 +1,5 @@
+#![feature(never_type)]
+
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;

@@ -283,15 +283,12 @@ where
                         }
                     };
 
-                match replicators::NoriaAdapter::start_with_url(&url, noria, None, log.clone())
-                    .await
+                if let Err(err) =
+                    replicators::NoriaAdapter::start_with_url(&url, noria, None, log.clone()).await
                 {
-                    Ok(()) => unreachable!(), // connector runs in infinite loop, so it will never finish normally
-                    Err(err) => {
-                        // On each replication error we wait for 30 seconds and then try again
-                        error!(log, "Replication error {}", err);
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                    }
+                    // On each replication error we wait for 30 seconds and then try again
+                    error!(log, "Replication error {}", err);
+                    tokio::time::sleep(Duration::from_secs(30)).await;
                 }
             }
         }));

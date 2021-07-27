@@ -88,7 +88,7 @@ impl NoriaAdapter<ZookeeperAuthority> {
         deployment: S2,
         options: AdapterOpts,
         log: Option<Logger>,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<!> {
         let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment))?;
         let noria = noria::ControllerHandle::new(authority).await?;
         let log = log.unwrap_or_else(|| Logger::root(Discard, o!()));
@@ -109,7 +109,7 @@ impl<A: Authority> NoriaAdapter<A> {
         noria: ControllerHandle<A>,
         server_id: Option<u32>,
         log: Logger,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<!> {
         let options = url
             .as_ref()
             .parse()
@@ -123,7 +123,7 @@ impl<A: Authority> NoriaAdapter<A> {
         options: AdapterOpts,
         log: slog::Logger,
         server_id: Option<u32>,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<!> {
         match options {
             AdapterOpts::MySql(options) => {
                 NoriaAdapter::start_inner_mysql(options, noria, server_id, log).await
@@ -149,7 +149,7 @@ impl<A: Authority> NoriaAdapter<A> {
         mut noria: ControllerHandle<A>,
         server_id: Option<u32>,
         log: slog::Logger,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let pos = match noria.replication_offset().await?.map(Into::into) {
@@ -199,7 +199,7 @@ impl<A: Authority> NoriaAdapter<A> {
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle<A>,
         log: slog::Logger,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let pos = noria.replication_offset().await?.map(Into::into);
@@ -308,7 +308,7 @@ impl<A: Authority> NoriaAdapter<A> {
     }
 
     /// Loop over the actions
-    async fn main_loop(&mut self, mut position: ReplicationOffset) -> ReadySetResult<()> {
+    async fn main_loop(&mut self, mut position: ReplicationOffset) -> ReadySetResult<!> {
         loop {
             let (action, pos) = self.connector.next_action(position).await?;
             position = pos.clone();

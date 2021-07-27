@@ -1,3 +1,5 @@
+#![feature(never_type)]
+
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
@@ -123,7 +125,7 @@ impl From<PostgresOpts> for AdapterOpts {
 }
 
 #[tokio::main]
-async fn main() -> noria::ReadySetResult<()> {
+async fn main() -> noria::ReadySetResult<!> {
     let opts: Opts = Opts::parse();
 
     let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
