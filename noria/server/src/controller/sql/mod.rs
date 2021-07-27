@@ -66,7 +66,7 @@ pub(crate) struct SqlIncorporator {
 
     schema_version: usize,
 
-    reuse_type: ReuseConfigType,
+    reuse_type: Option<ReuseConfigType>,
 }
 
 impl Default for SqlIncorporator {
@@ -87,7 +87,7 @@ impl Default for SqlIncorporator {
 
             schema_version: 0,
 
-            reuse_type: ReuseConfigType::Finkelstein,
+            reuse_type: Some(ReuseConfigType::Finkelstein),
         }
     }
 }
@@ -106,13 +106,13 @@ impl SqlIncorporator {
     /// Disable node reuse for future migrations.
     #[allow(unused)]
     pub(crate) fn disable_reuse(&mut self) {
-        self.reuse_type = ReuseConfigType::NoReuse;
+        self.reuse_type = None;
     }
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
     pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.reuse_type = reuse_type;
+        self.reuse_type = Some(reuse_type);
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -200,10 +200,12 @@ impl SqlIncorporator {
 
         trace!(self.log, "QG for \"{}\": {:#?}", query_name, qg);
 
-        // if reuse is disabled, we're done
-        if self.reuse_type == ReuseConfigType::NoReuse {
+        let reuse_config = if let Some(reuse_type) = self.reuse_type {
+            ReuseConfig::new(reuse_type)
+        } else {
+            // if reuse is disabled, we're done
             return Ok((qg, QueryGraphReuse::None));
-        }
+        };
 
         // Do we already have this exact query or a subset of it
         // TODO(malte): make this an O(1) lookup by QG signature
@@ -400,8 +402,6 @@ impl SqlIncorporator {
                 }
             }
         }
-
-        let reuse_config = ReuseConfig::new(self.reuse_type.clone());
 
         // Find a promising set of query graphs
         let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs)?;

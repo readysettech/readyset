@@ -192,8 +192,11 @@ fn main() -> anyhow::Result<()> {
     if opts.no_partial {
         builder.disable_partial();
     }
+
     if opts.enable_reuse {
-        builder.set_reuse(ReuseConfigType::Finkelstein);
+        builder.set_reuse(Some(ReuseConfigType::Finkelstein));
+    } else {
+        builder.set_reuse(None)
     }
 
     if let Some(r) = opts.region {

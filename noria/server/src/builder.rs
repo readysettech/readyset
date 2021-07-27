@@ -107,7 +107,7 @@ impl Builder {
     }
 
     /// Set the reuse policy for all subsequent migrations
-    pub fn set_reuse(&mut self, reuse_type: ReuseConfigType) {
+    pub fn set_reuse(&mut self, reuse_type: Option<ReuseConfigType>) {
         self.config.reuse = reuse_type;
     }
 

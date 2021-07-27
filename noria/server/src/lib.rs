@@ -402,13 +402,12 @@ mod integration_serial;
 mod integration_utils;
 pub mod metrics;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub enum ReuseConfigType {
     Finkelstein,
     Relaxed,
     Full,
-    NoReuse,
 }
 
 pub use crate::builder::Builder;
@@ -440,7 +439,7 @@ pub(crate) struct Config {
     pub(crate) heartbeat_every: time::Duration,
     pub(crate) healthcheck_every: time::Duration,
     pub(crate) quorum: usize,
-    pub(crate) reuse: ReuseConfigType,
+    pub(crate) reuse: Option<ReuseConfigType>,
     pub(crate) primary_region: Option<String>,
 }
 
@@ -462,7 +461,7 @@ impl Default for Config {
             heartbeat_every: time::Duration::from_secs(1),
             healthcheck_every: time::Duration::from_secs(10),
             quorum: 1,
-            reuse: ReuseConfigType::NoReuse,
+            reuse: None,
             primary_region: None,
         }
     }
