@@ -807,7 +807,7 @@ impl SqlIncorporator {
 
         // flattens out the query by replacing subqueries for references
         // to existing views in the graph
-        for sq in q.extract_subqueries() {
+        for sq in q.extract_subqueries()? {
             use self::passes::subqueries::SubqueryPosition;
             use nom_sql::JoinRightSide;
             let default_name = format!("q_{}", self.num_queries);
