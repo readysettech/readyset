@@ -53,7 +53,7 @@ struct Opts {
     external_address: Option<IpAddr>,
 
     /// Port to advertise to other Noria instances running in the same deployment.
-    #[clap(long, short = 'p', parse(try_from_str))]
+    #[clap(long, short = 'p', default_value = "6033", parse(try_from_str))]
     external_port: u16,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria instance.
@@ -92,7 +92,7 @@ struct Opts {
     zookeeper: String,
 
     /// Memory, in bytes, available for partially materialized state (0 = unlimited)
-    #[clap(long, short = 'm', env = "NORIA_MEMORY_BYTES")]
+    #[clap(long, short = 'm', default_value = "0", env = "NORIA_MEMORY_BYTES")]
     memory: usize,
 
     /// Frequency at which to check the state size against the memory limit (in seconds)
