@@ -2,6 +2,7 @@ use std::iter;
 
 use itertools::Either;
 use nom_sql::{Expression, FunctionExpression, InValue, JoinRightSide, SqlQuery};
+use noria::{unsupported, ReadySetResult};
 
 #[derive(Debug, PartialEq)]
 pub enum SubqueryPosition<'a> {
@@ -22,10 +23,12 @@ pub enum SubqueryPosition<'a> {
 }
 
 pub trait SubQueries {
-    fn extract_subqueries(&mut self) -> Vec<SubqueryPosition>;
+    fn extract_subqueries(&mut self) -> ReadySetResult<Vec<SubqueryPosition>>;
 }
 
-fn extract_subqueries_from_function_call(call: &mut FunctionExpression) -> Vec<SubqueryPosition> {
+fn extract_subqueries_from_function_call(
+    call: &mut FunctionExpression,
+) -> ReadySetResult<Vec<SubqueryPosition>> {
     match call {
         FunctionExpression::Avg { expr, .. }
         | FunctionExpression::Count { expr, .. }
@@ -34,77 +37,86 @@ fn extract_subqueries_from_function_call(call: &mut FunctionExpression) -> Vec<S
         | FunctionExpression::Min(expr)
         | FunctionExpression::GroupConcat { expr, .. }
         | FunctionExpression::Cast(expr, _) => extract_subqueries_from_expression(expr),
-        FunctionExpression::CountStar => vec![],
-        FunctionExpression::Call { arguments, .. } => arguments
+        FunctionExpression::CountStar => Ok(vec![]),
+        FunctionExpression::Call { arguments, .. } => Ok(arguments
             .iter_mut()
-            .flat_map(extract_subqueries_from_expression)
-            .collect(),
+            .map(extract_subqueries_from_expression)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect()),
     }
 }
 
-fn extract_subqueries_from_expression(expr: &mut Expression) -> Vec<SubqueryPosition> {
+fn extract_subqueries_from_expression(
+    expr: &mut Expression,
+) -> ReadySetResult<Vec<SubqueryPosition>> {
     match expr {
         Expression::BinaryOp { lhs, rhs, .. } => {
-            let lb = extract_subqueries_from_expression(lhs);
-            let rb = extract_subqueries_from_expression(rhs);
+            let lb = extract_subqueries_from_expression(lhs)?;
+            let rb = extract_subqueries_from_expression(rhs)?;
 
-            lb.into_iter().chain(rb.into_iter()).collect()
+            Ok(lb.into_iter().chain(rb.into_iter()).collect())
         }
         Expression::UnaryOp { rhs, .. } => extract_subqueries_from_expression(rhs),
         Expression::Between {
             operand, min, max, ..
         } => {
-            let ob = extract_subqueries_from_expression(operand);
-            let minb = extract_subqueries_from_expression(min);
-            let maxb = extract_subqueries_from_expression(max);
-            ob.into_iter()
+            let ob = extract_subqueries_from_expression(operand)?;
+            let minb = extract_subqueries_from_expression(min)?;
+            let maxb = extract_subqueries_from_expression(max)?;
+            Ok(ob
+                .into_iter()
                 .chain(minb.into_iter())
                 .chain(maxb.into_iter())
-                .collect()
+                .collect())
         }
         Expression::CaseWhen {
             condition,
             then_expr,
             else_expr,
-        } => extract_subqueries_from_expression(condition)
+        } => Ok(extract_subqueries_from_expression(condition)?
             .into_iter()
-            .chain(extract_subqueries_from_expression(then_expr))
+            .chain(extract_subqueries_from_expression(then_expr)?)
             .chain(match else_expr {
                 Some(else_expr) => {
-                    Either::Left(extract_subqueries_from_expression(else_expr).into_iter())
+                    Either::Left(extract_subqueries_from_expression(else_expr)?.into_iter())
                 }
                 None => Either::Right(iter::empty()),
             })
-            .collect(),
-        Expression::Exists(_) => unimplemented!(),
-        Expression::NestedSelect(_) => vec![SubqueryPosition::Expr(expr)],
+            .collect()),
+        Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
+        Expression::NestedSelect(_) => Ok(vec![SubqueryPosition::Expr(expr)]),
         Expression::Call(call) => extract_subqueries_from_function_call(call),
         Expression::In {
             lhs,
             rhs: rhs @ InValue::Subquery(_),
             ..
-        } => extract_subqueries_from_expression(lhs)
+        } => Ok(extract_subqueries_from_expression(lhs)?
             .into_iter()
             .chain(iter::once(SubqueryPosition::In(rhs)))
-            .collect(),
+            .collect()),
         Expression::In {
             lhs,
             rhs: InValue::List(exprs),
             ..
-        } => extract_subqueries_from_expression(lhs)
+        } => Ok(extract_subqueries_from_expression(lhs)?
             .into_iter()
             .chain(
                 exprs
                     .iter_mut()
-                    .flat_map(extract_subqueries_from_expression),
+                    .map(extract_subqueries_from_expression)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .flatten(),
             )
-            .collect(),
-        Expression::Literal(_) | Expression::Column(_) => vec![],
+            .collect()),
+        Expression::Literal(_) | Expression::Column(_) => Ok(vec![]),
     }
 }
 
 impl SubQueries for SqlQuery {
-    fn extract_subqueries(&mut self) -> Vec<SubqueryPosition> {
+    fn extract_subqueries(&mut self) -> ReadySetResult<Vec<SubqueryPosition>> {
         let mut subqueries = Vec::new();
         if let SqlQuery::Select(ref mut st) = *self {
             for jc in &mut st.join {
@@ -113,11 +125,11 @@ impl SubQueries for SqlQuery {
                 }
             }
             if let Some(ref mut ce) = st.where_clause {
-                subqueries.extend(extract_subqueries_from_expression(ce));
+                subqueries.extend(extract_subqueries_from_expression(ce)?);
             }
         }
 
-        subqueries
+        Ok(subqueries)
     }
 }
 
@@ -157,7 +169,7 @@ mod tests {
         };
 
         let mut q = SqlQuery::Select(st);
-        let res = q.extract_subqueries();
+        let res = q.extract_subqueries().unwrap();
 
         assert_eq!(res, vec![SubqueryPosition::In(&mut expected)]);
     }
@@ -176,7 +188,7 @@ mod tests {
             ..Default::default()
         });
 
-        let res = q.extract_subqueries();
+        let res = q.extract_subqueries().unwrap();
         let expected: Vec<SubqueryPosition> = Vec::new();
 
         assert_eq!(res, expected);
@@ -218,7 +230,7 @@ mod tests {
 
         let expected: Vec<SubqueryPosition> = Vec::new();
 
-        let res = q.extract_subqueries();
+        let res = q.extract_subqueries().unwrap();
 
         assert_eq!(res, expected);
     }
