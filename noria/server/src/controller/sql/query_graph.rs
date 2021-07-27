@@ -4,8 +4,10 @@ use nom_sql::{
 };
 use nom_sql::{OrderType, SelectStatement};
 
+use crate::controller::sql::query_utils::LogicalOp;
 use crate::ReadySetResult;
 use noria::{internal, invariant, invariant_eq, unsupported};
+use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::string::String;
@@ -308,183 +310,183 @@ fn classify_conditionals(
     //       and we don't support these yet.
 
     match ce {
-        Expression::BinaryOp {
-            op: op @ (BinaryOperator::And | BinaryOperator::Or),
-            lhs,
-            rhs,
-        } => {
-            // first, we recurse on both sides, collected the result of nested predicate analysis
-            // in separate collections. What do do with these depends on whether we're an AND or an
-            // OR clause:
-            //  1) AND can be split into separate local predicates one one or more tables
-            //  2) OR predictes must be preserved in their entirety, and we only use the nested
-            //     local predicates discovered to decide if the OR is over one table (so it can
-            //     remain a local predicate) or over several (so it must be a global predicate)
-            let mut new_params = Vec::new();
-            let mut new_join = Vec::new();
-            let mut new_local = HashMap::new();
-            let mut new_global = Vec::new();
+        Expression::BinaryOp { op, lhs, rhs } => {
+            if let Ok(op) = LogicalOp::try_from(*op) {
+                // first, we recurse on both sides, collected the result of nested predicate analysis
+                // in separate collections. What do do with these depends on whether we're an AND or an
+                // OR clause:
+                //  1) AND can be split into separate local predicates one one or more tables
+                //  2) OR predictes must be preserved in their entirety, and we only use the nested
+                //     local predicates discovered to decide if the OR is over one table (so it can
+                //     remain a local predicate) or over several (so it must be a global predicate)
+                let mut new_params = Vec::new();
+                let mut new_join = Vec::new();
+                let mut new_local = HashMap::new();
+                let mut new_global = Vec::new();
 
-            classify_conditionals(
-                lhs.as_ref(),
-                tables,
-                &mut new_local,
-                &mut new_join,
-                &mut new_global,
-                &mut new_params,
-            )?;
-            classify_conditionals(
-                rhs.as_ref(),
-                tables,
-                &mut new_local,
-                &mut new_join,
-                &mut new_global,
-                &mut new_params,
-            )?;
+                classify_conditionals(
+                    lhs.as_ref(),
+                    tables,
+                    &mut new_local,
+                    &mut new_join,
+                    &mut new_global,
+                    &mut new_params,
+                )?;
+                classify_conditionals(
+                    rhs.as_ref(),
+                    tables,
+                    &mut new_local,
+                    &mut new_join,
+                    &mut new_global,
+                    &mut new_params,
+                )?;
 
-            match op {
-                BinaryOperator::And => {
-                    //
-                    for (t, ces) in new_local {
-                        // conjunction, check if either side had a local predicate
-                        invariant!(
-                            ces.len() <= 2,
-                            "can only combine two or fewer ConditionExpression's"
-                        );
-                        if ces.len() == 2 {
+                match op {
+                    LogicalOp::And => {
+                        //
+                        for (t, ces) in new_local {
+                            // conjunction, check if either side had a local predicate
+                            invariant!(
+                                ces.len() <= 2,
+                                "can only combine two or fewer ConditionExpression's"
+                            );
+                            if ces.len() == 2 {
+                                let new_ce = Expression::BinaryOp {
+                                    op: BinaryOperator::And,
+                                    lhs: Box::new(ces.first().unwrap().clone()),
+                                    rhs: Box::new(ces.last().unwrap().clone()),
+                                };
+
+                                let e = local.entry(t.to_string()).or_default();
+                                e.push(new_ce);
+                            } else {
+                                let e = local.entry(t.to_string()).or_default();
+                                e.extend(ces);
+                            }
+                        }
+
+                        // one side of the AND might be a global predicate, so we need to keep
+                        // new_global around
+                        global.extend(new_global);
+                    }
+                    LogicalOp::Or => {
+                        if !new_join.is_empty() {
+                            unsupported!("can't handle OR expressions between JOIN predicates")
+                        }
+                        if !new_params.is_empty() {
+                            unsupported!(
+                                "can't handle OR expressions between query parameter predicates"
+                            );
+                        }
+                        if new_local.keys().len() == 1 && new_global.is_empty() {
+                            // OR over a single table => local predicate
+                            let (t, ces) = new_local.into_iter().next().unwrap();
+                            if ces.len() != 2 {
+                                unsupported!("should combine only 2 ConditionExpressions");
+                            }
                             let new_ce = Expression::BinaryOp {
-                                op: BinaryOperator::And,
                                 lhs: Box::new(ces.first().unwrap().clone()),
+                                op: BinaryOperator::Or,
                                 rhs: Box::new(ces.last().unwrap().clone()),
                             };
 
-                            let e = local.entry(t.to_string()).or_default();
+                            let e = local.entry(t).or_default();
                             e.push(new_ce);
                         } else {
-                            let e = local.entry(t.to_string()).or_default();
-                            e.extend(ces);
+                            // OR between different tables => global predicate
+                            global.push(ce.clone())
                         }
                     }
-
-                    // one side of the AND might be a global predicate, so we need to keep
-                    // new_global around
-                    global.extend(new_global);
                 }
-                BinaryOperator::Or => {
-                    if !new_join.is_empty() {
-                        unsupported!("can't handle OR expressions between JOIN predicates")
-                    }
-                    if !new_params.is_empty() {
-                        unsupported!(
-                            "can't handle OR expressions between query parameter predicates"
-                        );
-                    }
-                    if new_local.keys().len() == 1 && new_global.is_empty() {
-                        // OR over a single table => local predicate
-                        let (t, ces) = new_local.into_iter().next().unwrap();
-                        if ces.len() != 2 {
-                            unsupported!("should combine only 2 ConditionExpressions");
-                        }
-                        let new_ce = Expression::BinaryOp {
-                            lhs: Box::new(ces.first().unwrap().clone()),
-                            op: BinaryOperator::Or,
-                            rhs: Box::new(ces.last().unwrap().clone()),
-                        };
 
-                        let e = local.entry(t).or_default();
-                        e.push(new_ce);
-                    } else {
-                        // OR between different tables => global predicate
-                        global.push(ce.clone())
-                    }
-                }
-                _ => unreachable!("Already matched on And | Or above"),
-            }
-
-            join.extend(new_join);
-            params.extend(new_params);
-        }
-        Expression::BinaryOp { lhs, op, rhs } if is_predicate(op) => {
-            // atomic selection predicate
-            match **rhs {
-                // right-hand side is a column, so this could be a comma join
-                // or a security policy using UserContext
-                Expression::Column(ref rf) => {
-                    match **lhs {
-                        // column/column comparison
-                        Expression::Column(ref lf)
-                            if lf.table.is_some()
-                                && tables.contains(&Table::from(
-                                    lf.table.as_ref().unwrap().as_str(),
-                                ))
-                                && rf.table.is_some()
-                                && tables.contains(&Table::from(
-                                    rf.table.as_ref().unwrap().as_str(),
-                                ))
-                                && lf.table != rf.table =>
-                        {
-                            // both columns' tables appear in table list and the tables are
-                            // different --> comma join
-                            if *op == BinaryOperator::Equal {
-                                // equi-join between two tables
-                                let mut jp = JoinPredicate {
-                                    left: (**lhs).clone(),
-                                    right: (**rhs).clone(),
-                                };
-                                if let Ordering::Less = rf.table.as_ref().cmp(&lf.table.as_ref()) {
-                                    mem::swap(&mut jp.left, &mut jp.right);
+                join.extend(new_join);
+                params.extend(new_params);
+            } else if is_predicate(op) {
+                // atomic selection predicate
+                match **rhs {
+                    // right-hand side is a column, so this could be a comma join
+                    // or a security policy using UserContext
+                    Expression::Column(ref rf) => {
+                        match **lhs {
+                            // column/column comparison
+                            Expression::Column(ref lf)
+                                if lf.table.is_some()
+                                    && tables.contains(&Table::from(
+                                        lf.table.as_ref().unwrap().as_str(),
+                                    ))
+                                    && rf.table.is_some()
+                                    && tables.contains(&Table::from(
+                                        rf.table.as_ref().unwrap().as_str(),
+                                    ))
+                                    && lf.table != rf.table =>
+                            {
+                                // both columns' tables appear in table list and the tables are
+                                // different --> comma join
+                                if *op == BinaryOperator::Equal {
+                                    // equi-join between two tables
+                                    let mut jp = JoinPredicate {
+                                        left: (**lhs).clone(),
+                                        right: (**rhs).clone(),
+                                    };
+                                    if let Ordering::Less =
+                                        rf.table.as_ref().cmp(&lf.table.as_ref())
+                                    {
+                                        mem::swap(&mut jp.left, &mut jp.right);
+                                    }
+                                    join.push(jp);
+                                } else {
+                                    // non-equi-join?
+                                    unsupported!("non-equi-join?");
                                 }
-                                join.push(jp);
-                            } else {
-                                // non-equi-join?
-                                unsupported!("non-equi-join?");
+                            }
+                            _ => {
+                                // not a comma join, just an ordinary comparison with a
+                                // computed column. This must be a global predicate because it
+                                // crosses "tables" (the computed column has no associated
+                                // table)
+                                global.push(ce.clone());
                             }
                         }
-                        _ => {
-                            // not a comma join, just an ordinary comparison with a
-                            // computed column. This must be a global predicate because it
-                            // crosses "tables" (the computed column has no associated
-                            // table)
-                            global.push(ce.clone());
+                    }
+                    // right-hand side is a placeholder, so this must be a query parameter
+                    Expression::Literal(Literal::Placeholder(_)) => {
+                        if let Expression::Column(ref lf) = **lhs {
+                            params.push((lf.clone(), *op));
                         }
                     }
-                }
-                // right-hand side is a placeholder, so this must be a query parameter
-                Expression::Literal(Literal::Placeholder(_)) => {
-                    if let Expression::Column(ref lf) = **lhs {
-                        params.push((lf.clone(), *op));
-                    }
-                }
-                // right-hand side is a non-placeholder literal, so this is a predicate
-                Expression::Literal(_) => {
-                    if let Expression::Column(ref lf) = **lhs {
-                        // we assume that implied table names have previously been expanded
-                        // and thus all non-computed columns carry table names
-                        if lf.table.is_some() {
-                            let e = local.entry(lf.table.clone().unwrap()).or_default();
-                            e.push(ce.clone());
-                        } else {
-                            // comparisons between computed columns and literals are global
-                            // predicates
-                            global.push(ce.clone());
+                    // right-hand side is a non-placeholder literal, so this is a predicate
+                    Expression::Literal(_) => {
+                        if let Expression::Column(ref lf) = **lhs {
+                            // we assume that implied table names have previously been expanded
+                            // and thus all non-computed columns carry table names
+                            if lf.table.is_some() {
+                                let e = local.entry(lf.table.clone().unwrap()).or_default();
+                                e.push(ce.clone());
+                            } else {
+                                // comparisons between computed columns and literals are global
+                                // predicates
+                                global.push(ce.clone());
+                            }
                         }
                     }
+                    Expression::NestedSelect(_) => {
+                        unsupported!("nested SELECTs are unsupported")
+                    }
+                    Expression::Call(_)
+                    | Expression::BinaryOp { .. }
+                    | Expression::UnaryOp { .. }
+                    | Expression::CaseWhen { .. }
+                    | Expression::Exists(_)
+                    | Expression::Between { .. }
+                    | Expression::In { .. } => {
+                        unsupported!(
+                            "Unsupported right-hand side of condition expression: {}",
+                            rhs
+                        )
+                    }
                 }
-                Expression::NestedSelect(_) => {
-                    unsupported!("nested SELECTs are unsupported")
-                }
-                Expression::Call(_)
-                | Expression::BinaryOp { .. }
-                | Expression::UnaryOp { .. }
-                | Expression::CaseWhen { .. }
-                | Expression::Exists(_)
-                | Expression::Between { .. }
-                | Expression::In { .. } => {
-                    unsupported!(
-                        "Unsupported right-hand side of condition expression: {}",
-                        rhs
-                    )
-                }
+            } else {
+                unsupported!("Arithmetic not supported here")
             }
         }
         Expression::UnaryOp {
@@ -493,7 +495,6 @@ fn classify_conditionals(
         } => {
             internal!("negation should have been removed earlier");
         }
-        Expression::BinaryOp { .. } => unsupported!("Arithmetic not supported here"),
         Expression::Exists(_) => unsupported!("EXISTS not supported yet"),
         Expression::Between { .. } => {
             internal!("Between should have been removed earlier")

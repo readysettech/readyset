@@ -1,26 +1,10 @@
 use std::convert::TryFrom;
 
 use crate::controller::sql::query_graph::JoinPredicate;
+use crate::controller::sql::query_utils::LogicalOp;
 use crate::ReadySetResult;
 use nom_sql::{BinaryOperator, Expression, Expression::*, Literal};
 use noria::{internal, unsupported, ReadySetError};
-
-enum LogicalOp {
-    And,
-    Or,
-}
-
-impl TryFrom<BinaryOperator> for LogicalOp {
-    type Error = BinaryOperator;
-
-    fn try_from(value: BinaryOperator) -> Result<Self, Self::Error> {
-        match value {
-            BinaryOperator::And => Ok(Self::And),
-            BinaryOperator::Or => Ok(Self::Or),
-            _ => Err(value),
-        }
-    }
-}
 
 fn direct_elimination(
     op1: BinaryOperator,
