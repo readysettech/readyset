@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{BinaryOperator, Column, Expression, FunctionExpression, InValue};
 
@@ -86,4 +88,22 @@ pub(crate) fn is_logical_op(op: &BinaryOperator) -> bool {
     use BinaryOperator::*;
 
     matches!(op, And | Or)
+}
+
+/// Boolean-valued logical operators
+pub(crate) enum LogicalOp {
+    And,
+    Or,
+}
+
+impl TryFrom<BinaryOperator> for LogicalOp {
+    type Error = BinaryOperator;
+
+    fn try_from(value: BinaryOperator) -> Result<Self, Self::Error> {
+        match value {
+            BinaryOperator::And => Ok(Self::And),
+            BinaryOperator::Or => Ok(Self::Or),
+            _ => Err(value),
+        }
+    }
 }
