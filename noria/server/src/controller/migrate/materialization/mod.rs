@@ -212,7 +212,7 @@ impl Materializations {
                             .map(|&col| {
                                 if !n.is_internal() {
                                     if n.is_base() {
-                                        unreachable!();
+                                        internal!("map_indices called with base table");
                                     }
                                     return Ok(col);
                                 }
