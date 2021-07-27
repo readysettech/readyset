@@ -1,4 +1,10 @@
-#![warn(clippy::dbg_macro)]
+#![warn(
+    clippy::dbg_macro,
+    clippy::unimplemented,
+    clippy::unreachable,
+    clippy::panic,
+    clippy::todo
+)]
 #![feature(
     iter_order_by,
     trait_alias,

@@ -170,7 +170,7 @@ impl<'a> WriteHandleEntry<'a> {
 }
 
 impl<'a> MutWriteHandleEntry<'a> {
-    pub(crate) fn mark_filled(self) {
+    pub(crate) fn mark_filled(self) -> ReadySetResult<()> {
         if self
             .handle
             .handle
@@ -180,9 +180,10 @@ impl<'a> MutWriteHandleEntry<'a> {
             .iter()
             .any(LookupError::is_miss)
         {
-            self.handle.handle.clear(self.key)
+            self.handle.handle.clear(self.key);
+            Ok(())
         } else {
-            unreachable!("attempted to fill already-filled key");
+            Err(ReadySetError::KeyAlreadyFilled)
         }
     }
 
@@ -349,14 +350,15 @@ impl WriteHandle {
         }
     }
 
-    pub(crate) fn mark_filled(&mut self, key: KeyComparison) {
+    pub(crate) fn mark_filled(&mut self, key: KeyComparison) -> ReadySetResult<()> {
         match key {
-            KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled(),
+            KeyComparison::Equal(equal) => self.mut_with_key(equal.as_vec()).mark_filled()?,
             KeyComparison::Range((start, end)) => self.handle.insert_range((
                 start.as_ref().map(Vec1::as_vec),
                 end.as_ref().map(Vec1::as_vec),
             )),
-        }
+        };
+        Ok(())
     }
 }
 
@@ -704,7 +706,7 @@ mod tests {
             let key = vec1![DataType::from(0)];
             assert!(r.try_find_and(&key, |_| ()).err().unwrap().is_miss());
 
-            w.mark_filled(key.clone().into());
+            w.mark_filled(key.clone().into()).unwrap();
             w.swap();
             assert!(r.try_find_and(&key, |_| ()).is_ok());
         }
@@ -724,7 +726,8 @@ mod tests {
 
             w.mark_filled(KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
-            ));
+            ))
+            .unwrap();
             w.swap();
             assert!(r.try_find_range_and(&range, |_| ()).is_ok());
         }
@@ -741,7 +744,7 @@ mod tests {
             w.swap();
 
             let key = vec1![DataType::from(0)];
-            w.mark_filled(key.clone().into());
+            w.mark_filled(key.clone().into()).unwrap();
             w.swap();
             assert!(r.try_find_and(&key, |_| ()).is_ok());
 
@@ -759,7 +762,8 @@ mod tests {
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];
             w.mark_filled(KeyComparison::from_range(
                 &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
-            ));
+            ))
+            .unwrap();
             w.swap();
             assert!(r.try_find_range_and(&range, |_| ()).is_ok());
 

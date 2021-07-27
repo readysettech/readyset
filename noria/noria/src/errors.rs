@@ -472,6 +472,10 @@ pub enum ReadySetError {
     /// Node has already been taken, so we can't execute whatever action we need to.
     #[error("Node already taken")]
     NodeAlreadyTaken,
+
+    /// Attempted to fill a key that has already been filled.
+    #[error("attempted to fill already-filled key")]
+    KeyAlreadyFilled,
 }
 
 impl ReadySetError {
