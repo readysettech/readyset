@@ -16,6 +16,10 @@ pub(crate) trait Trigger =
     Fn(&mut dyn Iterator<Item = &KeyComparison>) -> bool + 'static + Send + Sync;
 
 /// Allocate a new end-user facing result table.
+///
+/// # Invariants:
+///
+/// * key must be non-empty, or we hit an unimplemented!
 pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
     new_inner(cols, key, None)
 }
@@ -29,6 +33,10 @@ pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle)
 /// * `cols` - the number of columns in this table
 /// * `key` - the column indices for the lookup key for this table
 /// * `trigger` - function to call to trigger an upquery and replay
+///
+/// # Invariants:
+///
+/// * key must be non-empty, or we hit an unimplemented!
 pub(crate) fn new_partial<F>(
     cols: usize,
     key: &[usize],
@@ -40,6 +48,9 @@ where
     new_inner(cols, key, Some(Arc::new(trigger)))
 }
 
+// # Invariants:
+//
+// * key must be non-empty, or we hit an unimplemented!
 fn new_inner(
     cols: usize,
     key: &[usize],
@@ -80,6 +91,7 @@ fn new_inner(
         }};
     }
 
+    #[allow(clippy::unreachable)] // Documented invariant.
     let (w, r) = match key.len() {
         0 => unreachable!(),
         1 => make!(Single),
