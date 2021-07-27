@@ -11,8 +11,8 @@ use std::convert::TryFrom;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
-    BinaryOperator, ColumnSpecification, CompoundSelectOperator, Expression, LimitClause, Literal,
-    OrderClause, SelectStatement, SqlQuery, TableKey, UnaryOperator,
+    BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
+    LimitClause, Literal, OrderClause, SelectStatement, TableKey, UnaryOperator,
 };
 
 use itertools::Itertools;
@@ -292,22 +292,17 @@ impl SqlToMirConverter {
     pub(super) fn named_base_to_mir(
         &mut self,
         name: &str,
-        query: &SqlQuery,
+        ctq: &CreateTableStatement,
     ) -> ReadySetResult<MirQuery> {
-        match *query {
-            SqlQuery::CreateTable(ref ctq) => {
-                invariant_eq!(name, ctq.table.name);
-                let n = self.make_base_node(name, &ctq.fields, ctq.keys.as_ref())?;
-                let node_id = (String::from(name), self.schema_version);
-                use std::collections::hash_map::Entry;
-                if let Entry::Vacant(e) = self.nodes.entry(node_id) {
-                    self.current.insert(String::from(name), self.schema_version);
-                    e.insert(n.clone());
-                }
-                Ok(MirQuery::singleton(name, n))
-            }
-            _ => internal!("expected CREATE TABLE query!"),
+        invariant_eq!(name, ctq.table.name);
+        let n = self.make_base_node(name, &ctq.fields, ctq.keys.as_ref())?;
+        let node_id = (String::from(name), self.schema_version);
+        use std::collections::hash_map::Entry;
+        if let Entry::Vacant(e) = self.nodes.entry(node_id) {
+            self.current.insert(String::from(name), self.schema_version);
+            e.insert(n.clone());
         }
+        Ok(MirQuery::singleton(name, n))
     }
 
     pub(super) fn remove_query(&mut self, name: &str, mq: &MirQuery) -> ReadySetResult<()> {
