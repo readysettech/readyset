@@ -43,25 +43,26 @@ pub(super) fn make_joins(
     let mut node_count = node_count;
 
     for jref in qg.join_order.iter() {
-        let (join_type, jps) = from_join_ref(jref, qg);
-        let (left_chain, right_chain) =
-            pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
+        if let Some((join_type, jps)) = from_join_ref(jref, qg) {
+            let (left_chain, right_chain) =
+                pick_join_chains(&jref.src, &jref.dst, &mut join_chains, node_for_rel);
 
-        let jn = mir_converter.make_join_node(
-            &format!("{}_n{}", name, node_count),
-            jps,
-            left_chain.last_node.clone(),
-            right_chain.last_node.clone(),
-            join_type,
-        )?;
+            let jn = mir_converter.make_join_node(
+                &format!("{}_n{}", name, node_count),
+                jps,
+                left_chain.last_node.clone(),
+                right_chain.last_node.clone(),
+                join_type,
+            )?;
 
-        // merge node chains
-        let new_chain = left_chain.merge_chain(right_chain, jn.clone());
-        join_chains.push(new_chain);
+            // merge node chains
+            let new_chain = left_chain.merge_chain(right_chain, jn.clone());
+            join_chains.push(new_chain);
 
-        node_count += 1;
+            node_count += 1;
 
-        join_nodes.push(jn);
+            join_nodes.push(jn);
+        }
     }
 
     Ok(join_nodes)
@@ -103,11 +104,14 @@ pub(super) fn make_joins_for_aggregates(
     Ok(join_nodes)
 }
 
-fn from_join_ref<'a>(jref: &JoinRef, qg: &'a QueryGraph) -> (JoinType, &'a [JoinPredicate]) {
+fn from_join_ref<'a>(
+    jref: &JoinRef,
+    qg: &'a QueryGraph,
+) -> Option<(JoinType, &'a [JoinPredicate])> {
     match &qg.edges[&(jref.src.clone(), jref.dst.clone())] {
-        QueryGraphEdge::Join { on } => (JoinType::Inner, on),
-        QueryGraphEdge::LeftJoin { on } => (JoinType::Left, on),
-        QueryGraphEdge::GroupBy(_) => unreachable!(),
+        QueryGraphEdge::Join { on } => Some((JoinType::Inner, on)),
+        QueryGraphEdge::LeftJoin { on } => Some((JoinType::Left, on)),
+        QueryGraphEdge::GroupBy(_) => None,
     }
 }
 
