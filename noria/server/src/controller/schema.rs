@@ -34,13 +34,15 @@ fn type_for_internal_column(
                     Ok(Some(res))
                 } else {
                     // if none, output column type is same as over column type
-                    let over_columns = grouped_op.over_columns();
-                    invariant_eq!(over_columns.len(), 1);
                     // use type of the "over" column
-                    Ok(
-                        column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
-                            .map(ColumnSchema::take_type),
-                    )
+                    Ok(column_schema(
+                        graph,
+                        next_node_on_path,
+                        recipe,
+                        grouped_op.over_column(),
+                        log,
+                    )?
+                    .map(ColumnSchema::take_type))
                 }
             } else {
                 Ok(
@@ -50,11 +52,9 @@ fn type_for_internal_column(
             }
         }
         ops::NodeOperator::Extremum(ref o) => {
-            let over_columns = o.over_columns();
-            invariant_eq!(over_columns.len(), 1);
             // use type of the "over" column
             Ok(
-                column_schema(graph, next_node_on_path, recipe, over_columns[0], log)?
+                column_schema(graph, next_node_on_path, recipe, o.over_column(), log)?
                     .map(ColumnSchema::take_type),
             )
         }

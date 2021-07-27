@@ -559,7 +559,7 @@ fn make_grouped_node(
         // For this reason, we need to pattern match for a groupconcat aggregation before we pattern
         // match for a generic aggregation.
         GroupedNodeType::Aggregation(Aggregation::GroupConcat { separator: sep }) => {
-            let gc = GroupConcat::new(parent_na, vec![over_col_indx], group_col_indx, sep)?;
+            let gc = GroupConcat::new(parent_na, over_col_indx, group_col_indx, sep)?;
             mig.add_ingredient(String::from(name), column_names.as_slice(), gc)
         }
         GroupedNodeType::Aggregation(agg) => mig.add_ingredient(

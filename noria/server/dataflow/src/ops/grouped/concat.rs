@@ -4,7 +4,7 @@ use crate::node::Node;
 use crate::ops::grouped::aggregate::SqlType;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
-use common::{DataType, Record};
+use common::DataType;
 use launchpad::Indices;
 use noria::invariant_eq;
 use serde_derive::{Deserialize, Serialize};
@@ -18,16 +18,15 @@ use std::fmt::Write;
 struct LastState {
     /// The string representation we last emitted for this group.
     string_repr: String,
-    /// A list of vectors (one for each source column, in order) containing the actual data.
-    data_for_source_cols: Vec<Vec<DataType>>,
+    /// A vector containing the actual data
+    data: Vec<DataType>,
 }
 
-impl LastState {
-    /// Set up a `LastState` for a group, making an empty vector for each source column.
-    fn make(num_source_cols: usize) -> Self {
+impl Default for LastState {
+    fn default() -> Self {
         Self {
-            string_repr: "".try_into().unwrap(),
-            data_for_source_cols: std::iter::repeat(vec![]).take(num_source_cols).collect(),
+            string_repr: "".to_owned(),
+            data: vec![],
         }
     }
 }
@@ -37,11 +36,9 @@ impl LastState {
 /// a user-defined separator.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GroupConcat {
-    /// Which columns (in order) to aggregate.
-    source_cols: Vec<usize>,
-    /// The columns to group by, which are just all columns not aggregated by.
-    ///
-    /// This is computed automatically on `setup()`.
+    /// Which column to aggregate.
+    source_col: usize,
+    /// The columns to group by.
     group_by: Vec<usize>,
     /// The user-defined separator.
     separator: String,
@@ -61,18 +58,18 @@ fn concat_fmt<F: Write>(f: &mut F, dt: &DataType) -> ReadySetResult<()> {
 }
 
 impl GroupConcat {
-    /// Construct a new `GroupConcat`, aggregating the provided `source_cols` and separating
+    /// Construct a new `GroupConcat`, aggregating the provided `source_col` and separating
     /// aggregated data with the provided `separator`.
     pub fn new(
         src: NodeIndex,
-        source_cols: Vec<usize>,
+        source_col: usize,
         group_by: Vec<usize>,
         separator: String,
     ) -> ReadySetResult<GroupedOperator<GroupConcat>> {
         Ok(GroupedOperator::new(
             src,
             GroupConcat {
-                source_cols,
+                source_col,
                 group_by,
                 separator,
                 last_state: RefCell::new(HashMap::new()),
@@ -82,7 +79,8 @@ impl GroupConcat {
 }
 
 pub struct ConcatDiff {
-    record: Record,
+    value: DataType,
+    is_positive: bool,
     group_by: Vec<DataType>,
 }
 
@@ -98,19 +96,17 @@ impl GroupedOperation for GroupConcat {
     }
 
     fn to_diff(&self, record: &[DataType], is_positive: bool) -> ReadySetResult<Self::Diff> {
-        let data = record
-            .cloned_indices(self.source_cols.iter().copied())
-            .map_err(|_| ReadySetError::InvalidRecordLength)?;
+        let value = record
+            .get(self.source_col)
+            .ok_or(ReadySetError::InvalidRecordLength)?
+            .clone();
         // We need this to figure out which state to use.
         let group_by = record
             .cloned_indices(self.group_by.iter().cloned())
             .map_err(|_| ReadySetError::InvalidRecordLength)?;
         Ok(ConcatDiff {
-            record: if is_positive {
-                Record::Positive(data)
-            } else {
-                Record::Negative(data)
-            },
+            value,
+            is_positive,
             group_by,
         })
     }
@@ -124,8 +120,10 @@ impl GroupedOperation for GroupConcat {
             .filter(|dt| matches!(dt, &DataType::Text(..) | &DataType::TinyText(..)))
             .and_then(|dt| <&str>::try_from(dt).ok());
 
+        let mut diffs = diffs.peekable();
+
         let first_diff = diffs
-            .next()
+            .peek()
             .ok_or_else(|| internal_err("group_concat got no diffs"))?;
         let group = first_diff.group_by.clone();
 
@@ -141,39 +139,38 @@ impl GroupedOperation for GroupConcat {
                 return Err(ReadySetError::GroupedStateLost);
             }
             // if we're recreating or this is the first record for the group, make a new state
-            None => LastState::make(self.source_cols.len()),
+            None => LastState::default(),
         };
-        for ConcatDiff { record, group_by } in Some(first_diff).into_iter().chain(diffs.into_iter())
+        for ConcatDiff {
+            value,
+            is_positive,
+            group_by,
+        } in diffs
         {
             invariant_eq!(group_by, group);
-
-            let (data, positive_p) = record.extract();
-            for (i, dt) in data.into_iter().enumerate() {
-                let col_state = prev_state.data_for_source_cols.get_mut(i).ok_or_else(|| {
-                    internal_err("group_concat received overlong data for previous col_state")
-                })?;
-                if positive_p {
-                    col_state.push(dt);
-                } else {
-                    let item_pos = col_state.iter().rposition(|x| x == &dt).ok_or_else(|| {
+            if is_positive {
+                prev_state.data.push(value);
+            } else {
+                let item_pos = prev_state
+                    .data
+                    .iter()
+                    .rposition(|x| x == &value)
+                    .ok_or_else(|| {
                         internal_err(format!(
                             "group_concat couldn't remove {:?} from {:?}",
-                            dt, col_state
+                            value, prev_state.data
                         ))
                     })?;
-                    col_state.remove(item_pos);
-                }
+                prev_state.data.remove(item_pos);
             }
         }
         // what I *really* want here is Haskell's "intercalate" ~eta
         let mut out_str = String::new();
-        for (i, data) in prev_state.data_for_source_cols.iter().enumerate() {
-            for (j, piece) in data.iter().enumerate() {
-                // TODO(eta): not unwrap, maybe
-                concat_fmt(&mut out_str, piece)?;
-                if !(j == data.len() - 1 && i == prev_state.data_for_source_cols.len() - 1) {
-                    write!(&mut out_str, "{}", self.separator).unwrap();
-                }
+        for (i, piece) in prev_state.data.iter().enumerate() {
+            // TODO(eta): not unwrap, maybe
+            concat_fmt(&mut out_str, piece)?;
+            if i < prev_state.data.len() - 1 {
+                write!(&mut out_str, "{}", self.separator).unwrap();
             }
         }
         prev_state.string_repr = out_str.clone();
@@ -187,13 +184,13 @@ impl GroupedOperation for GroupConcat {
         }
 
         format!(
-            "||({:?}, {:?}) γ{:?}",
-            self.source_cols, self.separator, self.group_by
+            "||({}, {:?}) γ{:?}",
+            self.source_col, self.separator, self.group_by
         )
     }
 
-    fn over_columns(&self) -> Vec<usize> {
-        self.source_cols.clone()
+    fn over_column(&self) -> usize {
+        self.source_col
     }
 
     fn output_col_type(&self) -> Option<SqlType> {
@@ -219,7 +216,7 @@ mod tests {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y"]);
 
-        let c = GroupConcat::new(s.as_global(), vec![1], vec![0], String::from("#")).unwrap();
+        let c = GroupConcat::new(s.as_global(), 1, vec![0], String::from("#")).unwrap();
 
         g.set_op("concat", &["x", "ys"], c, mat);
         g
@@ -228,7 +225,7 @@ mod tests {
     #[test]
     fn it_describes() {
         let c = setup(true);
-        assert_eq!(c.node().description(true), "||([1], \"#\") γ[0]",);
+        assert_eq!(c.node().description(true), "||(1, \"#\") γ[0]",);
     }
 
     #[test]
