@@ -165,6 +165,7 @@ pub(super) fn graphviz(
 }
 
 impl ControllerInner {
+    #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     pub(super) fn external_request<A: Authority + 'static>(
         &mut self,
         method: hyper::Method,
