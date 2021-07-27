@@ -65,7 +65,9 @@ pub trait GroupedOperation: fmt::Debug + Clone {
     ) -> ReadySetResult<DataType>;
 
     fn description(&self, detailed: bool) -> String;
-    fn over_columns(&self) -> Vec<usize>;
+
+    /// The column that is being aggregated over.
+    fn over_column(&self) -> usize;
 
     /// Defines the output column type for the Grouped Operation if possible.
     /// Returns None if the type of of the output varies depending on data type of over column
@@ -114,8 +116,8 @@ impl<T: GroupedOperation> GroupedOperator<T> {
         }
     }
 
-    pub fn over_columns(&self) -> Vec<usize> {
-        self.inner.over_columns()
+    pub fn over_column(&self) -> usize {
+        self.inner.over_column()
     }
 
     pub fn output_col_type(&self) -> Option<SqlType> {

@@ -248,8 +248,8 @@ impl GroupedOperation for Aggregator {
         format!("{} γ[{}]", op_string, group_cols)
     }
 
-    fn over_columns(&self) -> Vec<usize> {
-        vec![self.over]
+    fn over_column(&self) -> usize {
+        self.over
     }
 
     fn output_col_type(&self) -> Option<nom_sql::SqlType> {
