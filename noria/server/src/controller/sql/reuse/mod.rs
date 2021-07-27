@@ -38,7 +38,6 @@ impl ReuseConfig {
             }
             ReuseConfigType::Relaxed => relaxed::Relaxed::reuse_candidates(qg, query_graphs)?,
             ReuseConfigType::Full => full::Full::reuse_candidates(qg, query_graphs)?,
-            _ => unreachable!(),
         };
 
         self.reorder_joins(qg, &reuse_candidates)?;
@@ -59,7 +58,6 @@ impl ReuseConfig {
             ReuseConfigType::Finkelstein => ReuseConfig::finkelstein(),
             ReuseConfigType::Relaxed => ReuseConfig::relaxed(),
             ReuseConfigType::Full => ReuseConfig::full(),
-            _ => unreachable!(),
         }
     }
 

@@ -391,7 +391,7 @@ impl TestScript {
             builder.log_with(run_opts.logger());
 
             if run_opts.enable_reuse {
-                builder.set_reuse(ReuseConfigType::Finkelstein)
+                builder.set_reuse(Some(ReuseConfigType::Finkelstein))
             }
 
             if let Some(binlog_url) = &run_opts.binlog_url {

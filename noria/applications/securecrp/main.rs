@@ -25,10 +25,10 @@ impl Backend {
         cb.log_with(blender_log);
 
         match reuse {
-            "finkelstein" => cb.set_reuse(ReuseConfigType::Finkelstein),
-            "full" => cb.set_reuse(ReuseConfigType::Full),
-            "noreuse" => cb.set_reuse(ReuseConfigType::NoReuse),
-            "relaxed" => cb.set_reuse(ReuseConfigType::Relaxed),
+            "finkelstein" => cb.set_reuse(Some(ReuseConfigType::Finkelstein)),
+            "full" => cb.set_reuse(Some(ReuseConfigType::Full)),
+            "noreuse" => cb.set_reuse(None),
+            "relaxed" => cb.set_reuse(Some(ReuseConfigType::Relaxed)),
             _ => panic!("reuse configuration not supported"),
         }
 

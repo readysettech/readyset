@@ -667,7 +667,10 @@ impl ControllerInner {
         };
 
         let mut recipe = Recipe::blank(Some(log.clone()));
-        recipe.enable_reuse(state.config.reuse);
+        match state.config.reuse {
+            Some(reuse) => recipe.enable_reuse(reuse),
+            None => recipe.disable_reuse(),
+        }
 
         ControllerInner {
             ingredients: g,
