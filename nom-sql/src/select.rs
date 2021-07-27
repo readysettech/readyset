@@ -286,14 +286,11 @@ fn join_rhs(i: &[u8]) -> IResult<&[u8], JoinRightSide> {
         )),
         |t| JoinRightSide::NestedSelect(Box::new(t.0), t.1.map(String::from)),
     );
-    let nested_join = map(delimited(tag("("), join_clause, tag(")")), |nj| {
-        JoinRightSide::NestedJoin(Box::new(nj))
-    });
     let table = map(schema_table_reference, JoinRightSide::Table);
     let tables = map(delimited(tag("("), table_list, tag(")")), |tables| {
         JoinRightSide::Tables(tables)
     });
-    alt((nested_select, nested_join, table, tables))(i)
+    alt((nested_select, table, tables))(i)
 }
 
 // Parse WHERE clause of a selection

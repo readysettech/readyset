@@ -210,7 +210,6 @@ impl AliasRemoval for SqlQuery {
                 .chain(sq.join.iter().flat_map(|j| match j.right {
                     JoinRightSide::Table(ref table) => vec![table.clone()],
                     JoinRightSide::Tables(ref ts) => ts.clone(),
-                    JoinRightSide::NestedJoin(_) => unimplemented!(),
                     _ => vec![],
                 }))
                 .map(|t| (t.name, t.alias))
@@ -320,7 +319,7 @@ impl AliasRemoval for SqlQuery {
                                 }
                             }
                         }
-                        JoinRightSide::NestedSelect(_, _) | JoinRightSide::NestedJoin(_) => {}
+                        JoinRightSide::NestedSelect(_, _) => {}
                     }
 
                     jc.constraint = match jc.constraint {
@@ -370,8 +369,7 @@ impl AliasRemoval for SqlQuery {
                         JoinRightSide::Tables(ts) => JoinRightSide::Tables(
                             ts.iter().map(|t| rewrite_table(&table_remap, t)).collect(),
                         ),
-                        JoinRightSide::NestedJoin(_) => unimplemented!(),
-                        r => r,
+                        r @ JoinRightSide::NestedSelect(_, _) => r,
                     };
                     jc
                 })

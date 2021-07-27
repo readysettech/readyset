@@ -1,9 +1,10 @@
+use itertools::Itertools;
 use std::fmt;
 use std::str;
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
-use crate::select::{JoinClause, SelectStatement};
+use crate::select::SelectStatement;
 use crate::table::Table;
 use crate::Expression;
 use nom::branch::alt;
@@ -19,24 +20,21 @@ pub enum JoinRightSide {
     Tables(Vec<Table>),
     /// A nested selection, represented as (query, alias).
     NestedSelect(Box<SelectStatement>, Option<String>),
-    /// A nested join clause.
-    NestedJoin(Box<JoinClause>),
 }
 
 impl fmt::Display for JoinRightSide {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            JoinRightSide::Table(ref t) => write!(f, "{}", t)?,
+            JoinRightSide::Table(ref t) => write!(f, "{}", t),
             JoinRightSide::NestedSelect(ref q, ref a) => {
                 write!(f, "({})", q)?;
                 if a.is_some() {
                     write!(f, " AS {}", a.as_ref().unwrap())?;
                 }
+                Ok(())
             }
-            JoinRightSide::NestedJoin(ref jc) => write!(f, "({})", jc)?,
-            _ => unimplemented!(),
+            JoinRightSide::Tables(ref ts) => write!(f, "({})", ts.iter().join(", ")),
         }
-        Ok(())
     }
 }
 
