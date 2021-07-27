@@ -4,6 +4,7 @@ use dataflow::ops;
 use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::{ColumnBase, ColumnSchema};
+use ops::NodeOperator;
 
 type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,
@@ -19,15 +20,14 @@ fn type_for_internal_column(
     log: &slog::Logger,
 ) -> ReadySetResult<Option<SqlType>> {
     // column originates at internal view: literal, aggregation output
-    // FIXME(malte): return correct type depending on what column does
     match *(node.as_internal().ok_or(ReadySetError::NonInternalNode)?) {
-        ops::NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
+        NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
             Ok(
                 column_schema(graph, next_node_on_path, recipe, parent_col, log)?
                     .map(ColumnSchema::take_type),
             )
         }),
-        ops::NodeOperator::Aggregation(ref grouped_op) => {
+        NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
             if column_index == node.fields().len() - 1 {
                 if let Some(res) = grouped_op.output_col_type() {
@@ -51,48 +51,48 @@ fn type_for_internal_column(
                 )
             }
         }
-        ops::NodeOperator::Extremum(ref o) => {
+        NodeOperator::Extremum(ref o) => {
             // use type of the "over" column
-            Ok(
-                column_schema(graph, next_node_on_path, recipe, o.over_column(), log)?
-                    .map(ColumnSchema::take_type),
-            )
+            if column_index == node.fields().len() - 1 {
+                Ok(
+                    column_schema(graph, next_node_on_path, recipe, o.over_column(), log)?
+                        .map(ColumnSchema::take_type),
+                )
+            } else {
+                Ok(
+                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                        .map(ColumnSchema::take_type),
+                )
+            }
         }
-        ops::NodeOperator::Concat(_) => {
+        NodeOperator::Concat(_) => {
             // group_concat always outputs a string as the last column
             if column_index == node.fields().len() - 1 {
                 Ok(Some(SqlType::Text))
             } else {
-                // no column that isn't the concat result column should ever trace
-                // back to a group_concat.
-                unreachable!();
+                Ok(
+                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                        .map(ColumnSchema::take_type),
+                )
             }
         }
-        ops::NodeOperator::Join(_) => {
+        NodeOperator::Join(_) => {
             // join doesn't "generate" columns, but they may come from one of the other
             // ancestors; so keep iterating to try the other paths
             Ok(None)
         }
-        // no other operators should every generate columns
-        _ => unreachable!(),
-    }
-}
-
-fn type_for_base_column(
-    recipe: &Recipe,
-    base: &str,
-    column_index: usize,
-    log: &slog::Logger,
-) -> ReadySetResult<Option<SqlType>> {
-    if let Some(schema) = recipe.schema_for(base) {
-        // projected base table column
-        match schema {
-            Schema::Table(ref s) => Ok(Some(s.fields[column_index].sql_type.clone())),
-            _ => unreachable!(),
+        NodeOperator::ParamFilter(_) => unsupported!("ParamFilter isn't implemented"),
+        NodeOperator::Latest(_)
+        | NodeOperator::Union(_)
+        | NodeOperator::Identity(_)
+        | NodeOperator::Filter(_)
+        | NodeOperator::TopK(_)
+        | NodeOperator::Trigger(_) => {
+            Ok(
+                column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                    .map(ColumnSchema::take_type),
+            )
         }
-    } else {
-        error!(log, "no schema for base '{}'", base);
-        Ok(None)
     }
 }
 
@@ -108,18 +108,25 @@ fn trace_column_type_on_path(
 
         // We invoked provenance_of with a singleton slice, so must have got
         // results for a single column
-        assert_eq!(cols.len(), 1);
+        invariant_eq!(cols.len(), 1);
 
         let source_node = &graph[*ni];
         let source_column_index = cols[0].unwrap();
 
         if source_node.is_base() {
-            type_for_base_column(
-                recipe,
-                source_node.name(),
-                cols.first().unwrap().unwrap(),
-                log,
-            )
+            let base = source_node.name();
+            if let Some(schema) = recipe.schema_for(base) {
+                // projected base table column
+                match schema {
+                    Schema::Table(ref s) => {
+                        Ok(Some(s.fields[source_column_index].sql_type.clone()))
+                    }
+                    _ => internal!("Base node {:?} has non-Table schema: {:?}", ni, schema),
+                }
+            } else {
+                error!(log, "no schema for base '{}'", base);
+                Ok(None)
+            }
         } else {
             let parent_node_index = path[pos + 1].0;
 
