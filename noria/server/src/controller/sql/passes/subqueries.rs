@@ -1,15 +1,23 @@
 use std::iter;
 
 use itertools::Either;
-use nom_sql::{
-    Column, Expression, FieldDefinitionExpression, FunctionExpression, InValue, JoinRightSide,
-    SqlQuery,
-};
+use nom_sql::{Expression, FunctionExpression, InValue, JoinRightSide, SqlQuery};
 
 #[derive(Debug, PartialEq)]
 pub enum SubqueryPosition<'a> {
+    /// Subqueries on the right hand side of a join
+    ///
+    /// Invariant: This will always contain [`JoinRightSide::NestedSelect`]
     Join(&'a mut JoinRightSide),
+
+    /// Subqueries on the right hand side of an IN
+    ///
+    /// Invariant: This will always contain [`InValue::Subquery`]
     In(&'a mut InValue),
+
+    /// Subqueries in expressions.
+    ///
+    /// Invariant: This will always contain [`Expression::NestedSelect`]
     Expr(&'a mut Expression),
 }
 
@@ -92,28 +100,6 @@ fn extract_subqueries_from_expression(expr: &mut Expression) -> Vec<SubqueryPosi
             )
             .collect(),
         Expression::Literal(_) | Expression::Column(_) => vec![],
-    }
-}
-
-pub fn query_from_expr(expr: &Expression) -> (SqlQuery, Column) {
-    match *expr {
-        Expression::NestedSelect(ref bst) => {
-            let sq = SqlQuery::Select(*bst.clone());
-            let column = bst
-                .fields
-                .iter()
-                .map(|fe| match fe {
-                    FieldDefinitionExpression::Expression {
-                        expr: Expression::Column(c),
-                        ..
-                    } => c.clone(),
-                    _ => unreachable!(),
-                })
-                .next()
-                .unwrap();
-            (sq, column)
-        }
-        _ => unreachable!(),
     }
 }
 
