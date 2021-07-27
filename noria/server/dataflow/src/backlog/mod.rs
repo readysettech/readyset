@@ -310,9 +310,11 @@ impl WriteHandle {
     pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, mut n: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
-            if self.handle.is_empty() {
-                unreachable!("mem size is {}, but map is empty", self.mem_size);
-            }
+            debug_assert!(
+                !self.handle.is_empty(),
+                "mem size is {}, but map is empty",
+                self.mem_size
+            );
 
             self.handle.empty_random_for_each(rng, n, |vs| {
                 let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
