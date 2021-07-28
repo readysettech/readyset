@@ -1,3 +1,4 @@
+#![feature(drain_filter)]
 use clap::Clap;
 use noria::consensus::ZookeeperAuthority;
 use noria::ControllerHandle;
@@ -5,6 +6,7 @@ use noria::DataType;
 use noria::KeyComparison;
 use noria::ViewQuery;
 use rand::distributions::{Distribution, Uniform};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -53,13 +55,25 @@ struct ReaderThreadUpdate {
     queries: Vec<u128>,
 }
 
-impl Reader {
-    fn generate_user_id(&self) -> usize {
-        let mut rng = rand::thread_rng();
-        let uniform = Uniform::from(0..self.user_table_rows);
-        uniform.sample(&mut rng)
-    }
+#[derive(Clone, Copy)]
+struct BatchedQuery {
+    key: usize,
+    issued: Instant,
+}
 
+impl BatchedQuery {
+    fn new(max: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        let uniform = Uniform::from(0..max);
+
+        BatchedQuery {
+            key: uniform.sample(&mut rng),
+            issued: Instant::now(),
+        }
+    }
+}
+
+impl Reader {
     async fn generate_queries(
         &self,
         id: u32,
@@ -84,8 +98,7 @@ impl Reader {
 
         let batch_interval = Duration::from_millis(self.batch_duration_ms);
         let mut batch_start = Instant::now();
-        let mut batch_query_start = Vec::new();
-        let mut batch_keys = Vec::new();
+        let mut queries = Vec::new();
 
         let mut qps_sent: u32 = 0;
         let mut qps_start = Instant::now();
@@ -114,14 +127,11 @@ impl Reader {
             }
 
             // A client is executing a query.
-            let id = self.generate_user_id();
-
-            if batch_query_start.is_empty() {
+            if queries.is_empty() {
                 batch_start = now;
             }
 
-            batch_query_start.push(now);
-            batch_keys.push(id);
+            queries.push(BatchedQuery::new(self.user_table_rows));
             qps_sent += 1;
 
             if qps_sent == 10_000_000 {
@@ -132,15 +142,15 @@ impl Reader {
 
             // Client executes a query but we have not reached the batch interval
             // so we keep adding queries.
-            if batch_keys.len() < self.batch_size as usize && now < batch_start + batch_interval {
+            if queries.len() < self.batch_size as usize && now < batch_start + batch_interval {
                 continue;
             }
 
             // It is batch time, execute the batched query and calculate the time
             // for each query from the query start times.
-            let keys: Vec<_> = batch_keys
+            let keys: Vec<_> = queries
                 .iter()
-                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(*k as i32))))
+                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key as i32))))
                 .collect();
 
             let vq = ViewQuery {
@@ -151,14 +161,24 @@ impl Reader {
             };
 
             let r = view.raw_lookup(vq).await?;
-            assert_eq!(r.len(), batch_query_start.len());
+            assert_eq!(r.len(), queries.len());
+
             let finish = Instant::now();
 
-            for q_start in &batch_query_start {
-                reader_update.queries.push((finish - *q_start).as_millis());
+            let mut i: isize = -1;
+
+            // Filter and record comleted queries only, queries that didn't complete
+            // will remain and we need to send them to our blocking resolver
+            for query in queries.drain_filter(|_| {
+                i += 1;
+                !r[i as usize].is_empty()
+            }) {
+                reader_update
+                    .queries
+                    .push((finish.duration_since(query.issued)).as_millis());
             }
-            batch_query_start.clear();
-            batch_keys.clear();
+
+            queries.clear();
         }
     }
 
@@ -191,16 +211,21 @@ impl Reader {
         updates: &mut [Vec<u128>],
         period: Duration,
     ) -> anyhow::Result<()> {
-        let mut query_latencies: Vec<u128> = Vec::new();
+        let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         for u in updates {
-            query_latencies.append(u);
+            for l in u {
+                hist.record(u64::try_from(*l).unwrap()).unwrap();
+            }
         }
 
-        let qps = query_latencies.len() as f64 / period.as_secs() as f64;
-        let avg_latency =
-            query_latencies.iter().sum::<u128>() as f64 / query_latencies.len() as f64;
-
-        println!("qps: {}\tavg_latency: {:.4} ms", qps, avg_latency);
+        println!(
+            "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
+            hist.len() as f64 / period.as_secs() as f64,
+            hist.value_at_quantile(0.5),
+            hist.value_at_quantile(0.9),
+            hist.value_at_quantile(0.99),
+            hist.value_at_quantile(0.9999)
+        );
         Ok(())
     }
 
