@@ -523,15 +523,8 @@ impl PersistentState {
         // and env->SetBackgroundThreads(n, Env::LOW) here, but that would force us to create our
         // own env instead of relying on the default one that's shared across RocksDB instances
         // (which isn't supported by rust-rocksdb yet either).
-        //
-        // Using opts.increase_parallelism here would only change the thread count in
-        // the low priority pool, so we'll rather use the deprecated max_background_compactions
-        // and max_background_flushes for now.
         if params.persistence_threads > 1 {
-            // Split the threads between compactions and flushes,
-            // but round up for compactions and down for flushes:
-            opts.set_max_background_compactions((params.persistence_threads + 1) / 2);
-            opts.set_max_background_flushes(params.persistence_threads / 2);
+            opts.set_max_background_jobs(params.persistence_threads);
         }
 
         // Increase a few default limits:
