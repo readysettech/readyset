@@ -1,17 +1,20 @@
 #![feature(drain_filter)]
+use mysql::chrono::Utc;
 use noria::consensus::ZookeeperAuthority;
 use noria::ControllerHandle;
 use noria::DataType;
 use noria::KeyComparison;
 use noria::ViewQuery;
-use rand::distributions::Uniform;
+use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
+use rinfluxdb::line_protocol::LineBuilder;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use structopt::clap::arg_enum;
+use structopt::clap::{arg_enum, ArgGroup};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use url::Url;
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
@@ -25,7 +28,7 @@ arg_enum! {
 }
 
 #[derive(StructOpt)]
-#[structopt(name = "reader")]
+#[structopt(name = "reader", group = ArgGroup::with_name("influx").requires_all(&["influx-host", "influx-database", "influx-user", "influx-password"]).multiple(true))]
 struct Reader {
     /// The number of users in the system.
     #[structopt(long, default_value = "10")]
@@ -69,9 +72,30 @@ struct Reader {
     )]
     distribution: Dist,
 
-    #[structopt(long, required_if("distribution", "zipf"), default_value = "1.15")]
     /// Override the default alpha parameter for the zipf distribution
+    #[structopt(long, required_if("distribution", "zipf"), default_value = "1.15")]
     alpha: f64,
+
+    /// The number of seconds that the experiment should be running.
+    /// If `None` is provided, the experiment will run until it is interrupted.
+    #[structopt(long)]
+    run_for: Option<u32>,
+
+    /// The InfluxDB host address.
+    #[structopt(long, group = "influx")]
+    influx_host: Option<String>,
+
+    /// The InfluxDB database to write to.
+    #[structopt(long, group = "influx")]
+    influx_database: Option<String>,
+
+    /// The username to authenticate to InfluxDB.
+    #[structopt(long, group = "influx")]
+    influx_user: Option<String>,
+
+    /// The password to authenticate to InfluxDB.
+    #[structopt(long, group = "influx")]
+    influx_password: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,11 +160,12 @@ where
 
 impl Reader {
     async fn generate_queries(
-        &self,
+        &'static self,
         mut query_factory: Box<dyn QueryGenerator + Send>,
         query_interval: Option<Duration>,
         sender: UnboundedSender<ReaderThreadUpdate>,
         authority: Arc<ZookeeperAuthority>,
+        run_for: &Option<u32>,
     ) -> anyhow::Result<()> {
         let mut handle: ControllerHandle<ZookeeperAuthority> =
             ControllerHandle::new(authority).await?;
@@ -163,12 +188,28 @@ impl Reader {
         let mut qps_sent: u32 = 0;
         let mut qps_start = Instant::now();
 
+        let run_until = run_for.map(|seconds| Instant::now() + Duration::from_secs(seconds as u64));
+
+        let should_continue = || {
+            if let Some(until) = run_until {
+                Instant::now() < until
+            } else {
+                true
+            }
+        };
+
         loop {
             // Update the aggregator process on this reader's state.
             if last_thread_update.elapsed() >= THREAD_UPDATE_INTERVAL {
                 sender.send(reader_update.clone())?;
                 reader_update.queries.clear();
                 last_thread_update = Instant::now();
+                if !should_continue() {
+                    // We drop the senders so that the receiver
+                    // eventually stops.
+                    drop(sender);
+                    break;
+                }
             }
 
             let now = Instant::now();
@@ -244,11 +285,13 @@ impl Reader {
 
             queries.clear();
         }
+        Ok(())
     }
 
     async fn process_updates(
         &'static self,
         mut receiver: UnboundedReceiver<ReaderThreadUpdate>,
+        http_client: reqwest::Client,
     ) -> anyhow::Result<()> {
         // Process updates from readers, calculate statistics to report. We
         // store each channel's message in a hashmap for each interval. If
@@ -261,19 +304,25 @@ impl Reader {
             let elapsed = last_check.elapsed();
             if elapsed >= THREAD_UPDATE_INTERVAL {
                 last_check = Instant::now();
-                self.process_thread_updates(&mut updates, elapsed).unwrap();
+                self.process_thread_updates(&mut updates, elapsed, &http_client)
+                    .await
+                    .unwrap();
                 updates.clear();
             }
 
-            let r = receiver.recv().await.unwrap();
-            updates.push(r.queries);
+            match receiver.recv().await {
+                Some(r) => updates.push(r.queries),
+                None => break,
+            }
         }
+        Ok(())
     }
 
-    fn process_thread_updates(
-        &'static self,
+    async fn process_thread_updates(
+        &self,
         updates: &mut [Vec<u128>],
         period: Duration,
+        http_client: &reqwest::Client,
     ) -> anyhow::Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         for u in updates {
@@ -281,15 +330,59 @@ impl Reader {
                 hist.record(u64::try_from(*l).unwrap()).unwrap();
             }
         }
+        let qps = hist.len() as f64 / period.as_secs() as f64;
+        let percentiles = vec![
+            ("p50", hist.value_at_quantile(0.5)),
+            ("p90", hist.value_at_quantile(0.9)),
+            ("p99", hist.value_at_quantile(0.99)),
+            ("p9999", hist.value_at_percentile(0.9999)),
+        ];
 
-        println!(
-            "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
-            hist.len() as f64 / period.as_secs() as f64,
-            hist.value_at_quantile(0.5),
-            hist.value_at_quantile(0.9),
-            hist.value_at_quantile(0.99),
-            hist.value_at_quantile(0.9999)
-        );
+        if let Some(influx_host) = &self.influx_host {
+            let timestamp = Utc::now();
+            let mut measurements = vec![LineBuilder::new("read")
+                .insert_field("qps", qps)
+                .set_timestamp(timestamp)
+                .build()
+                .to_string()];
+            for (name, percentile) in percentiles {
+                measurements.push(
+                    LineBuilder::new("read")
+                        .insert_field(name, percentile)
+                        .set_timestamp(timestamp)
+                        .build()
+                        .to_string(),
+                )
+            }
+            let response = http_client
+                .post(Url::parse(format!("{}/write", influx_host.clone()).as_str()).unwrap())
+                .body(measurements.join("\n"))
+                .header("Content-Type", "text/plain")
+                .query(&[
+                    ("db", &self.influx_database.as_ref().unwrap().clone()),
+                    ("u", &self.influx_user.as_ref().unwrap().clone()),
+                    ("p", &self.influx_password.as_ref().unwrap().clone()),
+                ])
+                .send()
+                .await
+                .unwrap();
+            if !response.status().is_success() {
+                panic!(
+                    "Request to InfluxDB failed. Status: {} | Message: {}",
+                    response.status().as_u16(),
+                    response.text().await.unwrap()
+                )
+            }
+        } else {
+            println!(
+                "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
+                qps,
+                hist.value_at_quantile(0.5),
+                hist.value_at_quantile(0.9),
+                hist.value_at_quantile(0.99),
+                hist.value_at_quantile(0.9999)
+            );
+        }
         Ok(())
     }
 
@@ -303,6 +396,8 @@ impl Reader {
         let mut handle: ControllerHandle<ZookeeperAuthority> =
             ControllerHandle::new(Arc::clone(&authority)).await?;
         handle.ready().await.unwrap();
+
+        let http_client = reqwest::Client::new();
 
         let mut threads: Vec<_> = (0..self.threads)
             .map(|_| {
@@ -320,13 +415,24 @@ impl Reader {
                         )),
                     };
 
-                    self.generate_queries(factory, query_issue_interval, thread_tx, authority)
-                        .await
+                    self.generate_queries(
+                        factory,
+                        query_issue_interval,
+                        thread_tx,
+                        authority,
+                        &self.run_for,
+                    )
+                    .await
                 })
             })
             .collect();
 
-        threads.push(tokio::spawn(async move { self.process_updates(rx).await }));
+        // The original tx channel is never used.
+        drop(tx);
+
+        threads.push(tokio::spawn(async move {
+            self.process_updates(rx, http_client).await
+        }));
 
         let res = futures::future::join_all(threads).await;
         for err_res in res.iter().filter(|e| e.is_err()) {
@@ -341,7 +447,6 @@ impl Reader {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Reader is set to static as it is referenced by multiple threads.
-    let reader: &'static _ = Box::leak(Box::new(Reader::from_args()));
+    let reader: &'static mut _ = Box::leak(Box::new(Reader::from_args()));
     reader.run().await
 }

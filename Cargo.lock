@@ -1428,6 +1428,8 @@ dependencies = [
  "noria-logictest",
  "query_generator",
  "rand 0.8.4",
+ "reqwest",
+ "rinfluxdb",
  "structopt",
  "tokio 1.8.1",
  "url",
@@ -4646,6 +4648,24 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
+]
+
+[[package]]
+name = "rinfluxdb"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d3e5a6fdf3b411012a7c211198da64ced3855dbb26f87d2eb5b4f4da70503aa"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "csv",
+ "itertools 0.10.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "url",
 ]
 
 [[package]]
