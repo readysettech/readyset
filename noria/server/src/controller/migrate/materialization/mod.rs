@@ -11,6 +11,7 @@ use crate::errors::internal_err;
 use crate::ReadySetResult;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
+use maplit::hashmap;
 use noria::{internal, invariant, ReadySetError};
 use petgraph::graph::NodeIndex;
 use slog::Logger;
@@ -57,6 +58,9 @@ pub(in crate::controller) struct Materializations {
     /// Nodes materialized since the last time `commit()` was invoked.
     added: HashMap<NodeIndex, Indices>,
 
+    /// Readers added since the last time `commit()` was invoked.
+    new_readers: HashSet<NodeIndex>,
+
     /// A list of replay paths for each node, indexed by tag.
     paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
 
@@ -75,6 +79,7 @@ impl Materializations {
 
             have: HashMap::default(),
             added: HashMap::default(),
+            new_readers: HashSet::default(),
 
             paths: HashMap::default(),
 
@@ -157,11 +162,13 @@ impl Materializations {
                 if let Some(key) = r.key() {
                     // for a reader that will get lookups, we'd like to have an index above us
                     // somewhere on our key so that we can make the reader partial
-                    let mut i = HashMap::new();
                     // TODO(grfn): once the reader knows its own index type, ask it what that is
                     // here
-                    i.insert(ni, (Index::hash_map(key.to_vec()), false));
-                    i
+                    self.new_readers.insert(ni);
+                    let index = Index::hash_map(key.to_vec());
+                    hashmap! {
+                        ni => (index, false)
+                    }
                 } else {
                     // only streaming, no indexing needed
                     continue;
@@ -549,7 +556,12 @@ impl Materializations {
                 None
             }
 
-            for &ni in self.added.keys() {
+            for ni in self
+                .added
+                .keys()
+                .copied()
+                .chain(mem::take(&mut self.new_readers))
+            {
                 if self.partial.contains(&ni) {
                     continue;
                 }
