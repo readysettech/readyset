@@ -1307,13 +1307,16 @@ impl Domain {
                             r_part.post_lookup = r.post_lookup().clone();
 
                             #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                            #[allow(clippy::panic)] // registering the same reader twice is really bad
-                            assert!(self
-                                .readers
-                                .lock()
-                                .unwrap()
-                                .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                .is_none());
+                            #[allow(clippy::panic)]
+                            // registering the same reader twice is really bad
+                            {
+                                assert!(self
+                                    .readers
+                                    .lock()
+                                    .unwrap()
+                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
+                                    .is_none());
+                            }
 
                             // make sure Reader is actually prepared to receive state
                             r.set_write_handle(w_part)

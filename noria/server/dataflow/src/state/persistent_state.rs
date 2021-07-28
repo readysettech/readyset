@@ -269,7 +269,9 @@ impl State for PersistentState {
     /// Panics if partial is Some
     fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
         #[allow(clippy::panic)] // This should definitely never happen!
-        assert!(partial.is_none(), "Bases can't be partial");
+        {
+            assert!(partial.is_none(), "Bases can't be partial");
+        }
         let columns = &index.columns;
         let existing = self
             .indices
