@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  grafana:
+    image: grafana/grafana:8.0.6
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
+  influx:
+    image: influxdb:1.8.6
+    ports:
+      - 8086:8086
+    environment:
+      DOCKER_INFLUXDB_INIT_USERNAME: username
+      DOCKER_INFLUXDB_INIT_PASSWORD: password
+    volumes:
+      - ./influx/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+
