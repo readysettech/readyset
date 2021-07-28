@@ -4,7 +4,7 @@ use maplit::hashmap;
 use noria::{internal, invariant};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::cmp::Ordering;
+use std::cmp::{min, Ordering};
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
@@ -215,7 +215,7 @@ impl Ingredient for TopK {
                         {
                             current.extend(
                                 extra_records
-                                    .drain(0..diff.into())
+                                    .drain(0..min(diff.into(), extra_records.len()))
                                     .map(|r| (r.into(), true)),
                             );
                         }
@@ -339,6 +339,16 @@ impl Ingredient for TopK {
                             // for the same value in one batch
                             if !was_new {
                                 out.push(Record::Negative(r.clone()));
+                            }
+                        } else if let Some(extra_records) = self
+                            .extra_records
+                            .borrow_mut()
+                            .get_mut(&self.group_hash(r.as_slice())?)
+                        {
+                            // If we have extra records cached for this group, remove the row from
+                            // them
+                            if let Some(idx) = extra_records.iter().position(|x| x == r) {
+                                extra_records.remove(idx);
                             }
                         }
                     }
@@ -494,6 +504,42 @@ mod tests {
             "a = {:?} does not contain ({:?}, true)",
             &delta,
             r10
+        );
+    }
+
+    #[test]
+    fn fully_materialized_deletes_apply_to_cache() {
+        let (mut g, _) = setup(false);
+
+        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
+        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
+        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
+        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
+        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+
+        // fill topk
+        g.narrow_one_row(r12, true);
+        g.narrow_one_row(r10.clone(), true);
+        g.narrow_one_row(r11, true);
+        g.narrow_one_row(r5.clone(), true);
+        g.narrow_one_row(r15.clone(), true);
+
+        // [5, z, 15]
+        // [1, z, 12]
+        // [3, z, 11]
+
+        // delete 10
+        g.narrow_one_row((r10, false), true);
+
+        // check that removing 15 brings back 5 now (not 10)
+        let delta = g.narrow_one_row((r15.clone(), false), true);
+        assert_eq!(delta.len(), 2); // one negative, one positive
+        assert!(delta.iter().any(|r| r == &(r15.clone(), false).into()));
+        assert!(
+            delta.iter().any(|r| r == &(r5.clone(), true).into()),
+            "a = {:?} does not contain ({:?}, true)",
+            &delta,
+            r5
         );
     }
 
