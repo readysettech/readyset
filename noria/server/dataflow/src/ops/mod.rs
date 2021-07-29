@@ -72,7 +72,6 @@ impl ToString for NodeOperator {
             NodeOperator::Filter(_) => "Filter",
             NodeOperator::TopK(_) => "TopK",
             NodeOperator::Trigger(_) => "Trigger",
-            NodeOperator::Rewrite(_) => "Rewrite",
         }
         .to_string()
     }
