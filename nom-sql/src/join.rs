@@ -28,8 +28,8 @@ impl fmt::Display for JoinRightSide {
             JoinRightSide::Table(ref t) => write!(f, "{}", t),
             JoinRightSide::NestedSelect(ref q, ref a) => {
                 write!(f, "({})", q)?;
-                if a.is_some() {
-                    write!(f, " AS {}", a.as_ref().unwrap())?;
+                if let Some(alias) = a {
+                    write!(f, " AS {}", alias)?;
                 }
                 Ok(())
             }

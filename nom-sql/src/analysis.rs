@@ -21,7 +21,13 @@ impl ReferredTables for SqlQuery {
                 .flat_map(|(_, sq)| &sq.tables)
                 .cloned()
                 .collect(),
-            _ => unreachable!(),
+            // If the type does not have any referred tables, we return an
+            // empty hashset.
+            SqlQuery::CreateView(_)
+            | SqlQuery::Delete(_)
+            | SqlQuery::DropTable(_)
+            | SqlQuery::Update(_)
+            | SqlQuery::Set(_) => HashSet::new(),
         }
     }
 }

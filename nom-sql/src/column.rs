@@ -14,7 +14,7 @@ use crate::{
 };
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
-use nom::combinator::{map, opt};
+use nom::combinator::{map, map_res, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 use nom::{alt, complete, do_parse, named, opt, tag, tag_no_case, IResult};
@@ -280,10 +280,13 @@ impl ColumnSpecification {
 }
 
 fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
-    let (remaining_input, (i, _, f)) = tuple((digit1, tag("."), digit1))(i)?;
+    let (remaining_input, (int, _, f)) = tuple((
+        map_res(map_res(digit1, str::from_utf8), i32::from_str),
+        tag("."),
+        digit1,
+    ))(i)?;
     let precision = f.len();
-    let int = i32::from_str(str::from_utf8(i).unwrap()).unwrap();
-    let dec = i32::from_str(str::from_utf8(f).unwrap()).unwrap();
+    let dec = map_res(map_res(digit1, str::from_utf8), i32::from_str)(f)?.1;
     let value = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
     Ok((
         remaining_input,
@@ -303,14 +306,17 @@ fn default(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
         // https://app.clubhouse.io/readysettech/story/101/unify-the-expression-ast
         alt((
             map(
-                delimited(tag("'"), take_until("'"), tag("'")),
-                |s: &[u8]| Literal::String(String::from_utf8(s.to_vec()).unwrap()),
+                map_res(
+                    delimited(tag("'"), take_until("'"), tag("'")),
+                    str::from_utf8,
+                ),
+                |s: &str| Literal::String(String::from(s)),
             ),
             fixed_point,
-            map(digit1, |d| {
-                let d_i64 = i64::from_str(str::from_utf8(d).unwrap()).unwrap();
-                Literal::Integer(d_i64)
-            }),
+            map(
+                map_res(map_res(digit1, str::from_utf8), i64::from_str),
+                Literal::Integer,
+            ),
             map(tag("''"), |_| Literal::String(String::from(""))),
             map(tag_no_case("null"), |_| Literal::Null),
             map(
@@ -373,7 +379,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
             sql_identifier,
         ),
         |cs| {
-            let char_set = str::from_utf8(cs).unwrap().to_owned();
+            let char_set = cs.to_owned();
             ColumnConstraint::CharacterSet(char_set)
         },
     );
@@ -383,7 +389,7 @@ pub fn column_constraint(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
             sql_identifier,
         ),
         |c| {
-            let collation = str::from_utf8(c).unwrap().to_owned();
+            let collation = c.to_owned();
             ColumnConstraint::Collation(collation)
         },
     );

@@ -409,7 +409,7 @@ named!(cte(&[u8]) -> CommonTableExpression, do_parse!(
         >> multispace0
         >> char!(')')
         >> (CommonTableExpression {
-            name: String::from_utf8(name.to_owned()).unwrap(),
+            name: String::from(name),
             statement
         })
 ));

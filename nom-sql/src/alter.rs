@@ -4,9 +4,7 @@
 use std::{fmt, str};
 
 use nom::character::complete::{multispace0, multispace1};
-use nom::{
-    alt, complete, do_parse, map_res, named, opt, preceded, separated_list, tag_no_case, terminated,
-};
+use nom::{alt, complete, do_parse, named, opt, preceded, separated_list, tag_no_case, terminated};
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{
@@ -133,7 +131,7 @@ named!(
             >> multispace1
             >> tag_no_case!("column")
             >> multispace1
-            >> name: map_res!(sql_identifier, str::from_utf8)
+            >> name: sql_identifier
             >> behavior: opt!(preceded!(multispace1, drop_behavior))
             >> (AlterTableDefinition::DropColumn {
                 name: name.to_string(),
@@ -175,7 +173,7 @@ named!(
             >> multispace1
             >> tag_no_case!("column")
             >> multispace1
-            >> name: map_res!(sql_identifier, str::from_utf8)
+            >> name: sql_identifier
             >> multispace1
             >> operation: alter_column_operation
             >> (AlterTableDefinition::AlterColumn {

@@ -1,6 +1,7 @@
 use nom::{
     bytes::complete::is_not,
     character::complete::{digit1, multispace0, multispace1},
+    combinator::map_res,
 };
 use std::fmt;
 use std::str;
@@ -111,12 +112,15 @@ impl fmt::Display for CreateViewStatement {
 pub fn index_col_name(i: &[u8]) -> IResult<&[u8], (Column, Option<u16>, Option<OrderType>)> {
     let (remaining_input, (column, len_u8, order)) = tuple((
         terminated(column_identifier_no_alias, multispace0),
-        opt(delimited(tag("("), digit1, tag(")"))),
+        opt(delimited(
+            tag("("),
+            map_res(map_res(digit1, str::from_utf8), u16::from_str),
+            tag(")"),
+        )),
         opt(order_type),
     ))(i)?;
-    let len = len_u8.map(|l| u16::from_str(str::from_utf8(l).unwrap()).unwrap());
 
-    Ok((remaining_input, (column, len, order)))
+    Ok((remaining_input, (column, len_u8, order)))
 }
 
 // Helper for list of index columns
@@ -156,7 +160,7 @@ fn full_text_key(i: &[u8]) -> IResult<&[u8], TableKey> {
 
     match name {
         Some(name) => {
-            let n = String::from_utf8(name.to_vec()).unwrap();
+            let n = String::from(name);
             Ok((remaining_input, TableKey::FulltextKey(Some(n), columns)))
         }
         None => Ok((remaining_input, TableKey::FulltextKey(None, columns))),
@@ -211,8 +215,8 @@ named!(
                 )
             >> tag!(")")
             >> (TableKey::ForeignKey {
-                name: name.map(|n| String::from_utf8(n.to_vec()).unwrap()),
-                index_name: index_name.map(|n| String::from_utf8(n.to_vec()).unwrap()),
+                name: name.map(String::from),
+                index_name: index_name.map(String::from),
                 columns,
                 target_table,
                 target_columns
@@ -240,7 +244,7 @@ fn unique(i: &[u8]) -> IResult<&[u8], TableKey> {
 
     match name {
         Some(name) => {
-            let n = String::from_utf8(name.to_vec()).unwrap();
+            let n = String::from(name);
             Ok((remaining_input, TableKey::UniqueKey(Some(n), columns)))
         }
         None => Ok((remaining_input, TableKey::UniqueKey(None, columns))),
@@ -260,7 +264,7 @@ fn key_or_index(i: &[u8]) -> IResult<&[u8], TableKey> {
         ),
     ))(i)?;
 
-    let n = String::from_utf8(name.to_vec()).unwrap();
+    let n = String::from(name);
     Ok((remaining_input, TableKey::Key(n, columns)))
 }
 
@@ -467,7 +471,7 @@ pub fn view_creation(i: &[u8]) -> IResult<&[u8], CreateViewStatement> {
         statement_terminator,
     ))(i)?;
 
-    let name = String::from_utf8(name_slice.to_vec()).unwrap();
+    let name = String::from(name_slice);
     let fields = vec![]; // TODO(malte): support
     let definition = Box::new(def);
 
