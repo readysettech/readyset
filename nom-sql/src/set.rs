@@ -31,7 +31,7 @@ pub fn set(i: &[u8]) -> IResult<&[u8], SetStatement> {
         literal,
         statement_terminator,
     ))(i)?;
-    let variable = String::from(str::from_utf8(var).unwrap());
+    let variable = String::from(var);
     Ok((remaining_input, SetStatement { variable, value }))
 }
 

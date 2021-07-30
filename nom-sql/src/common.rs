@@ -10,9 +10,9 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
 use nom::character::is_alphanumeric;
-use nom::combinator::map_parser;
-use nom::combinator::opt;
 use nom::combinator::{map, not, peek};
+use nom::combinator::{map_parser, map_res};
+use nom::combinator::{opt, recognize};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{fold_many0, many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
@@ -440,6 +440,11 @@ impl Default for FieldDefinitionExpression {
     }
 }
 
+pub enum Sign {
+    Unsigned,
+    Signed,
+}
+
 #[inline]
 pub fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'_' || chr == b'@'
@@ -521,8 +526,11 @@ pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     delimited(tag("("), precision_helper, tag(")"))(i)
 }
 
-fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<&[u8]>> {
-    opt(alt((tag_no_case("unsigned"), tag_no_case("signed"))))(i)
+fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<Sign>> {
+    opt(alt((
+        map(tag_no_case("unsigned"), |_| Sign::Unsigned),
+        map(tag_no_case("signed"), |_| Sign::Signed),
+    )))(i)
 }
 
 fn delim_digit(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -549,15 +557,10 @@ where
 
     let len = len.unwrap_or(default_len);
 
-    match signed {
-        Some(sign)
-            if str::from_utf8(sign)
-                .unwrap()
-                .eq_ignore_ascii_case("unsigned") =>
-        {
-            Ok((remaining_input, mk_unsigned(len)))
-        }
-        _ => Ok((remaining_input, mk_signed(len))),
+    if let Some(Sign::Unsigned) = signed {
+        Ok((remaining_input, mk_unsigned(len)))
+    } else {
+        Ok((remaining_input, mk_signed(len)))
     }
 }
 
@@ -695,18 +698,21 @@ pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
     Ok((remaining_input, (args, distinct.is_some())))
 }
 
-fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], String> {
     let ws_sep = delimited(multispace0, tag_no_case("separator"), multispace0);
     let (remaining_input, sep) = delimited(
         ws_sep,
-        opt(alt((raw_string_single_quoted, raw_string_double_quoted))),
+        opt(map_res(
+            alt((raw_string_single_quoted, raw_string_double_quoted)),
+            String::from_utf8,
+        )),
         multispace0,
     )(i)?;
 
     Ok((remaining_input, sep.unwrap_or_default()))
 }
 
-fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<Vec<u8>>)> {
+fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<String>)> {
     pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
 }
 
@@ -765,7 +771,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
                 let separator = match sep {
                     // default separator is a comma, see MySQL manual §5.7
                     None => String::from(","),
-                    Some(s) => String::from_utf8(s).unwrap(),
+                    Some(s) => s,
                 };
                 FunctionExpression::GroupConcat {
                     expr: Box::new(Expression::Column(col.clone())),
@@ -784,7 +790,7 @@ pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
             |tuple| {
                 let (name, _, _, arguments, _) = tuple;
                 FunctionExpression::Call {
-                    name: str::from_utf8(name).unwrap().to_string(),
+                    name: name.to_string(),
                     arguments,
                 }
             },
@@ -802,15 +808,15 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
             function: Some(Box::new(f)),
         }),
         map(table_parser, |tup| Column {
-            name: str::from_utf8(tup.1).unwrap().to_string(),
-            table: tup.0.map(|t| str::from_utf8(t).unwrap().to_string()),
+            name: tup.1.to_string(),
+            table: tup.0.map(|t| t.to_string()),
             function: None,
         }),
     ))(i)
 }
 
 #[cfg(feature = "postgres")]
-pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &[u8]> {
+pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &str> {
     alt((
         preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
         delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
@@ -819,19 +825,20 @@ pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &[u8]> {
 
 // Parses a SQL identifier (alphanumeric1 and "_").
 #[cfg(not(feature = "postgres"))]
-pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    alt((
-        preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
-        delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
-        delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
-    ))(i)
+pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &str> {
+    map_res(
+        alt((
+            preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
+            delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
+            delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
+        )),
+        str::from_utf8,
+    )(i)
 }
 
 // Parse an unsigned integer.
 pub fn unsigned_number(i: &[u8]) -> IResult<&[u8], u64> {
-    map(digit1, |d| {
-        FromStr::from_str(str::from_utf8(d).unwrap()).unwrap()
-    })(i)
+    map_res(map_res(digit1, str::from_utf8), u64::from_str)(i)
 }
 
 pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
@@ -858,7 +865,7 @@ pub fn as_alias(i: &[u8]) -> IResult<&[u8], &str> {
             opt(pair(tag_no_case("as"), multispace1)),
             sql_identifier,
         )),
-        |a| str::from_utf8(a.2).unwrap(),
+        |a| a.2,
     )(i)
 }
 
@@ -928,32 +935,39 @@ pub fn table_list(i: &[u8]) -> IResult<&[u8], Vec<Table>> {
 
 // Integer literal value
 pub fn integer_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(pair(opt(tag("-")), digit1), |tup| {
-        let mut intval = i64::from_str(str::from_utf8(tup.1).unwrap()).unwrap();
-        if (tup.0).is_some() {
-            intval *= -1;
-        }
-        Literal::Integer(intval)
-    })(i)
+    map(
+        pair(
+            opt(tag("-")),
+            map_res(map_res(digit1, str::from_utf8), i64::from_str),
+        ),
+        |tup| {
+            let mut intval = tup.1;
+            if (tup.0).is_some() {
+                intval *= -1;
+            }
+            Literal::Integer(intval)
+        },
+    )(i)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn float(i: &[u8]) -> IResult<&[u8], (Option<&[u8]>, &[u8], &[u8], &[u8])> {
+    tuple((opt(tag("-")), digit1, tag("."), digit1))(i)
 }
 
 // Floating point literal value
 #[allow(clippy::type_complexity)]
 pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     map(
-        tuple((opt(tag("-")), digit1, tag("."), digit1)),
-        |(sign, whole, _, frac): (Option<&[u8]>, &[u8], &[u8], &[u8])| {
-            let prec = frac.len();
-            let value = f64::from_str(&format!(
-                "{}{}.{}",
-                sign.map_or("", |s| str::from_utf8(s).unwrap()),
-                str::from_utf8(whole).unwrap(),
-                str::from_utf8(frac).unwrap()
-            ))
-            .unwrap();
+        pair(
+            peek(float),
+            map_res(map_res(recognize(float), str::from_utf8), f64::from_str),
+        ),
+        |f| {
+            let (_, _, _, frac) = f.0;
             Literal::FixedPoint(Real {
-                value,
-                precision: prec as _,
+                value: f.1,
+                precision: frac.len() as _,
             })
         },
     )(i)
@@ -1040,14 +1054,20 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
         map(tag("?"), |_| {
             Literal::Placeholder(ItemPlaceholder::QuestionMark)
         }),
-        map(preceded(tag(":"), digit1), |num| {
-            let value = i32::from_str(str::from_utf8(num).unwrap()).unwrap();
-            Literal::Placeholder(ItemPlaceholder::ColonNumber(value))
-        }),
-        map(preceded(tag("$"), digit1), |num| {
-            let value = i32::from_str(str::from_utf8(num).unwrap()).unwrap();
-            Literal::Placeholder(ItemPlaceholder::DollarNumber(value))
-        }),
+        map(
+            preceded(
+                tag(":"),
+                map_res(map_res(digit1, str::from_utf8), i32::from_str),
+            ),
+            |num| Literal::Placeholder(ItemPlaceholder::ColonNumber(num)),
+        ),
+        map(
+            preceded(
+                tag("$"),
+                map_res(map_res(digit1, str::from_utf8), i32::from_str),
+            ),
+            |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
+        ),
     ))(i)
 }
 
@@ -1065,9 +1085,9 @@ pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
             opt(as_alias),
         )),
         |tup| Table {
-            name: String::from(str::from_utf8(tup.1).unwrap()),
+            name: String::from(tup.1),
             alias: tup.2.map(String::from),
-            schema: tup.0.map(|(s, _)| str::from_utf8(s).unwrap().to_string()),
+            schema: tup.0.map(|(s, _)| s.to_string()),
         },
     )(i)
 }
@@ -1085,7 +1105,7 @@ named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
 // Parse a reference to a named table, with an optional alias
 pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
     map(pair(sql_identifier, opt(as_alias)), |tup| Table {
-        name: String::from(str::from_utf8(tup.0).unwrap()),
+        name: String::from(tup.0),
         alias: tup.1.map(String::from),
         schema: None,
     })(i)
@@ -1096,9 +1116,12 @@ pub fn parse_comment(i: &[u8]) -> IResult<&[u8], String> {
     map(
         preceded(
             delimited(multispace0, tag_no_case("comment"), multispace1),
-            delimited(tag("'"), take_until("'"), tag("'")),
+            map_res(
+                delimited(tag("'"), take_until("'"), tag("'")),
+                str::from_utf8,
+            ),
         ),
-        |comment| String::from(str::from_utf8(comment).unwrap()),
+        String::from,
     )(i)
 }
 

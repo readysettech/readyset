@@ -41,16 +41,16 @@ pub struct CompoundSelectStatement {
 impl fmt::Display for CompoundSelectStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (ref op, ref sel) in &self.selects {
-            if op.is_some() {
-                write!(f, " {}", op.as_ref().unwrap())?;
+            if let Some(o) = op {
+                write!(f, " {}", o)?;
             }
             write!(f, " {}", sel)?;
         }
-        if self.order.is_some() {
-            write!(f, " {}", self.order.as_ref().unwrap())?;
+        if let Some(ord) = &self.order {
+            write!(f, " {}", ord)?;
         }
-        if self.limit.is_some() {
-            write!(f, " {}", self.order.as_ref().unwrap())?;
+        if let Some(lim) = &self.limit {
+            write!(f, " {}", lim)?;
         }
         Ok(())
     }
