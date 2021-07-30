@@ -5,14 +5,32 @@ use noria::ControllerHandle;
 use noria::DataType;
 use noria::KeyComparison;
 use noria::ViewQuery;
-use rand::distributions::{Distribution, Uniform};
-use std::convert::TryFrom;
+use rand::distributions::Uniform;
+use rand::prelude::*;
+use std::convert::{TryFrom, TryInto};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
+
+#[derive(Debug)]
+enum Dist {
+    Uniform,
+}
+
+impl FromStr for Dist {
+    type Err = &'static str;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "uniform" => Ok(Dist::Uniform),
+            _ => Err("Unrecognized distribution"),
+        }
+    }
+}
 
 #[derive(Clap)]
 #[clap(name = "reader")]
@@ -45,38 +63,75 @@ struct Reader {
     /// The number of threads to spawn to issue reader queries.
     #[clap(long, default_value = "1")]
     threads: u64,
+
+    #[clap(long, default_value = "uniform", parse(try_from_str))]
+    distribution: Dist,
 }
 
 #[derive(Debug, Clone)]
 struct ReaderThreadUpdate {
-    // The id of the thread assinged by the parent.
-    id: u32,
     // Query end-to-end latency in ms.
     queries: Vec<u128>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct BatchedQuery {
-    key: usize,
+    key: u64,
     issued: Instant,
 }
 
-impl BatchedQuery {
-    fn new(max: usize) -> Self {
-        let mut rng = rand::thread_rng();
-        let uniform = Uniform::from(0..max);
+/// Generates random queries using a provided `Distribution`
+struct QueryFactory<T, D> {
+    distribution: D,
+    rng: rand::rngs::SmallRng,
+    _t: std::marker::PhantomData<T>,
+}
+
+trait QueryGenerator {
+    fn query(&mut self) -> BatchedQuery;
+}
+
+impl<T, D> QueryFactory<T, D>
+where
+    T: TryInto<u64>,
+    <T as TryInto<u64>>::Error: std::fmt::Debug,
+    D: Distribution<T>,
+{
+    fn new(distribution: D) -> Self {
+        QueryFactory {
+            distribution,
+            rng: rand::rngs::SmallRng::from_entropy(),
+            _t: Default::default(),
+        }
+    }
+
+    fn new_query(&mut self) -> BatchedQuery {
+        let QueryFactory {
+            distribution, rng, ..
+        } = self;
 
         BatchedQuery {
-            key: uniform.sample(&mut rng),
+            key: distribution.sample(rng).try_into().unwrap(),
             issued: Instant::now(),
         }
+    }
+}
+
+impl<T, D> QueryGenerator for QueryFactory<T, D>
+where
+    T: TryInto<u64>,
+    <T as TryInto<u64>>::Error: std::fmt::Debug,
+    D: Distribution<T>,
+{
+    fn query(&mut self) -> BatchedQuery {
+        self.new_query()
     }
 }
 
 impl Reader {
     async fn generate_queries(
         &self,
-        id: u32,
+        mut query_factory: Box<dyn QueryGenerator + Send>,
         query_interval: Option<Duration>,
         sender: UnboundedSender<ReaderThreadUpdate>,
         authority: Arc<ZookeeperAuthority>,
@@ -87,7 +142,6 @@ impl Reader {
 
         let mut last_thread_update = Instant::now();
         let mut reader_update = ReaderThreadUpdate {
-            id,
             queries: Vec::new(),
         };
 
@@ -131,7 +185,7 @@ impl Reader {
                 batch_start = now;
             }
 
-            queries.push(BatchedQuery::new(self.user_table_rows));
+            queries.push(query_factory.query());
             qps_sent += 1;
 
             if qps_sent == 10_000_000 {
@@ -176,6 +230,10 @@ impl Reader {
                 reader_update
                     .queries
                     .push((finish.duration_since(query.issued)).as_millis());
+            }
+
+            if !queries.is_empty() {
+                panic!("Expected actual results");
             }
 
             queries.clear();
@@ -241,15 +299,24 @@ impl Reader {
         handle.ready().await.unwrap();
 
         let mut threads: Vec<_> = (0..self.threads)
-            .map(|id| {
+            .map(|_| {
                 let thread_tx = tx.clone();
                 let authority = Arc::clone(&authority);
+
                 tokio::spawn(async move {
-                    self.generate_queries(id as u32, query_issue_interval, thread_tx, authority)
+                    let factory: Box<dyn QueryGenerator + Send> = match self.distribution {
+                        Dist::Uniform => Box::new(QueryFactory::new(Uniform::new(
+                            0,
+                            self.user_table_rows as u64,
+                        ))),
+                    };
+
+                    self.generate_queries(factory, query_issue_interval, thread_tx, authority)
                         .await
                 })
             })
             .collect();
+
         threads.push(tokio::spawn(async move { self.process_updates(rx).await }));
 
         let res = futures::future::join_all(threads).await;
