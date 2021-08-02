@@ -12,8 +12,8 @@ use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
-    FieldDefinitionExpression, LimitClause, Literal, OrderClause, SelectStatement, TableKey,
-    UnaryOperator,
+    FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause,
+    SelectStatement, TableKey, UnaryOperator,
 };
 
 use itertools::Itertools;
@@ -73,6 +73,37 @@ fn value_columns_needed_for_predicates(
         })
         .filter(|(c, _)| pred_columns.contains(c))
         .collect()
+}
+
+fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
+    // If this is an aggregated query AND it does not contain a GROUP BY clause,
+    // set default values based on the aggregation (or lack thereof) on each
+    // individual field
+    if !st.contains_aggregate_select() || st.group_by.is_some() {
+        return None;
+    }
+    Some(
+        st.fields
+            .iter()
+            .map(|f| match f {
+                FieldDefinitionExpression::Expression {
+                    expr: Expression::Call(func),
+                    ..
+                } => match func {
+                    FunctionExpression::Avg { .. } => DataType::None,
+                    FunctionExpression::Count { .. } => DataType::Int(0),
+                    FunctionExpression::CountStar => DataType::Int(0),
+                    FunctionExpression::Sum { .. } => DataType::None,
+                    FunctionExpression::Max(..) => DataType::None,
+                    FunctionExpression::Min(..) => DataType::None,
+                    FunctionExpression::GroupConcat { .. } => DataType::None,
+                    FunctionExpression::Cast(..) => DataType::None,
+                    FunctionExpression::Call { .. } => DataType::None,
+                },
+                _ => DataType::None,
+            })
+            .collect(),
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -1878,6 +1909,7 @@ impl SqlToMirConverter {
                             cols.retain(|e| e.name != "bogokey");
                             cols
                         }),
+                        default_row: default_row_for_select(st),
                     },
                     vec![leaf_project_node],
                     vec![],

@@ -6592,7 +6592,6 @@ async fn group_by_agg_col_with_join() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn count_emit_zero() {
     let mut g = start_simple_unsharded("count_emit_zero").await;
     let sql = "
