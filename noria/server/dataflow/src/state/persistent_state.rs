@@ -773,7 +773,6 @@ impl PersistentState {
 
     /// Perform a lookup for multiple equal keys at once, the results are returned in order of the
     /// original keys
-    #[allow(unused)]
     pub(crate) fn lookup_multi<'a>(
         &'a self,
         columns: &[usize],

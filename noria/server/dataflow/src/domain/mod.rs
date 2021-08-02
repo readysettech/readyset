@@ -3,6 +3,7 @@ use std::cell;
 use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
+use std::iter::repeat;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -105,6 +106,55 @@ impl ReplayPath {
 
 type Hole = (Vec<usize>, KeyComparison);
 
+/// The result of do_lookup, consists of the vector of the found records
+/// the hashset of the fullfilled keys, and a hashset of the missed key/replay key tuples
+struct StateLookupResult<'a> {
+    /// Records returned by the lookup
+    records: Vec<RecordResult<'a>>,
+    /// Keys for which records were found
+    found_keys: HashSet<KeyComparison>,
+    /// Keys that were missed and need a replay
+    replay_keys: HashSet<(KeyComparison, KeyComparison)>,
+}
+
+/// Describes a required replay
+#[derive(Clone)]
+struct ReplayDescriptor {
+    idx: LocalNodeIndex,
+    tag: Tag,
+    replay_key: KeyComparison,
+    lookup_key: KeyComparison,
+    lookup_columns: Vec<usize>,
+    unishard: bool,
+    requesting_shard: usize,
+}
+
+impl ReplayDescriptor {
+    fn from_miss(miss: &Miss, tag: Tag, unishard: bool, requesting_shard: usize) -> Self {
+        #[allow(clippy::unwrap_used)]
+        // We know this is a partial replay
+        ReplayDescriptor {
+            idx: miss.on,
+            tag,
+            replay_key: miss.replay_key().unwrap(),
+            lookup_key: miss.lookup_key(),
+            lookup_columns: miss.lookup_idx.clone(),
+            unishard,
+            requesting_shard,
+        }
+    }
+
+    // Returns true if that `ReplayDescriptor` can be processed together, i.e. they only
+    // differ in their miss and lookup keys
+    fn can_combine(&self, other: &ReplayDescriptor) -> bool {
+        self.tag == other.tag
+            && self.idx == other.idx
+            && self.lookup_columns == other.lookup_columns
+            && self.unishard == other.unishard
+            && self.requesting_shard == other.requesting_shard
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct Redo {
     tag: Tag,
@@ -155,8 +205,6 @@ pub struct DomainBuilder {
     /// Configuration parameters for the domain.
     pub config: Config,
 }
-
-unsafe impl Send for DomainBuilder {}
 
 impl DomainBuilder {
     /// Starts up the domain represented by this `DomainBuilder`.
@@ -501,12 +549,11 @@ impl Domain {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn on_replay_miss(
+    fn on_replay_misses(
         &mut self,
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
-        replay_key: KeyComparison,
-        miss_key: KeyComparison,
+        misses: HashSet<(KeyComparison, KeyComparison)>,
         was_single_shard: bool,
         requesting_shard: usize,
         needed_for: Tag,
@@ -514,9 +561,14 @@ impl Domain {
         use std::collections::hash_map::Entry;
         use std::ops::AddAssign;
 
+        let mut miss_keys = Vec::with_capacity(misses.len());
+
+        // when the replay eventually succeeds, we want to re-do the replay.
+        let mut w = self.waiting.remove(miss_in).unwrap_or_default();
+
         counter!(
             recorded::DOMAIN_REPLAY_MISSES,
-            1,
+            misses.len() as u64,
             // HACK(eta): having to call `to_string()` here makes me sad,
             // but seems to be a limitation of the `metrics` crate
             "domain" => self.index.index().to_string(),
@@ -524,42 +576,43 @@ impl Domain {
             "miss_in" => miss_in.id().to_string(),
             "needed_for" => needed_for.to_string()
         );
-        // when the replay eventually succeeds, we want to re-do the replay.
-        let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
-        let mut redundant = false;
-        let redo = Redo {
-            tag: needed_for,
-            replay_key,
-            unishard: was_single_shard,
-            requesting_shard,
-        };
-        match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
-            Entry::Occupied(e) => {
-                // we have already requested backfill of this key
-                // remember to notify this Redo when backfill completes
-                if e.into_mut().insert(redo.clone()) {
+        for (replay_key, miss_key) in misses {
+            let redo = Redo {
+                tag: needed_for,
+                replay_key,
+                unishard: was_single_shard,
+                requesting_shard,
+            };
+            match w.redos.entry((Vec::from(miss_columns), miss_key.clone())) {
+                Entry::Occupied(e) => {
+                    // we have already requested backfill of this key
+                    // remember to notify this Redo when backfill completes
+                    if e.into_mut().insert(redo.clone()) {
+                        // this Redo should wait for this backfill to complete before redoing
+                        w.holes.entry(redo).or_default().add_assign(1);
+                    }
+                    continue;
+                }
+                Entry::Vacant(e) => {
+                    // we haven't already requested backfill of this key
+                    let mut redos = HashSet::new();
+                    // remember to notify this Redo when backfill completes
+                    redos.insert(redo.clone());
+                    e.insert(redos);
                     // this Redo should wait for this backfill to complete before redoing
                     w.holes.entry(redo).or_default().add_assign(1);
                 }
-                redundant = true;
             }
-            Entry::Vacant(e) => {
-                // we haven't already requested backfill of this key
-                let mut redos = HashSet::new();
-                // remember to notify this Redo when backfill completes
-                redos.insert(redo.clone());
-                e.insert(redos);
-                // this Redo should wait for this backfill to complete before redoing
-                w.holes.entry(redo).or_default().add_assign(1);
-            }
-        }
-        self.waiting.insert(miss_in, w);
-        if redundant {
-            return Ok(());
+            miss_keys.push(miss_key);
         }
 
-        self.find_tags_and_replay(vec![miss_key], miss_columns, miss_in)?;
+        self.waiting.insert(miss_in, w);
+
+        if !miss_keys.is_empty() {
+            self.find_tags_and_replay(miss_keys, miss_columns, miss_in)?
+        };
+
         Ok(())
     }
 
@@ -2203,6 +2256,103 @@ impl Domain {
         }
     }
 
+    /// Lookup the provided keys, returns a vector of results
+    /// Assuming that this is a persistent state, we can do an efficient multi-key
+    /// lookup for equal keys
+    fn do_lookup_multi<'a>(
+        &self,
+        state: &'a PersistentState,
+        cols: &[usize],
+        keys: &HashSet<KeyComparison>,
+    ) -> Vec<RecordResult<'a>> {
+        let mut range_records = Vec::new();
+        let equal_keys = keys
+            .iter()
+            .filter_map(|k| match k {
+                KeyComparison::Equal(equal) => Some(KeyType::from(equal)),
+                KeyComparison::Range(range) => {
+                    // TODO: aggregate ranges to optimize range lookups too?
+                    match state.lookup_range(cols, &RangeKey::from(range)) {
+                        RangeLookupResult::Some(res) => range_records.push(res),
+                        #[allow(clippy::unreachable)]
+                        // Can't miss in persistent state
+                        RangeLookupResult::Missing(_) => unreachable!("Persistent state"),
+                    }
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut records = state.lookup_multi(cols, &equal_keys);
+        records.append(&mut range_records);
+        records
+    }
+
+    /// Lookup the provided keys one by one, returns a vector of results, the set of the hit keys
+    /// and a set of the misses
+    fn do_lookup_iter<'a>(
+        &self,
+        state: &'a dyn State,
+        cols: &[usize],
+        mut keys: HashSet<KeyComparison>,
+    ) -> ReadySetResult<StateLookupResult<'a>> {
+        let mut records = Vec::new();
+        let mut replay_keys = HashSet::new();
+        // Drain misses, and keep the hits
+        keys.drain_filter(|key| match key {
+            KeyComparison::Equal(equal) => match state.lookup(cols, &KeyType::from(equal)) {
+                LookupResult::Some(record) => {
+                    records.push(record);
+                    false
+                }
+                LookupResult::Missing => {
+                    replay_keys.insert((key.clone(), key.clone()));
+                    true
+                }
+            },
+            KeyComparison::Range(range) => match state.lookup_range(cols, &RangeKey::from(range)) {
+                RangeLookupResult::Some(record) => {
+                    records.push(record);
+                    false
+                }
+                RangeLookupResult::Missing(ms) => {
+                    // FIXME(eta): error handling impl here adds overhead
+                    let ms = ms.into_iter().map(|m| {
+                        // This is the only point where the replay_key and miss_key are different.
+                        #[allow(clippy::unwrap_used)]
+                        // keys can't be empty coming from misses
+                        (key.clone(), KeyComparison::try_from(m).unwrap())
+                    });
+                    replay_keys.extend(ms);
+                    true
+                }
+            },
+        });
+
+        Ok(StateLookupResult {
+            records,
+            found_keys: keys,
+            replay_keys,
+        })
+    }
+
+    fn do_lookup<'a>(
+        &self,
+        state: &'a dyn State,
+        cols: &[usize],
+        keys: HashSet<KeyComparison>,
+    ) -> ReadySetResult<StateLookupResult<'a>> {
+        if let Some(state) = state.as_persistent() {
+            Ok(StateLookupResult {
+                records: self.do_lookup_multi(state, cols, &keys),
+                found_keys: keys, // PersistentState can't miss
+                replay_keys: HashSet::new(),
+            })
+        } else {
+            self.do_lookup_iter(state, cols, keys)
+        }
+    }
+
     fn seed_all(
         &mut self,
         tag: Tag,
@@ -2213,144 +2363,92 @@ impl Domain {
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::indexing_slicing)]
         // tag came from an internal data structure that guarantees it's present
-        let (m, source, is_miss) = match self.replay_paths[&tag] {
+        let (source, cols, path) = match &self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
-                trigger: TriggerEndpoint::Start(ref cols),
-                ref path,
+                trigger: TriggerEndpoint::Start(cols),
+                path,
                 ..
             }
             | ReplayPath {
                 source: Some(source),
-                trigger: TriggerEndpoint::Local(ref cols),
-                ref path,
+                trigger: TriggerEndpoint::Local(cols),
+                path,
                 ..
-            } => {
-                let state = self.state.get(source).ok_or_else(|| {
-                    internal_err(format!(
-                        "migration replay path (tag {:?}) started with non-materialized node",
-                        tag
-                    ))
-                })?;
-
-                self.record_dataflow_lookup_metrics(source);
-                let mut rs = Vec::new();
-                let mut new_keys = HashSet::new();
-                // `misses` is a tuple of (replay_key, miss_key), where `replay_key` is the key we're trying
-                // to replay and `miss_key` is the part of it we missed on.
-                // This is only relevant for range queries; for non-range queries the two are the same.
-                let mut misses: HashSet<(KeyComparison, KeyComparison)> = HashSet::new();
-                for key in &keys {
-                    match key {
-                        KeyComparison::Equal(equal) => {
-                            match state.lookup(&cols[..], &KeyType::from(equal)) {
-                                LookupResult::Some(res) => {
-                                    rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
-                                    new_keys.insert(key.clone());
-                                }
-                                LookupResult::Missing => {
-                                    misses.insert((key.clone(), key.clone()));
-                                }
-                            }
-                        }
-                        KeyComparison::Range(range) => {
-                            match state.lookup_range(&cols[..], &RangeKey::from(range)) {
-                                RangeLookupResult::Some(res) => {
-                                    rs.extend(res.into_iter().map(|r| self.seed_row(source, r)));
-                                    new_keys.insert(key.clone());
-                                }
-                                RangeLookupResult::Missing(ms) => {
-                                    // FIXME(eta): error handling impl here adds overhead
-                                    let ms = ms
-                                        .into_iter()
-                                        .map(|m| {
-                                            // This is the only point where the replay_key and miss_key are different.
-                                            Ok((
-                                                key.clone(),
-                                                KeyComparison::try_from(m).map_err(|_| {
-                                                    internal_err("Miss on empty key")
-                                                })?,
-                                            ))
-                                        })
-                                        .collect::<ReadySetResult<Vec<_>>>()?;
-                                    misses.extend(ms.into_iter());
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let m = if !keys.is_empty() {
-                    Some(Box::new(Packet::ReplayPiece {
-                        link: Link::new(source, path[0].node),
-                        tag,
-                        context: ReplayPieceContext::Partial {
-                            for_keys: new_keys,
-                            unishard: single_shard, // if we are the only source, only one path
-                            ignore: false,
-                            requesting_shard,
-                        },
-                        data: rs.into_iter().collect::<Result<Records, _>>()?,
-                    }))
-                } else {
-                    None
-                };
-
-                let miss = if !misses.is_empty() {
-                    Some((cols.clone(), misses))
-                } else {
-                    None
-                };
-
-                (m, source, miss)
-            }
-            _ => {
-                internal!();
-            }
+            } => (source, cols, path),
+            _ => internal!(),
         };
 
-        if let Some((cols, misses)) = is_miss {
+        let state = self.state.get(*source).ok_or_else(|| {
+            internal_err(format!(
+                "migration replay path (tag {:?}) started with non-materialized node",
+                tag
+            ))
+        })?;
+
+        self.record_dataflow_lookup_metrics(*source);
+
+        let StateLookupResult {
+            records,
+            found_keys,
+            replay_keys,
+        } = self.do_lookup(state.as_ref(), cols, keys)?;
+
+        let records = records
+            .into_iter()
+            .map(|rr| rr.into_iter().map(|r| self.seed_row(*source, r)))
+            .flatten()
+            .collect::<ReadySetResult<Vec<Record>>>()?;
+
+        let dst = path[0].node;
+        let cols = cols.clone(); // Clone to free the immutable reference at the top
+        let src = *source;
+
+        if !replay_keys.is_empty() {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            for (replay_key, miss_key) in misses {
-                trace!(self.log,
-                       "missed during replay request";
-                       "tag" => tag,
-                       "replay_key" => ?replay_key,
-                       "miss_key" => ?miss_key);
-                self.on_replay_miss(
-                    source,
-                    &cols[..],
-                    // NOTE: As described above, replay_key and miss_key are different in the case
-                    // of range queries.
-                    // Assuming they were the same was a whole bug that eta had to spend like 2
-                    // hours tracking down, only to find it was as simple as this.
-                    replay_key,
-                    miss_key,
-                    single_shard,
-                    requesting_shard,
-                    tag,
-                )?;
-            }
+            trace!(self.log,
+                "missed during replay request";
+                "tag" => tag,
+                "miss_keys" => ?replay_keys);
+
+            self.on_replay_misses(
+                src,
+                &cols,
+                // NOTE:
+                // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the key we're trying
+                // to replay and `miss_key` is the part of it we missed on.
+                // This is only relevant for range queries; for non-range queries the two are the same.
+                // Assuming they were the same for range queries was a whole bug that eta had to spend like 2
+                // hours tracking down, only to find it was as simple as this.
+                replay_keys,
+                single_shard,
+                requesting_shard,
+                tag,
+            )?;
         }
 
-        if let Some(m) = m {
-            if let Packet::ReplayPiece {
-                context: ReplayPieceContext::Partial { ref for_keys, .. },
-                ..
-            } = *m
-            {
-                trace!(self.log,
-                       "satisfied replay request";
-                       "tag" => tag,
-                       //"data" => ?m.as_ref().unwrap().data(),
-                       "keys" => ?for_keys,
-                );
-            } else {
-                internal!();
-            }
+        if !found_keys.is_empty() {
+            trace!(self.log,
+                   "satisfied replay request";
+                   "tag" => tag,
+                   "keys" => ?found_keys,
+            );
 
-            self.handle_replay(*m, ex)?;
+            self.handle_replay(
+                Packet::ReplayPiece {
+                    link: Link::new(src, dst),
+                    tag,
+                    context: ReplayPieceContext::Partial {
+                        for_keys: found_keys,
+                        unishard: single_shard, // if we are the only source, only one path
+                        ignore: false,
+                        requesting_shard,
+                    },
+                    data: records.into(),
+                },
+                ex,
+            )?;
         }
 
         Ok(())
@@ -2465,17 +2563,17 @@ impl Domain {
                    "missed during replay request";
                    "tag" => tag,
                    "key" => ?key);
-            for miss in misses {
-                self.on_replay_miss(
-                    source,
-                    &cols[..],
-                    key.clone().into_owned(),
-                    miss.into_owned(),
-                    single_shard,
-                    requesting_shard,
-                    tag,
-                )?;
-            }
+
+            self.on_replay_misses(
+                source,
+                &cols[..],
+                repeat(key.into_owned())
+                    .zip(misses.into_iter().map(Cow::into_owned))
+                    .collect(),
+                single_shard,
+                requesting_shard,
+                tag,
+            )?;
         } else {
             trace!(self.log,
                    "satisfied replay request";
@@ -2961,19 +3059,9 @@ impl Domain {
                                 internal!("backfill_keys.is_some() implies Context::Partial");
                             };
 
-                            for miss in misses {
-                                #[allow(clippy::unwrap_used)]
-                                // We know this is a partial replay
-                                need_replay.push((
-                                    miss.on,
-                                    miss.replay_key().unwrap(),
-                                    miss.lookup_key(),
-                                    miss.lookup_idx.clone(),
-                                    unishard,
-                                    requesting_shard,
-                                    tag,
-                                ));
-                            }
+                            need_replay.extend(misses.iter().map(|m| {
+                                ReplayDescriptor::from_miss(m, tag, unishard, requesting_shard)
+                            }));
 
                             // we should only finish the replays for keys that *didn't* miss
                             #[allow(clippy::unwrap_used)] // We already checked it's Some
@@ -3325,24 +3413,34 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial)?;
         }
 
-        for (node, while_replaying_key, miss_key, miss_cols, single_shard, requesting_shard, tag) in
-            need_replay
-        {
+        // While the are still misses, we iterate over the array, each time draining it from elements that
+        // can be batched into a single call to `on_replay_misses`
+        while let Some(next_replay) = need_replay.get(0).cloned() {
+            let misses: HashSet<_> = need_replay
+                .drain_filter(|rep| next_replay.can_combine(rep))
+                .map(
+                    |ReplayDescriptor {
+                         lookup_key,
+                         replay_key,
+                         ..
+                     }| (replay_key, lookup_key),
+                )
+                .collect();
+
             trace!(self.log,
                    "missed during replay processing";
                    "tag" => tag,
-                   "during" => ?while_replaying_key,
-                   "missed" => ?miss_key,
-                   "on" => %node,
+                   "misses" => ?misses,
+                   "on" => %next_replay.idx,
             );
-            self.on_replay_miss(
-                node,
-                &miss_cols[..],
-                while_replaying_key,
-                miss_key,
-                single_shard,
-                requesting_shard,
-                tag,
+
+            self.on_replay_misses(
+                next_replay.idx,
+                &next_replay.lookup_columns,
+                misses,
+                next_replay.unishard,
+                next_replay.requesting_shard,
+                next_replay.tag,
             )?;
         }
 
