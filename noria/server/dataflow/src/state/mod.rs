@@ -108,6 +108,11 @@ pub(crate) trait State: SizeOf + Send {
     /// * The length of `columns` must match the length of `key`
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>>;
 
+    /// If the internal type is a `PersistentState` return a reference to itself
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        None
+    }
+
     fn rows(&self) -> usize;
 
     fn keys(&self) -> Vec<Vec<usize>>;
