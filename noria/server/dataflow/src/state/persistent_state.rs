@@ -21,6 +21,7 @@ use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };
 use std::borrow::Cow;
+use std::iter::repeat;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 
@@ -192,10 +193,9 @@ impl State for PersistentState {
             let data = if index_id == 0 && self.has_unique_index {
                 // This is a primary key, so we know there's only one row to retrieve
                 // (no need to use prefix_iterator).
-                let raw_row = db.get_cf(cf, &prefix).unwrap();
+                let raw_row = db.get_pinned_cf(cf, &prefix).unwrap();
                 if let Some(raw) = raw_row {
-                    let row = bincode::deserialize(&*raw).unwrap();
-                    vec![row]
+                    vec![bincode::deserialize(&raw).unwrap()]
                 } else {
                     vec![]
                 }
@@ -264,6 +264,10 @@ impl State for PersistentState {
                     .collect(),
             ))
         })
+    }
+
+    fn as_persistent(&self) -> Option<&PersistentState> {
+        Some(self)
     }
 
     /// Panics if partial is Some
@@ -766,6 +770,49 @@ impl PersistentState {
             .cf_handle(&self.indices[self.index_id(columns)].column_family)
             .unwrap()
     }
+
+    /// Perform a lookup for multiple equal keys at once, the results are returned in order of the
+    /// original keys
+    #[allow(unused)]
+    pub(crate) fn lookup_multi<'a>(
+        &'a self,
+        columns: &[usize],
+        keys: &[KeyType],
+    ) -> Vec<RecordResult<'a>> {
+        let db = self.db();
+        let index_id = self.index_id(columns);
+        tokio::task::block_in_place(|| {
+            let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
+            if index_id == 0 && self.has_unique_index {
+                let keys = repeat(cf).zip(keys.iter().map(|k| Self::serialize_prefix(k)));
+                db.multi_get_cf(keys)
+                    .into_iter()
+                    .map(|row| {
+                        let row = if let Some(row) = row.unwrap() {
+                            vec![bincode::deserialize(&row).expect("Deserializing from rocksdb")]
+                        } else {
+                            vec![]
+                        };
+
+                        RecordResult::Owned(row)
+                    })
+                    .collect()
+            } else {
+                keys.iter()
+                    .map(|k| {
+                        let prefix = Self::serialize_prefix(k);
+                        RecordResult::Owned(
+                            db.prefix_iterator_cf(cf, &prefix)
+                                .map(|(_, v)| {
+                                    bincode::deserialize(&v).expect("Deserializing from rocksdb")
+                                })
+                                .collect(),
+                        )
+                    })
+                    .collect()
+            }
+        })
+    }
 }
 
 // SliceTransforms are used to create prefixes of all inserted keys, which can then be used for
@@ -933,6 +980,22 @@ mod tests {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0], first);
+            }
+            _ => unreachable!(),
+        }
+
+        match state
+            .lookup_multi(
+                &[0],
+                &[KeyType::Single(&10.into()), KeyType::Single(&20.into())],
+            )
+            .as_slice()
+        {
+            &[RecordResult::Owned(ref r0), RecordResult::Owned(ref r1)] => {
+                assert_eq!(r0.len(), 1);
+                assert_eq!(r0[0], first);
+                assert_eq!(r1.len(), 1);
+                assert_eq!(r1[0], second);
             }
             _ => unreachable!(),
         }
