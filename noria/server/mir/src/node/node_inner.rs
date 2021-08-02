@@ -100,6 +100,8 @@ pub enum MirNodeInner {
         limit: Option<usize>,
         /// Optional set of expression columns requested in the original query
         returned_cols: Option<Vec<Column>>,
+        /// Row of default values to send back, for example if we're aggregating and no rows are found
+        default_row: Option<Vec<DataType>>,
     },
     /// Param Filter node
     ParamFilter {
@@ -119,6 +121,7 @@ impl MirNodeInner {
             order_by: None,
             limit: None,
             returned_cols: None,
+            default_row: None,
         }
     }
 

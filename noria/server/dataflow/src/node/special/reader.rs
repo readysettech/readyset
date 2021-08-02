@@ -31,26 +31,38 @@ pub struct PostLookup {
     /// Indices of the columns requested in the query. Reader will filter out all other projected
     /// columns
     pub returned_cols: Option<Vec<usize>>,
+    /// Default values to send back, for example if we're aggregating and no rows are found
+    pub default_row: Option<Vec<DataType>>,
 }
 
 impl PostLookup {
     /// Apply this set of post-lookup operations, plus an optional [`ViewQueryFilter`], to the given
     /// set of results returned from a lookup
     pub fn process<'a, I>(
-        &self,
+        &'a self,
         iter: I,
         filter: &Option<ViewQueryFilter>,
     ) -> Vec<Vec<&'a DataType>>
     where
         I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
+        Self: 'a,
     {
         let data = iter.map(|r| r.iter().collect::<Vec<_>>());
         if self.order_by.is_none()
             && self.limit.is_none()
             && filter.is_none()
             && self.returned_cols.is_none()
+            && self.default_row.is_none()
         {
             return data.collect::<Vec<_>>();
+        }
+
+        // If no data is present AND we have default values (e.g. we're aggregating), we can
+        // short-circuit here and just return the defaults.
+        if data.len() == 0 {
+            if let Some(defaults) = self.default_row.as_ref() {
+                return vec![defaults.iter().collect()];
+            }
         }
 
         let ordered_limited = do_order_limit(data, self.order_by.as_deref(), self.limit);
