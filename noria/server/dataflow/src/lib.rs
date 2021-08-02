@@ -12,7 +12,9 @@
     option_result_contains,
     bound_as_ref,
     bound_map,
-    stmt_expr_attributes
+    stmt_expr_attributes,
+    drain_filter,
+    hash_drain_filter
 )]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.
