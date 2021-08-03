@@ -8,7 +8,11 @@
 		{
 			"Environment": "sandbox",
 			"Quality": "default"
+		},
+		{
+			"Environment": "build",
+			"Quality": "default"
 		}
 	],
-	"SubstrateVersion": "2021.05"
+	"SubstrateVersion": "2021.07"
 }

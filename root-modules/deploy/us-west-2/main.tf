@@ -47,9 +47,7 @@ resource "aws_s3_bucket" "readysettech-deploy-artifacts-us-west-2" {
 }
 EOF
   tags = {
-    Manager          = "Terraform"
-    Name             = "readysettech-deploy-artifacts-us-west-2"
-    SubstrateVersion = "2021.05"
+    Name = "readysettech-deploy-artifacts-us-west-2"
   }
   versioning {
     enabled = true

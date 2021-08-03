@@ -21,9 +21,9 @@ And here are the account numbers and roles for your service accounts:
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+
 | Domain   | Environment | Quality | Account Number | Role Name     | Role ARN                                     |
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+
-|          |             |         | 069491470376   | Administrator | arn:aws:iam::069491470376:role/Administrator |
-|          |             |         | 431238456211   | Administrator | arn:aws:iam::431238456211:role/Administrator |
-| atlantis | sandbox     | default | 305232526136   | Administrator | arn:aws:iam::305232526136:role/Administrator |
+| readyset | build       | default | 305232526136   | Administrator | arn:aws:iam::305232526136:role/Administrator |
+| readyset | prod        | default | 431238456211   | Administrator | arn:aws:iam::431238456211:role/Administrator |
+| readyset | sandbox     | default | 069491470376   | Administrator | arn:aws:iam::069491470376:role/Administrator |
 +----------+-------------+---------+----------------+---------------+----------------------------------------------+
 
 Finally, here are the account numbers and roles for your admin accounts:

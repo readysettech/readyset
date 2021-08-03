@@ -87,18 +87,12 @@ resource "aws_vpc_peering_connection" "requester" {
   peer_region = data.aws_region.accepter.name
   peer_vpc_id = data.aws_vpc.accepter.id
   provider    = aws.requester
-  tags = {
-    Manager = "Terraform"
-  }
-  vpc_id = data.aws_vpc.requester.id
+  vpc_id      = data.aws_vpc.requester.id
 }
 
 resource "aws_vpc_peering_connection_accepter" "accepter" {
-  auto_accept = true
-  provider    = aws.accepter
-  tags = {
-    Manager = "Terraform"
-  }
+  auto_accept               = true
+  provider                  = aws.accepter
   vpc_peering_connection_id = aws_vpc_peering_connection.requester.id
 }
 

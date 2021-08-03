@@ -2,11 +2,9 @@
 
 resource "aws_egress_only_internet_gateway" "sandbox-default-eu-west-1" {
   tags = {
-    Environment      = "sandbox"
-    Manager          = "Terraform"
-    Name             = "sandbox-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "sandbox"
+    Name        = "sandbox-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -16,10 +14,8 @@ resource "aws_eip" "sandbox-default-eu-west-1a" {
   tags = {
     AvailabilityZone = "eu-west-1a"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-nat-gateway-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
@@ -29,10 +25,8 @@ resource "aws_eip" "sandbox-default-eu-west-1b" {
   tags = {
     AvailabilityZone = "eu-west-1b"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-nat-gateway-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
@@ -42,21 +36,17 @@ resource "aws_eip" "sandbox-default-eu-west-1c" {
   tags = {
     AvailabilityZone = "eu-west-1c"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-nat-gateway-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc = true
 }
 
 resource "aws_internet_gateway" "sandbox-default-eu-west-1" {
   tags = {
-    Environment      = "sandbox"
-    Manager          = "Terraform"
-    Name             = "sandbox-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "sandbox"
+    Name        = "sandbox-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -67,10 +57,8 @@ resource "aws_nat_gateway" "sandbox-default-eu-west-1a" {
   tags = {
     AvailabilityZone = "eu-west-1a"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
 }
 
@@ -80,10 +68,8 @@ resource "aws_nat_gateway" "sandbox-default-eu-west-1b" {
   tags = {
     AvailabilityZone = "eu-west-1b"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
 }
 
@@ -93,10 +79,8 @@ resource "aws_nat_gateway" "sandbox-default-eu-west-1c" {
   tags = {
     AvailabilityZone = "eu-west-1c"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
 }
 
@@ -104,11 +88,9 @@ resource "aws_ram_resource_share" "sandbox-default-eu-west-1" {
   allow_external_principals = false
   name                      = "sandbox-default-eu-west-1"
   tags = {
-    Environment      = "sandbox"
-    Manager          = "Terraform"
-    Name             = "sandbox-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "sandbox"
+    Name        = "sandbox-default"
+    Quality     = "default"
   }
 }
 
@@ -200,10 +182,8 @@ resource "aws_route_table" "sandbox-default-private-eu-west-1a" {
     AvailabilityZone = "eu-west-1a"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -213,10 +193,8 @@ resource "aws_route_table" "sandbox-default-private-eu-west-1b" {
     AvailabilityZone = "eu-west-1b"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -226,10 +204,8 @@ resource "aws_route_table" "sandbox-default-private-eu-west-1c" {
     AvailabilityZone = "eu-west-1c"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -274,10 +250,8 @@ resource "aws_subnet" "sandbox-default-private-eu-west-1a" {
     AvailabilityZone = "eu-west-1a"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -292,10 +266,8 @@ resource "aws_subnet" "sandbox-default-private-eu-west-1b" {
     AvailabilityZone = "eu-west-1b"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -310,10 +282,8 @@ resource "aws_subnet" "sandbox-default-private-eu-west-1c" {
     AvailabilityZone = "eu-west-1c"
     Connectivity     = "private"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-private-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -328,10 +298,8 @@ resource "aws_subnet" "sandbox-default-public-eu-west-1a" {
     AvailabilityZone = "eu-west-1a"
     Connectivity     = "public"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-public-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -346,10 +314,8 @@ resource "aws_subnet" "sandbox-default-public-eu-west-1b" {
     AvailabilityZone = "eu-west-1b"
     Connectivity     = "public"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-public-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -364,10 +330,8 @@ resource "aws_subnet" "sandbox-default-public-eu-west-1c" {
     AvailabilityZone = "eu-west-1c"
     Connectivity     = "public"
     Environment      = "sandbox"
-    Manager          = "Terraform"
     Name             = "sandbox-default-public-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }
@@ -378,11 +342,9 @@ resource "aws_vpc" "sandbox-default-eu-west-1" {
   enable_dns_hostnames             = true
   enable_dns_support               = true
   tags = {
-    Environment      = "sandbox"
-    Manager          = "Terraform"
-    Name             = "sandbox-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "sandbox"
+    Name        = "sandbox-default"
+    Quality     = "default"
   }
 }
 
@@ -395,11 +357,9 @@ resource "aws_vpc_endpoint" "sandbox-default-eu-west-1" {
   ]
   service_name = "com.amazonaws.eu-west-1.s3"
   tags = {
-    Environment      = "sandbox"
-    Manager          = "Terraform"
-    Name             = "sandbox-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "sandbox"
+    Name        = "sandbox-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.sandbox-default-eu-west-1.id
 }

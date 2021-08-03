@@ -2,11 +2,9 @@
 
 resource "aws_internet_gateway" "admin-default-us-east-2" {
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -15,11 +13,9 @@ resource "aws_ram_resource_share" "admin-default-us-east-2" {
   allow_external_principals = false
   name                      = "admin-default-us-east-2"
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
 }
 
@@ -80,10 +76,8 @@ resource "aws_subnet" "admin-default-public-us-east-2a" {
     AvailabilityZone = "us-east-2a"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -98,10 +92,8 @@ resource "aws_subnet" "admin-default-public-us-east-2b" {
     AvailabilityZone = "us-east-2b"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -116,10 +108,8 @@ resource "aws_subnet" "admin-default-public-us-east-2c" {
     AvailabilityZone = "us-east-2c"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-us-east-2c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }
@@ -130,11 +120,9 @@ resource "aws_vpc" "admin-default-us-east-2" {
   enable_dns_hostnames             = true
   enable_dns_support               = true
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
 }
 
@@ -142,11 +130,9 @@ resource "aws_vpc_endpoint" "admin-default-us-east-2" {
   route_table_ids = [aws_vpc.admin-default-us-east-2.default_route_table_id]
   service_name    = "com.amazonaws.us-east-2.s3"
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.admin-default-us-east-2.id
 }

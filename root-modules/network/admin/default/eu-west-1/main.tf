@@ -2,11 +2,9 @@
 
 resource "aws_internet_gateway" "admin-default-eu-west-1" {
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.admin-default-eu-west-1.id
 }
@@ -15,11 +13,9 @@ resource "aws_ram_resource_share" "admin-default-eu-west-1" {
   allow_external_principals = false
   name                      = "admin-default-eu-west-1"
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
 }
 
@@ -80,10 +76,8 @@ resource "aws_subnet" "admin-default-public-eu-west-1a" {
     AvailabilityZone = "eu-west-1a"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-eu-west-1a"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-eu-west-1.id
 }
@@ -98,10 +92,8 @@ resource "aws_subnet" "admin-default-public-eu-west-1b" {
     AvailabilityZone = "eu-west-1b"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-eu-west-1b"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-eu-west-1.id
 }
@@ -116,10 +108,8 @@ resource "aws_subnet" "admin-default-public-eu-west-1c" {
     AvailabilityZone = "eu-west-1c"
     Connectivity     = "public"
     Environment      = "admin"
-    Manager          = "Terraform"
     Name             = "admin-default-public-eu-west-1c"
     Quality          = "default"
-    SubstrateVersion = "2021.06"
   }
   vpc_id = aws_vpc.admin-default-eu-west-1.id
 }
@@ -130,11 +120,9 @@ resource "aws_vpc" "admin-default-eu-west-1" {
   enable_dns_hostnames             = true
   enable_dns_support               = true
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
 }
 
@@ -142,11 +130,9 @@ resource "aws_vpc_endpoint" "admin-default-eu-west-1" {
   route_table_ids = [aws_vpc.admin-default-eu-west-1.default_route_table_id]
   service_name    = "com.amazonaws.eu-west-1.s3"
   tags = {
-    Environment      = "admin"
-    Manager          = "Terraform"
-    Name             = "admin-default"
-    Quality          = "default"
-    SubstrateVersion = "2021.06"
+    Environment = "admin"
+    Name        = "admin-default"
+    Quality     = "default"
   }
   vpc_id = aws_vpc.admin-default-eu-west-1.id
 }
