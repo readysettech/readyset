@@ -336,8 +336,7 @@ impl<A: 'static + Authority> Backend<A> {
         &mut self,
         query: &str,
     ) -> Result<(QueryResult, Option<String>), Error> {
-        let q = query.to_string().trim_start().to_lowercase();
-        let is_read = q.starts_with("select") || q.starts_with("show") || q.starts_with("describe");
+        let is_read = self.is_read(query);
         match self.reader.mysql_connector {
             Some(ref mut connector) => {
                 let (res, id) = if is_read {
@@ -348,6 +347,41 @@ impl<A: 'static + Authority> Backend<A> {
                 Ok((res, id))
             }
             None => Err(Error::ReadySet(ReadySetError::FallbackNoConnector)),
+        }
+    }
+
+    fn is_read(&self, query: &str) -> bool {
+        let q = query.to_string().trim_start().to_lowercase();
+        q.starts_with("select") || q.starts_with("show") || q.starts_with("describe")
+    }
+
+    /// Executes the given read against noria, and on failure sends the read to fallback instead.
+    /// If there is no fallback setup, then an error in Noria will be returned to the caller.
+    /// If fallback is setup, cascade_read will only return an error if it occurred during fallback,
+    /// in which case the caller is responsible for writing an appropriate MySQL error back to
+    /// the client.
+    pub async fn cascade_read(
+        &mut self,
+        q: nom_sql::SelectStatement,
+        query_str: &str,
+        use_params: Vec<Literal>,
+        ticket: Option<Timestamp>,
+    ) -> Result<QueryResult, Error> {
+        match self
+            .reader
+            .noria_connector
+            .handle_select(q, use_params, ticket)
+            .await
+        {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                // Check if we have fallback setup. If not, we need to return this error,
+                // otherwise, we transition to fallback.
+                match self.reader.mysql_connector {
+                    Some(ref mut connector) => connector.handle_select(query_str).await,
+                    None => Err(e),
+                }
+            }
         }
     }
 
@@ -618,10 +652,8 @@ impl<A: 'static + Authority> Backend<A> {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
                         let execution_timer = std::time::Instant::now();
-                        let try_noria_read = self
-                            .reader
-                            .noria_connector
-                            .handle_select(q, use_params, self.ticket.clone())
+                        let res = self
+                            .cascade_read(q, &query, use_params, self.ticket.clone())
                             .await;
                         //TODO(Dan): Implement fallback execution timing
                         let execution_time = execution_timer.elapsed().as_micros();
@@ -630,14 +662,7 @@ impl<A: 'static + Authority> Backend<A> {
                             execution_time,
                             SqlQueryType::Read,
                         );
-                        match try_noria_read {
-                            Ok(res) => Ok(res),
-                            Err(_) => {
-                                // RYW identifier will not be present on select
-                                let (res, _) = self.query_fallback(&query).await?;
-                                Ok(res)
-                            }
-                        }
+                        res
                     }
                     nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
