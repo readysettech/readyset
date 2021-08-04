@@ -241,7 +241,7 @@ steps:
     branches: 'master'
     command:
     - 'echo +++ :rust: Building docs'
-    - cargo doc --workspace
+    - cargo doc --workspace --document-private-items
     - 'echo +++ :ec2: Deploying docs'
     - apt-get install -y rsync
     - mkdir -p ~/.ssh
