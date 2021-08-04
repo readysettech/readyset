@@ -1,6 +1,9 @@
 use mysql_async::prelude::Queryable;
 use noria::DataType as D;
-use noria::{consensus::LocalAuthority, ControllerHandle, DataType, ReadySetResult};
+use noria::{
+    consensus::{LocalAuthority, LocalAuthorityStore},
+    ControllerHandle, DataType, ReadySetResult,
+};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
 use slog::{o, Discard, Logger};
@@ -149,7 +152,8 @@ impl DbConnection {
 
 impl TestHandle {
     async fn start_noria(url: String) -> ReadySetResult<TestHandle> {
-        let authority = Arc::new(LocalAuthority::new());
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
         TestHandle::start_with_authority(url, authority).await
     }
 

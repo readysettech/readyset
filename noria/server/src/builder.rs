@@ -1,7 +1,7 @@
 use crate::handle::Handle;
 use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
 use dataflow::PersistenceParameters;
-use noria::consensus::{Authority, LocalAuthority};
+use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -194,7 +194,8 @@ impl Builder {
     pub fn start_local(
         self,
     ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {
-        self.start_local_custom(Arc::new(LocalAuthority::new()))
+        let store = Arc::new(LocalAuthorityStore::new());
+        self.start_local_custom(Arc::new(LocalAuthority::new_with_store(store)))
     }
 
     /// Start a local-only worker using a custom authority, and return a handle to it.

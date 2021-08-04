@@ -1,7 +1,6 @@
 //! Error handling, definitions, and utilities
 
 use crate::channel::tcp::SendError;
-use crate::consensus::Epoch;
 use crate::internal::LocalNodeIndex;
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
@@ -331,15 +330,6 @@ pub enum ReadySetError {
     NodeNotFound {
         /// The erroneous node index.
         index: usize,
-    },
-
-    /// An RPC operation couldn't be completed because the message epoch didn't match.
-    #[error("Epoch mismatch: supplied {supplied:?}, but current is {current:?}")]
-    EpochMismatch {
-        /// The epoch supplied in the RPC message.
-        supplied: Option<Epoch>,
-        /// What the recipient thinks the current epoch is.
-        current: Option<Epoch>,
     },
 
     /// A worker tried to check in with a heartbeat payload, but the controller is unaware of it.

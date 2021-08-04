@@ -10,7 +10,7 @@ use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use noria::ControllerDescriptor;
 use noria::{
-    consensus::{Authority, Epoch, STATE_KEY},
+    consensus::{Authority, STATE_KEY},
     ReplicationOffset,
 };
 use noria::{internal, ReadySetError};
@@ -54,7 +54,6 @@ pub struct NodeRestrictionKey {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
-    pub(crate) epoch: Epoch,
 
     recipe_version: usize,
     recipes: Vec<String>,
@@ -331,7 +330,6 @@ where
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: descr.controller_uri,
                     heartbeat_every: state.config.heartbeat_every,
-                    epoch: state.epoch,
                 })
                 .await?;
             }
@@ -346,7 +344,6 @@ where
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
                     heartbeat_every: state.config.heartbeat_every,
-                    epoch: state.epoch,
                 })
                 .await?;
 
@@ -420,7 +417,7 @@ where
     }
 }
 
-pub(crate) fn instance_campaign<A: Authority + 'static>(
+pub(crate) fn authority_runner<A: Authority + 'static>(
     event_tx: Sender<CampaignUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
@@ -430,7 +427,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
 ) -> JoinHandle<()> {
     let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
     let handle = rt_handle.clone();
-    let campaign_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
+    let authority_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
         let payload_to_event = |payload: Vec<u8>| -> Result<CampaignUpdate, anyhow::Error> {
             let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
             let leader_state = authority
@@ -447,21 +444,18 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
             //
             // If there is currently a leader, then loop until there is a period without a
             // leader, notifying the main thread every time a leader change occurs.
-            let mut epoch;
             if let Some(leader) = authority.try_get_leader()? {
                 retries = 5;
-                epoch = leader.0;
                 if let Err(e) = rt_handle.block_on(async {
                     event_tx
-                        .send(payload_to_event(leader.1)?)
+                        .send(payload_to_event(leader)?)
                         .await
                         .map_err(|_| format_err!("send failed"))?;
                     while let Some(leader) =
-                        tokio::task::block_in_place(|| authority.await_new_epoch(epoch))?
+                        tokio::task::block_in_place(|| authority.await_new_leader())?
                     {
-                        epoch = leader.0;
                         event_tx
-                            .send(payload_to_event(leader.1)?)
+                            .send(payload_to_event(leader)?)
                             .await
                             .map_err(|_| format_err!("send failed"))?;
                     }
@@ -508,32 +502,32 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
             //
             // Becoming leader requires creating an ephemeral key and then doing an atomic
             // update to another.
-            let epoch = match authority.become_leader(descriptor_bytes.clone())? {
-                Some(epoch) => epoch,
+            // TODO(harley): This still needs to be cleaned up further but leaving for now to minimize changes
+            let _leader_descriptor = match authority.become_leader(descriptor_bytes.clone())? {
+                Some(leader_descriptor) => leader_descriptor,
                 None => continue,
             };
             let state = authority.read_modify_write(
                 STATE_KEY,
-                |state: Option<ControllerState>| match state {
-                    None => Ok(ControllerState {
-                        config: config.clone(),
-                        epoch,
-                        recipe_version: 0,
-                        recipes: vec![],
-                        replication_offset: None,
-                        node_restrictions: HashMap::new(),
-                    }),
-                    Some(ref state) if state.epoch > epoch => Err(()),
-                    Some(mut state) => {
-                        state.epoch = epoch;
-                        // check that running config is compatible with the new
-                        // configuration.
-                        assert_eq!(
-                            state.config, config,
-                            "Config in Zk is not compatible with requested config!"
-                        );
-                        state.config = config.clone();
-                        Ok(state)
+                |state: Option<ControllerState>| -> Result<ControllerState, ()> {
+                    match state {
+                        None => Ok(ControllerState {
+                            config: config.clone(),
+                            recipe_version: 0,
+                            recipes: vec![],
+                            replication_offset: None,
+                            node_restrictions: HashMap::new(),
+                        }),
+                        Some(mut state) => {
+                            // check that running config is compatible with the new
+                            // configuration.
+                            assert_eq!(
+                                state.config, config,
+                                "Config in Zk is not compatible with requested config!"
+                            );
+                            state.config = config.clone();
+                            Ok(state)
+                        }
                     }
                 },
             )?;
@@ -565,9 +559,9 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
     };
 
     thread::Builder::new()
-        .name("srv-zk".to_owned())
+        .name("srv-authority".to_owned())
         .spawn(move || {
-            if let Err(e) = campaign_inner(event_tx.clone()) {
+            if let Err(e) = authority_inner(event_tx.clone()) {
                 let _ = handle.block_on(event_tx.send(CampaignUpdate::CampaignError(e)));
             }
         })

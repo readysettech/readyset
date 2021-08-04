@@ -8,7 +8,6 @@ use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use launchpad::select;
 use metrics::{counter, gauge};
-use noria::consensus::Epoch;
 use noria::internal::DomainIndex;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
@@ -47,8 +46,6 @@ pub enum WorkerRequestKind {
         controller_uri: Url,
         /// The period at which the new controller expects heartbeat packets.
         heartbeat_every: Duration,
-        /// The epoch under which this information is valid.
-        epoch: Epoch,
     },
 
     /// A new domain should be started on this worker.
@@ -93,8 +90,6 @@ pub struct WorkerRequest {
 pub struct WorkerElectionState {
     /// The URI of the currently active controller.
     controller_uri: Url,
-    /// The epoch under which this information is valid.
-    epoch: Epoch,
 }
 
 pub struct DomainHandle {
@@ -153,7 +148,6 @@ impl Worker {
         if let Some(wes) = self.election_state.as_ref() {
             let uri = wes.controller_uri.join("/worker_rx/heartbeat")?;
             let body = bincode::serialize(&HeartbeatPayload {
-                epoch: wes.epoch,
                 worker_uri: self.worker_uri.clone(),
             })?;
             let log = self.log.clone();
@@ -192,11 +186,10 @@ impl Worker {
             WorkerRequestKind::NewController {
                 controller_uri,
                 heartbeat_every,
-                epoch,
             } => {
                 info!(
                     self.log,
-                    "worker informed of new controller at {} (epoch {:?})", controller_uri, epoch
+                    "worker informed of new controller at {}", controller_uri
                 );
                 let log = self.log.clone();
                 tokio::spawn(
@@ -204,7 +197,6 @@ impl Worker {
                         self.http
                             .post(controller_uri.join("/worker_rx/register")?)
                             .body(bincode::serialize(&RegisterPayload {
-                                epoch,
                                 worker_uri: self.worker_uri.clone(),
                                 reader_addr: self.reader_addr,
                                 region: self.region.clone(),
@@ -220,10 +212,7 @@ impl Worker {
                 for (_, d) in self.domains.drain() {
                     d.join_handle.abort();
                 }
-                self.election_state = Some(WorkerElectionState {
-                    controller_uri,
-                    epoch,
-                });
+                self.election_state = Some(WorkerElectionState { controller_uri });
                 self.heartbeat_interval = tokio::time::interval(heartbeat_every);
                 Ok(None)
             }

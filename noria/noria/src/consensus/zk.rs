@@ -1,4 +1,8 @@
+// TODO: Replace how leader election is done and locking implementation of recipes from
+// https://zookeeper.apache.org/doc/current/recipes.html
+
 use std::process;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::{self, Thread};
 use std::time::Duration;
 
@@ -8,8 +12,8 @@ use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use super::Authority;
-use super::Epoch;
 use super::CONTROLLER_KEY;
+use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
 use backoff::backoff::Backoff;
 use backoff::exponential::ExponentialBackoff;
@@ -38,15 +42,25 @@ impl Watcher for UnparkWatcher {
     }
 }
 
+struct ZookeeperAuthorityInner {
+    leader_create_epoch: Option<i64>,
+}
+
 /// Coordinator that shares connection information between workers and clients using ZooKeeper.
 pub struct ZookeeperAuthority {
     zk: ZooKeeper,
+
     log: slog::Logger,
+
+    // Inner which contains state is only needed for server so making an Option.
+    inner: Option<RwLock<ZookeeperAuthorityInner>>,
 }
 
 impl ZookeeperAuthority {
-    /// Create a new instance.
-    pub fn new(connect_string: &str) -> ReadySetResult<Self> {
+    fn new_with_inner(
+        connect_string: &str,
+        inner: Option<RwLock<ZookeeperAuthorityInner>>,
+    ) -> ReadySetResult<Self> {
         let zk_connect_op = || -> Result<ZooKeeper, backoff::Error<ZkError>> {
             match ZooKeeper::connect(connect_string, Duration::from_secs(1), EventWatcher) {
                 // HACK(fran): Currently, the Zookeeper::connect method won't fail if Zookeeper
@@ -89,17 +103,61 @@ impl ZookeeperAuthority {
         Ok(Self {
             zk,
             log: slog::Logger::root(slog::Discard, o!()),
+            inner,
         })
+    }
+
+    /// Create a new instance.
+    pub fn new(connect_string: &str) -> ReadySetResult<Self> {
+        let inner = Some(RwLock::new(ZookeeperAuthorityInner {
+            leader_create_epoch: None,
+        }));
+        Self::new_with_inner(connect_string, inner)
     }
 
     /// Enable logging
     pub fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
     }
+
+    fn read_inner(&self) -> Result<RwLockReadGuard<'_, ZookeeperAuthorityInner>, Error> {
+        if let Some(inner_mutex) = &self.inner {
+            match inner_mutex.read() {
+                Ok(inner) => Ok(inner),
+                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+            }
+        } else {
+            bail!(internal_err(
+                "attempting to read inner on readonly zk authority"
+            ))
+        }
+    }
+
+    fn write_inner(&self) -> Result<RwLockWriteGuard<'_, ZookeeperAuthorityInner>, Error> {
+        if let Some(inner_mutex) = &self.inner {
+            match inner_mutex.write() {
+                Ok(inner) => Ok(inner),
+                Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+            }
+        } else {
+            bail!(internal_err(
+                "attempting to mutate inner on readonly zk authority"
+            ))
+        }
+    }
+
+    fn update_leader_create_epoch(
+        &self,
+        new_leader_create_epoch: Option<i64>,
+    ) -> Result<(), Error> {
+        let mut inner = self.write_inner()?;
+        inner.leader_create_epoch = new_leader_create_epoch;
+        Ok(())
+    }
 }
 
 impl Authority for ZookeeperAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error> {
+    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Vec<u8>>, Error> {
         let path = match self.zk.create(
             CONTROLLER_KEY,
             payload_data.clone(),
@@ -114,7 +172,8 @@ impl Authority for ZookeeperAuthority {
         let (ref current_data, ref stat) = self.zk.get_data(&path, false)?;
         if *current_data == payload_data {
             info!(self.log, "became leader at epoch {}", stat.czxid);
-            Ok(Some(Epoch(stat.czxid)))
+            self.update_leader_create_epoch(Some(stat.czxid))?;
+            Ok(Some(payload_data))
         } else {
             Ok(None)
         }
@@ -125,10 +184,13 @@ impl Authority for ZookeeperAuthority {
         Ok(())
     }
 
-    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
+    fn get_leader(&self) -> Result<Vec<u8>, Error> {
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
-                Ok((data, stat)) => return Ok((Epoch(stat.czxid), data)),
+                Ok((data, stat)) => {
+                    self.update_leader_create_epoch(Some(stat.czxid))?;
+                    return Ok(data);
+                }
                 Err(ZkError::NoNode) => {}
                 Err(e) => bail!(e),
             };
@@ -147,21 +209,35 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
-    fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
+    fn try_get_leader(&self) -> Result<Option<Vec<u8>>, Error> {
         match self.zk.get_data(CONTROLLER_KEY, false) {
-            Ok((data, stat)) => Ok(Some((Epoch(stat.czxid), data))),
+            Ok((data, stat)) => {
+                self.update_leader_create_epoch(Some(stat.czxid))?;
+                Ok(Some(data))
+            }
             Err(ZkError::NoNode) => Ok(None),
             Err(e) => bail!(e),
         }
     }
 
-    fn await_new_epoch(&self, current_epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        let is_new_epoch = |stat: &Stat| stat.czxid > current_epoch.0;
+    fn await_new_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+        let inner = self.read_inner()?;
+        let current_epoch = inner.leader_create_epoch;
+        let is_new_epoch = |stat: &Stat| {
+            if let Some(epoch) = current_epoch {
+                stat.czxid > epoch
+            } else {
+                true
+            }
+        };
 
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
                 Ok((_, ref stat)) if !is_new_epoch(stat) => {}
-                Ok((data, stat)) => return Ok(Some((Epoch(stat.czxid), data))),
+                Ok((data, stat)) => {
+                    self.update_leader_create_epoch(Some(stat.czxid))?;
+                    return Ok(Some(data));
+                }
                 Err(ZkError::NoNode) => return Ok(None),
                 Err(e) => bail!(e),
             };
@@ -249,12 +325,12 @@ mod tests {
             Some("12".bytes().collect())
         );
         authority.become_leader(vec![15]).unwrap();
-        assert_eq!(authority.get_leader().unwrap().1, vec![15]);
+        assert_eq!(authority.get_leader().unwrap(), vec![15]);
         {
             let authority = authority.clone();
             thread::spawn(move || authority.become_leader(vec![20]).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap().1, vec![15]);
+        assert_eq!(authority.get_leader().unwrap(), vec![15]);
     }
 }
