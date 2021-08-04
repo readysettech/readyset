@@ -319,6 +319,16 @@ pub enum QueryResult {
     },
 }
 
+/// TODO: The ideal approach for query handling is as follows:
+/// 1. If we know we can't support a query, send it to fallback.
+/// 2. If we think we can support a query, try to send it to Noria. If that
+/// hits an error that should be retried, retry. If not try fallback without dropping the
+/// connection inbetween.
+/// 3. If that fails and we got a MySQL error code, send that back to the client and keep the connection open. This is a real correctness bug.
+/// 4. If we got another kind of error that is retryable from fallback, retry.
+/// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the
+///    most appropriate MySQL error code and write that back to the caller without dropping the
+///    connection.
 impl<A: 'static + Authority> Backend<A> {
     /// Executes query on mysql_backend, if present, when it cannot be parsed_query
     /// or executed by noria. Returns the query result and RYW ticket.
