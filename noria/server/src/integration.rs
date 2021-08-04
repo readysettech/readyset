@@ -6601,6 +6601,9 @@ async fn count_emit_zero() {
         # read queries
         QUERY countemitzero: SELECT count(id) as c FROM test GROUP BY id;
         QUERY countemitzeronogroup: SELECT count(*) as c FROM test;
+        QUERY countemitzeromultiple: SELECT COUNT(id) AS c, COUNT(*) AS c2 FROM test;
+        QUERY countemitzerowithcolumn: SELECT id, COUNT(*) AS c FROM test;
+        QUERY countemitzerowithotheraggregations: SELECT COUNT(*) AS c, SUM(id) AS s, MIN(id) AS m FROM test;
     ";
     g.install_recipe(sql).await.unwrap();
 
@@ -6623,6 +6626,37 @@ async fn count_emit_zero() {
         .sorted()
         .collect::<Vec<i32>>();
     assert_eq!(res, vec![0]);
+
+    // With no data in the table, we should get results with two COUNT()s and no GROUP BY
+    let mut q = g.view("countemitzeromultiple").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| r.into_iter().map(|v| i32::try_from(v).unwrap()).collect())
+        .sorted()
+        .collect::<Vec<Vec<i32>>>();
+    assert_eq!(res, vec![vec![0, 0]]);
+
+    // With no data in the table, we should get a NULL for any columns, and a 0 for COUNT()
+    let mut q = g.view("countemitzerowithcolumn").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| Vec::<DataType>::from(r))
+        .collect::<Vec<Vec<DataType>>>();
+    assert_eq!(res, vec![vec![DataType::None, DataType::Int(0)]]);
+
+    // With no data in the table, we should get a 0 for COUNT(), and a NULL for other aggregations
+    let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| Vec::<DataType>::from(r))
+        .collect::<Vec<Vec<DataType>>>();
+    assert_eq!(
+        res,
+        vec![vec![DataType::Int(0), DataType::None, DataType::None]]
+    );
 
     // Now let's add some data to ensure count is still correct.
     let mut test = g.table("test").await.unwrap();
@@ -6652,4 +6686,32 @@ async fn count_emit_zero() {
         .sorted()
         .collect::<Vec<i32>>();
     assert_eq!(res, vec![3]);
+
+    let mut q = g.view("countemitzeromultiple").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| r.into_iter().map(|v| i32::try_from(v).unwrap()).collect())
+        .sorted()
+        .collect::<Vec<Vec<i32>>>();
+    assert_eq!(res, vec![vec![3, 3]]);
+
+    let mut q = g.view("countemitzerowithcolumn").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| Vec::<DataType>::from(r))
+        .collect::<Vec<Vec<DataType>>>();
+    assert_eq!(res, vec![vec![DataType::Int(0), DataType::Int(3)]]);
+
+    let mut q = g.view("countemitzerowithotheraggregations").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| Vec::<DataType>::from(r))
+        .collect::<Vec<Vec<DataType>>>();
+    assert_eq!(
+        res,
+        vec![vec![DataType::Int(3), DataType::Int(0), DataType::Int(0)]]
+    );
 }
