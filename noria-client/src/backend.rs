@@ -571,6 +571,12 @@ impl<A: 'static + Authority> Backend<A> {
 
         let res = match &mut self.writer {
             // Interacting directly with Noria writer (No RYW support)
+            //
+            // This is relatively unintuitive and could use a re-write. We only have a single
+            // writer, and potentially multiple readers. If our writer is MySQL, then we have
+            // fallback setup, and can assume we have two readers, noria and MySQL. Otherwise, if
+            // our single writer is noria, we assume that there's only a single reader setup -
+            // noria.
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
             Writer::NoriaConnector(connector) => match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
