@@ -35,8 +35,7 @@ impl Error {
     /// Transforms each error to the closest mysql error.
     /// Sometimes, there is not a good one and UNKNOWN is used.
     pub fn error_kind(&self) -> ErrorKind {
-        // TODO FIXME TODO FIXME FIXME
-        ErrorKind::ER_UNKNOWN_ERROR
+        // TODO(peter): Implement the rest of this error translation logic.
         /*
         match self {
             MySqlError(_) => ErrorKind::ER_UNKNOWN_ERROR,
@@ -52,5 +51,15 @@ impl Error {
             MissingPreparedStatement => ErrorKind::ER_NEED_REPREPARE,
         }
          */
+        match self {
+            Error::MySql(mysql::Error::MySqlError(e)) => e.code.into(),
+            Error::MySqlAsync(mysql_async::Error::Server(e)) => e.code.into(),
+            Error::MySqlAsync(_) => {
+                // TODO(peter): We need to translate these to appropriate
+                // mysql error codes. Currently mysql_async is only used by fallback.
+                ErrorKind::ER_UNKNOWN_ERROR
+            }
+            _ => ErrorKind::ER_UNKNOWN_ERROR,
+        }
     }
 }

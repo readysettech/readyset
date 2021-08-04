@@ -929,7 +929,7 @@ where
                     .await
                     .map_err(Error::from)
             }
-            Err(e) => return Err(e),
+            Err(e) => results.error(e.error_kind(), e.to_string().as_bytes()).await,
             _ => internal!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
         };
 
