@@ -3,7 +3,6 @@ use url::Url;
 
 use crate::VolumeId;
 use dataflow::prelude::*;
-use noria::consensus::Epoch;
 pub use noria::util::do_noria_rpc;
 
 /// Initial registration request body, sent from workers to controllers.
@@ -11,8 +10,6 @@ pub use noria::util::do_noria_rpc;
 /// (used for the `/worker_rx/register` route)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RegisterPayload {
-    /// What the worker thinks the current epoch is.
-    pub epoch: Epoch,
     /// URI at which the worker can be reached.
     pub worker_uri: Url,
     /// Socket address the worker listens on for data-plane read queries.
@@ -30,8 +27,6 @@ pub struct RegisterPayload {
 /// (used for the `/worker_rx/heartbeat` route)
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HeartbeatPayload {
-    /// What the worker thinks the current epoch is.
-    pub epoch: Epoch,
     /// URI at which the worker can be reached.
     pub worker_uri: Url,
 }

@@ -22,7 +22,7 @@ use tokio::time::sleep;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
-use noria::consensus::LocalAuthority;
+use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
 use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::NoriaConnector;
@@ -220,7 +220,8 @@ impl TestScript {
 
     /// Run the test script on Noria server
     pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
-        let authority = Arc::new(LocalAuthority::default());
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
         let mut noria_handle = self.start_noria_server(opts, Arc::clone(&authority)).await;
         let (adapter_task, conn_opts) = self.setup_mysql_adapter(opts, authority).await;
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
-use noria::consensus::LocalAuthority;
+use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::{
     metrics::client::MetricsClient,
     metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
@@ -50,12 +50,13 @@ pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
 /// Builds a custom local worker with log prefix `prefix`,
 /// with optional sharding and logging.
 pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
+    let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
         sharding,
         log,
         true,
-        Arc::new(LocalAuthority::new()),
+        Arc::new(LocalAuthority::new_with_store(authority_store)),
         None,
         false,
     )

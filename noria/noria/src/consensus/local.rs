@@ -1,23 +1,119 @@
+//! LocalAuthority is replicating the abstraction over the different authority
+//! systems (Zookeeper, Consul, etcd) but for a single process and in memory
+//! instead of requiring a server.
+//!
+//! As such, it is maintaining a separation between the Store and Authority. In
+//! a process, only exactly one store should ever exist with multiple
+//! Authorities linked to it.
+//!
+//! The LocalAuthority stores effectively a "cache" of what it was able to get
+//! from LocalAuthorityStore when it last checked in.
 use std::collections::BTreeMap;
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::Authority;
-use super::Epoch;
 use super::CONTROLLER_KEY;
 use crate::errors::internal_err;
 
-struct LocalAuthorityInner {
+struct LocalAuthorityStoreInner {
     keys: BTreeMap<String, Vec<u8>>,
-    epoch: Epoch,
+    leader_epoch: u64,
+}
+
+/// LocalAuthorityStore represents a global consensus system but in a single
+/// process. As such, only one Store should exist per process if this is being
+/// used.
+pub struct LocalAuthorityStore {
+    // This must be a Mutex as this represents a single global consensus and as
+    // such should block everything when being looked at for any reason. As well,
+    // Condvar is dependent on Mutex.
+    inner: Mutex<LocalAuthorityStoreInner>,
+    cv: Condvar,
+}
+
+/// LocalAuthorityInner is the cache of information received from the store.
+struct LocalAuthorityInner {
+    known_leader_epoch: Option<u64>,
 }
 
 pub struct LocalAuthority {
-    inner: Mutex<LocalAuthorityInner>,
-    cv: Condvar,
+    store: Arc<LocalAuthorityStore>,
+    inner: RwLock<LocalAuthorityInner>,
+}
+
+impl LocalAuthorityStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(LocalAuthorityStoreInner {
+                keys: BTreeMap::default(),
+                leader_epoch: 0,
+            }),
+            cv: Condvar::new(),
+        }
+    }
+
+    fn inner_lock(&self) -> Result<MutexGuard<'_, LocalAuthorityStoreInner>, Error> {
+        match self.inner.lock() {
+            Ok(inner) => Ok(inner),
+            Err(e) => bail!(internal_err(format!("mutex is poisoned: '{}'", e))),
+        }
+    }
+
+    fn inner_wait<'a>(
+        &self,
+        inner_guard: MutexGuard<'a, LocalAuthorityStoreInner>,
+    ) -> Result<MutexGuard<'a, LocalAuthorityStoreInner>, Error> {
+        match self.cv.wait(inner_guard) {
+            Ok(inner) => Ok(inner),
+            Err(e) => bail!(internal_err(format!("mutex is poisoned: '{}'", e))),
+        }
+    }
+
+    fn inner_notify_all(&self) {
+        self.cv.notify_all()
+    }
+}
+
+impl Default for LocalAuthorityStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LocalAuthority {
+    pub fn new() -> Self {
+        // Allowing creation of a store inline if one is not given as cloning an
+        // authority reuses the store.
+        let store = Arc::new(LocalAuthorityStore::new());
+        Self::new_with_store(store)
+    }
+
+    pub fn new_with_store(store: Arc<LocalAuthorityStore>) -> Self {
+        Self {
+            store,
+            inner: RwLock::new(LocalAuthorityInner {
+                known_leader_epoch: None,
+            }),
+        }
+    }
+
+    fn inner_read(&self) -> Result<RwLockReadGuard<'_, LocalAuthorityInner>, Error> {
+        match self.inner.read() {
+            Ok(inner) => Ok(inner),
+            Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+        }
+    }
+
+    fn inner_write(&self) -> Result<RwLockWriteGuard<'_, LocalAuthorityInner>, Error> {
+        match self.inner.write() {
+            Ok(inner) => Ok(inner),
+            Err(e) => bail!(internal_err(format!("rwlock is poisoned: '{}'", e))),
+        }
+    }
 }
 
 impl Default for LocalAuthority {
@@ -26,84 +122,102 @@ impl Default for LocalAuthority {
     }
 }
 
-impl LocalAuthority {
-    pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(LocalAuthorityInner {
-                keys: BTreeMap::default(),
-                epoch: Epoch(0),
-            }),
-            cv: Condvar::new(),
-        }
+// A custom clone is implemented for Authority since each Authority should have its own "connection"
+// to the store. This makes sure the local information from the Authority is not copied around.
+// In addition, each Authority should eventually get a unique ID and we will be implicitly
+// creating and passing one in when that happens.
+impl Clone for LocalAuthority {
+    fn clone(&self) -> Self {
+        Self::new_with_store(Arc::clone(&self.store))
     }
 }
 
-macro_rules! try_poisoned {
-    ($res:expr) => {
-        $res.map_err(|e| internal_err(format!("mutex is poisoned: '{}'", e)))?;
-    };
-}
-
 impl Authority for LocalAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Epoch>, Error> {
-        let mut inner = try_poisoned!(self.inner.lock());
-        if !inner.keys.contains_key(CONTROLLER_KEY) {
-            inner.keys.insert(CONTROLLER_KEY.to_owned(), payload_data);
-            self.cv.notify_all();
-            Ok(Some(inner.epoch))
+    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Vec<u8>>, Error> {
+        let mut store_inner = self.store.inner_lock()?;
+
+        if !store_inner.keys.contains_key(CONTROLLER_KEY) {
+            store_inner
+                .keys
+                .insert(CONTROLLER_KEY.to_owned(), payload_data.clone());
+
+            store_inner.leader_epoch += 1;
+
+            let mut inner = self.inner_write()?;
+            inner.known_leader_epoch = Some(store_inner.leader_epoch);
+
+            self.store.inner_notify_all();
+            Ok(Some(payload_data))
         } else {
             Ok(None)
         }
     }
 
     fn surrender_leadership(&self) -> Result<(), Error> {
-        let mut inner = try_poisoned!(self.inner.lock());
-        assert!(inner.keys.remove(CONTROLLER_KEY).is_some());
-        inner.epoch = Epoch(inner.epoch.0 + 1);
-        self.cv.notify_all();
+        let mut store_inner = self.store.inner_lock()?;
+
+        assert!(store_inner.keys.remove(CONTROLLER_KEY).is_some());
+        store_inner.leader_epoch += 1;
+
+        let mut inner = self.inner_write()?;
+        inner.known_leader_epoch = Some(store_inner.leader_epoch);
+
+        self.store.inner_notify_all();
         Ok(())
     }
 
-    fn get_leader(&self) -> Result<(Epoch, Vec<u8>), Error> {
-        let mut inner = try_poisoned!(self.inner.lock());
-        while !inner.keys.contains_key(CONTROLLER_KEY) {
-            inner = try_poisoned!(self.cv.wait(inner));
+    fn get_leader(&self) -> Result<Vec<u8>, Error> {
+        let mut store_inner = self.store.inner_lock()?;
+        while !store_inner.keys.contains_key(CONTROLLER_KEY) {
+            store_inner = self.store.inner_wait(store_inner)?;
         }
-        inner
+
+        let mut inner = self.inner_write()?;
+        inner.known_leader_epoch = Some(store_inner.leader_epoch);
+
+        store_inner
             .keys
             .get(CONTROLLER_KEY)
             .ok_or_else(|| {
                 anyhow::Error::from(internal_err("no keys found when looking for leader"))
             })
-            .map(|keys| (inner.epoch, keys.clone()))
+            .map(|keys| keys.clone())
     }
 
-    fn try_get_leader(&self) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        let inner = try_poisoned!(self.inner.lock());
+    fn try_get_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+        let store_inner = self.store.inner_lock()?;
 
-        Ok(inner
-            .keys
-            .get(CONTROLLER_KEY)
-            .cloned()
-            .map(|payload| (inner.epoch, payload)))
+        let mut inner = self.inner_write()?;
+        inner.known_leader_epoch = Some(store_inner.leader_epoch);
+
+        Ok(store_inner.keys.get(CONTROLLER_KEY).cloned())
     }
 
-    fn await_new_epoch(&self, epoch: Epoch) -> Result<Option<(Epoch, Vec<u8>)>, Error> {
-        let mut inner = try_poisoned!(self.inner.lock());
-        while inner.epoch == epoch && inner.keys.contains_key(CONTROLLER_KEY) {
-            inner = try_poisoned!(self.cv.wait(inner));
+    fn await_new_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+        let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
+            let inner = self.inner_read()?;
+            if let Some(epoch) = inner.known_leader_epoch {
+                Ok(leader_epoch == epoch)
+            } else {
+                Ok(false)
+            }
+        };
+        let mut store_inner = self.store.inner_lock()?;
+        while is_same_epoch(store_inner.leader_epoch)?
+            && store_inner.keys.contains_key(CONTROLLER_KEY)
+        {
+            store_inner = self.store.inner_wait(store_inner)?;
         }
 
-        Ok(inner
-            .keys
-            .get(CONTROLLER_KEY)
-            .cloned()
-            .map(|k| (inner.epoch, k)))
+        let mut inner = self.inner_write()?;
+        inner.known_leader_epoch = Some(store_inner.leader_epoch);
+
+        Ok(store_inner.keys.get(CONTROLLER_KEY).cloned())
     }
 
     fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
-        let inner = try_poisoned!(self.inner.lock());
-        Ok(inner.keys.get(path).cloned())
+        let store_inner = self.store.inner_lock()?;
+        Ok(store_inner.keys.get(path).cloned())
     }
 
     fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
@@ -111,13 +225,16 @@ impl Authority for LocalAuthority {
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned,
     {
-        let mut inner = try_poisoned!(self.inner.lock());
-        let r = f(inner
+        let mut store_inner = self.store.inner_lock()?;
+
+        let r = f(store_inner
             .keys
             .get(path)
             .and_then(|data| serde_json::from_slice(data).ok()));
         if let Ok(ref p) = r {
-            inner.keys.insert(path.to_owned(), serde_json::to_vec(&p)?);
+            store_inner
+                .keys
+                .insert(path.to_owned(), serde_json::to_vec(&p)?);
         }
         Ok(r)
     }
@@ -132,7 +249,8 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let authority = Arc::new(LocalAuthority::new());
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
         assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
         assert!(authority.try_read("/a").unwrap().is_none());
         assert_eq!(
@@ -148,13 +266,13 @@ mod tests {
             authority.try_read("/a").unwrap(),
             Some("12".bytes().collect())
         );
-        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(Epoch(0)));
-        assert_eq!(authority.get_leader().unwrap(), (Epoch(0), vec![15]));
+        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(vec![15]));
+        assert_eq!(authority.get_leader().unwrap(), vec![15]);
         {
             let authority = authority.clone();
             thread::spawn(move || authority.become_leader(vec![20]).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap(), (Epoch(0), vec![15]));
+        assert_eq!(authority.get_leader().unwrap(), vec![15]);
     }
 }

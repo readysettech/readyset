@@ -28,7 +28,7 @@ use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema};
 use noria::{
-    consensus::{Authority, Epoch, STATE_KEY},
+    consensus::{Authority, STATE_KEY},
     RecipeSpec,
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
@@ -88,8 +88,6 @@ pub struct ControllerInner {
 
     /// State between migrations
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
-
-    pub(super) epoch: Epoch,
 
     pending_recovery: Option<(Vec<String>, usize)>,
 
@@ -338,7 +336,6 @@ impl ControllerInner {
 
     pub(super) fn handle_register(&mut self, msg: RegisterPayload) -> ReadySetResult<()> {
         let RegisterPayload {
-            epoch,
             worker_uri,
             reader_addr,
             region,
@@ -352,13 +349,6 @@ impl ControllerInner {
             worker_uri,
             reader_addr
         );
-
-        if epoch != self.epoch {
-            return Err(ReadySetError::EpochMismatch {
-                supplied: Some(epoch),
-                current: Some(self.epoch),
-            });
-        }
 
         let ws = Worker::new(worker_uri.clone(), region, reader_only, volume_id);
 
@@ -495,14 +485,7 @@ impl ControllerInner {
     }
 
     pub(super) fn handle_heartbeat(&mut self, msg: HeartbeatPayload) -> ReadySetResult<()> {
-        let HeartbeatPayload { epoch, worker_uri } = msg;
-
-        if epoch != self.epoch {
-            return Err(ReadySetError::EpochMismatch {
-                supplied: Some(epoch),
-                current: Some(self.epoch),
-            });
-        }
+        let HeartbeatPayload { worker_uri } = msg;
 
         match self.workers.get_mut(&worker_uri) {
             None => {
@@ -708,7 +691,6 @@ impl ControllerInner {
             domains: Default::default(),
             domain_nodes: Default::default(),
             channel_coordinator: cc,
-            epoch: state.epoch,
 
             remap: HashMap::default(),
 
@@ -1455,7 +1437,6 @@ impl ControllerInner {
                             STATE_KEY,
                             |state: Option<ControllerState>| match state {
                                 None => Err(()),
-                                Some(ref state) if state.epoch > self.epoch => Err(()),
                                 Some(mut state) => {
                                     state.node_restrictions = self.node_restrictions.clone();
                                     state.recipe_version = self.recipe.version();
@@ -1512,7 +1493,6 @@ impl ControllerInner {
                             |state: Option<ControllerState>| {
                                 match state {
                                     None => Err(()),
-                                    Some(ref state) if state.epoch > self.epoch => Err(()),
                                     Some(mut state) => {
                                         state.node_restrictions = self.node_restrictions.clone();
                                         state.recipe_version = self.recipe.version();

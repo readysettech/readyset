@@ -14,7 +14,7 @@ use crate::DataType;
 use assert_approx_eq::assert_approx_eq;
 use dataflow::node::special::Base;
 use dataflow::ops::union::{self, Union};
-use noria::consensus::LocalAuthority;
+use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::internal::DomainIndex;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use noria::{get_all_metrics, get_metric};
@@ -209,7 +209,8 @@ async fn test_metrics_client() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn reader_replication() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "reader_replication";
 
     let mut w1 = build_custom(

@@ -6,9 +6,9 @@
 //! contains many `Domain` objects).
 //!
 //! We also start the reader listening loop (`worker::readers::listen`, responsible for servicing
-//! data-plane read requests) and the controller's leadership election campaign
-//! (`controller::instance_campaign`, responsible for attempting to find leadership information via
-//! the `Authority` and win the leadership election if possible).
+//! data-plane read requests) and the controller's authority manager
+//! (`controller::authority`, responsible for findind leadership information via
+//! the `Authority`, keeping track of workers, and winning the leadership election if possible).
 //!
 //! These are all spun up by the `start_instance` function in this module, and run on the Tokio
 //! event loop. This gives you a `Handle`, enabling you to send requests to the `ControllerOuter`.
@@ -103,7 +103,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
 ) -> Result<Handle<A>, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
-    let (campaign_tx, campaign_rx) = tokio::sync::mpsc::channel(16);
+    let (authority_tx, authority_rx) = tokio::sync::mpsc::channel(16);
     let (handle_tx, handle_rx) = tokio::sync::mpsc::channel(16);
 
     let (trigger, valve) = Valve::new();
@@ -190,7 +190,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         inner: None,
         authority: authority.clone(),
         worker_tx,
-        campaign_rx,
+        campaign_rx: authority_rx,
         http_rx: controller_rx,
         handle_rx,
         our_descriptor: our_descriptor.clone(),
@@ -199,8 +199,8 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         replicator_task: None,
     };
 
-    crate::controller::instance_campaign(
-        campaign_tx,
+    crate::controller::authority_runner(
+        authority_tx,
         authority.clone(),
         our_descriptor.clone(),
         config,

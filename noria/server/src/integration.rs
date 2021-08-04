@@ -20,7 +20,7 @@ use dataflow::ops::union::{self, Union};
 use dataflow::{DurabilityMode, PersistenceParameters, PostLookup};
 use itertools::Itertools;
 use nom_sql::OrderType;
-use noria::consensus::LocalAuthority;
+use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, SchemaType,
     ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
@@ -1079,7 +1079,8 @@ async fn it_works_with_arithmetic_aliases() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("it_recovers_persisted_bases");
     let persistence_params = PersistenceParameters::new(
@@ -1315,7 +1316,8 @@ async fn mutator_churn() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn view_connection_churn() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
 
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
@@ -1365,7 +1367,8 @@ async fn view_connection_churn() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn table_connection_churn() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
 
     let mut builder = Builder::default();
     builder.set_sharding(Some(DEFAULT_SHARDING));
@@ -1413,7 +1416,9 @@ async fn table_connection_churn() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+
     let dir = tempfile::tempdir().unwrap();
     let path = dir
         .path()
@@ -4764,7 +4769,8 @@ async fn left_join_null() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_view_includes_replicas() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "view_includes_replicas";
 
     let mut w1 = build_custom(
@@ -6384,7 +6390,8 @@ async fn distinct_select_with_distinct_agg_sharded() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn assign_nonreader_domains_to_nonreader_workers() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "assign_nonreader_domains_to_nonreader_workers";
 
     let mut w1 = build_custom(
@@ -6485,7 +6492,8 @@ async fn join_straddled_columns() {
 async fn replicate_to_unavailable_worker() {
     use crate::logger_pls;
 
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "replicate_to_non_existent_worker";
 
     let mut builder = Builder::default();
