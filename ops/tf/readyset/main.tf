@@ -1,7 +1,5 @@
 # Shared load balancer
 resource "aws_lb" "main" {
-  name = format("%s-%s", var.deployment, var.env)
-
   enable_cross_zone_load_balancing = true
   internal                         = true
   load_balancer_type               = "network"
@@ -9,7 +7,7 @@ resource "aws_lb" "main" {
 
   tags = merge(
     {
-      Name = var.deployment
+      Name = format("%s-%s", var.deployment, var.env)
     },
     local.tags
   )

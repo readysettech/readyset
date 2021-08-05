@@ -102,7 +102,6 @@ resource "aws_lb_listener" "mysql_adapter" {
 }
 
 resource "aws_lb_target_group" "mysql_adapter" {
-  name     = local.mysql_adapter
   vpc_id   = data.aws_vpc.vpc.id
   port     = 3306
   protocol = "TCP"

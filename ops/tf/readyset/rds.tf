@@ -18,7 +18,7 @@ resource "aws_db_instance" "db" {
   identifier = local.db
 
   allocated_storage       = var.rds_instance_allocated_storage
-  storage_type            = "io1"
+  storage_type            = var.rds_instance_iops == 0 ? "gp2" : "io1"
   iops                    = var.rds_instance_iops
   backup_retention_period = 7
   db_subnet_group_name    = aws_db_subnet_group.db[0].name

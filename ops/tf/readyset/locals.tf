@@ -15,7 +15,7 @@ locals {
     local.db_name,
   )
 
-  # Resource names
+  # Resource name tags.
   db            = format("%s-%s", var.deployment, var.env)
   mysql_adapter = format("%s-%s-mysql-adapter", var.deployment, var.env)
   server        = format("%s-%s-server", var.deployment, var.env)

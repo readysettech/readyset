@@ -158,9 +158,9 @@ variable "rds_instance_allocated_storage" {
 }
 
 variable "rds_instance_iops" {
-  description = "Number of IOPS per instance when create_rds = true. This must be between 0.5 * rds_instance_allocated_storage and 50 * rds_instance_allocated_storage."
+  description = "Number of IOPS per instance when create_rds = true. This must be between 0.5 * rds_instance_allocated_storage and 50 * rds_instance_allocated_storage. Note: IOPS is MUCH MORE EXPENSIVE than standard storage"
   type        = number
-  default     = 500
+  default     = 0
 }
 
 variable "rds_volume_kms_key_id" {
