@@ -57,6 +57,14 @@ pub enum NodeType {
 /// General error type to be used across all of the ReadySet codebase.
 #[derive(Serialize, Deserialize, Error, Debug)]
 pub enum ReadySetError {
+    /// The adapter will return this error on any set statement that is not
+    /// explicitly allowed.
+    #[error("Set statement disallowed: {statement}")]
+    SetDisallowed {
+        /// The set statement passed to the mysql adapter
+        statement: String,
+    },
+
     /// Query fallback failed because noria_connector is not present. This error
     /// would indicate a bug if seen.
     #[error("Fallback failed because noria_connector is not present")]

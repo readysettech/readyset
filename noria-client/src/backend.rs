@@ -126,6 +126,21 @@ pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
     }
 }
 
+/// Check whether the set statement is explicitly allowed. All other set
+/// statements should return an error
+pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
+    // Only allow set time_zone = '+00:00' at the moment
+    if (&set.variable[..] == "time_zone")
+        || (&set.variable == "@@GLOBAL.time_zone")
+        || (&set.variable == "@@LOCAL.time_zone")
+        || (&set.variable == "@@SESSION.time_zone")
+    {
+        matches!(&set.value, Literal::String(s) if s == "+00:00")
+    } else {
+        false
+    }
+}
+
 #[derive(From)]
 pub enum Writer<A: 'static + Authority> {
     MySqlConnector(MySqlConnector),
@@ -623,6 +638,13 @@ impl<A: 'static + Authority> Backend<A> {
         let (parsed_query, use_params) = match parse_result {
             Ok(parsed_tuple) => parsed_tuple,
             Err(e) => {
+                // Do not fall back if the set is not allowed
+                if matches!(
+                    e,
+                    Error::ReadySet(ReadySetError::SetDisallowed { statement: _ })
+                ) {
+                    return Err(e);
+                }
                 // TODO(Dan): Implement RYW for query_fallback
                 match self.reader.mysql_connector {
                     Some(_) => {
@@ -638,6 +660,19 @@ impl<A: 'static + Authority> Backend<A> {
                 }
             }
         };
+
+        // If we have a mysql backend then we will pass valid set statements
+        // across the mysql connector.
+        // If no mysql connector is present we will ignore the statement
+        // Disallowed set statements always produce an error
+        if let nom_sql::SqlQuery::Set(s) = &parsed_query {
+            if !is_allowed_set(s) {
+                return Err(ReadySetError::SetDisallowed {
+                    statement: parsed_query.to_string(),
+                }
+                .into());
+            }
+        }
 
         let res = match &mut self.writer {
             // Interacting directly with Noria writer (No RYW support)
@@ -779,7 +814,8 @@ impl<A: 'static + Authority> Backend<A> {
                     // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                     nom_sql::SqlQuery::CreateView(_)
                     | nom_sql::SqlQuery::CreateTable(_)
-                    | nom_sql::SqlQuery::DropTable(_) => {
+                    | nom_sql::SqlQuery::DropTable(_)
+                    | nom_sql::SqlQuery::Set(_) => {
                         let (query_result, _) = connector
                             .handle_write(&parsed_query.to_string(), false)
                             .await?;
