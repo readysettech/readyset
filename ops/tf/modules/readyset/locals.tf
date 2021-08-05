@@ -30,11 +30,19 @@ locals {
     var.tags,
   )
 
-  asg_tags = flatten([[
-    for k, v in local.tags : {
-      key                 = k
-      value               = v
-      propagate_at_launch = true
-    }
-  ]])
+  mysql_adapter_asg_tags = concat(
+    [
+      {
+        key                 = "Name"
+        value               = local.mysql_adapter
+        propagate_at_launch = true
+      },
+    ],
+    flatten([[
+      for k, v in local.tags : {
+        key                 = k
+        value               = v
+        propagate_at_launch = true
+      }
+  ]]))
 }

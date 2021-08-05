@@ -1,3 +1,7 @@
+# Outdated!!!
+
+This documentation is outdated. Also, this module will be moving out into another repository.
+
 # ReadySet Terraform Module
 
 Terraform module to deploy Readyset in AWS. It consists of three main components:

@@ -13,11 +13,6 @@ output "zookeeper_private_ips" {
   value       = aws_network_interface.zookeeper.*.private_ip
 }
 
-output "server_public_ips" {
-  description = "ReadySet Servers public IPs"
-  value       = aws_instance.server.*.public_ip
-}
-
 output "server_private_ips" {
   description = "ReadySet Servers private IPs"
   value       = aws_instance.server.*.private_ip

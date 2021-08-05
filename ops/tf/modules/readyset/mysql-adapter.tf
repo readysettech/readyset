@@ -65,16 +65,14 @@ resource "aws_autoscaling_group" "main" {
   ]
   vpc_zone_identifier = local.private_subnet_ids
 
-  tags = concat(
-    [
-      {
-        key                 = "Name"
-        value               = local.mysql_adapter
-        propagate_at_launch = true
-      },
-    ],
-    local.asg_tags
-  )
+  dynamic "tag" {
+    for_each = local.mysql_adapter_asg_tags
+    content {
+      key                 = tag.value.key
+      value               = tag.value.value
+      propagate_at_launch = tag.value.propagate_at_launch
+    }
+  }
 
   launch_template {
     id      = aws_launch_template.mysql_adapter.id
