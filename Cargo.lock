@@ -3992,6 +3992,7 @@ dependencies = [
  "proptest",
  "query_generator",
  "slog",
+ "tempfile",
  "tokio 1.8.1",
  "walkdir",
  "zookeeper",

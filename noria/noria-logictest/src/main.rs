@@ -2,10 +2,10 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
-use std::io;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{env, io, process};
 
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
@@ -16,6 +16,7 @@ use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
 use query_generator::QuerySeed;
+use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
@@ -481,27 +482,46 @@ impl Fuzz {
             TestRunner::new(self.into())
         };
 
-        let result = runner.run(
-            &(&any::<Vec<QuerySeed>>(), self.generate_opts()),
-            move |(query_seeds, generate_opts)| {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let _guard = rt.enter();
-                rt.block_on(async move { self.test_query_seeds(query_seeds, generate_opts).await })
-                    .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
-            },
-        );
+        let result = runner.run(&self.test_script_strategy(), move |test_script| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
+            rt.block_on(test_script.run(RunOptions {
+                verbose: self.verbose,
+                ..Default::default()
+            }))
+            .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
+        });
 
-        if let Err(TestError::Fail(reason, (seeds, _))) = result {
-            bail!(
-                "Found failing set of queries: {:?} (reason: {})",
-                seeds,
-                reason
-            )
+        if let Err(TestError::Fail(reason, script)) = result {
+            let mut file = NamedTempFile::new()?;
+            eprintln!(
+                "Writing failing test script to {}",
+                file.path().to_string_lossy()
+            );
+            script.write_to(&mut file)?;
+            if env::var("BUILDKITE").is_ok() {
+                process::Command::new("buildkite-agent")
+                    .args(&["artifact", "upload", file.path().to_str().unwrap()])
+                    .spawn()
+                    .context("Uploading test script to Buildkite")?;
+            }
+
+            bail!("Found failing set of queries: {}", reason);
         }
 
         println!("No bugs found!");
 
         Ok(())
+    }
+
+    fn test_script_strategy(&self) -> impl Strategy<Value = TestScript> + 'static {
+        (any::<Vec<QuerySeed>>(), self.generate_opts()).prop_map(|(query_seeds, generate_opts)| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
+            let mut seed = generate::Seed::try_from(query_seeds).unwrap();
+            let script = rt.block_on(seed.run(generate_opts)).unwrap();
+            script.clone()
+        })
     }
 
     fn generate_opts(&self) -> impl Strategy<Value = generate::GenerateOpts> + 'static {
@@ -518,22 +538,6 @@ impl Fuzz {
                 rows_to_delete: Some(rows_to_delete),
             })
         })
-    }
-
-    async fn test_query_seeds(
-        &self,
-        seeds: Vec<QuerySeed>,
-        generate_opts: generate::GenerateOpts,
-    ) -> anyhow::Result<()> {
-        let mut seed = generate::Seed::try_from(seeds)?;
-        let script = seed.run(generate_opts).await?;
-        script
-            .run(RunOptions {
-                verbose: self.verbose,
-                ..Default::default()
-            })
-            .await?;
-        Ok(())
     }
 }
 
