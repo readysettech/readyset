@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 tokio = { version = "1.8.1", features = ["macros", "rt-multi-thread"] }
-clap = "3.0.0-beta.2"
 anyhow = "1.0.38"
 nom = "5.1.2"
 mysql = "20.1.0"
@@ -15,6 +14,9 @@ futures = "0.3.15"
 vec1 = "1.8.0"
 url = "2.2.2"
 hdrhistogram = "7.1"
+zipf = "7.0.0"
+structopt = "0.3.22"
+clap = "3.0.0-beta.2"
 
 # local dependencies
 demo-utils = { path = "../utils/" }

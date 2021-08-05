@@ -1,5 +1,4 @@
 #![feature(drain_filter)]
-use clap::Clap;
 use noria::consensus::ZookeeperAuthority;
 use noria::ControllerHandle;
 use noria::DataType;
@@ -8,64 +7,71 @@ use noria::ViewQuery;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::convert::{TryFrom, TryInto};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use structopt::clap::arg_enum;
+use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Debug)]
-enum Dist {
-    Uniform,
-}
-
-impl FromStr for Dist {
-    type Err = &'static str;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            "uniform" => Ok(Dist::Uniform),
-            _ => Err("Unrecognized distribution"),
-        }
+arg_enum! {
+    #[derive(StructOpt)]
+    enum Dist {
+        Uniform,
+        Zipf,
     }
 }
 
-#[derive(Clap)]
-#[clap(name = "reader")]
+#[derive(StructOpt)]
+#[structopt(name = "reader")]
 struct Reader {
     /// The number of users in the system.
-    #[clap(long, default_value = "10")]
+    #[structopt(long, default_value = "10")]
     user_table_rows: usize,
 
     /// ReadySet's zookeeper connection string.
-    #[clap(long)]
+    #[structopt(long)]
     zookeeper_url: String,
 
     /// The target rate at the reader issues queries at.
-    #[clap(long)]
+    #[structopt(long)]
     target_qps: Option<u64>,
 
     /// The region used when requesting a view.
-    #[clap(long)]
+    #[structopt(long)]
     target_region: Option<String>,
 
     /// The amount of time to batch a set of requests for in ms. If
     /// `batch_duration_ms` is 0, no batching is performed.
-    #[clap(long, default_value = "1")]
+    #[structopt(long, default_value = "1")]
     batch_duration_ms: u64,
 
     /// The maximum batch size for lookup requests.
-    #[clap(long, default_value = "10")]
+    #[structopt(long, default_value = "10")]
     batch_size: u64,
 
     /// The number of threads to spawn to issue reader queries.
-    #[clap(long, default_value = "1")]
+    #[structopt(long, default_value = "1")]
     threads: u64,
 
-    #[clap(long, default_value = "uniform", parse(try_from_str))]
+    /// The distribution to use to generate the random user ids
+    ///
+    /// 'uniform' - samples uniformly in the range [0..user_table_rows)
+    ///
+    /// 'zipf' - sample pattern is skewed such that 90% of accesses are for 10% of the ids (Zipf; α=1.15)
+    #[structopt(
+        long,
+        default_value = "uniform",
+        case_insensitive = true,
+        rename_all = "lower"
+    )]
     distribution: Dist,
+
+    #[structopt(long, required_if("distribution", "zipf"), default_value = "1.15")]
+    /// Override the default alpha parameter for the zipf distribution
+    alpha: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -309,6 +315,9 @@ impl Reader {
                             0,
                             self.user_table_rows as u64,
                         ))),
+                        Dist::Zipf => Box::new(QueryFactory::new(
+                            zipf::ZipfDistribution::new(self.user_table_rows, self.alpha).unwrap(),
+                        )),
                     };
 
                     self.generate_queries(factory, query_issue_interval, thread_tx, authority)
@@ -333,6 +342,6 @@ impl Reader {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Reader is set to static as it is referenced by multiple threads.
-    let reader: &'static _ = Box::leak(Box::new(Reader::parse()));
+    let reader: &'static _ = Box::leak(Box::new(Reader::from_args()));
     reader.run().await
 }
