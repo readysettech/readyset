@@ -2,8 +2,6 @@
 #[macro_use]
 extern crate tracing;
 
-use std::io;
-
 use async_trait::async_trait;
 use tokio::net;
 
@@ -21,13 +19,13 @@ impl ConnectionHandler for MysqlHandler {
         stream: net::TcpStream,
         backend: Backend<noria::ZookeeperAuthority>,
     ) {
-        if let Err(noria_client::backend::error::Error::Io(e)) =
-            MysqlIntermediary::run_on_tcp(backend, stream).await
-        {
-            match e.kind() {
-                io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe => {}
-                _ => {
+        if let Err(e) = MysqlIntermediary::run_on_tcp(backend, stream).await {
+            match e {
+                noria_client::backend::error::Error::Io(e) => {
                     error!(err = ?e, "connection lost");
+                }
+                _ => {
+                    error!(err = ?e)
                 }
             }
         }
