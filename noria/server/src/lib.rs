@@ -502,3 +502,7 @@ impl<T> Sink<T> for ImplSinkForSender<T> {
         Poll::Ready(Ok(()))
     }
 }
+
+// TODO(justin): Change VolumeId type when we know this fixed size.
+/// Id associated with the worker server's volume.
+pub type VolumeId = String;

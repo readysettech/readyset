@@ -1,8 +1,10 @@
+use std::net::SocketAddr;
+use url::Url;
+
+use crate::VolumeId;
 use dataflow::prelude::*;
 use noria::consensus::Epoch;
 pub use noria::util::do_noria_rpc;
-use std::net::SocketAddr;
-use url::Url;
 
 /// Initial registration request body, sent from workers to controllers.
 ///
@@ -19,6 +21,8 @@ pub struct RegisterPayload {
     pub region: Option<String>,
     /// Whether or not this worker is used only to hold reader domains.
     pub reader_only: bool,
+    /// The volume associated with this server.
+    pub volume_id: Option<VolumeId>,
 }
 
 /// Worker heartbeat request body, sent from workers to controllers.

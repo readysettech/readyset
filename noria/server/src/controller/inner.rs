@@ -327,6 +327,7 @@ impl ControllerInner {
             reader_addr,
             region,
             reader_only,
+            volume_id,
         } = msg;
 
         info!(
@@ -343,7 +344,7 @@ impl ControllerInner {
             });
         }
 
-        let ws = Worker::new(worker_uri.clone(), region, reader_only);
+        let ws = Worker::new(worker_uri.clone(), region, reader_only, volume_id);
 
         let mut domain_addresses = Vec::new();
         for (index, handle) in &self.domains {
