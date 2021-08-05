@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io;
+use std::io::Write;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
@@ -55,6 +56,15 @@ impl FromIterator<Record> for TestScript {
 impl Extend<Record> for TestScript {
     fn extend<T: IntoIterator<Item = Record>>(&mut self, iter: T) {
         self.records.extend(iter)
+    }
+}
+
+impl TestScript {
+    pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writeln!(w, "{}", self.records().iter().join("\n"))
     }
 }
 
