@@ -84,7 +84,7 @@ use crate::controller::{ControllerOuter, ControllerRequest};
 use crate::handle::Handle;
 use crate::metrics::{get_global_recorder, Clear, RecorderType};
 use crate::worker::{Worker, WorkerRequest};
-use crate::Config;
+use crate::{Config, VolumeId};
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// instance. Make sure that this method is run while on a runtime.
@@ -99,6 +99,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     region: Option<String>,
     replicator_url: Option<String>,
     reader_only: bool,
+    volume_id: Option<VolumeId>,
 ) -> Result<Handle<A>, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -172,6 +173,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         domains: Default::default(),
         region: region.clone(),
         reader_only,
+        volume_id,
     };
 
     tokio::spawn(worker.run().map_err(|e| {

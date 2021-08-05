@@ -4,7 +4,7 @@ use crate::controller::recipe::Recipe;
 use crate::coordination::do_noria_rpc;
 use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
-use crate::{Config, ReadySetResult};
+use crate::{Config, ReadySetResult, VolumeId};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
@@ -49,10 +49,18 @@ pub struct Worker {
     http: reqwest::Client,
     region: Option<String>,
     reader_only: bool,
+    /// Volume associated with this worker's server.
+    #[allow(dead_code)]
+    volume_id: Option<VolumeId>,
 }
 
 impl Worker {
-    pub fn new(instance_uri: Url, region: Option<String>, reader_only: bool) -> Self {
+    pub fn new(
+        instance_uri: Url,
+        region: Option<String>,
+        reader_only: bool,
+        volume_id: Option<VolumeId>,
+    ) -> Self {
         Worker {
             healthy: true,
             last_heartbeat: time::Instant::now(),
@@ -60,6 +68,7 @@ impl Worker {
             http: reqwest::Client::new(),
             region,
             reader_only,
+            volume_id,
         }
     }
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {

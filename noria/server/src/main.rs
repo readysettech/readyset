@@ -15,7 +15,7 @@ use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use noria_server::{
-    Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, ZookeeperAuthority,
+    Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId, ZookeeperAuthority,
 };
 
 const PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
@@ -147,6 +147,10 @@ struct Opts {
     /// Output noria metrics
     #[clap(long)]
     noria_metrics: bool,
+
+    /// Volume associated with the server.
+    #[clap(long)]
+    volume_id: Option<VolumeId>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -201,6 +205,10 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(r) = opts.region {
         builder.set_region(r);
+    }
+
+    if let Some(v) = opts.volume_id {
+        builder.set_volume_id(v);
     }
 
     if let Some(pr) = opts.primary_region {

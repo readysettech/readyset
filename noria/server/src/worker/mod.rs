@@ -3,7 +3,7 @@ use crate::coordination::{
 };
 use crate::errors::internal_err;
 use crate::worker::replica::WrappedDomainRequest;
-use crate::ReadySetResult;
+use crate::{ReadySetResult, VolumeId};
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use launchpad::select;
@@ -143,6 +143,9 @@ pub struct Worker {
     ///
     /// These are indexed by (domain index, shard).
     pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
+
+    /// Volume id associated with the server the worker is running on.
+    pub(crate) volume_id: Option<VolumeId>,
 }
 
 impl Worker {
@@ -206,6 +209,7 @@ impl Worker {
                                 reader_addr: self.reader_addr,
                                 region: self.region.clone(),
                                 reader_only: self.reader_only,
+                                volume_id: self.volume_id.clone(),
                             })?),
                     )
                     .map_err(move |e| {

@@ -1,7 +1,5 @@
 use crate::handle::Handle;
-use crate::Config;
-use crate::FrontierStrategy;
-use crate::ReuseConfigType;
+use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
 use dataflow::PersistenceParameters;
 use noria::consensus::{Authority, LocalAuthority};
 use std::future::Future;
@@ -22,6 +20,7 @@ pub struct Builder {
     region: Option<String>,
     replicator_url: Option<String>,
     reader_only: bool,
+    volume_id: Option<VolumeId>,
 }
 
 impl Default for Builder {
@@ -37,6 +36,7 @@ impl Default for Builder {
             region: None,
             replicator_url: None,
             reader_only: false,
+            volume_id: None,
         }
     }
 }
@@ -149,6 +149,11 @@ impl Builder {
         self.config.healthcheck_every = duration;
     }
 
+    /// Configures the volume id associated with this server.
+    pub fn set_volume_id(&mut self, volume_id: VolumeId) {
+        self.volume_id = Some(volume_id);
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start<A: Authority + 'static>(
         self,
@@ -164,6 +169,7 @@ impl Builder {
             region,
             replicator_url,
             reader_only,
+            volume_id,
         } = self;
 
         let config = config.clone();
@@ -180,6 +186,7 @@ impl Builder {
             region,
             replicator_url,
             reader_only,
+            volume_id,
         )
     }
 
