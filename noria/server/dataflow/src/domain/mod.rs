@@ -3267,6 +3267,10 @@ impl Domain {
                     .clone()
                     .unwrap();
 
+                // We try to batch as many redos together, so they can be later issued in a single
+                // call to `RequestPartialReplay`
+                let mut replay_sets = HashMap::new();
+
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
@@ -3274,33 +3278,23 @@ impl Domain {
                 // this is a partial replay (since it's in waiting), so it must have keys
                 for key in for_keys.unwrap() {
                     let hole = (key_cols.clone(), key);
-                    let replay = waiting.redos.remove(&hole);
-                    let unwrapped;
-                    match replay {
-                        Some(x) => {
-                            unwrapped = x;
-                        }
-                        None => {
-                            internal!(
-                                "got backfill for unnecessary key {:?} via tag {:?}",
-                                hole.1,
-                                tag
-                            );
-                        }
-                    }
-                    let replay = unwrapped;
+                    let replay = match waiting.redos.remove(&hole) {
+                        Some(x) => x,
+                        None => internal!(
+                            "got backfill for unnecessary key {:?} via tag {:?}",
+                            hole.1,
+                            tag
+                        ),
+                    };
 
                     // we may need more holes to fill before some replays should be re-attempted
                     let replay: Vec<_> = replay
                         .into_iter()
                         .filter(|tagged_replay_key| {
-                            let left = {
-                                let left = waiting.holes.get_mut(tagged_replay_key).unwrap();
-                                *left -= 1;
-                                *left
-                            };
+                            let left = waiting.holes.get_mut(tagged_replay_key).unwrap();
+                            *left -= 1;
 
-                            if left == 0 {
+                            if *left == 0 {
                                 trace!(self.log, "filled last hole for key, triggering replay";
                                    "k" => ?tagged_replay_key);
 
@@ -3310,7 +3304,7 @@ impl Domain {
                             } else {
                                 trace!(self.log, "filled hole for key, not triggering replay";
                                    "k" => ?tagged_replay_key,
-                                   "left" => left);
+                                   "left" => *left);
                                 false
                             }
                         })
@@ -3323,14 +3317,22 @@ impl Domain {
                         requesting_shard,
                     } in replay
                     {
-                        self.delayed_for_self
-                            .push_back(Box::new(Packet::RequestPartialReplay {
-                                tag,
-                                unishard,
-                                keys: vec![replay_key],
-                                requesting_shard,
-                            }));
+                        replay_sets
+                            .entry((tag, unishard, requesting_shard))
+                            .or_insert_with(|| Vec::new())
+                            .push(replay_key);
                     }
+                }
+
+                // After we actually finished sorting the Redos into batches, issue each batch
+                for ((tag, unishard, requesting_shard), keys) in replay_sets.drain() {
+                    self.delayed_for_self
+                        .push_back(Box::new(Packet::RequestPartialReplay {
+                            tag,
+                            unishard,
+                            keys,
+                            requesting_shard,
+                        }));
                 }
 
                 if !waiting.holes.is_empty() {
