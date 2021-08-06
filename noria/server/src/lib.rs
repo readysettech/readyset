@@ -454,7 +454,6 @@ impl Default for Config {
             frontier_strategy: Default::default(),
             domain_config: DomainConfig {
                 concurrent_replays: 512,
-                replay_batch_timeout: time::Duration::new(0, 100_000),
                 aggressively_update_state_sizes: false,
             },
             persistence: Default::default(),

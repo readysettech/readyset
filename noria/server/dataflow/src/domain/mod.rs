@@ -3,7 +3,6 @@ use std::cell;
 use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
-use std::iter::repeat;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -47,7 +46,6 @@ pub enum ProcessResult {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     pub concurrent_replays: usize,
-    pub replay_batch_timeout: time::Duration,
 
     /// If set to `true`, the metric tracking the in-memory size of materialized state will be
     /// updated after every packet is handled, rather than only when requested by the eviction
@@ -246,8 +244,6 @@ impl DomainBuilder {
             readers,
             channel_coordinator,
 
-            buffered_replay_requests: Default::default(),
-            replay_batch_timeout: self.config.replay_batch_timeout,
             timed_purges: Default::default(),
 
             concurrent_replays: 0,
@@ -363,8 +359,6 @@ pub struct Domain {
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
 
-    buffered_replay_requests: HashMap<(Tag, usize), (time::Instant, HashSet<KeyComparison>, bool)>,
-    replay_batch_timeout: time::Duration,
     delayed_for_self: VecDeque<Box<Packet>>,
 
     group_commit_queues: GroupCommitQueueSet,
@@ -491,7 +485,7 @@ impl Domain {
             processed += 1;
             #[allow(clippy::indexing_slicing)] // Tag must exist
             if let TriggerEndpoint::Local(..) = self.replay_paths[&tag].trigger {
-                // *in theory* we could just call self.seed_replay, and everything would be good.
+                // *in theory* we could just call self.seed_all, and everything would be good.
                 // however, then we start recursing, which could get us into sad situations where
                 // we break invariants where some piece of code is assuming that it is the only
                 // thing processing at the time (think, e.g., borrow_mut()).
@@ -502,7 +496,7 @@ impl Domain {
                 // keys we have requested in self.waiting.redos (see `redundant` in
                 // `on_replay_miss`). in particular, on_replay_miss is called while looping over
                 // all the misses that need replays, and while the first miss of a given key will
-                // trigger a replay, the second will not. if we call `seed_replay` directly here,
+                // trigger a replay, the second will not. if we call `seed_all` directly here,
                 // that might immediately fill in this key and remove the entry. when the next miss
                 // (for the same key) is then hit in the outer iteration, it will *also* request a
                 // replay of that same key, which gets us into trouble with `State::mark_filled`.
@@ -2039,15 +2033,13 @@ impl Domain {
                         );
                         let start = time::Instant::now();
                         self.total_replay_time.start();
-                        for key in keys {
-                            self.seed_replay(
-                                tag,
-                                Cow::Owned(key),
-                                unishard,
-                                requesting_shard,
-                                executor,
-                            )?;
-                        }
+                        self.seed_all(
+                            tag,
+                            requesting_shard,
+                            keys.into_iter().collect(),
+                            unishard,
+                            executor,
+                        )?;
                         self.total_replay_time.stop();
                         histogram!(
                             recorded::DOMAIN_SEED_REPLAY_TIME,
@@ -2063,6 +2055,7 @@ impl Domain {
                             "domain" => self.index.index().to_string(),
                             "shard" => self.shard.unwrap_or(0).to_string(),
                             "tag" => tag.to_string()
+
                         );
                     }
                     Packet::Finish(tag, ni) => {
@@ -2107,66 +2100,10 @@ impl Domain {
         }
 
         if top {
-            let mut elapsed_replays: Vec<(Tag, usize, HashSet<KeyComparison>, bool)> = Vec::new();
             loop {
                 while let Some(m) = self.delayed_for_self.pop_front() {
                     trace!(self.log, "handling local transmission");
-                    // we really want this to just use tail recursion.
-                    // but alas, the compiler doesn't seem to want to do that.
-                    // instead, we ensure that only the topmost call to handle() walks delayed_for_self
-
-                    // WO for https://github.com/rust-lang/rfcs/issues/1403
                     self.handle(m, executor, false)?;
-                }
-
-                if !self.buffered_replay_requests.is_empty() {
-                    self.total_replay_time.start();
-                    let now = time::Instant::now();
-                    let to = self.replay_batch_timeout;
-                    elapsed_replays.extend({
-                        self.buffered_replay_requests.iter_mut().filter_map(
-                            |(
-                                &(tag, requesting_shard),
-                                &mut (first, ref mut keys, single_shard),
-                            )| {
-                                if !keys.is_empty() && now.duration_since(first) > to {
-                                    // will be removed by retain below
-                                    Some((
-                                        tag,
-                                        requesting_shard,
-                                        std::mem::take(keys),
-                                        single_shard,
-                                    ))
-                                } else {
-                                    None
-                                }
-                            },
-                        )
-                    });
-                    self.buffered_replay_requests
-                        .retain(|_, (_, ref keys, _)| !keys.is_empty());
-                    for (tag, requesting_shard, keys, single_shard) in elapsed_replays.drain(..) {
-                        let start = time::Instant::now();
-                        self.seed_all(tag, requesting_shard, keys, single_shard, executor)?;
-                        histogram!(
-                            recorded::DOMAIN_SEED_ALL_TIME,
-                            start.elapsed().as_micros() as f64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "requesting_shard" => requesting_shard.to_string(),
-                            "tag" => tag.to_string()
-                        );
-
-                        counter!(
-                            recorded::DOMAIN_TOTAL_SEED_ALL_TIME,
-                            start.elapsed().as_micros() as u64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "requesting_shard" => requesting_shard.to_string(),
-                            "tag" => tag.to_string()
-                        );
-                    }
-                    self.total_replay_time.stop();
                 }
 
                 let mut swap = HashSet::new();
@@ -2449,142 +2386,6 @@ impl Domain {
                 },
                 ex,
             )?;
-        }
-
-        Ok(())
-    }
-
-    fn seed_replay(
-        &mut self,
-        tag: Tag,
-        key: Cow<KeyComparison>,
-        single_shard: bool,
-        requesting_shard: usize,
-        ex: &mut dyn Executor,
-    ) -> Result<(), ReadySetError> {
-        #[allow(clippy::indexing_slicing)]
-        // tag came from an internal data structure that guarantees it exists
-        if let ReplayPath {
-            trigger: TriggerEndpoint::Start(..) | TriggerEndpoint::Local(..),
-            ..
-        } = self.replay_paths[&tag]
-        {
-            // maybe delay this seed request so that we can batch respond later?
-            // TODO
-            use std::collections::hash_map::Entry;
-            let key = key.into_owned();
-            match self.buffered_replay_requests.entry((tag, requesting_shard)) {
-                Entry::Occupied(o) => {
-                    assert!(!o.get().1.is_empty());
-                    o.into_mut().1.insert(key);
-                }
-                Entry::Vacant(v) => {
-                    let mut ks = HashSet::new();
-                    ks.insert(key);
-                    v.insert((time::Instant::now(), ks, single_shard));
-                }
-            }
-
-            // TODO: if timer has expired, call seed_all(tag, _, executor) immediately
-            return Ok(());
-        }
-
-        #[allow(clippy::indexing_slicing)]
-        // tag came from an internal data structure that guarantees it exists
-        let (m, source, misses) = match self.replay_paths[&tag] {
-            ReplayPath {
-                source: Some(source),
-                trigger: TriggerEndpoint::Start(ref cols) | TriggerEndpoint::Local(ref cols),
-                ref path,
-                ..
-            } => {
-                let state = self.state.get(source).ok_or_else(|| {
-                    internal_err(format!(
-                        "migration replay path (tag {:?}) started with non-materialized node",
-                        tag
-                    ))
-                })?;
-
-                self.record_dataflow_lookup_metrics(source);
-                let rs = match key.as_ref() {
-                    KeyComparison::Equal(equal) => state
-                        .lookup(&cols[..], &KeyType::from(equal))
-                        .records()
-                        .ok_or_else(|| vec![key.clone()]),
-                    KeyComparison::Range(range) => state
-                        .lookup_range(&cols[..], &RangeKey::from(range))
-                        .into_result()
-                        .map_err(|misses| {
-                            misses
-                                .into_iter()
-                                .map(|miss| {
-                                    #[allow(clippy::unwrap_used)]
-                                    // keys can't be empty coming from misses
-                                    Cow::Owned(KeyComparison::try_from(miss).unwrap())
-                                })
-                                .collect()
-                        }),
-                };
-
-                match rs {
-                    Ok(rs) => {
-                        let data = rs
-                            .into_iter()
-                            .map(|r| self.seed_row(source, r))
-                            .collect::<Result<Records, _>>()?;
-
-                        let mut k = HashSet::new();
-                        k.insert(key.clone().into_owned());
-                        let m = Some(Box::new(Packet::ReplayPiece {
-                            link: Link::new(source, path[0].node),
-                            tag,
-                            context: ReplayPieceContext::Partial {
-                                for_keys: k,
-                                unishard: single_shard, // if we are the only source, only one path
-                                ignore: false,
-                                requesting_shard,
-                            },
-                            data,
-                        }));
-                        (m, source, None)
-                    }
-                    Err(misses) => (None, source, Some((misses, cols.clone()))),
-                }
-            }
-            _ => {
-                internal!();
-            }
-        };
-
-        if let Some((misses, cols)) = misses {
-            // we have missed in our lookup, so we have a partial replay through a partial replay
-            // trigger a replay to source node, and enqueue this request.
-            trace!(self.log,
-                   "missed during replay request";
-                   "tag" => tag,
-                   "key" => ?key);
-
-            self.on_replay_misses(
-                source,
-                &cols[..],
-                repeat(key.into_owned())
-                    .zip(misses.into_iter().map(Cow::into_owned))
-                    .collect(),
-                single_shard,
-                requesting_shard,
-                tag,
-            )?;
-        } else {
-            trace!(self.log,
-                   "satisfied replay request";
-                   "tag" => tag,
-                   //"data" => ?m.as_ref().unwrap().data(),
-                   "key" => ?key,
-            );
-        }
-
-        if let Some(m) = m {
-            self.handle_replay(*m, ex)?;
         }
 
         Ok(())
@@ -4053,18 +3854,8 @@ impl Domain {
     pub fn resume_polling(&mut self) -> Option<time::Duration> {
         // when do we need to be woken up again?
         let now = time::Instant::now();
-        let opt1 = self
-            .buffered_replay_requests
-            .iter()
-            .filter(|&(_, &(_, ref keys, _))| !keys.is_empty())
-            .map(|(_, &(first, _, _))| {
-                self.replay_batch_timeout
-                    .checked_sub(now.duration_since(first))
-                    .unwrap_or_else(|| time::Duration::from_millis(0))
-            })
-            .min();
-        let opt2 = self.group_commit_queues.duration_until_flush();
-        let opt3 = self.timed_purges.front().map(|tp| {
+        let opt1 = self.group_commit_queues.duration_until_flush();
+        let opt2 = self.timed_purges.front().map(|tp| {
             if tp.time > now {
                 tp.time - now
             } else {
@@ -4072,16 +3863,11 @@ impl Domain {
             }
         });
 
-        let mut timeout = opt1.or(opt2).or(opt3);
+        let mut timeout = opt1.or(opt2);
         // timeout is based on opt2, so if opt2 is Some so is timeout
         #[allow(clippy::unwrap_used)]
         if let Some(opt2) = opt2 {
             timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
-        }
-        // timeout is based on opt3, so if opt3 is Some so is timeout
-        #[allow(clippy::unwrap_used)]
-        if let Some(opt3) = opt3 {
-            timeout = Some(std::cmp::min(timeout.unwrap(), opt3));
         }
         timeout
     }
@@ -4119,7 +3905,7 @@ impl Domain {
                     self.handle(m, executor, true)?;
                 }
 
-                if !self.buffered_replay_requests.is_empty() || !self.timed_purges.is_empty() {
+                if !self.timed_purges.is_empty() {
                     self.handle(Box::new(Packet::Spin), executor, true)?;
                 }
 
