@@ -860,6 +860,16 @@ where
             Ok(PrepareResult::MySqlPrepareWrite { statement_id: _ }) => {
                 info.reply(self.prepared_count, &[], &[]).await
             } // TODO : handle params correctly. dont just leave them blank.
+            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
+                code,
+                message,
+                ..
+            })))
+            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
+                code,
+                message,
+                ..
+            }))) => info.error(code.into(), message.as_bytes()).await,
             Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
         };
 
@@ -928,6 +938,12 @@ where
                     )
                     .await
                     .map_err(Error::from)
+            }
+            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError{code, message,
+                ..})))
+            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError{code,
+                message, ..}))) => {
+                results.error(code.into(), message.as_bytes()).await
             }
             Err(e) => results.error(e.error_kind(), e.to_string().as_bytes()).await,
             _ => internal!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
@@ -1051,7 +1067,16 @@ where
                     rw.finish().await
                 }
             }
-
+            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
+                code,
+                message,
+                ..
+            })))
+            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
+                code,
+                message,
+                ..
+            }))) => results.error(code.into(), message.as_bytes()).await,
             Err(e) => {
                 results
                     .error(e.error_kind(), e.to_string().as_bytes())

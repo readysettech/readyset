@@ -8,9 +8,9 @@ use thiserror::Error;
 /// Connectors should all use this error enum in their results.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("MySQL error: {0}")]
+    #[error(transparent)]
     MySql(#[from] mysql::error::Error),
-    #[error("MySQL error: {0}")]
+    #[error(transparent)]
     MySqlAsync(#[from] mysql_async::Error),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
