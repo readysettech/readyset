@@ -69,10 +69,7 @@ async fn main() {
         ..Default::default()
     });
     builder.set_sharding(None);
-    builder.set_partial_replay_batch_timeout(Duration::new(
-        0,
-        value_t_or_exit!(args, "replay-timeout", u32),
-    ));
+
     match args.value_of("purge").unwrap() {
         "all" => {
             builder.set_frontier_strategy(FrontierStrategy::AllPartial);
