@@ -2,6 +2,7 @@ use arccstr::ArcCStr;
 
 use bytes::BytesMut;
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
+use derive_more::{From, Into};
 use itertools::Either;
 use tokio_postgres::types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 
@@ -1051,7 +1052,39 @@ impl<'a> TryFrom<&'a DataType> for &'a str {
             }
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
-                src_type: "DataType".to_string(),
+                src_type: match data.sql_type() {
+                    Some(ty) => ty.to_string(),
+                    None => "Null".to_string(),
+                },
+                target_type: "&str".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<DataType> for Vec<u8> {
+    type Error = ReadySetError;
+
+    fn try_from(data: DataType) -> Result<Self, Self::Error> {
+        match data {
+            DataType::Text(t) => Ok(t.to_bytes().to_vec()),
+            DataType::TinyText(t) => {
+                if t[TINYTEXT_WIDTH - 1] == 0 {
+                    // guaranteed to have at least one 0
+                    let null = t.iter().position(|&i| i == 0).unwrap();
+                    Ok(t[0..null].to_vec())
+                } else {
+                    // entire [u8] contains data
+                    Ok(t.to_vec())
+                }
+            }
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: match data.sql_type() {
+                    Some(ty) => ty.to_string(),
+                    None => "Null".to_string(),
+                },
                 target_type: "&str".to_string(),
                 details: "".to_string(),
             }),
@@ -1454,6 +1487,61 @@ impl ToSql for DataType {
     to_sql_checked!();
 }
 
+impl TryFrom<DataType> for mysql_common::value::Value {
+    type Error = ReadySetError;
+
+    fn try_from(dt: DataType) -> Result<Self, Self::Error> {
+        use mysql_common::value::Value;
+
+        match dt {
+            DataType::None => Ok(Value::NULL),
+            DataType::Int(val) => Ok(Value::Int(i64::from(val))),
+            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(val))),
+            DataType::BigInt(val) => Ok(Value::Int(val)),
+            DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
+            DataType::Real(val, _) => Ok(Value::Double(val)),
+            DataType::Text(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DataType::Timestamp(val) => Ok(val.into()),
+            DataType::Time(val) => Ok(Value::Time(
+                !val.is_positive(),
+                (val.hour() / 24).into(),
+                (val.hour() % 24) as _,
+                val.minutes(),
+                val.seconds(),
+                val.microseconds(),
+            )),
+        }
+    }
+}
+
+impl TryFrom<DataType> for mysql_async::Value {
+    type Error = ReadySetError;
+
+    fn try_from(dt: DataType) -> Result<Self, Self::Error> {
+        use mysql_async::Value;
+
+        match dt {
+            DataType::None => Ok(Value::NULL),
+            DataType::Int(val) => Ok(Value::Int(i64::from(val))),
+            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(val))),
+            DataType::BigInt(val) => Ok(Value::Int(val)),
+            DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
+            DataType::Real(val, _) => Ok(Value::Double(val)),
+            DataType::Text(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DataType::Timestamp(val) => Ok(val.into()),
+            DataType::Time(val) => Ok(Value::Time(
+                !val.is_positive(),
+                (val.hour() / 24).into(),
+                (val.hour() % 24) as _,
+                val.minutes(),
+                val.seconds(),
+                val.microseconds(),
+            )),
+        }
+    }
+}
 // Performs an arithmetic operation on two numeric DataTypes,
 // returning a new DataType as the result.
 macro_rules! arithmetic_operation (
@@ -1722,10 +1810,136 @@ impl Arbitrary for DataType {
     }
 }
 
+#[derive(Debug, From, Into)]
+struct MySqlValue(mysql_common::value::Value);
+
+impl Arbitrary for MySqlValue {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<MySqlValue>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use mysql_common::value::Value;
+        use proptest::arbitrary::any;
+        use proptest::prelude::*;
+
+        //TODO(DAN): cleaner way of avoiding invalid dates/times
+        prop_oneof![
+            Just(Value::NULL),
+            any::<i64>().prop_map(Value::Int),
+            any::<u64>().prop_map(Value::UInt),
+            any::<f32>().prop_map(Value::Float),
+            any::<f64>().prop_map(Value::Double),
+            (
+                1001u16..9999,
+                1u8..13,
+                1u8..29, //TODO(DAN): Allow up to 31 and check for invalid dates in the test
+                0u8..24,
+                0u8..60,
+                0u8..60,
+                0u32..100
+            )
+                .prop_map(|(y, m, d, h, min, s, ms)| Value::Date(y, m, d, h, min, s, ms)),
+            (
+                any::<bool>(),
+                0u32..34, // DataType cannot accept time hihger than 838:59:59
+                0u8..24,
+                0u8..60,
+                0u8..60,
+                0u32..100
+            )
+                .prop_map(|(neg, d, h, m, s, ms)| Value::Time(neg, d, h, m, s, ms)),
+        ]
+        .prop_map(MySqlValue)
+        .boxed()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use test_strategy::proptest;
+
+    #[proptest]
+    fn dt_to_mysql_value_roundtrip_prop(v: MySqlValue) {
+        use assert_approx_eq::assert_approx_eq;
+        use mysql_common::value::Value;
+        let MySqlValue(v) = v;
+        match (
+            Value::try_from(DataType::try_from(v.clone()).unwrap()).unwrap(),
+            v,
+        ) {
+            (Value::Double(d), Value::Float(f)) => assert_approx_eq!(d, f as f64),
+            (v1, v2) => assert_eq!(v1, v2),
+        }
+    }
+
+    #[proptest]
+    fn mysql_value_to_dt_roundtrip_prop(dt: DataType) {
+        use chrono::Datelike;
+        use mysql_common::value::Value;
+
+        prop_assume!(!matches!(
+            dt,
+            DataType::Timestamp(t)
+                if t.date().year() < 1000 ||
+                   t.date().year() > 9999
+        ));
+
+        match (
+            DataType::try_from(Value::try_from(dt.clone()).unwrap()).unwrap(),
+            dt,
+        ) {
+            (DataType::Real(f1, _), DataType::Real(f2, _)) => assert_eq!(f1, f2),
+            (dt1, dt2) => assert_eq!(dt1, dt2),
+        }
+    }
+
+    #[test]
+    fn mysql_value_to_datatype_roundtrip() {
+        use assert_approx_eq::assert_approx_eq;
+        use mysql_common::value::Value;
+
+        assert_eq!(
+            Value::Bytes(vec![1, 2, 3]),
+            Value::try_from(DataType::try_from(Value::Bytes(vec![1, 2, 3])).unwrap()).unwrap()
+        );
+
+        assert_eq!(
+            Value::Int(1),
+            Value::try_from(DataType::try_from(Value::Int(1)).unwrap()).unwrap()
+        );
+        assert_eq!(
+            Value::UInt(1),
+            Value::try_from(DataType::try_from(Value::UInt(1)).unwrap()).unwrap()
+        );
+        // round trip results in conversion from float to double
+        assert_approx_eq!(
+            match Value::Float(1.1) {
+                Value::Float(v) => v as f64,
+                _ => 0.0,
+            },
+            match Value::try_from(DataType::try_from(Value::Float(1.1)).unwrap()).unwrap() {
+                Value::Double(v) => v,
+                Value::Float(v) => v as f64,
+                _ => 1.0,
+            }
+        );
+        assert_eq!(
+            Value::Double(1.1),
+            Value::try_from(DataType::try_from(Value::Double(1.1)).unwrap()).unwrap()
+        );
+        assert_eq!(
+            Value::Date(2021, 1, 1, 1, 1, 1, 1),
+            Value::try_from(DataType::try_from(Value::Date(2021, 1, 1, 1, 1, 1, 1)).unwrap())
+                .unwrap()
+        );
+        assert_eq!(
+            Value::Time(false, 1, 1, 1, 1, 1),
+            Value::try_from(DataType::try_from(Value::Time(false, 1, 1, 1, 1, 1)).unwrap())
+                .unwrap()
+        );
+    }
 
     #[test]
     fn mysql_value_to_datatype() {
