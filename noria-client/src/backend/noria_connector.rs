@@ -5,7 +5,7 @@ use noria::{
     ViewQueryOperator,
 };
 
-use msql_srv::{self, *};
+use msql_srv;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
     UpdateStatement,
@@ -24,8 +24,8 @@ use crate::schema::{self, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
-use crate::backend::QueryResult;
 use crate::backend::SelectSchema;
+use crate::backend::{PrepareResult, QueryResult};
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
@@ -231,7 +231,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<(u32, Vec<msql_srv::Column>, Vec<Column>), Error> {
+    ) -> std::result::Result<PrepareResult, Error> {
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
@@ -285,7 +285,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(id = statement_id, "insert::registered");
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Insert(q));
-        Ok((statement_id, params, schema))
+        Ok(PrepareResult::NoriaPrepareInsert {
+            statement_id,
+            params,
+            schema,
+        })
     }
 
     pub(crate) async fn execute_prepared_insert(
@@ -380,7 +384,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<(u64, Vec<Column>), Error> {
+    ) -> std::result::Result<PrepareResult, Error> {
         // ensure that we have schemas and endpoints for the query
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
@@ -411,7 +415,10 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(id = statement_id, "update::registered");
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Update(q));
-        Ok((statement_id as u64, params))
+        Ok(PrepareResult::NoriaPrepareUpdate {
+            statement_id: statement_id as u64,
+            params,
+        })
     }
 
     pub(crate) async fn execute_prepared_update(
@@ -855,7 +862,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<(u32, Vec<msql_srv::Column>, Vec<Column>), Error> {
+    ) -> std::result::Result<PrepareResult, Error> {
         // extract parameter columns
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
@@ -902,11 +909,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
-        Ok((
+        Ok(PrepareResult::NoriaPrepareSelect {
             statement_id,
             params,
-            getter_schema.to_cols(SchemaType::ReturnedSchema),
-        ))
+            schema: getter_schema.to_cols(SchemaType::ReturnedSchema),
+        })
     }
 
     pub(crate) async fn execute_prepared_select(

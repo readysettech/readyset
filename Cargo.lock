@@ -3288,6 +3288,7 @@ dependencies = [
  "mysql 20.1.0",
  "mysql_async 0.27.0",
  "native-tls",
+ "nom",
  "nom-sql",
  "noria",
  "noria-client-metrics",

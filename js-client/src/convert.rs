@@ -76,7 +76,7 @@ where
                 js_params.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::MySqlPrepareWrite { statement_id } => {
+        PrepareResult::MySqlPrepare { statement_id, .. } => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
         }
     }

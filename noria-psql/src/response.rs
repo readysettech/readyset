@@ -42,7 +42,8 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: MysqlSchema(params).try_into()?,
                 row_schema: vec![],
             }),
-            MySqlPrepareWrite { statement_id } => Ok(ps::PrepareResponse {
+            // TODO(DAN): MySqlPrepare probably shouldn't be seen?
+            MySqlPrepare { statement_id, .. } => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
                 param_schema: vec![],
                 row_schema: vec![],

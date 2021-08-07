@@ -151,6 +151,17 @@ pub struct Column {
     pub colflags: ColumnFlags,
 }
 
+impl From<&mysql_async::Column> for Column {
+    fn from(c: &mysql_async::Column) -> Self {
+        Column {
+            table: c.table_str().to_string(),
+            column: c.name_str().to_string(),
+            coltype: c.column_type(),
+            colflags: c.flags(),
+        }
+    }
+}
+
 pub use crate::datatype::MysqlTime;
 pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
