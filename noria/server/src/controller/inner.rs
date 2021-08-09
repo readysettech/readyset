@@ -8,11 +8,12 @@
     clippy::unreachable
 )]
 
+use super::NodeRestrictionKey;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::recipe::Schema;
 use crate::controller::schema;
-use crate::controller::{ControllerState, Migration, Recipe};
+use crate::controller::{ControllerState, DomainPlacementRestriction, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{DomainDescriptor, HeartbeatPayload, RegisterPayload, RunDomainResponse};
 use crate::debug::info::{DomainKey, GraphInfo};
@@ -74,6 +75,8 @@ pub struct ControllerInner {
     recipe: Recipe,
     /// Latest replication position for the schema if from replica or binlog
     replication_offset: Option<ReplicationOffset>,
+    /// Placement restrictions for nodes and the domains they are placed into.
+    pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
     pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
@@ -162,6 +165,19 @@ pub(super) fn graphviz(
     s.push_str("}}");
 
     s
+}
+
+/// Verifies that the worker `worker` meets the domain placement restrictions
+/// of all dataflow nodes that will be placed in a new domain on the worker.
+/// If the set of restrictions in this domain are too stringent, no worker
+/// may be able to satisfy the domain placement.
+fn worker_meets_restrictions(
+    worker: &Worker,
+    restrictions: &[&DomainPlacementRestriction],
+) -> bool {
+    restrictions
+        .iter()
+        .all(|r| r.worker_volume == worker.volume_id)
 }
 
 impl ControllerInner {
@@ -685,6 +701,7 @@ impl ControllerInner {
             heartbeat_every: state.config.heartbeat_every,
             healthcheck_every: state.config.healthcheck_every,
             recipe,
+            node_restrictions: state.node_restrictions,
             quorum: state.config.quorum,
             log,
 
@@ -750,11 +767,11 @@ impl ControllerInner {
         #[allow(clippy::indexing_slicing)] // checked above
         let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
 
-        let nodes: DomainNodes = nodes
-            .into_iter()
+        let domain_nodes: DomainNodes = nodes
+            .iter()
             .map(|(ni, _)| {
                 #[allow(clippy::unwrap_used)] // checked above
-                let node = self.ingredients.node_weight_mut(ni).unwrap().take();
+                let node = self.ingredients.node_weight_mut(*ni).unwrap().take();
                 node.finalize(&self.ingredients)
             })
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
@@ -767,16 +784,21 @@ impl ControllerInner {
                     .filter(|s_worker_id| **worker_id == **s_worker_id)
                     .is_some())
         };
-        let mut wi = self
+
+        let worker_set = self
             .workers
             .iter()
             .filter(|(_, w)| w.healthy)
             .filter(worker_selector)
-            .filter(|(_, worker)| !worker.reader_only || is_reader_domain)
-            .cycle();
+            .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
+
+        // We create a second iterator used to assign workers in a round robin
+        // fashion.
+        let mut round_robin = worker_set.clone().cycle();
 
         let mut domain_addresses = vec![];
         let mut assignments = vec![];
+        let mut new_domain_restrictions = vec![];
         // Send `AssignDomain` to each shard of the given domain
         for i in 0..num_shards.unwrap_or(1) {
             let domain = DomainBuilder {
@@ -784,11 +806,36 @@ impl ControllerInner {
                 shard: if num_shards.is_some() { Some(i) } else { None },
                 nshards: num_shards.unwrap_or(1),
                 config: self.domain_config.clone(),
-                nodes: nodes.clone(),
+                nodes: domain_nodes.clone(),
                 persistence_parameters: self.persistence.clone(),
             };
 
-            let (_, w) = wi.next().ok_or(ReadySetError::NoAvailableWorkers {
+            // Shards of certain dataflow nodes may have restrictions that
+            // limit the workers they are placed upon.
+            let dataflow_node_restrictions = nodes
+                .iter()
+                .filter_map(|(n, _)| {
+                    #[allow(clippy::indexing_slicing)] // checked above
+                    let node_name = self.ingredients[*n].name();
+                    self.node_restrictions.get(&NodeRestrictionKey {
+                        node_name: node_name.into(),
+                        shard: i,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            // If there are placement restrictions we select the first worker
+            // that meets the placement restrictions. This can lead to imbalance
+            // in the number of dataflow nodes placed on each server.
+            let (_, w) = if !dataflow_node_restrictions.is_empty() {
+                let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
+                    worker_meets_restrictions(*worker, &dataflow_node_restrictions)
+                };
+                worker_set.clone().find(restriction_filter)
+            } else {
+                round_robin.next()
+            }
+            .ok_or(ReadySetError::NoAvailableWorkers {
                 domain_index: idx.index(),
                 shard: i,
             })?;
@@ -815,12 +862,36 @@ impl ControllerInner {
                 source: Box::new(e),
             })?;
 
+            // Update the domain placement restrictions on nodes in the placed
+            // domain if necessary.
+            for (n, _) in &nodes {
+                #[allow(clippy::indexing_slicing)] // checked above
+                let node = &self.ingredients[*n];
+
+                if node.is_base() && w.volume_id.is_some() {
+                    new_domain_restrictions.push((
+                        node.name().to_owned(),
+                        shard,
+                        DomainPlacementRestriction {
+                            worker_volume: w.volume_id.clone(),
+                        },
+                    ));
+                }
+            }
+
             info!(log, "worker booted domain at {}", ret.external_addr);
 
             self.channel_coordinator
                 .insert_remote((idx, shard), ret.external_addr)?;
             domain_addresses.push(DomainDescriptor::new(idx, shard, ret.external_addr));
             assignments.push(w.uri.clone());
+        }
+
+        // Push all domain placement restrictions to the local controller state. We
+        // do this outside the loop to satisfy the borrow checker as this immutably
+        // borrows self.
+        for (node_name, shard, restrictions) in new_domain_restrictions {
+            self.set_domain_placement_local(&node_name, shard, restrictions);
         }
 
         // Tell all workers about the new domain(s)
@@ -1386,6 +1457,7 @@ impl ControllerInner {
                                 None => Err(()),
                                 Some(ref state) if state.epoch > self.epoch => Err(()),
                                 Some(mut state) => {
+                                    state.node_restrictions = self.node_restrictions.clone();
                                     state.recipe_version = self.recipe.version();
                                     state.recipes.push(add_txt.to_string());
                                     if let Some(offset) = &add_txt_spec.replication_offset {
@@ -1442,6 +1514,7 @@ impl ControllerInner {
                                     None => Err(()),
                                     Some(ref state) if state.epoch > self.epoch => Err(()),
                                     Some(mut state) => {
+                                        state.node_restrictions = self.node_restrictions.clone();
                                         state.recipe_version = self.recipe.version();
                                         state.recipes = vec![r_txt.to_string()];
                                         // When installing a recipe, the new replication offset overwrites the existing
@@ -1453,8 +1526,9 @@ impl ControllerInner {
                                 }
                             },
                         );
-                        if install_result.is_err() {
-                            noria::internal!("failed to persist recipe installation")
+
+                        if let Err(e) = install_result {
+                            noria::internal!("failed to persist recipe installation, {}", e)
                         }
                         Ok(x)
                     }
@@ -1489,6 +1563,21 @@ impl ControllerInner {
             .map_err(|_| internal_err("Unable to update state"))??;
 
         Ok(())
+    }
+
+    fn set_domain_placement_local(
+        &mut self,
+        node_name: &str,
+        shard: usize,
+        node_restriction: DomainPlacementRestriction,
+    ) {
+        self.node_restrictions.insert(
+            NodeRestrictionKey {
+                node_name: node_name.into(),
+                shard,
+            },
+            node_restriction,
+        );
     }
 
     fn graphviz(&self, detailed: bool) -> String {

@@ -46,6 +46,7 @@ petgraph = { version = "0.5", features = ["serde-1"] }
 rand = "0.7.0"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
+serde_with = "1.9.4"
 slog = "2.7"
 #slog = { version = "2.4.0", features = ["max_level_trace", "release_max_level_trace"] }
 slog-term = "2.4.0"

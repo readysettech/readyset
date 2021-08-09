@@ -15,6 +15,7 @@ use noria::{
 };
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::{self, sleep, JoinHandle};
 use std::time;
@@ -32,6 +33,24 @@ pub(crate) mod recipe; // crate viz for tests
 pub(crate) mod schema;
 pub(crate) mod sql; // crate viz for tests
 
+/// A set of placement restrictions applied to a domain
+/// that a dataflow node is in. Each base table node can have
+/// a set of DomainPlacementRestrictions. A domain's
+/// DomainPlacementRestriction is the merged set of restrictions
+/// of all contained dataflow nodes.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct DomainPlacementRestriction {
+    worker_volume: Option<VolumeId>,
+}
+
+/// The key for a DomainPlacemnetRestriction for a dataflow node.
+/// Each dataflow node, shard pair may have a DomainPlacementRestriction.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
+pub struct NodeRestrictionKey {
+    node_name: String,
+    shard: usize,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
@@ -40,6 +59,10 @@ pub(crate) struct ControllerState {
     recipe_version: usize,
     recipes: Vec<String>,
     replication_offset: Option<ReplicationOffset>,
+    // Serde requires hash map's be keyed by a string, we workaround this by
+    // serializing the hashmap as a tuple list.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 }
 
 pub struct Worker {
@@ -50,7 +73,6 @@ pub struct Worker {
     region: Option<String>,
     reader_only: bool,
     /// Volume associated with this worker's server.
-    #[allow(dead_code)]
     volume_id: Option<VolumeId>,
 }
 
@@ -499,6 +521,7 @@ pub(crate) fn instance_campaign<A: Authority + 'static>(
                         recipe_version: 0,
                         recipes: vec![],
                         replication_offset: None,
+                        node_restrictions: HashMap::new(),
                     }),
                     Some(ref state) if state.epoch > epoch => Err(()),
                     Some(mut state) => {

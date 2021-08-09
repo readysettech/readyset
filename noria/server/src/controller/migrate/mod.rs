@@ -622,7 +622,13 @@ impl Migration {
         };
 
         // Assign domains
-        assignment::assign(&log, &mut ingredients, &topo, &mut ndomains)?;
+        assignment::assign(
+            &log,
+            &mut ingredients,
+            &topo,
+            &mut ndomains,
+            &mainline.node_restrictions,
+        )?;
 
         // Set up ingress and egress nodes
         let swapped1 = routing::add(&log, &mut ingredients, source, &mut new, &topo)?;
