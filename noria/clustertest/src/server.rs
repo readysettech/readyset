@@ -28,7 +28,7 @@ impl NoriaServerRunner {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
-            args: vec!["--no-reuse".to_string()],
+            args: vec!["--noria-metrics".into()],
         }
     }
 
