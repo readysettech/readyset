@@ -1139,6 +1139,127 @@ async fn it_recovers_persisted_bases() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn it_recovers_persisted_bases_with_volume_id() {
+    let authority = Arc::new(LocalAuthority::new());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("it_recovers_persisted_bases_with_volume_id");
+    let persistence_params = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Duration::from_millis(1),
+        Some(path.to_string_lossy().into()),
+        1,
+    );
+
+    {
+        let mut g = Builder::default();
+        g.log_with(crate::logger_pls());
+        g.set_persistence(persistence_params.clone());
+        g.set_volume_id("ef731j2".into());
+        let mut g = g.start(authority.clone()).await.unwrap();
+        sleep().await;
+
+        {
+            let sql = "
+            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
+        ";
+            g.install_recipe(sql).await.unwrap();
+
+            let mut mutator = g.table("Car").await.unwrap();
+
+            for i in 1..10 {
+                let price = i * 10;
+                mutator.insert(vec![i.into(), price.into()]).await.unwrap();
+            }
+        }
+
+        // Let writes propagate:
+        sleep().await;
+        g.shutdown();
+        g.wait_done().await;
+    }
+
+    sleep().await;
+
+    let mut g = Builder::default();
+    g.set_persistence(persistence_params);
+    g.set_volume_id("ef731j2".into());
+    g.log_with(crate::logger_pls());
+    let mut g = g.start(authority.clone()).await.unwrap();
+    sleep().await;
+    {
+        let mut getter = g.view("CarPrice").await.unwrap();
+
+        // Make sure that the new graph contains the old writes
+        for i in 1..10 {
+            let price = i * 10;
+            let result = getter.lookup(&[i.into()], true).await.unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0][0], price.into());
+        }
+    }
+    drop(g);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
+    let authority = Arc::new(LocalAuthority::new());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("it_doesnt_recover_persisted_bases_with_wrong_volume_id");
+    let persistence_params = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Duration::from_millis(1),
+        Some(path.to_string_lossy().into()),
+        1,
+    );
+
+    {
+        let mut g = Builder::default();
+        g.log_with(crate::logger_pls());
+        g.set_persistence(persistence_params.clone());
+        g.set_volume_id("ef731j2".into());
+        let mut g = g.start(authority.clone()).await.unwrap();
+        sleep().await;
+
+        {
+            let sql = "
+            CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
+            QUERY CarPrice: SELECT price FROM Car WHERE id = ?;
+        ";
+            g.install_recipe(sql).await.unwrap();
+
+            let mut mutator = g.table("Car").await.unwrap();
+
+            for i in 1..10 {
+                let price = i * 10;
+                mutator.insert(vec![i.into(), price.into()]).await.unwrap();
+            }
+        }
+
+        // Let writes propagate:
+        sleep().await;
+        g.shutdown();
+        g.wait_done().await;
+    }
+
+    sleep().await;
+
+    let mut g = Builder::default();
+    g.set_persistence(persistence_params);
+    g.set_volume_id("j3131t8".into());
+    g.log_with(crate::logger_pls());
+    let mut g = g.start(authority.clone()).await.unwrap();
+    let getter = g.view("CarPrice").await;
+    // This throws an error because there is no worker to place the domain on.
+    assert!(getter.is_err());
+    drop(g);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mutator_churn() {
     let mut g = start_simple("mutator_churn").await;
     let _ = g
@@ -1338,6 +1459,68 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     // state that the other one had.
     let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
+    let mut g = g.start(authority.clone()).await.unwrap();
+    sleep().await;
+    for (i, table) in tables.iter().enumerate() {
+        let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
+        let result = getter.lookup(&[i.into()], true).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0], i.into());
+    }
+    g.shutdown();
+    g.wait_done().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
+    let authority = Arc::new(LocalAuthority::new());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("it_recovers_persisted_bases_w_multiple_nodes_and_volume_id");
+    let tables = vec!["A", "B", "C"];
+    let persistence_parameters = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Duration::from_millis(1),
+        Some(path.to_string_lossy().into()),
+        1,
+    );
+
+    {
+        let mut g = Builder::default();
+        g.set_persistence(persistence_parameters.clone());
+        g.set_volume_id("ef731j2".into());
+        let mut g = g.start(authority.clone()).await.unwrap();
+        sleep().await;
+
+        {
+            let sql = "
+            CREATE TABLE A (id int, PRIMARY KEY(id));
+            CREATE TABLE B (id int, PRIMARY KEY(id));
+            CREATE TABLE C (id int, PRIMARY KEY(id));
+
+            QUERY AID: SELECT id FROM A WHERE id = ?;
+            QUERY BID: SELECT id FROM B WHERE id = ?;
+            QUERY CID: SELECT id FROM C WHERE id = ?;
+        ";
+            g.install_recipe(sql).await.unwrap();
+            for (i, table) in tables.iter().enumerate() {
+                let mut mutator = g.table(table).await.unwrap();
+                mutator.insert(vec![i.into()]).await.unwrap();
+            }
+        }
+        sleep().await;
+        g.shutdown();
+        g.wait_done().await;
+    }
+
+    sleep().await;
+
+    // Create a new controller with the same authority, and make sure that it recovers to the same
+    // state that the other one had.
+    let mut g = Builder::default();
+    g.set_persistence(persistence_parameters);
+    g.set_volume_id("ef731j2".into());
     let mut g = g.start(authority.clone()).await.unwrap();
     sleep().await;
     for (i, table) in tables.iter().enumerate() {

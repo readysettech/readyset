@@ -3,11 +3,15 @@
 use dataflow::prelude::*;
 use slog::Logger;
 
+use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey};
+use std::collections::HashMap;
+
 pub fn assign(
     log: &Logger,
     graph: &mut Graph,
     topo_list: &[NodeIndex],
     ndomains: &mut usize,
+    node_restrictions: &HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 ) -> ReadySetResult<()> {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we generally want as few domains as possible, but in *some* cases we must make new ones.
@@ -96,8 +100,65 @@ pub fn assign(
                     }
                 }
 
+                // A base table is only friendly with another if their shards also
+                // do not have conflicting domain placement restrictions. If a node
+                // has more shards than another, these shards will be placed
+                // in a separate domain shard and placement restrictions do not
+                // overlap.
                 return Ok(if let Some(friendly_base) = friendly_base {
-                    friendly_base.domain().index()
+                    let num_shards = std::cmp::min(
+                        n.sharded_by().shards().unwrap_or(1),
+                        friendly_base.sharded_by().shards().unwrap_or(1),
+                    );
+
+                    let compatible = |new_node: &Node, existing_node: &Node| {
+                        for i in 0..num_shards {
+                            let new_node_key = NodeRestrictionKey {
+                                node_name: new_node.name().into(),
+                                shard: i,
+                            };
+                            let existing_node_key = NodeRestrictionKey {
+                                node_name: existing_node.name().into(),
+                                shard: i,
+                            };
+
+                            let compatible = match (
+                                node_restrictions.get(&new_node_key),
+                                node_restrictions.get(&existing_node_key),
+                            ) {
+                                // If two nodes each have domain placement restrictions.
+                                // The two need to be compatible to be placed in the
+                                // same domain. Otherwise, the domain would not be placed
+                                // on a valid server.
+                                (Some(new_node), Some(existing_node)) => {
+                                    // A server can only have one worker_volume, as a
+                                    // result, these two nodes should require the same
+                                    // worker_volume.
+                                    new_node.worker_volume == existing_node.worker_volume
+                                }
+                                // If we have placement restrictions, don't place the node
+                                // in a domain without. We technically can if the worker
+                                // matches, but requires more checks.
+                                (Some(_), None) => false,
+                                // If we have no domain placemnet restrictions, we can
+                                // be placed anywhere.
+                                (None, Some(_)) => true,
+                                (None, None) => true,
+                            };
+
+                            if !compatible {
+                                return false;
+                            }
+                        }
+
+                        true
+                    };
+
+                    if compatible(n, friendly_base) {
+                        friendly_base.domain().index()
+                    } else {
+                        next_domain()?
+                    }
                 } else {
                     // there are no bases like us, so we need a new domain :'(
                     next_domain()?

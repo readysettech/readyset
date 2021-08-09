@@ -47,8 +47,8 @@ steps:
   - label: ':docker: Build cargo-audit image'
     key: cargo-audit-image
     commands:
-    - 'echo --- :docker: Pulling image'
-    - 'docker pull 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+      #- 'echo --- :docker: Pulling image'
+      #- 'docker pull 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
     - 'echo --- :docker: Building image'
     - >-
       docker build -f build/Dockerfile.cargo-audit \
