@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --package xtask --bin xtask --"
+lint = "clippy --all-targets"
+
+[build]
+rustflags = ["-C", "link-args=-llz4"]

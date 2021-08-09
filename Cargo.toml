@@ -21,7 +21,8 @@ members = [
     "maths",
     "demos/fastly",
     "demos/weavegrid",
-    "demos/utils"
+    "demos/utils",
+    "xtask"
 ]
 [profile.release]
 debug=true
