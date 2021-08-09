@@ -78,8 +78,7 @@ async fn query_regional_routing_test() {
         vec![vec![
             DataType::from(1i32),
             DataType::from(2i32),
-            DataType::from(2i32),
-            DataType::from(0i32)
+            DataType::from(2i32)
         ]]
     );
 
