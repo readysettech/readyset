@@ -335,7 +335,7 @@ impl Seed {
         let insert_statements = data
             .iter()
             .map(|(table_name, data)| {
-                let spec = generator.table(&table_name.clone().into()).unwrap();
+                let spec = generator.table(table_name).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
                 nom_sql::InsertStatement {
                     table: spec.name.clone().into(),
@@ -393,7 +393,7 @@ impl Seed {
             let delete_statements: Vec<DeleteStatement> = data
                 .iter()
                 .map(|(table_name, data)| {
-                    let spec = generator.table(&table_name.clone().into()).unwrap();
+                    let spec = generator.table(table_name).unwrap();
                     let table: Table = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(
