@@ -1,4 +1,10 @@
 steps:
+  # Zero the failure status
+  - label: ':buildkite:'
+    command: buildkite-agent meta-data set 'failure' '0'
+
+  - wait: ~
+
   - label: ':git: Lint commits'
     key: lint-commits
     branches: '!master'
@@ -97,6 +103,11 @@ steps:
             - label: 'Generate framework pipeline'
               include:
                 - "readyset-framework-testing/frameworks/**"
+
+  - wait: ~
+    continue_on_failure: true
+  - command: ".buildkite/set_gerrit_status.sh"
+  - wait
 
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries

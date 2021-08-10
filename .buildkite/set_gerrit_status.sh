@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ -z ${GERRIT_CHANGE_ID+x} ] && [ -z ${GERRIT_PATCHSET+x} ]; then
+    echo "Not a CL build, skipping"
+    exit 0
+fi
+
+if [ "$(buildkite-agent meta-data get 'failure')" = 1 ]; then
+    verified="1"
+    verb="passed"
+else
+    verified="-1"
+    verb="failed"
+fi
+
+msg="Build of patchset $GERRIT_PATCHSET $verb: $BUILDKITE_BUILD_URL"
+
+if [ $verified = 1 ]; then
+    ignore_default_attention_set_rules="true"
+else
+    ignore_default_attention_set_rules="false"
+fi
+
+body="{
+    \"message\": \"$msg\",
+    \"omit_duplicate_comments\": true,
+    \"ignore_default_attention_set_rules\": $ignore_default_attention_set_rules,
+    \"labels\": {
+        \"Verified\": $verified
+    }
+}"
+
+url="https://gerrit.readyset.name/a/changes/$GERRIT_CHANGE_ID/revisions/$GERRIT_PATCHSET/review"
+
+curl \
+    -v \
+    -X POST \
+    -u "buildkite:$BUILDKITE_GERRIT_PASSWORD" \
+    -H "Content-Type: application/json" \
+    "$url" \
+    -d "$body"
