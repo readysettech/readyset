@@ -3535,7 +3535,6 @@ dependencies = [
  "slog-term",
  "strawpoll",
  "stream-cancel",
- "streamunordered",
  "tempfile",
  "thiserror",
  "timekeeper",
@@ -5220,18 +5219,6 @@ dependencies = [
  "futures-core",
  "pin-project 1.0.7",
  "tokio 1.8.1",
-]
-
-[[package]]
-name = "streamunordered"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e68576e37c8a37f5372796df15202190349dd80e7ed6a79544c0232213e90e35"
-dependencies = [
- "futures-core",
- "futures-sink",
- "futures-util",
- "slab",
 ]
 
 [[package]]

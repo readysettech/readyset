@@ -77,9 +77,7 @@ impl Node {
             NodeType::Base(ref mut b) => {
                 // NOTE: bases only accept BaseOperations
                 match m.take().map(|p| *p) {
-                    Some(Packet::Input {
-                        inner, mut senders, ..
-                    }) => {
+                    Some(Packet::Input { inner, .. }) => {
                         let PacketData { dst, data } = unsafe { inner.take() };
                         let data = data
                             .try_into()
@@ -99,10 +97,6 @@ impl Node {
                         if keyed_by.is_none() {
                             materialize(&mut rs, replication_offset, None, state.get_mut(addr));
                         }
-
-                        // Send write-ACKs to all the clients with updates that made
-                        // it into this merged packet:
-                        senders.drain(..).for_each(|src| ex.ack(src));
 
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
@@ -498,7 +492,7 @@ impl Node {
                 // for updating it.
                 let p = Box::new(Packet::Timestamp {
                     link,
-                    src: None,
+                    src,
                     timestamp: LocalOrNot::new(PacketData {
                         dst,
                         data: PacketPayload::Timestamp(timestamp),
@@ -514,12 +508,7 @@ impl Node {
                         e.process(p, None, 0, executor)?;
                         None
                     }
-                    NodeType::Base(_) => {
-                        if let Some(src) = src {
-                            executor.ack(src);
-                        }
-                        Some(p)
-                    }
+                    NodeType::Base(_) => Some(p),
                     _ => Some(p),
                 })
             }

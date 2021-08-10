@@ -39,7 +39,6 @@ pub mod prelude;
 pub mod state; // pub for doctests
 
 mod domain;
-mod group_commit;
 mod processing;
 
 use derivative::Derivative;
@@ -56,7 +55,7 @@ pub type Readers =
     Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
-pub use crate::domain::{Domain, DomainBuilder, Index, PollEvent, ProcessResult};
+pub use crate::domain::{Domain, DomainBuilder, Index};
 pub use crate::node::special::PostLookup;
 pub use crate::payload::{DomainRequest, Packet};
 pub use crate::processing::SuggestedIndex;

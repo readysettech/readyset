@@ -23,25 +23,12 @@ use noria::errors::{internal_err, ReadySetResult};
 use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
 
-use crate::group_commit::GroupCommitQueueSet;
 use crate::node::NodeProcessingResult;
 use crate::payload::{ReplayPieceContext, SourceSelection};
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
 use crate::state::RangeLookupResult;
 use crate::{DomainRequest, Readers};
-
-#[derive(Debug)]
-pub enum PollEvent {
-    Process(Box<Packet>),
-    Timeout,
-}
-
-#[derive(Debug)]
-pub enum ProcessResult {
-    Processed,
-    StopPolling,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
@@ -221,7 +208,6 @@ impl DomainBuilder {
             .collect();
 
         let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-        let group_commit_queues = GroupCommitQueueSet::new(&self.persistence_parameters);
 
         Domain {
             index: self.index,
@@ -250,8 +236,6 @@ impl DomainBuilder {
             max_concurrent_replays: self.config.concurrent_replays,
             replay_request_queue: Default::default(),
             delayed_for_self: Default::default(),
-
-            group_commit_queues,
 
             state_size,
             total_time: Timer::new(),
@@ -360,8 +344,6 @@ pub struct Domain {
     channel_coordinator: Arc<ChannelCoordinator>,
 
     delayed_for_self: VecDeque<Box<Packet>>,
-
-    group_commit_queues: GroupCommitQueueSet,
 
     state_size: Arc<AtomicUsize>,
     total_time: Timer<SimpleTracker, RealTime>,
@@ -1082,7 +1064,7 @@ impl Domain {
             }
             p.link_mut().dst = childi;
 
-            self.handle(p, executor, true)?;
+            self.handle_packet(p, executor)?;
         }
         Ok(())
     }
@@ -1841,7 +1823,7 @@ impl Domain {
                 Ok(Some(bincode::serialize(&self.replication_offset()?)?))
             }
             DomainRequest::Packet(pkt) => {
-                self.handle(Box::new(pkt), executor, true)?;
+                self.handle_packet(Box::new(pkt), executor)?;
                 Ok(None)
             }
             DomainRequest::QueryReplayDone => {
@@ -1859,24 +1841,15 @@ impl Domain {
         //
         // Not doing this leads to complete insanity, as things just don't replay sometimes and
         // you aren't sure why.
-        self.handle(Box::new(Packet::Spin), executor, true)?;
+        self.handle_packet(Box::new(Packet::Spin), executor)?;
         ret
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn handle(
-        &mut self,
-        m: Box<Packet>,
-        executor: &mut dyn Executor,
-        top: bool,
-    ) -> Result<(), ReadySetError> {
+    fn handle(&mut self, m: Box<Packet>, executor: &mut dyn Executor) -> Result<(), ReadySetError> {
         // TODO(eta): better error handling here.
         // In particular one dodgy packet can kill the whole domain, which is probably not what we
         // want.
-
-        if self.wait_time.is_running() {
-            self.wait_time.stop();
-        }
 
         // Count of each packet sent from a domain.
         counter!(
@@ -1942,219 +1915,190 @@ impl Domain {
                 self.handle_eviction(*m, executor)?;
             }
             Packet::Timestamp { .. } => {
+                // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
+                // ack should be moved to the base table node's handling of the packet.
+                // As the packet is not propagated or mutated before reaching the
+                // domain, we still have a source channel identifier that we can use
+                // to ack the packet.
                 self.handle_timestamp(*m, executor)?;
             }
-            consumed => {
-                match consumed {
-                    // workaround #16223
-                    Packet::RequestReaderReplay {
-                        mut keys,
-                        cols,
-                        node,
-                    } => {
-                        let start = time::Instant::now();
-                        self.total_replay_time.start();
+            Packet::RequestReaderReplay {
+                mut keys,
+                cols,
+                node,
+            } => {
+                let start = time::Instant::now();
+                self.total_replay_time.start();
 
-                        let mut n = self
-                            .nodes
-                            .get(node)
-                            .ok_or(ReadySetError::NoSuchNode(node))?
-                            .borrow_mut();
+                let mut n = self
+                    .nodes
+                    .get(node)
+                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .borrow_mut();
 
-                        let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
-                            node_index: node,
-                            expected_type: NodeType::Reader,
-                        })?;
+                let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
+                    node_index: node,
+                    expected_type: NodeType::Reader,
+                })?;
 
-                        // the reader could have raced with us filling in the key after some
-                        // *other* reader requested it, so let's double check that it indeed still
-                        // misses!
-                        let w = r.writer_mut().ok_or_else(|| {
-                            internal_err("reader replay requested for non-materialized reader")
-                        })?;
-                        // ensure that all writes have been applied
-                        w.swap();
+                // the reader could have raced with us filling in the key after some
+                // *other* reader requested it, so let's double check that it indeed still
+                // misses!
+                let w = r.writer_mut().ok_or_else(|| {
+                    internal_err("reader replay requested for non-materialized reader")
+                })?;
+                // ensure that all writes have been applied
+                w.swap();
 
-                        // don't request keys that have been filled since the request was sent
-                        let writer = r.writer().ok_or_else(|| {
-                            internal_err("reader replay request for non-materialized reader")
-                        })?;
-                        let mut whoopsed = false;
-                        keys.retain(|key| {
-                            !writer.contains(key).unwrap_or_else(|| {
-                                whoopsed = true;
-                                true
-                            })
-                        });
-                        if whoopsed {
-                            internal!("reader replay requested for non-ready reader")
-                        }
-
-                        drop(n); // NLL needs a little help. don't we all, sometimes?
-
-                        // ensure that we haven't already requested a replay of this key
-                        keys.retain(|key| {
-                            self.reader_triggered
-                                .entry(node)
-                                .or_default()
-                                .insert(key.clone())
-                        });
-                        if !keys.is_empty() {
-                            self.find_tags_and_replay(keys, &cols[..], node)?;
-                        }
-                        self.total_replay_time.stop();
-                        histogram!(
-                            recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
-                            start.elapsed().as_micros() as f64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "node" => node.id().to_string()
-                        );
-
-                        counter!(
-                            recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-                            start.elapsed().as_micros() as u64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "node" => node.id().to_string()
-                        );
-                    }
-                    Packet::RequestPartialReplay {
-                        tag,
-                        keys,
-                        unishard,
-                        requesting_shard,
-                    } => {
-                        trace!(
-                            self.log,
-                           "got replay request";
-                           "tag" => tag,
-                           "keys" => format!("{:?}", keys)
-                        );
-                        let start = time::Instant::now();
-                        self.total_replay_time.start();
-                        self.seed_all(
-                            tag,
-                            requesting_shard,
-                            keys.into_iter().collect(),
-                            unishard,
-                            executor,
-                        )?;
-                        self.total_replay_time.stop();
-                        histogram!(
-                            recorded::DOMAIN_SEED_REPLAY_TIME,
-                            start.elapsed().as_micros() as f64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-                        );
-
-                        counter!(
-                            recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-                            start.elapsed().as_micros() as u64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-
-                        );
-                    }
-                    Packet::Finish(tag, ni) => {
-                        let start = time::Instant::now();
-                        self.total_replay_time.start();
-                        self.finish_replay(tag, ni, executor)?;
-                        self.total_replay_time.stop();
-                        histogram!(
-                            recorded::DOMAIN_FINISH_REPLAY_TIME,
-                            start.elapsed().as_micros() as f64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-                        );
-
-                        counter!(
-                            recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-                            start.elapsed().as_micros() as u64,
-                            "domain" => self.index.index().to_string(),
-                            "shard" => self.shard.unwrap_or(0).to_string(),
-                            "tag" => tag.to_string()
-                        );
-                    }
-                    Packet::Spin => {
-                        // spinning as instructed
-                    }
-                    Packet::Timestamp { src, .. } => {
-                        // TODO(justinmiron): Handle timestamp packets at data flow nodes. The
-                        // ack should be moved to the base table node's handling of the packet.
-                        // As the packet is not propagated or mutated before reaching the
-                        // domain, we still have a source channel identifier that we can use
-                        // to ack the packet.
-                        if let Some(src) = src {
-                            executor.ack(src);
-                        }
-                    }
-                    _ => {
-                        internal!();
-                    }
+                // don't request keys that have been filled since the request was sent
+                let writer = r.writer().ok_or_else(|| {
+                    internal_err("reader replay request for non-materialized reader")
+                })?;
+                let mut whoopsed = false;
+                keys.retain(|key| {
+                    !writer.contains(key).unwrap_or_else(|| {
+                        whoopsed = true;
+                        true
+                    })
+                });
+                if whoopsed {
+                    internal!("reader replay requested for non-ready reader")
                 }
+
+                drop(n); // NLL needs a little help. don't we all, sometimes?
+
+                // ensure that we haven't already requested a replay of this key
+                keys.retain(|key| {
+                    self.reader_triggered
+                        .entry(node)
+                        .or_default()
+                        .insert(key.clone())
+                });
+                if !keys.is_empty() {
+                    self.find_tags_and_replay(keys, &cols[..], node)?;
+                }
+                self.total_replay_time.stop();
+                histogram!(
+                    recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
+                    start.elapsed().as_micros() as f64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "node" => node.id().to_string()
+                );
+
+                counter!(
+                    recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
+                    start.elapsed().as_micros() as u64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "node" => node.id().to_string()
+                );
             }
-        }
+            Packet::RequestPartialReplay {
+                tag,
+                keys,
+                unishard,
+                requesting_shard,
+            } => {
+                trace!(
+                    self.log,
+                   "got replay request";
+                   "tag" => tag,
+                   "keys" => format!("{:?}", keys)
+                );
+                let start = time::Instant::now();
+                self.total_replay_time.start();
+                self.seed_all(
+                    tag,
+                    requesting_shard,
+                    keys.into_iter().collect(),
+                    unishard,
+                    executor,
+                )?;
+                self.total_replay_time.stop();
+                histogram!(
+                    recorded::DOMAIN_SEED_REPLAY_TIME,
+                    start.elapsed().as_micros() as f64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
 
-        if top {
-            loop {
-                while let Some(m) = self.delayed_for_self.pop_front() {
-                    trace!(self.log, "handling local transmission");
-                    self.handle(m, executor, false)?;
-                }
+                counter!(
+                    recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
+                    start.elapsed().as_micros() as u64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
 
-                let mut swap = HashSet::new();
-                while let Some(tp) = self.timed_purges.front() {
-                    let now = time::Instant::now();
-                    if tp.time <= now {
-                        #[allow(clippy::unwrap_used)]
-                        // we know it's Some because we check at the head of the while
-                        let tp = self.timed_purges.pop_front().unwrap();
-                        #[allow(clippy::indexing_slicing)]
-                        // nodes in tp.view must reference nodes in self
-                        let mut node = self.nodes[tp.view].borrow_mut();
-                        trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
-                        #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
-                        let r = node.as_mut_reader().unwrap();
-                        if let Some(wh) = r.writer_mut() {
-                            for key in tp.keys {
-                                wh.mark_hole(&key);
-                            }
-                            swap.insert(tp.view);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                for n in swap {
-                    #[allow(clippy::indexing_slicing)]
-                    // nodes in tp.view must reference nodes in self
-                    let mut n = self.nodes[n].borrow_mut();
-                    #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
-                    let r = n.as_mut_reader().unwrap();
-                    if let Some(wh) = r.writer_mut() {
-                        wh.swap();
-                    }
-                }
-
-                if self.delayed_for_self.is_empty() {
-                    break;
-                }
+                );
             }
-        }
+            Packet::Finish(tag, ni) => {
+                let start = time::Instant::now();
+                self.total_replay_time.start();
+                self.finish_replay(tag, ni, executor)?;
+                self.total_replay_time.stop();
+                histogram!(
+                    recorded::DOMAIN_FINISH_REPLAY_TIME,
+                    start.elapsed().as_micros() as f64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
 
-        if self.aggressively_update_state_sizes {
-            self.update_state_sizes();
-        }
-
-        if !self.wait_time.is_running() {
-            self.wait_time.start();
+                counter!(
+                    recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
+                    start.elapsed().as_micros() as u64,
+                    "domain" => self.index.index().to_string(),
+                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "tag" => tag.to_string()
+                );
+            }
+            Packet::Spin => {
+                // spinning as instructed
+            }
         }
 
         Ok(())
+    }
+
+    /// Timed purges happen when [`FrontierStrategy`] is not None, in which case all keys
+    /// are purged from the node after a given amount of time
+    fn handle_timed_purges(&mut self) {
+        let mut swap = HashSet::new();
+        while let Some(tp) = self.timed_purges.front() {
+            let now = time::Instant::now();
+            if tp.time <= now {
+                #[allow(clippy::unwrap_used)]
+                // we know it's Some because we check at the head of the while
+                let tp = self.timed_purges.pop_front().unwrap();
+                #[allow(clippy::indexing_slicing)]
+                // nodes in tp.view must reference nodes in self
+                let mut node = self.nodes[tp.view].borrow_mut();
+                trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
+                let r = node.as_mut_reader().unwrap();
+                if let Some(wh) = r.writer_mut() {
+                    for key in tp.keys {
+                        wh.mark_hole(&key);
+                    }
+                    swap.insert(tp.view);
+                }
+            } else {
+                break;
+            }
+        }
+
+        for n in swap {
+            #[allow(clippy::indexing_slicing)]
+            // nodes in tp.view must reference nodes in self
+            let mut n = self.nodes[n].borrow_mut();
+            #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
+            let r = n.as_mut_reader().unwrap();
+            if let Some(wh) = r.writer_mut() {
+                wh.swap();
+            }
+        }
     }
 
     fn seed_row(&self, source: LocalNodeIndex, row: Cow<[DataType]>) -> ReadySetResult<Record> {
@@ -3850,70 +3794,67 @@ impl Domain {
             })
     }
 
-    pub fn resume_polling(&mut self) -> Option<time::Duration> {
+    /// If there is a pending timed purge, return the duration until it needs
+    /// to happen
+    pub fn next_poll_duration(&mut self) -> Option<time::Duration> {
         // when do we need to be woken up again?
         let now = time::Instant::now();
-        let opt1 = self.group_commit_queues.duration_until_flush();
-        let opt2 = self.timed_purges.front().map(|tp| {
+        self.timed_purges.front().map(|tp| {
             if tp.time > now {
                 tp.time - now
             } else {
                 time::Duration::from_millis(0)
             }
-        });
-
-        let mut timeout = opt1.or(opt2);
-        // timeout is based on opt2, so if opt2 is Some so is timeout
-        #[allow(clippy::unwrap_used)]
-        if let Some(opt2) = opt2 {
-            timeout = Some(std::cmp::min(timeout.unwrap(), opt2));
-        }
-        timeout
+        })
     }
 
-    pub fn on_event(
+    /// Handle a single message for this domain
+    pub fn handle_packet(
         &mut self,
+        packet: Box<Packet>,
         executor: &mut dyn Executor,
-        event: PollEvent,
-    ) -> Result<ProcessResult, ReadySetError> {
+    ) -> ReadySetResult<()> {
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
-        //self.total_time.start();
-        //self.total_ptime.start();
-        let res = match event {
-            PollEvent::Process(packet) => {
-                // TODO: Initialize tracer here, and when flushing group commit
-                // queue.
-                if self.group_commit_queues.should_append(&packet, &self.nodes) {
-                    if let Some(packet) = self.group_commit_queues.append(packet)? {
-                        self.handle(packet, executor, true)?;
-                    }
-                } else {
-                    self.handle(packet, executor, true)?;
-                }
 
-                while let Some(m) = self.group_commit_queues.flush_if_necessary()? {
-                    self.handle(m, executor, true)?;
-                }
+        self.handle(packet, executor)?;
+        // After we handle an external packet, the domain may have accumulated a bunch of packets to itself
+        // we need to process them all next;
+        while let Some(message) = self.delayed_for_self.pop_front() {
+            trace!(self.log, "handling local transmission");
+            self.handle(message, executor)?;
+        }
 
-                Ok(ProcessResult::Processed)
-            }
-            PollEvent::Timeout => {
-                while let Some(m) = self.group_commit_queues.flush_if_necessary()? {
-                    self.handle(m, executor, true)?;
-                }
+        if self.aggressively_update_state_sizes {
+            self.update_state_sizes();
+        }
 
-                if !self.timed_purges.is_empty() {
-                    self.handle(Box::new(Packet::Spin), executor, true)?;
-                }
-
-                Ok(ProcessResult::Processed)
-            }
-        };
         if !self.wait_time.is_running() {
             self.wait_time.start();
         }
-        res
+
+        Ok(())
+    }
+
+    /// Handle an expired timeout from `next_poll_duration`
+    pub fn handle_timeout(&mut self) -> ReadySetResult<()> {
+        if self.wait_time.is_running() {
+            self.wait_time.stop();
+        }
+
+        if !self.timed_purges.is_empty() {
+            self.handle_timed_purges();
+        }
+
+        if self.aggressively_update_state_sizes {
+            self.update_state_sizes();
+        }
+
+        if !self.wait_time.is_running() {
+            self.wait_time.start();
+        }
+
+        Ok(())
     }
 }

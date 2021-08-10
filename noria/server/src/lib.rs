@@ -371,7 +371,8 @@
     stmt_expr_attributes,
     result_cloned,
     result_flattening,
-    bindings_after_at
+    bindings_after_at,
+    drain_filter
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]

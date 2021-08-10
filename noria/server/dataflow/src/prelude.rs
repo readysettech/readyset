@@ -14,7 +14,7 @@ pub(crate) use crate::processing::{
 pub(crate) type Edge = ();
 
 // dataflow types
-pub(crate) use crate::payload::{ReplayPathSegment, SourceChannelIdentifier};
+pub(crate) use crate::payload::ReplayPathSegment;
 pub(crate) use noria::PacketPayload;
 
 // domain local state
@@ -44,7 +44,6 @@ pub use vec1::vec1;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
-    fn ack(&mut self, tag: SourceChannelIdentifier);
     fn create_universe(&mut self, req: HashMap<String, DataType>);
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>);
 }
