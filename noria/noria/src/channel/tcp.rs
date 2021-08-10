@@ -243,8 +243,6 @@ where
     type Item = Result<T, bincode::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // https://github.com/rust-lang/rust-clippy/issues/3071
-        #[allow(clippy::redundant_closure)]
         match self.project() {
             DualTcpStreamProj::Passthrough(abr) => abr.poll_next(cx),
             DualTcpStreamProj::Upgrade(abr, upgrade) => {

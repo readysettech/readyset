@@ -279,7 +279,7 @@ impl Worker {
                     self.coord.clone(),
                 );
 
-                let jh = tokio::spawn(replica);
+                let jh = tokio::spawn(replica.run());
 
                 self.domains.insert(
                     (idx, shard),

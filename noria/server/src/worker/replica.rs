@@ -1,118 +1,83 @@
-/// Only allow processing this many inputs in a domain before we handle timer events, acks, etc.
-const FORCE_INPUT_YIELD_EVERY: usize = 32;
-
 use super::ChannelCoordinator;
 use crate::ReadySetResult;
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
-use dataflow::{
-    payload::SourceChannelIdentifier,
-    prelude::{DataType, Executor},
-    Domain, DomainRequest, Packet, PollEvent, ProcessResult,
-};
-use futures_util::{
-    sink::Sink,
-    stream::{futures_unordered::FuturesUnordered, Stream},
-};
-use noria::internal::DomainIndex;
-use noria::internal::LocalOrNot;
-use noria::{
-    channel::{DualTcpStream, CONNECTION_FROM_BASE},
-    PacketPayload,
-};
-use noria::{PacketData, ReadySetError, Tagged};
-use pin_project::pin_project;
+use dataflow::payload::SourceChannelIdentifier;
+use dataflow::prelude::{DataType, Executor};
+use dataflow::{Domain, DomainRequest, Packet};
+use futures_util::sink::{Sink, SinkExt};
+use futures_util::stream::StreamExt;
+use futures_util::FutureExt;
+use noria::channel::{self, CONNECTION_FROM_BASE};
+use noria::internal::{DomainIndex, LocalOrNot};
+use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, VecDeque};
-use std::io;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{atomic, Arc};
 use std::time;
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
 use strawpoll::Strawpoll;
-use streamunordered::{StreamUnordered, StreamYield};
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
-use tokio::sync::oneshot;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::IntervalStream;
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
-// https://github.com/rust-lang/rust/issues/64445
-type FirstByte = impl Future<Output = Result<(tokio::net::TcpStream, u8), tokio::io::Error>> + Send;
+type DualTcpStream = channel::DualTcpStream<
+    BufStream<TcpStream>,
+    Box<Packet>,
+    Tagged<LocalOrNot<PacketData>>,
+    AsyncDestination,
+>;
 
-/// Read the first byte of a stream.
-fn read_first_byte(mut stream: tokio::net::TcpStream) -> FirstByte {
-    async move {
-        let mut byte = [0; 1];
-        let n = stream.read_exact(&mut byte[..]).await?;
-        assert_eq!(n, 1);
-        Ok((stream, byte[0]))
-    }
+type Outputs =
+    AHashMap<ReplicaAddr, Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>>;
+
+/// Generates a monotonically incrementing u64 value to be used as a token for our connections
+fn next_token() -> u64 {
+    static NEXT_TOKEN: atomic::AtomicU64 = atomic::AtomicU64::new(0);
+    NEXT_TOKEN.fetch_add(1, atomic::Ordering::Relaxed)
 }
 
+/// A domain request wrapped together with the sender to which to send the processing result
 pub struct WrappedDomainRequest {
     pub req: DomainRequest,
     pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
 }
 
-#[pin_project]
+/// [`Replica`] is a wrapper for a [`Domain`], handling intra Domain communication and coordination
 pub struct Replica {
+    /// Wrapped domain
     domain: Domain,
     pub(super) log: slog::Logger,
 
     coord: Arc<ChannelCoordinator>,
 
-    retry: Option<Box<Packet>>,
-
-    #[pin]
+    /// How often to update state sizes (hardcoded to 500 ms ATM, should probably change)
+    /// NOTE: if `aggressively_update_state_sizes` updates will happen every packet
     refresh_sizes: IntervalStream,
 
-    #[pin]
-    incoming: Strawpoll<tokio::net::TcpListener>,
+    /// Incoming TCP connections, usually from other Domains
+    incoming: Strawpoll<TcpListener>,
 
-    #[pin]
-    first_byte: FuturesUnordered<FirstByte>,
+    /// A receiver for locally sent messages
+    locals: mpsc::UnboundedReceiver<Box<Packet>>,
 
-    locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
+    /// A receiver for domain messages
+    requests: mpsc::Receiver<WrappedDomainRequest>,
 
-    requests: tokio::sync::mpsc::Receiver<WrappedDomainRequest>,
-
-    #[pin]
-    inputs: StreamUnordered<
-        DualTcpStream<
-            BufStream<tokio::net::TcpStream>,
-            Box<Packet>,
-            Tagged<LocalOrNot<PacketData>>,
-            AsyncDestination,
-        >,
-    >,
-
-    outputs: AHashMap<
-        ReplicaAddr,
-        (
-            Box<dyn Sink<Box<Packet>, Error = bincode::Error> + Send + Unpin>,
-            bool,
-        ),
-    >,
-
-    #[pin]
-    timeout: Box<tokio::time::Sleep>,
-    timed_out: bool,
-
+    /// Stores pending outgoing messages
     out: Outboxes,
 }
 
 impl Replica {
     pub(super) fn new(
         domain: Domain,
-        on: tokio::net::TcpListener,
-        locals: tokio::sync::mpsc::UnboundedReceiver<Box<Packet>>,
-        requests: tokio::sync::mpsc::Receiver<WrappedDomainRequest>,
+        on: TcpListener,
+        locals: mpsc::UnboundedReceiver<Box<Packet>>,
+        requests: mpsc::Receiver<WrappedDomainRequest>,
         log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
@@ -121,421 +86,30 @@ impl Replica {
         Replica {
             coord: cc,
             domain,
-            retry: None,
             incoming: Strawpoll::from(on),
-            first_byte: FuturesUnordered::new(),
             locals,
             log: log.new(o! {"id" => id}),
-            inputs: Default::default(),
-            outputs: Default::default(),
             out: Outboxes::new(),
-            timeout: Box::new(tokio::time::sleep(Duration::from_secs(3600))),
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
-            timed_out: false,
             requests,
         }
     }
-
-    fn try_acks(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<(), anyhow::Error> {
-        let this = self.project();
-
-        let mut inputs = this.inputs;
-        let conns = &mut this.out.connections;
-        let pending = &mut this.out.pending;
-
-        // first, queue up any additional writes we have to do
-        let mut err = Vec::new();
-        for &streami in &*pending {
-            let conn = &mut conns[streami];
-            let mut stream = Pin::new(&mut inputs[streami]);
-            let mut sent = 0;
-
-            for &tag in &conn.tag_acks {
-                match stream.as_mut().poll_ready(cx) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Pending => break,
-                    Poll::Ready(Err(e)) => {
-                        err.push(e.into());
-                        break;
-                    }
-                }
-
-                if let Err(e) = stream.as_mut().start_send(Tagged { tag, v: () }) {
-                    // start_send shouldn't generally error
-                    err.push(e.into());
-                    break;
-                }
-
-                sent += 1;
-            }
-
-            let _ = conn.tag_acks.drain(0..sent).count();
-
-            if sent > 0 {
-                conn.pending_flush = true;
-            }
-        }
-
-        if !err.is_empty() {
-            return Err(err.swap_remove(0));
-        }
-
-        // then, try to send on any streams we may be able to
-        let mut close = Vec::new();
-        pending.retain(|&streami| {
-            let conn = &mut conns[streami];
-            if !conn.pending_flush {
-                // there better be unwritten tags, otherwise why is the stream in pending?
-                assert!(!conn.tag_acks.is_empty());
-                return true;
-            }
-
-            let stream = &mut inputs[streami];
-            match Pin::new(stream).poll_flush(cx) {
-                Poll::Pending => true,
-                Poll::Ready(Ok(())) => {
-                    conn.pending_flush = false;
-                    if inputs.is_finished(streami).unwrap()
-                        && conn.unacked == 0
-                        && conn.tag_acks.is_empty()
-                    {
-                        // no more inputs on this stream, and nothing more to flush!
-                        close.push(streami);
-                    }
-
-                    // there may stil be more tags to write out
-                    !conn.tag_acks.is_empty()
-                }
-                Poll::Ready(Err(e)) => {
-                    let mut e = Some(e);
-                    if let bincode::ErrorKind::Io(ref ioe) = **e.as_ref().unwrap() {
-                        match ioe.kind() {
-                            io::ErrorKind::BrokenPipe
-                            | io::ErrorKind::NotConnected
-                            | io::ErrorKind::UnexpectedEof
-                            | io::ErrorKind::ConnectionAborted
-                            | io::ErrorKind::ConnectionReset => {
-                                // connection went away, let's not bother the user with it
-                                let _ = e.take();
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // there's no point in trying to write more things, so:
-                    conn.pending_flush = false;
-                    conn.unacked = 0;
-                    conn.tag_acks.clear();
-                    if inputs.is_finished(streami).unwrap() {
-                        close.push(streami);
-                    } else {
-                        // the read side of this stream will probably error soon too. when it does,
-                        // try_retire will likely succeed, and it will remove the connection. if an
-                        // ack comes in after that, we'll just hit if again, though then take the
-                        // branch above.
-                    }
-
-                    if let Some(e) = e {
-                        err.push(e.into());
-                    }
-
-                    false
-                }
-            }
-        });
-
-        if !err.is_empty() {
-            return Err(err.swap_remove(0));
-        }
-
-        for streami in close {
-            if this.out.try_retire(streami) {
-                // this stream has no more inputs and no more outputs
-                assert!(inputs.as_mut().is_finished(streami).unwrap());
-                inputs.as_mut().remove(streami);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn try_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> ReadySetResult<()> {
-        let this = self.project();
-
-        let cc = this.coord;
-        let outputs = this.outputs;
-
-        // just like in try_acks:
-        // first, queue up any additional writes we have to do
-        let mut err = Vec::new();
-        for (&ri, ms) in &mut this.out.domains {
-            if ms.is_empty() {
-                continue;
-            }
-
-            let &mut (ref mut tx, ref mut pending) = match outputs.entry(ri) {
-                Occupied(entry) => entry.into_mut(),
-                Vacant(entry) => entry.insert({
-                    while !cc.has(&ri) {}
-                    let tx = cc.builder_for(&ri)?.build_async().unwrap();
-                    (tx, true)
-                }),
-            };
-
-            let mut tx = Pin::new(tx);
-
-            while !ms.is_empty() {
-                match tx.as_mut().poll_ready(cx) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Pending => break,
-                    Poll::Ready(Err(e)) => {
-                        err.push(e);
-                        break;
-                    }
-                }
-
-                let m = ms.pop_front().expect("!is_empty");
-                match tx.as_mut().start_send(m) {
-                    Ok(()) => {
-                        // we queued something, so we'll need to send!
-                        *pending = true;
-                    }
-                    Err(e) => {
-                        err.push(e);
-                        break;
-                    }
-                }
-            }
-        }
-
-        if !err.is_empty() {
-            return Err(err.swap_remove(0).into());
-        }
-
-        // then, try to do any sends that are still pending
-        for &mut (ref mut tx, ref mut pending) in outputs.values_mut() {
-            if !*pending {
-                continue;
-            }
-
-            match Pin::new(tx).poll_flush(cx) {
-                Poll::Ready(Ok(())) => {
-                    *pending = false;
-                }
-                Poll::Pending => {}
-                Poll::Ready(Err(e)) => err.push(e),
-            }
-        }
-
-        if !err.is_empty() {
-            return Err(err.swap_remove(0).into());
-        }
-
-        Ok(())
-    }
-
-    fn try_new(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, anyhow::Error> {
-        let mut this = self.project();
-
-        while let Poll::Ready((stream, _)) = this
-            .incoming
-            .as_mut()
-            .poll_fn(cx, |i, cx| i.poll_accept(cx))
-            .map_err(|e| anyhow::Error::new(e).context("poll_accept"))?
-        {
-            // we know that any new connection to a domain will first send a one-byte
-            // token to indicate whether the connection is from a base or not.
-            debug!(this.log, "accepted new connection"; "from" => ?stream.peer_addr().unwrap());
-            this.first_byte.push(read_first_byte(stream));
-        }
-
-        while let Poll::Ready(Some(r)) = this.first_byte.as_mut().poll_next(cx) {
-            let (stream, tag) = match r {
-                Ok((s, t)) => (s, t),
-                Err(e) => {
-                    if let io::ErrorKind::BrokenPipe
-                    | io::ErrorKind::NotConnected
-                    | io::ErrorKind::UnexpectedEof
-                    | io::ErrorKind::ConnectionAborted
-                    | io::ErrorKind::ConnectionReset = e.kind()
-                    {
-                        // connection went away right after connecting,
-                        // let's not bother the user with it
-                        continue;
-                    }
-                    return Err(e).context("poll_next");
-                }
-            };
-            let is_base = tag == CONNECTION_FROM_BASE;
-
-            debug!(this.log, "established new connection"; "base" => ?is_base);
-            let slot = this.inputs.stream_entry();
-            let token = slot.token();
-            let epoch = if let Some(e) = this.out.connections.get_mut(token) {
-                e.epoch
-            } else {
-                let epoch = 1;
-                let t = this.out.connections.insert(ConnState {
-                    unacked: 0,
-                    tag_acks: Vec::new(),
-                    epoch,
-                    pending_flush: false,
-                });
-                assert_eq!(t, token);
-                epoch
-            };
-            if let Err(e) = stream.set_nodelay(true) {
-                warn!(this.log,
-                      "failed to set TCP_NODELAY for new connection: {:?}", e;
-                      "from" => ?stream.peer_addr().unwrap());
-            }
-            let tcp = if is_base {
-                DualTcpStream::upgrade(
-                    tokio::io::BufStream::new(stream),
-                    move |Tagged { v, tag }| {
-                        let input: LocalOrNot<PacketData> = v;
-                        // Peek at its type.
-                        match unsafe { input.deref() }.data {
-                            PacketPayload::Input(_) => Box::new(Packet::Input {
-                                inner: input,
-                                src: Some(SourceChannelIdentifier { token, epoch, tag }),
-                                senders: Vec::new(),
-                            }),
-                            PacketPayload::Timestamp(_) => Box::new(Packet::Timestamp {
-                                // The link values propagated to the base table are not used.
-                                link: None,
-                                src: Some(SourceChannelIdentifier { token, epoch, tag }),
-                                timestamp: input,
-                            }),
-                        }
-                    },
-                )
-            } else {
-                tokio::io::BufStream::from(BufReader::with_capacity(
-                    2 * 1024 * 1024,
-                    BufWriter::with_capacity(4 * 1024, stream),
-                ))
-                .into()
-            };
-            slot.insert(tcp);
-        }
-        Ok(true)
-    }
-
-    // returns true if on_event(Timeout) was called
-    fn try_timeout(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Result<bool, ReadySetError> {
-        let mut processed = false;
-        let this = self.project();
-
-        // SAFETY: map_unchecked_mut is converting a Pin<Box<Sleep>> to a Pin<&Sleep>, which is safe
-        // per the rules of `map_unchecked_mut` ("the data you return will not move so long as the
-        // argument value does not move"), since we're borrowing from a pinned box.
-        if let Poll::Ready(()) = unsafe { this.timeout.map_unchecked_mut(|x| &mut **x) }.poll(cx) {
-            *this.timed_out = true;
-        }
-
-        if *this.timed_out {
-            *this.timed_out = false;
-            this.domain.on_event(this.out, PollEvent::Timeout)?;
-            processed = true;
-        }
-
-        Ok(processed)
-    }
-}
-
-struct ConnState {
-    // number of unacked inputs
-    unacked: usize,
-
-    // unsent acks (value is the tag)
-    tag_acks: Vec<u32>,
-
-    // epoch counter for each stream index (since they're re-used)
-    epoch: usize,
-
-    // do we have stuff to flush
-    pending_flush: bool,
 }
 
 struct Outboxes {
-    // anything new to send?
-    dirty: bool,
-
-    // messages for other domains
+    /// messages for other domains
     domains: AHashMap<ReplicaAddr, VecDeque<Box<Packet>>>,
-
-    // connection state for each stream
-    connections: slab::Slab<ConnState>,
-
-    // which connections have pending writes
-    pending: AHashSet<usize>,
 }
 
 impl Outboxes {
     fn new() -> Self {
-        let mut connections = slab::Slab::new();
-
-        // index 0 is reserved
-        connections.insert(ConnState {
-            unacked: 0,
-            tag_acks: Vec::new(),
-            epoch: 0,
-            pending_flush: false,
-        });
-
         Outboxes {
             domains: Default::default(),
-            connections,
-            pending: Default::default(),
-            dirty: false,
-        }
-    }
-
-    fn saw_input(&mut self, token: usize, epoch: usize) {
-        let mut c = &mut self.connections[token];
-        if c.epoch == epoch {
-            c.unacked += 1;
-        }
-    }
-
-    fn try_retire(&mut self, streami: usize) -> bool {
-        let mut c = &mut self.connections[streami];
-        if c.unacked == 0 && c.tag_acks.is_empty() && !c.pending_flush {
-            // nothing more to send back on this connection -- fine to retire!
-            // increment the epoch to detect stale acks
-            c.epoch += 1;
-
-            // no unwritten tags and not pending flush, so we shouldn't be in pending
-            assert!(!self.pending.contains(&streami));
-
-            // NOTE: the ConnState will be re-used for another connection
-            true
-        } else {
-            false
         }
     }
 }
 
 impl Executor for Outboxes {
-    fn ack(&mut self, id: SourceChannelIdentifier) {
-        self.dirty = true;
-        let mut c = &mut self.connections[id.token];
-        if id.epoch == c.epoch {
-            // if the epoch doesn't match, the stream was closed and a new one has been established
-            // note that this only matters for connections that do not wait for all acks!
-            c.tag_acks.push(id.tag);
-
-            // NOTE: it's a little sad we can't crash on underflow here.
-            // it is because if a send fails, we set c.unacked = 0, and should the domain _then_
-            // produce an ack, a checked underflow would fail.
-            c.unacked = c.unacked.saturating_sub(1);
-
-            // we now have stuff to send for this connection
-            self.pending.insert(id.token);
-        }
-    }
-
     fn create_universe(&mut self, _universe: HashMap<String, DataType>) {
         /*
         self.ctrl_tx
@@ -545,229 +119,273 @@ impl Executor for Outboxes {
     }
 
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
-        self.dirty = true;
         self.domains.entry(dest).or_default().push_back(m);
     }
 }
 
-impl Future for Replica {
-    type Output = Result<(), anyhow::Error>;
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        'process: loop {
-            // are there any new connections?
-            if !self
-                .as_mut()
-                .try_new(cx)
-                .context("check for new connections")?
+/// Merge multiple [`RequestReaderReplay`] packets into a single packet
+fn flatten_request_reader_replay(
+    n: noria::internal::LocalNodeIndex,
+    c: &[usize],
+    unique_keys: &mut HashSet<KeyComparison>,
+    packets: &mut VecDeque<Box<Packet>>,
+) {
+    // Sadly no drain filter for VecDeque yet
+    let mut i = 0;
+    while i < packets.len() {
+        match packets.get_mut(i) {
+            Some(box Packet::RequestReaderReplay { node, cols, keys })
+                if *node == n && *cols == c =>
             {
-                // incoming socket closed -- no more clients will arrive
-                return Poll::Ready(Ok(()));
+                unique_keys.extend(keys.drain(..));
+                packets.remove(i);
             }
+            _ => i += 1,
+        }
+    }
+}
 
-            // have any of our timers expired?
-            if let Err(e) = self.as_mut().try_timeout(cx) {
-                return Poll::Ready(Err(e.into()));
-            };
+impl Replica {
+    /// Read the first byte of a connection to determine if it is from a base node, and convert
+    /// it to a DualTcpStream, returning a unique token for the connection together with the
+    /// upgraded connection
+    async fn handle_new_connection(
+        mut stream: TcpStream,
+        log: slog::Logger,
+    ) -> Result<(u64, DualTcpStream), anyhow::Error> {
+        let mut tag: u8 = 0;
+        stream.read_exact(std::slice::from_mut(&mut tag)).await?;
+        let is_base = tag == CONNECTION_FROM_BASE;
 
-            // we have three logical input sources: receives from local domains, receives from
-            // remote domains, and remote mutators. we want to achieve some kind of fairness among
-            // these, but bias the data-flow towards finishing work it has accepted (i.e., domain
-            // operations) to accepting new work. however, this is complicated by two facts:
-            //
-            //  - we cannot (currently) differentiate between receives from remote domains and
-            //    receives from mutators. they are all remote tcp channels. we *could*
-            //    differentiate them using `is_base` in `try_new` to store them separately, but
-            //    it's also unclear how that would change the receive heuristic.
-            //  - domain operations are not all "completing starting work". in many cases, traffic
-            //    from domains will be replay-related, in which case favoring domains would favor
-            //    writes over reads. while we do in general want reads to be fast, we don't want
-            //    them to fully starve writes.
-            //
-            // the current stategy is therefore that we alternate reading once from the local
-            // channel and once from the set of remote channels. this biases slightly in favor of
-            // local sends, without starving either. we also stop alternating once either source is
-            // depleted.
-            let mut local_done = false;
-            let mut remote_done = false;
-            let mut check_local = true;
-            let mut this = self.as_mut().project();
-            let d = this.domain;
-            let out = this.out;
+        debug!(log, "established new connection"; "base" => ?is_base);
 
-            if let Poll::Ready(Some(_)) = this.refresh_sizes.poll_next(cx) {
-                // TODO: keep the state size up-to-date continuously?
-                d.update_state_sizes();
-            }
+        let token = next_token();
+        let _ = stream.set_nodelay(true);
 
-            loop {
-                match this.requests.poll_recv(cx) {
-                    Poll::Ready(Some(req)) => {
-                        let ret = d.domain_request(req.req, out);
-                        if req.done_tx.send(ret).is_err() {
-                            warn!(this.log, "domain request sender hung up");
-                        }
-                    }
-                    Poll::Ready(None) => {
-                        // request stream finished
-                        // TODO: should we finish up remaining work?
-                        warn!(this.log, "domain request stream ended");
-                        return Poll::Ready(Ok(()));
-                    }
-                    Poll::Pending => break,
+        let tcp = if is_base {
+            DualTcpStream::upgrade(BufStream::new(stream), move |Tagged { v, tag }| {
+                let input: LocalOrNot<PacketData> = v;
+                // Peek at its type.
+                match unsafe { input.deref() }.data {
+                    PacketPayload::Input(_) => Box::new(Packet::Input {
+                        inner: input,
+                        src: SourceChannelIdentifier { token, tag },
+                    }),
+                    PacketPayload::Timestamp(_) => Box::new(Packet::Timestamp {
+                        // The link values propagated to the base table are not used.
+                        link: None,
+                        src: SourceChannelIdentifier { token, tag },
+                        timestamp: input,
+                    }),
                 }
-            }
+            })
+        } else {
+            BufStream::from(BufReader::with_capacity(
+                2 * 1024 * 1024,
+                BufWriter::with_capacity(4 * 1024, stream),
+            ))
+            .into()
+        };
 
-            macro_rules! process {
-                ($retry:expr, $outbox:expr, $p:expr, $pp:expr) => {{
-                    $retry = Some($p);
-                    let retry = &mut $retry;
-                    if let ProcessResult::StopPolling = {
-                        let packet = retry.take().unwrap();
-                        match *packet {
-                            Packet::Input {
-                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
-                                ..
-                            } => $outbox.saw_input(token, epoch),
-                            Packet::Timestamp {
-                                src: Some(SourceChannelIdentifier { token, epoch, .. }),
-                                ..
-                            } => $outbox.saw_input(token, epoch),
-                            _ => {}
-                        }
-                        $pp(packet)?
-                    } {
-                        // domain got a message to quit
-                        // TODO: should we finish up remaining work?
-                        return Poll::Ready(Ok(()));
-                    }
-                }};
-            }
+        Ok((token, tcp))
+    }
 
-            if let Some(p) = this.retry.take() {
-                // first try the thing we failed to process last time again
-                process!(*this.retry, out, p, |p| d
-                    .on_event(out, PollEvent::Process(p),));
-            }
+    /// Receive packets from local and remote connections
+    async fn receive_packets(
+        locals: &mut mpsc::UnboundedReceiver<Box<Packet>>,
+        connections: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+    ) -> ReadySetResult<Option<VecDeque<Box<Packet>>>> {
+        const MAX_PACKETS_PER_CALL: usize = 64;
 
-            for _ in 0..FORCE_INPUT_YIELD_EVERY {
-                if !local_done && (check_local || remote_done) {
-                    match this.locals.poll_recv(cx) {
-                        Poll::Ready(Some(packet)) => {
-                            process!(*this.retry, out, packet, |p| d
-                                .on_event(out, PollEvent::Process(p),));
-                        }
-                        Poll::Ready(None) => {
-                            // local input stream finished
-                            // TODO: should we finish up remaining work?
-                            warn!(this.log, "local input stream ended");
-                            return Poll::Ready(Ok(()));
-                        }
-                        Poll::Pending => {
-                            local_done = true;
-                        }
-                    }
-                }
+        let mut packets = VecDeque::with_capacity(MAX_PACKETS_PER_CALL);
 
-                if !remote_done && (!check_local || local_done) {
-                    match this.inputs.as_mut().poll_next(cx) {
-                        Poll::Ready(Some((StreamYield::Item(Ok(packet)), _))) => {
-                            process!(*this.retry, out, packet, |p| d
-                                .on_event(out, PollEvent::Process(p),));
-                        }
-                        Poll::Ready(Some((StreamYield::Finished(f), streami))) => {
-                            if out.try_retire(streami) {
-                                f.remove(this.inputs.as_mut());
-                            } else {
-                                // We still have responses to send, even though there are no
-                                // more requests. Keep the stream around for now. We'll clean
-                                // it up when the sends have finished.
-                                f.keep();
+        // Read packets from either the local connection or the remote connections, tokio
+        // select order is random, so if both are ready some degree of forward progress will
+        // happen for both
+        tokio::select! {
+            local_req = locals.recv() => match local_req {
+                None => return Ok(None),
+                Some(packet) => {
+                    packets.push_back(packet);
+                    // Try to read more packets without waiting
+                    while let Some(packet) = locals.recv().now_or_never() {
+                        match packet {
+                            None => {
+                                return Ok(None)
                             }
-                        }
-                        Poll::Ready(None) => {
-                            // we probably haven't booted yet
-                            remote_done = true;
-                        }
-                        Poll::Pending => {
-                            remote_done = true;
-                        }
-                        Poll::Ready(Some((StreamYield::Item(Err(e)), streami))) => {
-                            error!(this.log, "input stream failed: {:?}", e);
-                            // we want to _forcibly_ retire streami
-                            this.inputs.as_mut().remove(streami);
-                            let c = &mut out.connections[streami];
-                            c.epoch += 1;
-                            c.unacked = 0;
-                            c.tag_acks.clear();
-                            c.pending_flush = false;
-                            out.pending.remove(&streami);
-                        }
-                    }
-                }
-
-                if local_done && remote_done {
-                    break;
-                }
-
-                // alternate between input sources
-                check_local = !check_local;
-            }
-
-            // send to downstream
-            // TODO: send fail == exiting?
-            self.as_mut()
-                .try_flush(cx)
-                .context("downstream flush (after)")?;
-
-            // send acks
-            self.as_mut().try_acks(cx)?;
-
-            if !local_done || !remote_done {
-                // we're yielding voluntarily to not block the executor and must ensure we wake
-                // up again
-                cx.waker().wake_by_ref();
-            }
-
-            // check if we now need to set a timeout
-            self.out.dirty = false;
-            loop {
-                let mut this = self.as_mut().project();
-                if let Some(timeout) = this.domain.resume_polling() {
-                    if timeout == Duration::new(0, 0) {
-                        *this.timed_out = true;
-                    } else {
-                        this.timeout.set(Box::new(tokio::time::sleep(timeout)));
-                    }
-
-                    // we need to poll the timer to ensure we'll get woken up
-                    match self.as_mut().try_timeout(cx) {
-                        Ok(timed_out) => {
-                            if timed_out {
-                                // a timeout occurred, so we may have to set a new timer
-                                if self.out.dirty {
-                                    // if we're already dirty, we'll re-do processing anyway
-                                } else {
-                                    // try to resume polling again
-                                    continue;
+                            Some(packet) => {
+                                packets.push_back(packet);
+                                if packets.len() >= MAX_PACKETS_PER_CALL {
+                                    break;
                                 }
                             }
                         }
-                        Err(e) => {
-                            return Poll::Ready(Err(e.into()));
-                        }
                     }
                 }
+            },
 
-                if self.out.dirty {
-                    // more stuff appeared in our outboxes
-                    // can't yield yet -- we need to try to send it
-                    continue 'process;
+            Some((_, packet)) = connections.next() => {
+                let packet = packet?;
+                packets.push_back(packet);
+                // Try to read more packets without waiting
+                while let Some(Some((_, packet))) = connections.next().now_or_never() {
+                    packets.push_back(packet?);
+                    if packets.len() > MAX_PACKETS_PER_CALL {
+                        break;
+                    }
                 }
+            }
+        }
 
-                break;
+        Ok(Some(packets))
+    }
+
+    /// Sends response packets asynchronously, the future takes ownership of a set of packets and
+    /// their destination, therefore it can't be dropped before completion without risking some
+    /// packets being lost
+    async fn send_packets(
+        to_send: Vec<(ReplicaAddr, VecDeque<Box<Packet>>)>,
+        connections: &tokio::sync::Mutex<Outputs>,
+        coord: &ChannelCoordinator,
+    ) -> ReadySetResult<()> {
+        let mut lock = connections.lock().await;
+
+        let connections = &mut *lock;
+        for (replica_address, mut messages) in to_send {
+            if messages.is_empty() {
+                continue;
             }
 
-            break Poll::Pending;
+            let tx = match connections.entry(replica_address) {
+                Occupied(entry) => entry.into_mut(),
+                Vacant(entry) => entry.insert({
+                    while !coord.has(&replica_address) {
+                        tokio::task::yield_now().await;
+                    }
+                    coord.builder_for(&replica_address)?.build_async()?
+                }),
+            };
+
+            while let Some(m) = messages.pop_front() {
+                tx.feed(m).await?;
+            }
+            tx.flush().await?;
+        }
+        Ok(())
+    }
+
+    /// Start the event loop for a Replica
+    pub async fn run(mut self) -> Result<(), anyhow::Error> {
+        // Accepted TCP connections being upgraded
+        let mut connection_preambles = futures::stream::FuturesUnordered::new();
+        // Every established connection goes here
+        let mut connections: tokio_stream::StreamMap<u64, DualTcpStream> = Default::default();
+        // A cache of established connections to other Replicas we may send messages to
+        // sadly have to use Mutex here to make it possible to pass a mutable reference to outputs to an async
+        // function
+        let outputs = tokio::sync::Mutex::new(Outputs::default());
+        // Will only ever hold a single future that handles sending packets, wrap it for convenience into FuturesUnordered
+        // in general we don't want to drop the future for send_packets until it finished, otherwise some packets might get
+        // lost. So the solution for that is to do a `pin_mut` on a `Fuse` future (which requires first issuing a fake call)
+        // and then keeping it updated once `Fuse` reports `terminated`, or instead simply using `FuturesUnordered` with one
+        // entry, and adding the next future when it is empty.
+        let mut send_packets = futures::stream::FuturesUnordered::new();
+
+        let Replica {
+            domain,
+            log,
+            coord,
+            refresh_sizes,
+            incoming,
+            locals,
+            requests,
+            out,
+        } = &mut self;
+
+        loop {
+            // we have three logical input sources: receives from local domains, receives from
+            // remote domains, and remote mutators.
+
+            // NOTE: If adding new statements, make sure they are cancellation safe according to
+            // https://docs.rs/tokio/1.9.0/tokio/macro.select.html
+            tokio::select! {
+                // Accept incoming connections
+                conn = incoming.accept() => {
+                    let (conn, addr) = conn.context("listening")?;
+                    debug!(log, "accepted new connection"; "from" => ?addr);
+                    connection_preambles.push(Self::handle_new_connection(conn, log.clone()));
+                },
+
+                // Handle any connections that we accepted but still need to preprocess and convert to DualTcpStream
+                Some(established_conn) = connection_preambles.next() => {
+                    let (token, tcp) = match established_conn {
+                        Err(_) => continue, // Ignore the errors on unestablished connections, they don't matter
+                        Ok(tcp) => tcp,
+                    };
+
+                    connections.insert(token, tcp);
+                },
+
+                // Handle domain requests
+                domain_req = requests.recv() => match domain_req {
+                    Some(req) => if req.done_tx.send(domain.domain_request(req.req, out)).is_err() {
+                        warn!(log, "domain request sender hung up");
+                    },
+                    None => {
+                        warn!(log, "domain request stream ended");
+                        return Ok(())
+                    }
+                },
+
+                // Handle incoming messages
+                packets = Self::receive_packets(locals, &mut connections) => match packets? {
+                    None => {
+                        warn!(log, "local input stream ended");
+                        return Ok(())
+                    },
+                    Some(mut packets) => {
+                        while let Some(mut packet) = packets.pop_front() {
+                            let ack = match &mut *packet {
+                                Packet::Timestamp { src: SourceChannelIdentifier { token, tag }, .. } |
+                                Packet::Input { src: SourceChannelIdentifier { token, tag }, .. } => {
+                                    // After processing we need to ack timestamp and input messages from base
+                                    connections.iter_mut().find(|(t, _)| *t == *token).map(|(_, conn)| (*tag, conn))
+                                }
+                                Packet::RequestReaderReplay { node, cols, keys } => {
+                                    // We want to batch multiple reader replay requests into a single call while
+                                    // deduplicating non unique keys
+                                    let mut unique_keys: HashSet<_> = keys.drain(..).collect();
+                                    flatten_request_reader_replay(*node, cols, &mut unique_keys, &mut packets);
+                                    keys.extend(unique_keys.drain());
+                                    None
+                                }
+                                _ => None,
+                            };
+
+                            domain.handle_packet(packet, out)?;
+
+                            if let Some((tag, conn)) = ack {
+                                conn.send(Tagged { tag, v: () }).await?;
+                            }
+                        }
+                    },
+                },
+
+                // Poll the send packets future and reissue if outstanding packets are present
+                Some(res) = send_packets.next() => res?,
+
+                // Update domain sizes when `refresh_sizes` expires
+                Some(_) = refresh_sizes.next() => domain.update_state_sizes(),
+
+                // Wait for a possible sleep
+                _ = tokio::time::sleep(domain.next_poll_duration().unwrap_or_else(|| Duration::from_secs(3600))) => domain.handle_timeout()?,
+            }
+
+            // Check if the previous batch of send packets is done, and issue a new batch if needed
+            if send_packets.is_empty() && !out.domains.is_empty() {
+                let to_send: Vec<_> = out.domains.drain().collect();
+                send_packets.push(Self::send_packets(to_send, &outputs, coord));
+            }
         }
     }
 }

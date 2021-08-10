@@ -76,8 +76,7 @@ pub enum ReplayPieceContext {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SourceChannelIdentifier {
-    pub token: usize,
-    pub epoch: usize,
+    pub token: u64,
     pub tag: u32,
 }
 
@@ -198,8 +197,7 @@ pub enum Packet {
     /// A write received to the base table
     Input {
         inner: LocalOrNot<PacketData>,
-        src: Option<SourceChannelIdentifier>,
-        senders: Vec<SourceChannelIdentifier>,
+        src: SourceChannelIdentifier,
     },
 
     /// Regular data-flow update.
@@ -258,7 +256,7 @@ pub enum Packet {
     /// Propagate updated timestamps for the set of base tables.
     Timestamp {
         link: Option<Link>,
-        src: Option<SourceChannelIdentifier>,
+        src: SourceChannelIdentifier,
         timestamp: LocalOrNot<PacketData>,
     },
 }
