@@ -1286,6 +1286,18 @@ pub enum SubqueryPosition {
     Join(JoinOperator),
 }
 
+/// Parameters for generating an arbitrary [`QueryOperation`]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryOperationArgs {
+    in_subquery: bool,
+}
+
+impl Default for QueryOperationArgs {
+    fn default() -> Self {
+        Self { in_subquery: false }
+    }
+}
+
 /// Operations that can be performed as part of a SQL query
 ///
 /// Members of this enum represent some sense of an individual operation that can be performed on an
@@ -1311,16 +1323,23 @@ pub enum SubqueryPosition {
 ///
 /// [0]: https://docs.google.com/document/d/1rb-AU_PsH2Z40XFLjmLP7DcyeJzlwKI4Aa-GQgEoWKA
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
+#[arbitrary(args = QueryOperationArgs)]
 pub enum QueryOperation {
     ColumnAggregate(AggregateType),
     Filter(Filter),
     Distinct,
     Join(JoinOperator),
     ProjectLiteral,
+    #[weight(if args.in_subquery { 0 } else { 1 })]
     SingleParameter,
+    #[weight(if args.in_subquery { 0 } else { 1 })]
     MultipleParameters,
     ProjectBuiltinFunction(BuiltinFunction),
-    TopK { order_type: OrderType, limit: u64 },
+    TopK {
+        order_type: OrderType,
+        limit: u64,
+    },
+    #[weight(0)]
     Subquery(SubqueryPosition),
 }
 
@@ -2027,6 +2046,7 @@ pub struct Subquery {
     position: SubqueryPosition,
 
     /// The specification for the query itself
+    #[strategy(any_with::<QuerySeed>(QueryOperationArgs { in_subquery: true } ))]
     seed: QuerySeed,
 }
 
@@ -2096,12 +2116,12 @@ pub struct QuerySeed {
 }
 
 impl Arbitrary for QuerySeed {
-    type Parameters = ();
+    type Parameters = QueryOperationArgs;
 
     type Strategy = BoxedStrategy<QuerySeed>;
 
-    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
-        any::<Vec<QueryOperation>>()
+    fn arbitrary_with(op_args: Self::Parameters) -> Self::Strategy {
+        any_with::<Vec<QueryOperation>>((Default::default(), op_args.clone()))
             .prop_map(|operations| Self {
                 operations,
                 subqueries: vec![],
