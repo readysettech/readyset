@@ -285,6 +285,12 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
 #[repr(transparent)]
 pub struct TableName(String);
 
+impl Borrow<String> for TableName {
+    fn borrow(&self) -> &String {
+        &self.0
+    }
+}
+
 impl From<TableName> for Table {
     fn from(name: TableName) -> Self {
         Table {
@@ -973,6 +979,22 @@ impl<'a> QueryState<'a> {
         }
     }
 
+    /// Returns a mutable reference to some table referenced in the given query
+    pub fn some_table_in_query_mut<'b>(&'b mut self, query: &SelectStatement) -> &'b mut TableSpec {
+        match query
+            .tables
+            .iter()
+            .chain(query.join.iter().filter_map(|jc| match &jc.right {
+                JoinRightSide::Table(tbl) => Some(tbl),
+                _ => None,
+            }))
+            .next()
+        {
+            Some(tbl) => self.gen.table_mut(&tbl.name).unwrap(),
+            None => self.fresh_table_mut(),
+        }
+    }
+
     /// Create a new, unique, empty table, and return a mutable reference to that table
     pub fn fresh_table_mut(&mut self) -> &mut TableSpec {
         let table = self.gen.fresh_table_mut();
@@ -1437,11 +1459,7 @@ fn column_in_query<'state>(state: &mut QueryState<'state>, query: &mut SelectSta
     match query.tables.first() {
         Some(table) => {
             let table_name = table.name.clone();
-            let column = state
-                .gen
-                .table_mut(&table_name.clone().into())
-                .unwrap()
-                .some_column_name();
+            let column = state.gen.table_mut(&table_name).unwrap().some_column_name();
             Column {
                 name: column.into(),
                 table: Some(table_name),
@@ -1481,7 +1499,7 @@ impl QueryOperation {
                 use AggregateType::*;
 
                 let alias = state.fresh_alias();
-                let tbl = state.some_table_mut();
+                let tbl = state.some_table_in_query_mut(&query);
 
                 if query.tables.is_empty() {
                     query.tables.push(tbl.name.clone().into());
@@ -1523,7 +1541,7 @@ impl QueryOperation {
 
             QueryOperation::Filter(filter) => {
                 let alias = state.fresh_alias();
-                let tbl = state.some_table_mut();
+                let tbl = state.some_table_in_query_mut(&query);
                 let col = tbl.some_column_with_type(filter.column_type.clone());
 
                 if query.tables.is_empty() {
@@ -1590,7 +1608,7 @@ impl QueryOperation {
             }
 
             QueryOperation::Join(operator) => {
-                let left_table = state.some_table_mut();
+                let left_table = state.some_table_in_query_mut(&query);
                 let left_table_name = left_table.name.clone();
                 let left_join_key = left_table.some_column_with_type(SqlType::Int(32));
                 let left_projected = left_table.fresh_column();
@@ -1664,7 +1682,12 @@ impl QueryOperation {
             QueryOperation::ProjectBuiltinFunction(bif) => {
                 macro_rules! add_builtin {
                     ($fname:ident($($arg:tt)*)) => {{
-                        let table = state.some_table_mut();
+                        let table = state.some_table_in_query_mut(&query);
+
+                        if query.tables.is_empty() {
+                            query.tables.push(table.name.clone().into());
+                        }
+
                         let mut arguments = Vec::new();
                         add_builtin!(@args_to_expr, table, arguments, $($arg)*);
                         let expr = Expression::Call(FunctionExpression::Call {
@@ -1717,7 +1740,7 @@ impl QueryOperation {
                 }
             }
             QueryOperation::TopK { order_type, limit } => {
-                let table = state.some_table_mut();
+                let table = state.some_table_in_query_mut(&query);
 
                 if query.tables.is_empty() {
                     query.tables.push(table.name.clone().into());
