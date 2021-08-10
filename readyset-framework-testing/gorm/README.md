@@ -1,6 +1,6 @@
-# Sequelize Local Testing
+# Gorm Local Testing
 
-To test sequelize locally, we need to first build the following:
+To test gorm locally, we need to first build the following:
 
 1. A base docker image. In the root directory of the mono-repo run `make
    build-basic`
@@ -9,7 +9,7 @@ To test sequelize locally, we need to first build the following:
 3. A noria-mysql docker image. In the root directory of the mono-repo run `make
    build-adapter`
 4. The sequelize framework image. In the framework directory run `./run.sh
-   build_image javascript/sequelize`
+   build_image go/gorm`
 
 Now that we have all of that setup we can run the framework test by running the
 following command from this directory:

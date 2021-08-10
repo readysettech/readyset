@@ -1,0 +1,95 @@
+version: "3.8"
+services:
+  zookeeper:
+    image: zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  mysql:
+    image: mysql:8.0
+    cap_add:
+      - SYS_NICE #CAP_SYS_NICE
+    expose:
+      - 3306
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: root
+    # doesn't actually depend on zookeeper, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # noria-server waits on both zookeeper and mysql for fallback.
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: "mysqladmin ping"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+  noria-server:
+    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      ZOOKEEPER_HOST: zookeeper
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: noria-server
+      DEPLOYMENT: frameworktests
+      REPLICATION_URL: mysql://root:root@mysql/test
+      RUST_LOG: TRACE
+    links:
+      - mysql
+      - zookeeper
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
+    expose:
+      - 3333
+    environment:
+      ZOOKEEPER_HOST: zookeeper
+      ADDRESS: 0.0.0.0:3333
+      DEPLOYMENT: frameworktests
+      MYSQL_URL: mysql://root:root@mysql/test
+      RUST_LOG: TRACE
+    links:
+      - noria-server
+      - mysql
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      noria-server:
+        condition: service_healthy
+  test:
+    image: "069491470376.dkr.ecr.us-east-2.amazonaws.com/frameworks/python/sqlalchemy"
+    depends_on:
+      db:
+        condition: service_healthy
+    links:
+      - db
+    environment:
+      FRAMEWORK: python/sqlalchemy
+      RS_USERNAME: root
+      RS_PASSWORD: root
+      RS_DATABASE: test
+      RS_HOST: db
+      RS_PORT: 3333
+      RS_NUM_SHARDS: 1
+      RS_DIALECT: mysql80
