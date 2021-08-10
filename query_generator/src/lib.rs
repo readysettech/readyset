@@ -214,7 +214,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
         }
         SqlType::Enum(_) => unimplemented!(),
-        SqlType::Bool => unimplemented!(),
+        SqlType::Bool => DataType::from(rng.gen_bool(0.5)),
     }
 }
 
