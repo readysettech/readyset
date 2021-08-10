@@ -1180,12 +1180,30 @@ impl From<LogicalOp> for BinaryOperator {
     }
 }
 
+fn filter_op() -> impl Strategy<Value = BinaryOperator> {
+    use BinaryOperator::*;
+
+    proptest::sample::select(vec![
+        Like,
+        NotLike,
+        ILike,
+        NotILike,
+        Equal,
+        NotEqual,
+        Greater,
+        GreaterOrEqual,
+        Less,
+        LessOrEqual,
+    ])
+}
+
 /// An individual filter operation
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
 #[arbitrary(args = FilterRhsArgs)]
 pub enum FilterOp {
     /// Compare a column with either another column, or a value
     Comparison {
+        #[strategy(filter_op())]
         op: BinaryOperator,
 
         #[strategy(any_with::<FilterRHS>((*args).clone()))]
