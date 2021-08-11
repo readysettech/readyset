@@ -23,9 +23,7 @@ impl CountStarRewrite for SqlQuery {
                 invariant!(!tables.is_empty());
                 if *f == CountStar {
                     let bogo_table = &tables[0];
-                    // This unwrap is safe because we are getting the table directly from the
-                    // query which has already been registered into the write_schemas map being
-                    // passed in.
+                    // unwrap: We've already checked that all the tables referenced in the query exist
                     let mut schema_iter = write_schemas.get(&bogo_table.name).unwrap().iter();
                     // The columns in the write_schemas map are actually columns as seen from the
                     // current mir node. In this case, we've already passed star expansion, which

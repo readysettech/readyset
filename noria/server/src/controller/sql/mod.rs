@@ -785,6 +785,31 @@ impl SqlIncorporator {
         use passes::alias_removal::TableAliasRewrite;
         use passes::*;
 
+        // Check that all tables mentioned in the query exist.
+        // This must happen before the rewrite passes are applied because some of them rely on
+        // having the table schema available in `self.view_schemas`.
+        match q {
+            // if we're just about to create the table, we don't need to check if it exists. If it
+            // does, we will amend or reuse it; if it does not, we create it.
+            SqlQuery::CreateTable(_) => (),
+            SqlQuery::CreateView(_) => (),
+            // other kinds of queries *do* require their referred tables to exist!
+            ref q @ SqlQuery::CompoundSelect(_)
+            | ref q @ SqlQuery::Select(_)
+            | ref q @ SqlQuery::Set(_)
+            | ref q @ SqlQuery::Update(_)
+            | ref q @ SqlQuery::Delete(_)
+            | ref q @ SqlQuery::DropTable(_)
+            | ref q @ SqlQuery::AlterTable(_)
+            | ref q @ SqlQuery::Insert(_) => {
+                for t in &q.referred_tables() {
+                    if !self.view_schemas.contains_key(&t.name) {
+                        return Err(ReadySetError::TableNotFound(t.name.clone()));
+                    }
+                }
+            }
+        }
+
         let mut q = q
             .rewrite_between()
             .remove_negation()?
@@ -923,31 +948,6 @@ impl SqlIncorporator {
                     self.nodes_for_named_query(query, to_view, true, false, mig)?;
                 }
                 TableAliasRewrite::Table { .. } => {}
-            }
-        }
-
-        // Check that all tables mentioned in the query exist.
-        // This must happen before the rewrite passes are applied because some of them rely on
-        // having the table schema available in `self.view_schemas`.
-        match q {
-            // if we're just about to create the table, we don't need to check if it exists. If it
-            // does, we will amend or reuse it; if it does not, we create it.
-            SqlQuery::CreateTable(_) => (),
-            SqlQuery::CreateView(_) => (),
-            // other kinds of queries *do* require their referred tables to exist!
-            ref q @ SqlQuery::CompoundSelect(_)
-            | ref q @ SqlQuery::Select(_)
-            | ref q @ SqlQuery::Set(_)
-            | ref q @ SqlQuery::Update(_)
-            | ref q @ SqlQuery::Delete(_)
-            | ref q @ SqlQuery::DropTable(_)
-            | ref q @ SqlQuery::AlterTable(_)
-            | ref q @ SqlQuery::Insert(_) => {
-                for t in &q.referred_tables() {
-                    if !self.view_schemas.contains_key(&t.name) {
-                        return Err(ReadySetError::TableNotFound(t.name.clone()));
-                    }
-                }
             }
         }
 
@@ -3359,6 +3359,17 @@ mod tests {
             let _res = inc.add_query("SELECT tq2.id FROM tq2;", Some("over_tq2".into()), mig);
             // should have added a projection and a reader
             assert_eq!(mig.graph().node_count(), ncount + 2);
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn count_star_nonexistent_table() {
+        let mut g = integration_utils::start_simple("count_star_nonexistent_table").await;
+        g.migrate(|mig| {
+            let mut inc = SqlIncorporator::default();
+            let res = inc.add_query("SELECT count(*) FROM foo;", None, mig);
+            assert!(res.is_err());
         })
         .await;
     }
