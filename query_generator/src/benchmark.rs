@@ -413,7 +413,7 @@ impl Benchmark {
         builder.set_sharding(self.shards);
         builder.set_persistence(PersistenceParameters {
             mode: DurabilityMode::DeleteOnExit,
-            log_prefix: "benchmarks".to_owned(),
+            db_filename_prefix: "benchmarks".to_owned(),
             ..Default::default()
         });
         builder.set_aggressively_update_state_sizes(true);

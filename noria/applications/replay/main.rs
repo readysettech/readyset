@@ -293,7 +293,7 @@ async fn main() {
     let persistence = PersistenceParameters {
         flush_timeout: Duration::new(0, flush_ns),
         persistence_threads: value_t_or_exit!(args, "persistence-threads", i32),
-        log_prefix: "replay".to_string(),
+        db_filename_prefix: "replay".to_string(),
         mode: if durable {
             DurabilityMode::Permanent
         } else {
