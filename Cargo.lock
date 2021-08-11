@@ -1618,9 +1618,11 @@ dependencies = [
  "noria-logictest",
  "query_generator",
  "rand 0.8.4",
+ "structopt",
  "tokio 1.8.1",
  "url 2.2.2",
  "vec1",
+ "zipf 7.0.0",
 ]
 
 [[package]]
@@ -3833,7 +3835,7 @@ dependencies = [
  "trawler",
  "vec1",
  "vec_map",
- "zipf",
+ "zipf 6.1.0",
  "zookeeper",
 ]
 
@@ -6267,6 +6269,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
+name = "structopt"
+version = "0.3.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b041cdcb67226aca307e6e7be44c8806423d83e018bd662360a93dabce4d71"
+dependencies = [
+ "clap 2.33.3",
+ "lazy_static",
+ "structopt-derive",
+]
+
+[[package]]
+name = "structopt-derive"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7813934aecf5f51a54775e00068c237de98489463968231a51746bbbc03f9c10"
+dependencies = [
+ "heck",
+ "proc-macro-error",
+ "proc-macro2 1.0.27",
+ "quote 1.0.9",
+ "syn 1.0.73",
+]
+
+[[package]]
 name = "strum"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7269,7 +7295,7 @@ dependencies = [
  "tower-make",
  "tower-service",
  "url 2.2.2",
- "zipf",
+ "zipf 6.1.0",
 ]
 
 [[package]]
@@ -7817,6 +7843,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e12b8667a4fff63d236f8363be54392f93dbb13616be64a83e761a9319ab589"
 dependencies = [
  "rand 0.7.3",
+]
+
+[[package]]
+name = "zipf"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "835688a7a1b5d2dfaeb5b7e1b4cfb979e7095a70cd1c72fe083f4904ef3e995e"
+dependencies = [
+ "rand 0.8.4",
 ]
 
 [[package]]
