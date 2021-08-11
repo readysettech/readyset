@@ -1,4 +1,4 @@
-# partially managed by Substrate; do not edit the archive, aws, or external providers by hand
+# managed by Substrate; do not edit by hand
 
 terraform {
   required_providers {
@@ -8,7 +8,7 @@ terraform {
     }
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 3.49.0"
+      version = ">= 3.45.0"
     }
     external = {
       source  = "hashicorp/external"
