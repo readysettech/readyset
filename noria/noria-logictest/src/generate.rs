@@ -324,7 +324,7 @@ impl Seed {
             .clone()
             .into_iter()
             .map(|table_name| {
-                let spec = generator.table_mut(&table_name.clone().into()).unwrap();
+                let spec = generator.table_mut(&table_name).unwrap();
                 (
                     table_name,
                     spec.generate_data(opts.rows_per_table, opts.random),
