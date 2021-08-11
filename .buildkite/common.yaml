@@ -5,11 +5,11 @@ steps:
     - 'echo --- :docker: Building image'
     - >-
       docker build -f build/Dockerfile \
-        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
-        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
+        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
         .
     - 'echo --- :docker: Pushing image'
-    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
     plugins:
       ecr#v2.2.0:
         login: true
@@ -20,11 +20,11 @@ steps:
       - "echo --- :docker: Building noria-server image"
       - >-
         docker build -f build/Dockerfile.noria-server \
-          --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
-          -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -35,11 +35,11 @@ steps:
     - 'echo --- :docker: Building image'
     - >-
       docker build -f build/Dockerfile.prettier \
-        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
-        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
+        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
+        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
         .
     - 'echo --- :docker: Pushing image'
-    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
+    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
     plugins:
       ecr#v2.2.0:
         login: true
@@ -48,15 +48,15 @@ steps:
     key: cargo-audit-image
     commands:
     - 'echo --- :docker: Pulling image'
-    - 'docker pull 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+    - 'docker pull 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
     - 'echo --- :docker: Building image'
     - >-
       docker build -f build/Dockerfile.cargo-audit \
-        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
-        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
+        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
+        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
         .
     - 'echo --- :docker: Pushing image'
-    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
     plugins:
       ecr#v2.2.0:
         login: true
@@ -69,7 +69,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -86,7 +86,7 @@ steps:
     - prettier-image
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
@@ -101,7 +101,7 @@ steps:
     - cargo-audit-image
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
@@ -117,7 +117,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -139,7 +139,7 @@ steps:
       - build-image
     plugins:
       - docker#v3.7.0:
-          image: "069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest"
           volumes:
             - "cargo-registry:/usr/local/cargo/registry"
             - "cargo-registry:/usr/local/cargo/registry"
@@ -225,7 +225,7 @@ steps:
     - build-image
     plugins:
       - docker-compose#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           run: app
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
@@ -249,7 +249,7 @@ steps:
     - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
