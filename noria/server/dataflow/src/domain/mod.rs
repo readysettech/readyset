@@ -1662,7 +1662,10 @@ impl Domain {
                             | (Some(base), &DurabilityMode::Permanent) => {
                                 let base_name = format!(
                                     "{}-{}-{}",
-                                    &self.persistence_parameters.log_prefix,
+                                    &self
+                                        .persistence_parameters
+                                        .db_filename_prefix
+                                        .replace("-", "_"),
                                     node_ref.borrow().name(),
                                     self.shard.unwrap_or(0),
                                 );

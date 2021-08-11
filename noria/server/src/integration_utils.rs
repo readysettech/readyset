@@ -24,7 +24,7 @@ pub const DEFAULT_SHARDING: usize = 2;
 pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
     PersistenceParameters {
         mode: DurabilityMode::DeleteOnExit,
-        log_prefix: String::from(prefix),
+        db_filename_prefix: String::from(prefix),
         ..Default::default()
     }
 }

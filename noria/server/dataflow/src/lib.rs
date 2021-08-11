@@ -119,7 +119,7 @@ pub struct PersistenceParameters {
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
     /// Filename prefix for persistent log entries.
-    pub log_prefix: String,
+    pub db_filename_prefix: String,
     /// Absolute path where the log will be written. Defaults to the current directory.
     #[derivative(PartialEq = "ignore")]
     pub log_dir: Option<PathBuf>,
@@ -132,7 +132,7 @@ impl Default for PersistenceParameters {
         Self {
             flush_timeout: time::Duration::new(0, 100_000),
             mode: DurabilityMode::MemoryOnly,
-            log_prefix: String::from("soup"),
+            db_filename_prefix: String::from("soup"),
             log_dir: None,
             persistence_threads: 1,
         }
@@ -152,16 +152,19 @@ impl PersistenceParameters {
     pub fn new(
         mode: DurabilityMode,
         flush_timeout: time::Duration,
-        log_prefix: Option<String>,
+        db_filename_prefix: Option<String>,
         persistence_threads: i32,
     ) -> Self {
-        let log_prefix = log_prefix.unwrap_or_else(|| String::from("soup"));
-        assert!(!log_prefix.contains('-'));
+        // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to, modify
+        // it before use, but do not make assertions on it. The reason being, we use Noria's deployment
+        // name as db filename prefix (which makes sense), and we don't want to impose any restriction
+        // on it (since sometimes we automate the deployments and deployment name generation).
+        let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("soup"));
 
         Self {
             flush_timeout,
             mode,
-            log_prefix,
+            db_filename_prefix,
             persistence_threads,
             ..Default::default()
         }
