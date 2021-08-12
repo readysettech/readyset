@@ -1706,9 +1706,11 @@ impl QueryOperation {
             }
 
             QueryOperation::ProjectLiteral => {
-                query
-                    .fields
-                    .push(FieldDefinitionExpression::from(Literal::Integer(1)));
+                let alias = state.fresh_alias();
+                query.fields.push(FieldDefinitionExpression::Expression {
+                    expr: Expression::Literal(Literal::Integer(1)),
+                    alias: Some(alias),
+                });
             }
 
             QueryOperation::SingleParameter => {
