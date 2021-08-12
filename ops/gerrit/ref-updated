@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+#   ref-updated
+#       --oldrev <old rev>
+#       --newrev <new rev>
+#       --refname <ref name>
+#       --project <project name>
+#       --submitter <submitter>
+#       --submitter-username <username>
+
+organization=readyset
+pipeline=readyset
+
+while [ "$#" -gt 1 ]; do
+    case "$1" in
+        --oldrev)
+            oldrev=$2 ; shift 2 ;;
+        --newrev)
+            newrev=$2 ; shift 2 ;;
+        --refname)
+            refname=$2 ; shift 2 ;;
+        --project)
+            project=$2 ; shift 2 ;;
+        --submitter)
+            submitter=$2 ; shift 2 ;;
+        --submitter-username)
+            submitter_username=$2 ; shift 2 ;;
+        *) echo "Unknown flag $1" ; exit 1 ;;
+    esac
+done
+
+if [ "$project" != "readyset" ]; then
+    echo "Project is not readyset"
+    exit 0
+fi
+
+if [[ "$refname" == */meta ]]; then
+    echo "Ignoring update to meta ref"
+    exit 0
+fi
+
+if [[ "$refname" == refs/notes* ]]; then
+    echo "Ignoring update to refs/notes"
+    exit 0
+fi
+
+if [[ "$refname" == refs/changes/* ]]; then
+    # This is a change to a CL, so kick off a CL build
+
+    # Strip the patchset off the name of the CL so multiple builds of the same
+    # CL show up next to each other in Buildkite (and cancel each other)
+    branch=$(dirname "$refname") # refs/changes/28/28/1 -> refs/changes/28/28
+
+    # refs/changes/28/28/1
+    #                 ^  ^ - patchset
+    #                 |--- changeID
+    change_id="${refname_parts[3]}"
+    patchset="${refname_parts[4]}"
+
+    env="{
+        \"GERRIT_CHANGE_ID\": \"$change_id\",
+        \"GERRIT_PATCHSET\": \"$patchset\"
+    }"
+else
+    # This is a change to a branch (like refs/heads/main), so don't do any of
+    # the CL stuff and just kick off a regular build
+    branch="$refname"
+    env="{}"
+fi
+
+commit=$(git -C /srv/gerrit/git/readyset.git rev-parse $refname)
+message=$(git -C /srv/gerrit/git/readyset.git show -s --pretty=format:%s $commit)
+author_name=$(git -C /srv/gerrit/git/readyset.git show -s --pretty=format:%an $commit)
+author_email=$(git -C /srv/gerrit/git/readyset.git show -s --pretty=format:%ae $commit)
+buildkite_token=$(< /srv/gerrit/etc/buildkite_token)
+
+curl \
+    -X POST \
+    -H "Authorization: Bearer $buildkite_token" \
+    "https://api.buildkite.com/v2/organizations/$organization/pipelines/$pipeline/builds" \
+    -d "{
+    \"commit\": \"$commit\",
+    \"branch\": \"$branch\",
+    \"message\": \"$message\",
+    \"author\": {
+      \"name\": \"$author_name\",
+      \"email\": \"$author_email\"
+    },
+    \"env\": $env
+  }"
