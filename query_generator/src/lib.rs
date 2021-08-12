@@ -1648,6 +1648,14 @@ impl QueryOperation {
 
             QueryOperation::Distinct => {
                 query.distinct = true;
+                if let Some(order) = &query.order {
+                    for (col, _) in &order.columns {
+                        query.fields.push(FieldDefinitionExpression::Expression {
+                            expr: Expression::Column(col.clone()),
+                            alias: Some(state.fresh_alias()),
+                        })
+                    }
+                }
             }
 
             QueryOperation::Join(operator) => {
@@ -1789,21 +1797,26 @@ impl QueryOperation {
                     query.tables.push(table.name.clone().into());
                 }
 
-                let column = table.some_column_name();
+                let column_name = table.some_column_name();
+                let column = Column {
+                    table: Some(table.name.clone().into()),
+                    ..column_name.into()
+                };
                 query.order = Some(OrderClause {
-                    columns: vec![(
-                        Column {
-                            table: Some(table.name.clone().into()),
-                            ..column.into()
-                        },
-                        *order_type,
-                    )],
+                    columns: vec![(column.clone(), *order_type)],
                 });
 
                 query.limit = Some(LimitClause {
                     limit: *limit,
                     offset: 0,
-                })
+                });
+
+                if query.distinct {
+                    query.fields.push(FieldDefinitionExpression::Expression {
+                        expr: Expression::Column(column),
+                        alias: Some(state.fresh_alias()),
+                    })
+                }
             }
             // Subqueries are turned into QuerySeed::subqueries as part of
             // GeneratorOps::into_query_seeds
@@ -2200,6 +2213,14 @@ impl QuerySeed {
                                 group_by.columns.push(col.clone());
                             }
                         }
+                    }
+                }
+            }
+
+            if let Some(order) = &query.order {
+                for (col, _) in &order.columns {
+                    if !existing_group_by_cols.contains(col) {
+                        group_by.columns.push(col.clone());
                     }
                 }
             }
