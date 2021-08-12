@@ -8,6 +8,11 @@ pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
     (-2000i32..3000, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo(y, doy))
 }
 
+/// Strategy to generate an arbitrary [`NaiveDate`] with a positive year value
+pub fn arbitrary_positive_naive_date() -> impl Strategy<Value = NaiveDate> {
+    (0i32..3000, 1u32..365).prop_map(|(y, doy)| NaiveDate::from_yo(y, doy))
+}
+
 /// Generate an arbitrary [`NaiveTime`]
 pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
     (0u32..23, 0u32..59, 0u32..59).prop_map(|(hour, min, sec)| NaiveTime::from_hms(hour, min, sec))

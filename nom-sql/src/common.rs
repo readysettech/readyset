@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use launchpad::arbitrary::{
-    arbitrary_naive_date, arbitrary_naive_time, arbitrary_timestamp_naive_date_time,
+    arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
 };
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
@@ -279,7 +279,7 @@ impl Literal {
             SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
                 any::<Real>().prop_map(Self::FixedPoint).boxed()
             }
-            SqlType::Date => arbitrary_naive_date()
+            SqlType::Date => arbitrary_positive_naive_date()
                 .prop_map(|nd| Self::String(nd.format("%Y-%m-%d").to_string()))
                 .boxed(),
             SqlType::DateTime(_) | SqlType::Timestamp => arbitrary_timestamp_naive_date_time()
