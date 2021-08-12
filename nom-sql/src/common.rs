@@ -61,7 +61,8 @@ pub enum SqlType {
     Varbinary(u16),
     #[weight(0)]
     Enum(Vec<Literal>),
-    Decimal(u8, u8),
+    #[weight(0)]
+    Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=#0)] u8),
 }
 
 impl SqlType {
