@@ -218,32 +218,37 @@ impl<'a> From<&'a str> for Literal {
     }
 }
 
-impl ToString for Literal {
-    fn to_string(&self) -> String {
-        match *self {
-            Literal::Null => "NULL".to_string(),
-            Literal::Integer(ref i) => format!("{}", i),
-            Literal::FixedPoint(ref f) => {
-                let precision = if f.precision < 30 { f.precision } else { 30 };
-                let fstr = format!("{:.*}", precision as usize, f.value);
+impl Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Literal::Null => write!(f, "NULL"),
+            Literal::Integer(i) => write!(f, "{}", i),
+            Literal::FixedPoint(fp) => {
+                let precision = if fp.precision < 30 { fp.precision } else { 30 };
+                let fstr = format!("{:.*}", precision as usize, fp.value);
                 // Trim all trailing zeros, but leave one after the dot if this is a whole number
                 let res = fstr.trim_end_matches('0');
                 if res.ends_with('.') {
-                    format!("{}0", res)
+                    write!(f, "{}0", res)
                 } else {
-                    res.to_owned()
+                    write!(f, "{}", res)
                 }
             }
-            Literal::String(ref s) => format!("'{}'", s.replace('\'', "''")),
-            Literal::Blob(ref bv) => bv
-                .iter()
-                .map(|v| format!("{:x}", v))
-                .collect::<Vec<String>>()
-                .join(" "),
-            Literal::CurrentTime => "CURRENT_TIME".to_string(),
-            Literal::CurrentDate => "CURRENT_DATE".to_string(),
-            Literal::CurrentTimestamp => "CURRENT_TIMESTAMP".to_string(),
-            Literal::Placeholder(ref item) => item.to_string(),
+            Literal::String(ref s) => {
+                write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
+            }
+            Literal::Blob(ref bv) => write!(
+                f,
+                "{}",
+                bv.iter()
+                    .map(|v| format!("{:x}", v))
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            ),
+            Literal::CurrentTime => write!(f, "CURRENT_TIME"),
+            Literal::CurrentDate => write!(f, "CURRENT_DATE"),
+            Literal::CurrentTimestamp => write!(f, "CURRENT_TIMESTAMP"),
+            Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
         }
     }
 }
@@ -1138,6 +1143,7 @@ mod tests {
     use super::*;
     use assert_approx_eq::assert_approx_eq;
     use launchpad::hash::hash;
+    use proptest::prop_assume;
     use test_strategy::proptest;
 
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
@@ -1299,6 +1305,14 @@ mod tests {
     #[proptest]
     fn real_hash_matches_eq(real1: Real, real2: Real) {
         assert_eq!(real1 == real2, hash(&real1) == hash(&real2));
+    }
+
+    #[proptest]
+    fn literal_to_string_parse_round_trip(lit: Literal) {
+        prop_assume!(!matches!(lit, Literal::FixedPoint(_)));
+        let s = lit.to_string();
+        eprintln!("to_string(): {}", s);
+        assert_eq!(literal(s.as_bytes()).unwrap().1, lit)
     }
 }
 
