@@ -36,3 +36,8 @@ nom-sql = { path = "../nom-sql" }
 readyset-data = { path = "../readyset-data/" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-util = { path = "../readyset-util" }
+
+[dev-dependencies]
+mysql_async = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serial_test = "0.5"
