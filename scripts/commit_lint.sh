@@ -17,7 +17,7 @@ contains_body() {
   local body
 
   CURRENT_SUBJECT=$(git log --format="%s" "${sha}^..${sha}")
-  body=$(git log --format="%b" "${sha}^..${sha}")
+  body=$(git log --format="%b" "${sha}^..${sha}" | grep -v "Change-Id:")
   grep -E '.+' <<<"${body}" >/dev/null
 }
 
