@@ -64,7 +64,7 @@ steps:
   - label: ':rust: Check rustfmt'
     key: check-rustfmt
     commands:
-    - "cargo fmt -- --check"
+    - "cargo --locked fmt -- --check"
     depends_on:
     - build-image
     plugins:
@@ -96,7 +96,7 @@ steps:
 
   - label: ':rust: :lock: Check cargo-audit'
     commands:
-    - cargo audit
+    - cargo --locked audit
     depends_on:
     - cargo-audit-image
     plugins:
@@ -112,7 +112,7 @@ steps:
   - label: ':clippy: Check clippy'
     key: check-clippy
     commands:
-    - cargo clippy --all -- -D warnings
+    - cargo --locked clippy --all -- -D warnings
     depends_on:
     - build-image
     plugins:
@@ -131,7 +131,7 @@ steps:
     key: build-js-client-lib
     commands:
       - "echo +++ :rust: Running cargo build"
-      - RUSTFLAGS='-D warnings' cargo build --release -p js-client
+      - RUSTFLAGS='-D warnings' cargo --locked build --release -p js-client
       - strip target/release/libjs_client.so
     artifact_paths:
       - target/release/libjs_client.so
@@ -196,7 +196,7 @@ steps:
     key: logictest
     command:
     - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest -- verify logictests
+    - cargo --locked run --bin noria-logictest -- verify logictests
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -219,7 +219,7 @@ steps:
     key: logictest-binlog
     command:
     - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo run --bin noria-logictest -- verify --binlog-mysql mysql://root:noria@mysql logictests
+    - cargo --locked run --bin noria-logictest -- verify --binlog-mysql mysql://root:noria@mysql logictests
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -241,7 +241,7 @@ steps:
     branches: 'master'
     command:
     - 'echo +++ :rust: Building docs'
-    - cargo doc --workspace --document-private-items
+    - cargo --locked doc --workspace --document-private-items
     - 'echo +++ :ec2: Deploying docs'
     - apt-get install -y rsync
     - mkdir -p ~/.ssh
