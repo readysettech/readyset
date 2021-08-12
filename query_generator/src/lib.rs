@@ -291,6 +291,12 @@ impl Borrow<String> for TableName {
     }
 }
 
+impl Borrow<str> for TableName {
+    fn borrow(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 impl From<TableName> for Table {
     fn from(name: TableName) -> Self {
         Table {
@@ -1536,7 +1542,7 @@ impl QueryOperation {
                 use AggregateType::*;
 
                 let alias = state.fresh_alias();
-                let tbl = state.some_table_in_query_mut(&query);
+                let tbl = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
                     query.tables.push(tbl.name.clone().into());
@@ -1578,7 +1584,7 @@ impl QueryOperation {
 
             QueryOperation::Filter(filter) => {
                 let alias = state.fresh_alias();
-                let tbl = state.some_table_in_query_mut(&query);
+                let tbl = state.some_table_in_query_mut(query);
                 let col = tbl.some_column_with_type(filter.column_type.clone());
 
                 if query.tables.is_empty() {
@@ -1645,7 +1651,7 @@ impl QueryOperation {
             }
 
             QueryOperation::Join(operator) => {
-                let left_table = state.some_table_in_query_mut(&query);
+                let left_table = state.some_table_in_query_mut(query);
                 let left_table_name = left_table.name.clone();
                 let left_join_key = left_table.some_column_with_type(SqlType::Int(32));
                 let left_projected = left_table.fresh_column();
@@ -1777,7 +1783,7 @@ impl QueryOperation {
                 }
             }
             QueryOperation::TopK { order_type, limit } => {
-                let table = state.some_table_in_query_mut(&query);
+                let table = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
                     query.tables.push(table.name.clone().into());
@@ -2121,7 +2127,7 @@ impl Arbitrary for QuerySeed {
     type Strategy = BoxedStrategy<QuerySeed>;
 
     fn arbitrary_with(op_args: Self::Parameters) -> Self::Strategy {
-        any_with::<Vec<QueryOperation>>((Default::default(), op_args.clone()))
+        any_with::<Vec<QueryOperation>>((Default::default(), op_args))
             .prop_map(|operations| Self {
                 operations,
                 subqueries: vec![],
