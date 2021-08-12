@@ -42,9 +42,13 @@ pub enum SqlType {
     UnsignedTinyint(#[strategy(1..255u16)] u16),
     Smallint(#[strategy(1..255u16)] u16),
     UnsignedSmallint(#[strategy(1..255u16)] u16),
+    #[weight(0)]
     Blob,
+    #[weight(0)]
     Longblob,
+    #[weight(0)]
     Mediumblob,
+    #[weight(0)]
     Tinyblob,
     Double,
     Float,
@@ -57,7 +61,9 @@ pub enum SqlType {
     DateTime(u16),
     Time,
     Timestamp,
+    #[weight(0)]
     Binary(u16),
+    #[weight(0)]
     Varbinary(u16),
     #[weight(0)]
     Enum(Vec<Literal>),
@@ -168,6 +174,7 @@ pub enum Literal {
     Integer(i64),
     FixedPoint(Real),
     String(String),
+    #[weight(0)]
     Blob(Vec<u8>),
     CurrentTime,
     CurrentDate,
