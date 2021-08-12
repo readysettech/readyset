@@ -58,7 +58,7 @@ pub enum SqlType {
     Longtext,
     Text,
     Date,
-    DateTime(u16),
+    DateTime(#[strategy(1..=6u16)] u16),
     Time,
     Timestamp,
     #[weight(0)]
