@@ -7,7 +7,7 @@ if [ -z ${GERRIT_CHANGE_ID+x} ] && [ -z ${GERRIT_PATCHSET+x} ]; then
     exit 0
 fi
 
-if [ "$(buildkite-agent meta-data get 'failure')" = 1 ]; then
+if [ "$(buildkite-agent meta-data get 'failure')" = 0 ]; then
     verified="1"
     verb="passed"
 else
