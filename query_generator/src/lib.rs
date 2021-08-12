@@ -195,7 +195,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Int(_) => rng.gen::<i32>().into(),
         SqlType::Bigint(_) => rng.gen::<i64>().into(),
         SqlType::UnsignedInt(_) => rng.gen::<u32>().into(),
-        SqlType::UnsignedBigint(_) => rng.gen::<u64>().into(),
+        SqlType::UnsignedBigint(_) => rng.gen::<u32>().into(),
         SqlType::Tinyint(_) => rng.gen::<i8>().into(),
         SqlType::UnsignedTinyint(_) => rng.gen::<u8>().into(),
         SqlType::Smallint(_) => rng.gen::<i16>().into(),
