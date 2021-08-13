@@ -88,6 +88,25 @@ impl Miss {
     }
 }
 
+/// Which kind of index to use when performing lookups as part of processing for an Ingredient.
+///
+/// The variants of this enum correspond to the variants of the [`SuggestedIndex`] enum - see the
+/// documentation for that enum, and [the documentation for the State
+/// trait](trait@crate::state::State) for more information.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LookupMode {
+    /// Lookup into a strict index, returning either *all* rows for the given key, or a miss.
+    Strict,
+
+    /// Lookup into a weak index, returning all rows for a given key that are materialized into
+    /// other strict indices in the same node.
+    ///
+    /// This is not automatically enforced, but it is invalid to perform lookups with
+    /// [`LookupMode::Weak`] when processing replays, since replays must represent a total set of
+    /// rows for the replay key, and weak indices may be missing rows
+    Weak,
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Lookup {
     /// The node we looked up into.
@@ -449,16 +468,24 @@ where
         _key: &KeyType,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
+        _mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         None
     }
 
-    /// Look up the given key in the given parent's state, falling back to query_through if
-    /// necessary. The return values signifies:
+    /// Look up the given key in the given parent's state using the given `mode` to specify which
+    /// kind of index to look up into, falling back to query_through if necessary. The return values
+    /// signifies:
     ///
     ///  - `None` => no materialization of the parent state exists
     ///  - `Some(None)` => materialization exists, but lookup got a miss
     ///  - `Some(Some(rs))` => materialization exists, and got results rs
+    ///
+    /// # Invariants
+    ///
+    /// * The passed `columns` and `mode` must match an index previously created by
+    ///   `suggest_indexes`
+    /// * `columns` and `key` must have the same length
     #[allow(clippy::type_complexity)]
     #[allow(clippy::option_option)]
     fn lookup<'a>(
@@ -468,11 +495,21 @@ where
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
+        mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         match states.get(parent) {
-            Some(state) => match state.lookup(columns, key) {
-                LookupResult::Some(rs) => Some(Some(Box::new(rs.into_iter().map(Ok)) as Box<_>)),
-                LookupResult::Missing => Some(None),
+            Some(state) => match mode {
+                LookupMode::Weak if state.is_partial() => {
+                    Some(state.lookup_weak(columns, key).and_then(|rs| {
+                        (!rs.is_empty()).then(|| Box::new(rs.into_iter().map(Ok)) as Box<_>)
+                    }))
+                }
+                _ => match state.lookup(columns, key) {
+                    LookupResult::Some(rs) => {
+                        Some(Some(Box::new(rs.into_iter().map(Ok)) as Box<_>))
+                    }
+                    LookupResult::Missing => Some(None),
+                },
             },
             None => {
                 // this is a long-shot.
@@ -481,7 +518,7 @@ where
                 let parent = nodes[parent].borrow();
 
                 if let Some(n) = parent.as_internal() {
-                    n.query_through(columns, key, nodes, states)
+                    n.query_through(columns, key, nodes, states, mode)
                 } else {
                     None
                 }

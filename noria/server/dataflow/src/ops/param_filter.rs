@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
@@ -119,6 +119,7 @@ impl Ingredient for ParamFilter {
         _key: &KeyType,
         _nodes: &DomainNodes,
         _states: &'a StateMap,
+        _mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         todo!()
     }

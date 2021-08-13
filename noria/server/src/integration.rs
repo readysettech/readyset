@@ -31,8 +31,8 @@ use chrono::NaiveDate;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+use std::{iter, thread};
 use vec1::vec1;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -6714,4 +6714,48 @@ async fn count_emit_zero() {
         res,
         vec![vec![DataType::Int(3), DataType::Int(0), DataType::Int(0)]]
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn partial_join_on_one_parent() {
+    let mut g = start_simple("partial_join_on_one_parent").await;
+    g.install_recipe(
+        "
+        CREATE TABLE t1 (jk INT, val INT);
+        CREATE TABLE t2 (jk INT, pk INT PRIMARY KEY);
+    ",
+    )
+    .await
+    .unwrap();
+
+    let mut t1 = g.table("t1").await.unwrap();
+    let mut t2 = g.table("t2").await.unwrap();
+
+    t1.insert_many(
+        iter::once(vec![DataType::from(1i32), DataType::from(1i32)])
+            .cycle()
+            .take(5),
+    )
+    .await
+    .unwrap();
+
+    t2.insert_many((1i32..=5).map(|pk| vec![DataType::from(1i32), DataType::from(pk)]))
+        .await
+        .unwrap();
+
+    g.extend_recipe("QUERY q: SELECT t1.val FROM t2 JOIN t1 ON t2.jk = t1.jk WHERE t1.val = ?")
+        .await
+        .unwrap();
+
+    let mut q = g.view("q").await.unwrap();
+
+    let res1 = q.lookup(&[DataType::from(1i32)], true).await.unwrap();
+    assert_eq!(res1.len(), 25);
+
+    t2.delete(vec![DataType::from(1i32)]).await.unwrap();
+
+    sleep().await;
+
+    let res2 = q.lookup(&[DataType::from(1i32)], true).await.unwrap();
+    assert_eq!(res2.len(), 20);
 }

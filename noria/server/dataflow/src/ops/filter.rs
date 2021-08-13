@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
@@ -90,8 +90,9 @@ impl Ingredient for Filter {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
+        mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        self.lookup(*self.src, columns, key, nodes, states)
+        self.lookup(*self.src, columns, key, nodes, states, mode)
             .map(|result| {
                 result.map(|rs| {
                     let f = self.expression.clone();
