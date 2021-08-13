@@ -23,10 +23,41 @@ pub use partial_map::PartialMap;
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
 
+/// The state of an individual, non-reader node in the graph
+///
+/// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
+/// all rows that have been materialized from the output of that node. States have multiple *keys*,
+/// each of which is an index providing efficient lookup of the rows based on a subset of the
+/// columns in those rows. In the case of *partial* state, those keys are identified by the [`Tag`]s
+/// for the replay paths that can materialize to those keys. For a given key value, a partial key
+/// always stores either all possible rows matching that value, or has a *hole*, meaning that the
+/// rows have not been materialized yet. When [performing writes into state](process_records), all
+/// records that match a hole in partial state will be ignored - to allow inserting new records in
+/// the case of replays, the [`mark_filled`](State::mark_filled) method must be called to mark the
+/// hole as filled prior to processing the records.
+///
+/// # Weak keys
+///
+/// Partial state can additionally have a number of *weak* keys, created by [`add_weak_key`][] and
+/// queried by [`lookup_weak`][]. These keys provide an efficient lookup index into rows that are
+/// otherwise materialized into normal ("strict") indices. Weak keys do not have filled/unfilled
+/// holes - they only index into rows that are stored in filled holes in strict indices.
+///
+/// See [this design doc][weak-keys-doc] for more information about the context in which weak keys
+/// were added
+///
+/// [`add_weak_key`]: State::add_weak_key
+/// [`lookup_weak`]: State::lookup_weak
+/// [weak-keys-doc]: https://docs.google.com/document/d/1JFyvA_3GhMaTewaR0Bsk4N8uhzOwMtB0uH7dD4gJvoQ
 pub(crate) trait State: SizeOf + Send {
     /// Add an index of the given type, keyed by the given columns and replayed to by the given
     /// partial tags.
-    fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>);
+    fn add_key(&mut self, index: &Index, tags: Option<Vec<Tag>>);
+
+    /// Add a new weak key index to this state.
+    ///
+    /// See [the section about weak keys](trait@State#weak-keys) for more information
+    fn add_weak_key(&mut self, index: &Index);
 
     /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
     /// infromation and is thus "not useful".
@@ -63,6 +94,19 @@ pub(crate) trait State: SizeOf + Send {
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a>;
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a>;
+
+    /// Lookup all the rows matching the given `key` in the weak index for the given set of
+    /// `columns`, and return them if any exist. Some(empty) should never be returned from this
+    /// method.
+    ///
+    /// See [the section about weak keys](trait@State#weak-keys) for more information.
+    ///
+    /// # Invariants
+    ///
+    /// * This method should only be called with a set of `columns` that have been previously added
+    ///   as a weak key with [`add_weak_key`](State::add_weak_key)
+    /// * The length of `columns` must match the length of `key`
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>>;
 
     fn rows(&self) -> usize;
 

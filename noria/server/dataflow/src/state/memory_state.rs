@@ -8,11 +8,13 @@ use crate::prelude::*;
 use crate::state::single_state::SingleState;
 use common::SizeOf;
 
-use super::RangeLookupResult;
+use super::keyed_state::KeyedState;
+use super::{RangeLookupResult, Rows};
 
 #[derive(Default)]
 pub struct MemoryState {
     state: Vec<SingleState>,
+    weak_indices: HashMap<Vec<usize>, KeyedState>,
     by_tag: HashMap<Tag, usize>,
     mem_size: u64,
     /// The latest replication offset that has been written to the base table backed by this
@@ -237,7 +239,19 @@ impl State for MemoryState {
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |index| {
-            let bytes = self.state[index].evict_keys(keys);
+            let rows = self.state[index].evict_keys(keys);
+            let bytes = rows
+                .iter()
+                .filter(|r| Rc::strong_count(&r.0) == 1)
+                .map(SizeOf::deep_size_of)
+                .sum();
+
+            for row in &rows {
+                for (key, weak_index) in self.weak_indices.iter_mut() {
+                    weak_index.remove(key, row, None);
+                }
+            }
+
             self.mem_size = self.mem_size.saturating_sub(bytes);
             (self.state[index].key(), bytes)
         })
@@ -253,6 +267,15 @@ impl State for MemoryState {
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
         self.replication_offset.as_ref()
     }
+
+    fn add_weak_key(&mut self, index: &Index) {
+        self.weak_indices
+            .insert(index.columns.clone(), KeyedState::from(index));
+    }
+
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+        self.weak_indices[columns].lookup(key).map(From::from)
+    }
 }
 
 impl MemoryState {
@@ -263,9 +286,9 @@ impl MemoryState {
     }
 
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
-        let r = Rc::new(r);
+        let r = Row::from(r);
 
-        if let Some(tag) = partial_tag {
+        let hit = if let Some(tag) = partial_tag {
             let i = match self.by_tag.get(&tag) {
                 Some(i) => *i,
                 None => {
@@ -276,17 +299,25 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            self.state[i].insert_row(Row::from(r))
+            self.state[i].insert_row(r.clone())
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
-                hit_any |= self.state[i].insert_row(Row::from(r.clone()));
+                hit_any |= self.state[i].insert_row(r.clone());
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();
             }
             hit_any
+        };
+
+        if hit {
+            for (key, weak_index) in self.weak_indices.iter_mut() {
+                weak_index.insert(key, r.clone(), false);
+            }
         }
+
+        hit
     }
 
     fn remove(&mut self, r: &[DataType]) -> bool {
@@ -296,6 +327,12 @@ impl MemoryState {
                 if Rc::strong_count(&row.0) == 1 {
                     self.mem_size = self.mem_size.saturating_sub(row.deep_size_of());
                 }
+            }
+        }
+
+        if hit {
+            for (key, weak_index) in self.weak_indices.iter_mut() {
+                weak_index.remove(key, r, None);
             }
         }
 
@@ -535,6 +572,91 @@ mod tests {
                     )
                 );
             }
+        }
+    }
+
+    mod weak_indices {
+        use super::*;
+
+        fn setup() -> MemoryState {
+            let mut state = MemoryState::default();
+
+            state.add_key(&Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_weak_key(&Index::hash_map(vec![1]));
+
+            state
+        }
+
+        #[test]
+        fn insert_lookup() {
+            let mut state = setup();
+            let mut records: Records = vec![
+                (vec![1.into(), "A".into()], true),
+                (vec![1.into(), "B".into()], true),
+                (vec![2.into(), "A".into()], true),
+            ]
+            .into();
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
+            state.process_records(&mut records, Some(Tag::new(0)), None);
+
+            assert_eq!(records.len(), 3);
+
+            let result = state.lookup_weak(&[1], &KeyType::Single(&DataType::from("A")));
+            let mut rows: Vec<_> = result.unwrap().into_iter().collect();
+            rows.sort();
+            assert_eq!(
+                rows,
+                vec![vec![1.into(), "A".into()], vec![2.into(), "A".into()]]
+            );
+        }
+
+        #[test]
+        fn insert_delete_lookup() {
+            let mut state = setup();
+            let mut records: Records = vec![
+                (vec![1.into(), "A".into()], true),
+                (vec![1.into(), "B".into()], true),
+                (vec![2.into(), "A".into()], true),
+            ]
+            .into();
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
+            state.process_records(&mut records, Some(Tag::new(0)), None);
+            assert_eq!(records.len(), 3);
+
+            let mut delete_records: Records = vec![(vec![2.into(), "A".into()], false)].into();
+            state.process_records(&mut delete_records, Some(Tag::new(0)), None);
+            assert_eq!(delete_records.len(), 1);
+
+            let result = state.lookup_weak(&[1], &KeyType::Single(&DataType::from("A")));
+            assert_eq!(
+                result,
+                Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
+            );
+        }
+
+        #[test]
+        fn insert_evict_lookup() {
+            let mut state = setup();
+            let mut records: Records = vec![
+                (vec![1.into(), "A".into()], true),
+                (vec![1.into(), "B".into()], true),
+                (vec![2.into(), "A".into()], true),
+            ]
+            .into();
+            state.mark_filled(KeyComparison::Equal(vec1![1.into()]), Tag::new(0));
+            state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
+            state.process_records(&mut records, Some(Tag::new(0)), None);
+            assert_eq!(records.len(), 3);
+
+            state.evict_keys(Tag::new(0), &[KeyComparison::Equal(vec1![2.into()])]);
+
+            let result = state.lookup_weak(&[1], &KeyType::Single(&DataType::from("A")));
+            assert_eq!(
+                result,
+                Some(RecordResult::Owned(vec![vec![1.into(), "A".into()],]))
+            );
         }
     }
 }
