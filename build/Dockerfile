@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly
 
 RUN rustup toolchain install nightly-2021-03-01
 
