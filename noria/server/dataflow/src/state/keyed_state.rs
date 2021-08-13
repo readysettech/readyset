@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use std::iter;
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use tuple::Map;
@@ -6,7 +7,7 @@ use tuple::TupleElements;
 use vec1::Vec1;
 
 use super::mk_key::MakeKey;
-use super::partial_map::PartialMap;
+use super::partial_map::{self, PartialMap};
 use super::Misses;
 use crate::prelude::*;
 use common::SizeOf;
@@ -87,6 +88,184 @@ impl KeyedState {
                 )
             }
         }
+    }
+
+    /// Insert the given `row` into this `KeyedState`, using the column indices in `key_cols` to
+    /// derive the key, and return whether or not the row was actually inserted
+    ///
+    /// If `partial` is `true`, and the key is not present, the row will not be inserted and
+    /// `insert` will return `false`.
+    ///
+    /// # Invariants
+    ///
+    /// * The length of `key_cols` must be equal to the length of the key of this KeyedState
+    /// * All column indices in `key_cols` must be in-bounds for `row`
+    pub(super) fn insert(&mut self, key_cols: &[usize], row: Row, partial: bool) -> bool {
+        macro_rules! single_insert {
+            ($map: ident, $key_cols: expr, $row: expr, $partial: expr) => {{
+                // treat this specially to avoid the extra Vec
+                debug_assert_eq!($key_cols.len(), 1);
+                // i *wish* we could use the entry API here, but it would mean an extra clone
+                // in the common case of an entry already existing for the given key...
+                let key = &row[key_cols[0]];
+                if let Some(ref mut rs) = $map.get_mut(key) {
+                    rs.insert(row);
+                    return true;
+                } else if $partial {
+                    // trying to insert a record into partial materialization hole!
+                    return false;
+                }
+
+                $map.insert(key.clone(), iter::once(row).collect());
+            }};
+        }
+
+        macro_rules! multi_insert {
+            ($map: ident, $key_cols: expr, $row:expr, $partial: expr, $entry:path) => {{
+                let key = MakeKey::from_row($key_cols, &*$row);
+                use $entry as Entry;
+                match $map.entry(key) {
+                    Entry::Occupied(mut rs) => {
+                        rs.get_mut().insert($row);
+                    }
+                    Entry::Vacant(..) if $partial => return false,
+                    rs @ Entry::Vacant(..) => {
+                        rs.or_default().insert($row);
+                    }
+                }
+            }};
+        }
+
+        match self {
+            KeyedState::SingleBTree(map) => single_insert!(map, key_cols, row, partial),
+            KeyedState::DoubleBTree(map) => {
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::TriBTree(map) => {
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::QuadBTree(map) => {
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::QuinBTree(map) => {
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::SexBTree(map) => {
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::MultiBTree(map, len) => {
+                debug_assert_eq!(key_cols.len(), *len);
+                multi_insert!(map, key_cols, row, partial, partial_map::Entry)
+            }
+            KeyedState::SingleHash(map) => single_insert!(map, key_cols, row, partial),
+            KeyedState::DoubleHash(map) => {
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+            KeyedState::TriHash(map) => {
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+            KeyedState::QuadHash(map) => {
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+            KeyedState::QuinHash(map) => {
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+            KeyedState::SexHash(map) => {
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+            KeyedState::MultiHash(map, len) => {
+                debug_assert_eq!(key_cols.len(), *len);
+                multi_insert!(map, key_cols, row, partial, indexmap::map::Entry)
+            }
+        }
+
+        true
+    }
+
+    /// Remove one instance of the given `row` from this `KeyedState`, using the column indices in
+    /// `key_cols` to derive the key, and return the row itself.
+    ///
+    /// If given, `hit` will be set to `true` if the key exists in `self` (but not necessarily if
+    /// the row was found!)
+    ///
+    /// # Invariants
+    ///
+    /// * The length of `key_cols` must be equal to the length of the key of this KeyedState
+    /// * All column indices in `key_cols` must be in-bounds for `row`
+    pub(super) fn remove(
+        &mut self,
+        key_cols: &[usize],
+        row: &[DataType],
+        hit: Option<&mut bool>,
+    ) -> Option<Row> {
+        let do_remove = |rs: &mut Rows| -> Option<Row> {
+            if let Some(hit) = hit {
+                *hit = true;
+            }
+            let rm = if rs.len() == 1 {
+                // it *should* be impossible to get a negative for a record that we don't have,
+                // so let's avoid hashing + eqing if we don't need to
+                let left = rs.drain().next().unwrap();
+                debug_assert_eq!(left.1, 1);
+                debug_assert_eq!(&left.0[..], row);
+                Some(left.0)
+            } else {
+                match rs.try_take(row) {
+                    Ok(row) => Some(row),
+                    Err(None) => None,
+                    Err(Some((row, _))) => {
+                        // there are still copies of the row left in rs
+                        Some(row.clone())
+                    }
+                }
+            };
+            rm
+        };
+
+        macro_rules! single_remove {
+            ($map: ident, $key_cols: expr, $row: expr) => {{
+                if let Some(rs) = $map.get_mut(&row[$key_cols[0]]) {
+                    return do_remove(rs);
+                }
+            }};
+        }
+
+        macro_rules! multi_remove {
+            ($map: ident, $key_cols: expr, $row: expr) => {
+                multi_remove!($map, $key_cols, $row, _)
+            };
+            ($map: ident, $key_cols: expr, $row: expr, $hint: ty) => {{
+                let key = <$hint as MakeKey<_>>::from_row(&$key_cols, $row);
+                if let Some(rs) = $map.get_mut(&key) {
+                    return do_remove(rs);
+                }
+            }};
+        }
+
+        match self {
+            KeyedState::SingleBTree(map) => single_remove!(map, key_cols, row),
+            KeyedState::DoubleBTree(map) => multi_remove!(map, key_cols, row),
+            KeyedState::TriBTree(map) => multi_remove!(map, key_cols, row),
+            KeyedState::QuadBTree(map) => multi_remove!(map, key_cols, row),
+            KeyedState::QuinBTree(map) => multi_remove!(map, key_cols, row),
+            KeyedState::SexBTree(map) => multi_remove!(map, key_cols, row),
+            KeyedState::MultiBTree(map, len) => {
+                debug_assert_eq!(key_cols.len(), *len);
+                multi_remove!(map, key_cols, row, Vec<_>);
+            }
+            KeyedState::SingleHash(map) => single_remove!(map, key_cols, row),
+            KeyedState::DoubleHash(map) => multi_remove!(map, key_cols, row, (_, _)),
+            KeyedState::TriHash(map) => multi_remove!(map, key_cols, row, (_, _, _)),
+            KeyedState::QuadHash(map) => multi_remove!(map, key_cols, row, (_, _, _, _)),
+            KeyedState::QuinHash(map) => multi_remove!(map, key_cols, row, (_, _, _, _, _)),
+            KeyedState::SexHash(map) => multi_remove!(map, key_cols, row, (_, _, _, _, _, _)),
+            KeyedState::MultiHash(map, len) => {
+                debug_assert_eq!(key_cols.len(), *len);
+                multi_remove!(map, key_cols, row, Vec<_>);
+            }
+        }
+
+        None
     }
 
     /// Mark the given range of keys as filled

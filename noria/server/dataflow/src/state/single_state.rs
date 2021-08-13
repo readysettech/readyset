@@ -1,5 +1,5 @@
 use super::mk_key::MakeKey;
-use super::{partial_map, RangeLookupResult};
+use super::RangeLookupResult;
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
 use common::SizeOf;
@@ -55,191 +55,23 @@ impl SingleState {
         }
     }
 
-    /// Inserts the given record, or returns false if a hole was encountered (and the record hence
+    /// Inserts the given row, or returns false if a hole was encountered (and the record hence
     /// not inserted).
-    pub(super) fn insert_row(&mut self, r: Row) -> bool {
-        macro_rules! insert_row_match_impl {
-            ($self:ident, $r:ident, $map:ident, $entry:path) => {{
-                let key = MakeKey::from_row(&$self.key, &*$r);
-                use $entry as Entry;
-                match $map.entry(key) {
-                    Entry::Occupied(mut rs) => {
-                        rs.get_mut().insert($r);
-                    }
-                    Entry::Vacant(..) if $self.partial => return false,
-                    rs @ Entry::Vacant(..) => {
-                        rs.or_default().insert($r);
-                    }
-                }
-            }};
+    pub(super) fn insert_row(&mut self, row: Row) -> bool {
+        let added = self.state.insert(&self.key, row, self.partial);
+        if added {
+            self.rows += 1;
         }
-
-        match self.state {
-            KeyedState::SingleBTree(ref mut map) => {
-                // treat this specially to avoid the extra Vec
-                debug_assert_eq!(self.key.len(), 1);
-                // i *wish* we could use the entry API here, but it would mean an extra clone
-                // in the common case of an entry already existing for the given key...
-                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
-                    self.rows += 1;
-                    rs.insert(r);
-                    return true;
-                } else if self.partial {
-                    // trying to insert a record into partial materialization hole!
-                    return false;
-                }
-                map.insert(r[self.key[0]].clone(), std::iter::once(r).collect());
-            }
-            KeyedState::DoubleBTree(ref mut map) => {
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::TriBTree(ref mut map) => {
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::QuadBTree(ref mut map) => {
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::QuinBTree(ref mut map) => {
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::SexBTree(ref mut map) => {
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::MultiBTree(ref mut map, len) => {
-                debug_assert_eq!(self.key.len(), len);
-                insert_row_match_impl!(self, r, map, partial_map::Entry)
-            }
-            KeyedState::MultiHash(ref mut map, len) => {
-                debug_assert_eq!(self.key.len(), len);
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-            KeyedState::DoubleHash(ref mut map) => {
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-            KeyedState::SingleHash(ref mut map) => {
-                // treat this specially to avoid the extra Vec
-                debug_assert_eq!(self.key.len(), 1);
-                // i *wish* we could use the entry API here, but it would mean an extra clone
-                // in the common case of an entry already existing for the given key...
-                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
-                    self.rows += 1;
-                    rs.insert(r);
-                    return true;
-                } else if self.partial {
-                    // trying to insert a record into partial materialization hole!
-                    return false;
-                }
-                map.insert(r[self.key[0]].clone(), std::iter::once(r).collect());
-            }
-            KeyedState::TriHash(ref mut map) => {
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-            KeyedState::QuadHash(ref mut map) => {
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-            KeyedState::QuinHash(ref mut map) => {
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-            KeyedState::SexHash(ref mut map) => {
-                insert_row_match_impl!(self, r, map, indexmap::map::Entry)
-            }
-        }
-
-        self.rows += 1;
-        true
+        added
     }
 
     /// Attempt to remove row `r`.
     pub(super) fn remove_row(&mut self, r: &[DataType], hit: &mut bool) -> Option<Row> {
-        let mut do_remove = |self_rows: &mut usize, rs: &mut Rows| -> Option<Row> {
-            *hit = true;
-            let rm = if rs.len() == 1 {
-                // it *should* be impossible to get a negative for a record that we don't have,
-                // so let's avoid hashing + eqing if we don't need to
-                let left = rs.drain().next().unwrap();
-                debug_assert_eq!(left.1, 1);
-                debug_assert_eq!(&left.0[..], r);
-                Some(left.0)
-            } else {
-                match rs.try_take(r) {
-                    Ok(row) => Some(row),
-                    Err(None) => None,
-                    Err(Some((row, _))) => {
-                        // there are still copies of the row left in rs
-                        Some(row.clone())
-                    }
-                }
-            };
-
-            if rm.is_some() {
-                *self_rows = self_rows.saturating_sub(1);
-            }
-            rm
-        };
-
-        macro_rules! remove_row_match_impl {
-            ($self:ident, $r:ident, $map:ident) => {
-                remove_row_match_impl!($self, $r, $map, _)
-            };
-            ($self:ident, $r:ident, $map:ident, $hint:ty) => {{
-                let key = <$hint as MakeKey<_>>::from_row(&$self.key, $r);
-                if let Some(ref mut rs) = $map.get_mut(&key) {
-                    return do_remove(&mut $self.rows, rs);
-                }
-            }};
+        let row = self.state.remove(&self.key, r, Some(hit));
+        if row.is_some() {
+            self.rows = self.rows.saturating_sub(1);
         }
-
-        match self.state {
-            KeyedState::SingleBTree(ref mut map) => {
-                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::DoubleBTree(ref mut map) => {
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::TriBTree(ref mut map) => {
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::QuadBTree(ref mut map) => {
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::QuinBTree(ref mut map) => {
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::SexBTree(ref mut map) => {
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::MultiBTree(ref mut map, len) => {
-                debug_assert_eq!(self.key.len(), len);
-                remove_row_match_impl!(self, r, map)
-            }
-            KeyedState::MultiHash(ref mut map, len) => {
-                debug_assert_eq!(self.key.len(), len);
-                remove_row_match_impl!(self, r, map, Vec<_>)
-            }
-            KeyedState::SingleHash(ref mut map) => {
-                if let Some(ref mut rs) = map.get_mut(&r[self.key[0]]) {
-                    return do_remove(&mut self.rows, rs);
-                }
-            }
-            KeyedState::DoubleHash(ref mut map) => {
-                remove_row_match_impl!(self, r, map, (DataType, _))
-            }
-            KeyedState::TriHash(ref mut map) => {
-                remove_row_match_impl!(self, r, map, (DataType, _, _))
-            }
-            KeyedState::QuadHash(ref mut map) => {
-                remove_row_match_impl!(self, r, map, (DataType, _, _, _))
-            }
-            KeyedState::QuinHash(ref mut map) => {
-                remove_row_match_impl!(self, r, map, (DataType, _, _, _, _))
-            }
-            KeyedState::SexHash(ref mut map) => {
-                remove_row_match_impl!(self, r, map, (DataType, _, _, _, _, _))
-            }
-        }
-        None
+        row
     }
 
     fn mark_point_filled(&mut self, key: Vec1<DataType>) {
