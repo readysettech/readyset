@@ -7,7 +7,7 @@ use std::convert::{TryFrom, TryInto};
 use vec1::Vec1;
 
 use crate::prelude::*;
-use crate::processing::{ColumnRef, ColumnSource};
+use crate::processing::{ColumnRef, ColumnSource, SuggestedIndex};
 use noria::errors::ReadySetResult;
 
 use super::Side;
@@ -919,7 +919,7 @@ impl Ingredient for Union {
         }
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         // index nothing (?)
         HashMap::new()
     }

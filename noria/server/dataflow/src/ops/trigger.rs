@@ -2,9 +2,11 @@ use maplit::hashmap;
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
+use crate::processing::SuggestedIndex;
 use noria::errors::{internal_err, ReadySetResult};
 
 use std::collections::HashMap;
+
 use std::convert::TryInto;
 
 /// A Trigger data-flow operator.
@@ -127,10 +129,10 @@ impl Ingredient for Trigger {
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         // index all key columns
         hashmap! {
-            this => Index::hash_map(vec![self.key])
+            this => SuggestedIndex::Strict(Index::hash_map(vec![self.key]))
         }
     }
 

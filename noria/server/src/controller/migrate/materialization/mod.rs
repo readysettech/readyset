@@ -49,6 +49,22 @@ impl Default for FrontierStrategy {
     }
 }
 
+#[derive(Debug)]
+enum IndexObligation {
+    /// An obligation to index a particular set of columns with a particular index type in a node.
+    ///
+    /// A lookup obligation can be created either if a node asks for its own state to be
+    /// materialized, or if a node indicates that it will perform lookups on its ancestors
+    Lookup(Index),
+
+    /// An obligation to index a particular set of columns for replays into a node
+    ///
+    /// Replay indexes are special, in that they can be hoisted past *all* nodes, including across
+    /// domain boundaries. They are also special in that they also need to be carried along all the
+    /// way to the nearest *full* materialization.
+    Replay(Index),
+}
+
 #[derive(Clone)]
 pub(in crate::controller) struct Materializations {
     log: Logger,
@@ -57,6 +73,11 @@ pub(in crate::controller) struct Materializations {
     have: HashMap<NodeIndex, Indices>,
     /// Nodes materialized since the last time `commit()` was invoked.
     added: HashMap<NodeIndex, Indices>,
+
+    /// Nodes that have weak indices
+    have_weak: HashMap<NodeIndex, Indices>,
+    /// Weak indices added since the last time `commit()` was invoked
+    added_weak: HashMap<NodeIndex, Indices>,
 
     /// Readers added since the last time `commit()` was invoked.
     new_readers: HashSet<NodeIndex>,
@@ -80,6 +101,9 @@ impl Materializations {
             have: HashMap::default(),
             added: HashMap::default(),
             new_readers: HashSet::default(),
+
+            have_weak: HashMap::default(),
+            added_weak: HashMap::default(),
 
             paths: HashMap::default(),
 
@@ -158,7 +182,7 @@ impl Materializations {
         for &ni in new {
             let n = &graph[ni];
 
-            let mut indices = if let Some(r) = n.as_reader() {
+            let mut indices: HashMap<NodeIndex, IndexObligation> = if let Some(r) = n.as_reader() {
                 if let Some(key) = r.key() {
                     // for a reader that will get lookups, we'd like to have an index above us
                     // somewhere on our key so that we can make the reader partial
@@ -167,7 +191,7 @@ impl Materializations {
                     self.new_readers.insert(ni);
                     let index = Index::hash_map(key.to_vec());
                     hashmap! {
-                        ni => (index, false)
+                        ni => IndexObligation::Replay(index)
                     }
                 } else {
                     // only streaming, no indexing needed
@@ -176,32 +200,40 @@ impl Materializations {
             } else {
                 n.suggest_indexes(ni)
                     .into_iter()
-                    .map(|(k, c)| (k, (c, true)))
+                    .map(|(n, suggested_index)| {
+                        // Since lookups into weak indices are forbidden when processing replays,
+                        // any weak index that we add needs to *also* have a corresponding strict
+                        // index of the same type and columns.
+                        if suggested_index.is_weak() {
+                            self.added_weak
+                                .entry(n)
+                                .or_default()
+                                .insert(suggested_index.index().clone());
+                        }
+
+                        (n, IndexObligation::Lookup(suggested_index.into_index()))
+                    })
                     .collect()
             };
 
             if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, (Index::hash_map(vec![0]), true));
+                indices.insert(ni, IndexObligation::Lookup(Index::hash_map(vec![0])));
             }
 
-            for (ni, (cols, lookup)) in indices {
+            for (ni, obligation) in indices {
                 trace!(self.log, "new indexing obligation";
-                       "node" => ni.index(),
-                       "columns" => ?cols,
-                       "lookup" => lookup);
+                           "node" => ni.index(),
+                           "obligation" => ?obligation,);
 
-                if lookup {
-                    lookup_obligations
-                        .entry(ni)
-                        .or_insert_with(HashSet::new)
-                        .insert(cols);
-                } else {
-                    replay_obligations
-                        .entry(ni)
-                        .or_insert_with(HashSet::new)
-                        .insert(cols);
+                match obligation {
+                    IndexObligation::Replay(index) => {
+                        replay_obligations.entry(ni).or_default().insert(index);
+                    }
+                    IndexObligation::Lookup(index) => {
+                        lookup_obligations.entry(ni).or_default().insert(index);
+                    }
                 }
             }
         }

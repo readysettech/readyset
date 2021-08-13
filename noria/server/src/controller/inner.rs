@@ -1131,10 +1131,14 @@ impl ControllerInner {
         trace!(self.log, "creating table"; "for" => base);
 
         let mut key = node
-            .suggest_indexes(ni)
-            .remove(&ni)
-            .map(|index| index.columns)
-            .unwrap_or_else(Vec::new);
+            .get_base()
+            .ok_or_else(|| ReadySetError::InvalidNodeType {
+                node_index: node.local_addr(),
+                expected_type: NodeType::Base,
+            })?
+            .key()
+            .map(|k| k.to_owned())
+            .unwrap_or_default();
         let mut is_primary = false;
         if key.is_empty() {
             if let Sharding::ByColumn(col, _) = node.sharded_by() {

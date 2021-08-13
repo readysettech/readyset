@@ -1188,27 +1188,35 @@ impl Domain {
             DomainRequest::PrepareState { node, state } => {
                 use crate::payload::InitialState;
                 match state {
-                    InitialState::PartialLocal(index) => {
+                    InitialState::PartialLocal { strict, weak } => {
                         if !self.state.contains_key(node) {
                             self.state.insert(node, Box::new(MemoryState::default()));
                         }
                         let state = self.state.get_mut(node).unwrap();
-                        for (index, tags) in index {
+                        for (index, tags) in strict {
                             info!(self.log, "told to prepare partial state";
-                                           "index" => ?index,
-                                           "tags" => ?tags);
+                                  "index" => ?index,
+                                  "tags" => ?tags);
                             state.add_key(&index, Some(tags));
                         }
+
+                        for index in weak {
+                            state.add_weak_key(&index);
+                        }
                     }
-                    InitialState::IndexedLocal(index) => {
+                    InitialState::IndexedLocal { strict, weak } => {
                         if !self.state.contains_key(node) {
                             self.state.insert(node, Box::new(MemoryState::default()));
                         }
                         let state = self.state.get_mut(node).unwrap();
-                        for idx in index {
+                        for index in strict {
                             info!(self.log, "told to prepare full state";
-                                           "key" => ?idx);
-                            state.add_key(&idx, None);
+                                  "key" => ?index);
+                            state.add_key(&index, None);
+                        }
+
+                        for index in weak {
+                            state.add_weak_key(&index);
                         }
                     }
                     InitialState::PartialGlobal {

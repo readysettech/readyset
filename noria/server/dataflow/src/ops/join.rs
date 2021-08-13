@@ -8,7 +8,7 @@ use vec1::{vec1, Vec1};
 
 use super::Side;
 use crate::prelude::*;
-use crate::processing::{ColumnMiss, ColumnRef, ColumnSource};
+use crate::processing::{ColumnMiss, ColumnRef, ColumnSource, SuggestedIndex};
 use noria::errors::{internal_err, ReadySetResult};
 use noria::{internal, KeyComparison};
 
@@ -730,10 +730,14 @@ impl Ingredient for Join {
         })
     }
 
-    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
+        // Replays might have happened through our parents into keys *other* than the join key, and
+        // we need to find those rows when looking up values to perform the join as part of forward
+        // processing of normal writes - so we use a weak index here to avoid dropping writes in
+        // that case.
         hashmap! {
-            self.left.as_global() => Index::hash_map(self.on_left()),
-            self.right.as_global() => Index::hash_map(self.on_right()),
+            self.left.as_global() => SuggestedIndex::Weak(Index::hash_map(self.on_left())),
+            self.right.as_global() => SuggestedIndex::Weak(Index::hash_map(self.on_right())),
         }
     }
 
@@ -1071,11 +1075,11 @@ mod tests {
     fn it_suggests_indices() {
         let me = 2.into();
         let (g, l, r) = setup();
-        let hm = hashmap! {
-            l.as_global() => Index::hash_map(vec![0]), // join column for left
-            r.as_global() => Index::hash_map(vec![0]), // join column for right
+        let expected = hashmap! {
+            l.as_global() => SuggestedIndex::Weak(Index::hash_map(vec![0])), // join column for left
+            r.as_global() => SuggestedIndex::Weak(Index::hash_map(vec![0])), // join column for right
         };
-        assert_eq!(g.node().suggest_indexes(me), hm);
+        assert_eq!(g.node().suggest_indexes(me), expected);
     }
 
     #[test]
