@@ -381,6 +381,14 @@ impl State for PersistentState {
     fn clear(&mut self) {
         unreachable!("can't clear PersistentState")
     }
+
+    fn add_weak_key(&mut self, index: &Index) {
+        self.add_key(index, None);
+    }
+
+    fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
+        self.lookup(columns, key).records()
+    }
 }
 
 fn serialize<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {

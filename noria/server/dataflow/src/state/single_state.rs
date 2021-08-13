@@ -2,7 +2,9 @@ use super::mk_key::MakeKey;
 use super::RangeLookupResult;
 use crate::prelude::*;
 use crate::state::keyed_state::KeyedState;
+use crate::state::Rows;
 use common::SizeOf;
+use itertools::Either;
 use noria::KeyComparison;
 use rand::prelude::*;
 use std::ops::{Bound, RangeBounds};
@@ -335,14 +337,21 @@ impl SingleState {
         (bytes_freed, keys)
     }
 
-    /// Evicts a specified key from this state, returning the number of bytes freed.
-    pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> u64 {
+    /// Evicts a specified key from this state, returning the removed rows
+    pub(super) fn evict_keys(&mut self, keys: &[KeyComparison]) -> Rows {
         keys.iter()
-            .map(|k| match k {
-                KeyComparison::Equal(equal) => self.state.evict(equal),
-                KeyComparison::Range(range) => self.state.evict_range(range),
+            .flat_map(|k| match k {
+                KeyComparison::Equal(equal) => Either::Left(
+                    self.state
+                        .evict(equal)
+                        .into_iter()
+                        .flat_map(|r| r.into_iter().map(|(r, _)| r)),
+                ),
+                KeyComparison::Range(range) => {
+                    Either::Right(self.state.evict_range(range).into_iter().map(|(r, _)| r))
+                }
             })
-            .sum()
+            .collect()
     }
 
     pub(super) fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Rows> + 'a> {

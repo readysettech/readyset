@@ -501,8 +501,8 @@ impl KeyedState {
         ))
     }
 
-    /// Remove all rows for the given key, returning the number of bytes freed.
-    pub(super) fn evict(&mut self, key: &[DataType]) -> u64 {
+    /// Remove all rows for the given key, returning the evicted rows.
+    pub(super) fn evict(&mut self, key: &[DataType]) -> Option<Rows> {
         match *self {
             KeyedState::SingleBTree(ref mut m) => m.remove(&(key[0])),
             KeyedState::DoubleBTree(ref mut m) => m.remove(&MakeKey::from_key(key)),
@@ -529,35 +529,22 @@ impl KeyedState {
             }
             KeyedState::MultiHash(ref mut m, _) => m.remove(&key.to_owned()),
         }
-        .map(|rows| {
-            rows.iter()
-                .filter(|r| Rc::strong_count(&r.0) == 1)
-                .map(SizeOf::deep_size_of)
-                .sum()
-        })
-        .unwrap_or(0)
     }
 
-    /// Evict all rows in the given range of keys from this KeyedState, and return the amount of
-    /// memory freed in bytes
+    /// Evict all rows in the given range of keys from this KeyedState, and return the removed rows
     ///
     /// # Panics
     ///
     /// Panics if this `KeyedState` is backed by a HashMap index
-    pub(super) fn evict_range<R>(&mut self, range: &R) -> u64
+    pub(super) fn evict_range<R>(&mut self, range: &R) -> Rows
     where
         R: RangeBounds<Vec1<DataType>>,
     {
         macro_rules! do_evict_range {
             ($m: expr, $range: expr, $hint: ty) => {
                 $m.remove_range(<$hint as MakeKey<DataType>>::from_range($range))
-                    .map(|(_, rows)| -> u64 {
-                        rows.iter()
-                            .filter(|r| Rc::strong_count(&r.0) == 1)
-                            .map(SizeOf::deep_size_of)
-                            .sum()
-                    })
-                    .sum()
+                    .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
+                    .collect()
             };
         }
 
@@ -573,17 +560,13 @@ impl KeyedState {
                     range.start_bound().map(Vec1::as_vec),
                     range.end_bound().map(Vec1::as_vec),
                 ))
-                .map(|(_, rows)| -> u64 {
-                    rows.iter()
-                        .filter(|r| Rc::strong_count(&r.0) == 1)
-                        .map(SizeOf::deep_size_of)
-                        .sum()
-                })
-                .sum(),
-            _ =>
-            #[allow(clippy::panic)] // documented invariant
-            {
-                panic!("evict_range called on a HashMap KeyedState")
+                .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
+                .collect(),
+            _ => {
+                #[allow(clippy::panic)] // documented invariant
+                {
+                    panic!("evict_range called on a HashMap KeyedState")
+                }
             }
         }
     }
