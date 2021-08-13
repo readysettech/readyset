@@ -1,4 +1,4 @@
-FROM 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest
 COPY . /readyset
 WORKDIR /readyset
 RUN cargo build --release --bin noria-mysql

@@ -133,7 +133,7 @@ steps:
     - build-release-binaries
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -157,7 +157,7 @@ steps:
     - build-release-binaries
     plugins:
       - docker#v3.7.0:
-          image: '069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'

@@ -6,11 +6,11 @@ steps:
     - 'echo --- :docker: Building image'
     - >-
       docker build -f build/Dockerfile \
-        --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
-        -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest \
+        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
+        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
         .
     - 'echo --- :docker: Pushing image'
-    - 'docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-build:latest'
+    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
     plugins:
       ecr#v2.2.0:
         login: true

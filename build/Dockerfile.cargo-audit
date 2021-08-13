@@ -1,3 +1,3 @@
-FROM rustlang/rust:nightly
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly
 
 RUN cargo install cargo-audit
