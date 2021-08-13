@@ -40,7 +40,7 @@ thiserror = "1.0.26"
 sha-1 = "0.9.6"
 
 [dev-dependencies]
-postgres = "0.15.2"
+postgres = "0.19.1"
 mysql = "17.0.0"
 mysql_async = "0.27.1"
 slab = "0.4.2"

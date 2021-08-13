@@ -17,7 +17,6 @@ members = [
     "launchpad",
     "replicators",
     "query_generator",
-    "taster",
     "maths",
 ]
 [profile.release]
