@@ -33,7 +33,7 @@ futures-util = "0.3.14"
 futures-sink = "0.3.14"
 futures-executor = "0.3.14"
 pin-project = "1.0.6"
-hyper = { version = "0.14.4", features = [ "stream", "server" ] }
+hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 itertools = "0.10.0"
 maths = { version = "0.0.1", path = "../../maths" }
 metrics = "0.14.2"
