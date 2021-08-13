@@ -8,7 +8,7 @@ use vec1::{vec1, Vec1};
 
 use super::Side;
 use crate::prelude::*;
-use crate::processing::{ColumnMiss, ColumnRef, ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnMiss, ColumnRef, ColumnSource, LookupMode, SuggestedIndex};
 use noria::errors::{internal_err, ReadySetResult};
 use noria::{internal, KeyComparison};
 
@@ -439,6 +439,15 @@ impl Ingredient for Join {
                         &KeyType::from(prev_join_key.clone()),
                         nodes,
                         state,
+                        // Only do a lookup into a weak index if we're processing regular updates,
+                        // not if we're processing a replay, since regular updates should represent
+                        // all rows that won't hit holes downstream but replays need to have *all*
+                        // rows
+                        if replay_key_cols.is_some() {
+                            LookupMode::Strict
+                        } else {
+                            LookupMode::Weak
+                        },
                     )
                     .unwrap();
 
@@ -491,6 +500,15 @@ impl Ingredient for Join {
                     &KeyType::from(prev_join_key.clone()),
                     nodes,
                     state,
+                    // Only do a lookup into a weak index if we're processing regular updates,
+                    // not if we're processing a replay, since regular updates should represent
+                    // all rows that won't hit holes downstream but replays need to have *all*
+                    // rows
+                    if replay_key_cols.is_some() {
+                        LookupMode::Strict
+                    } else {
+                        LookupMode::Weak
+                    },
                 )
                 .unwrap();
 

@@ -8,7 +8,7 @@ use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
 use noria::errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
@@ -289,6 +289,7 @@ where
                                 &KeyType::from(&group[..]),
                                 nodes,
                                 state,
+                                LookupMode::Strict
                             ).ok_or_else(|| internal_err("grouped operators must have their parents' state materialized"))?
                             {
                                 None => {

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::iter;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
@@ -104,6 +104,7 @@ impl Ingredient for Project {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
+        mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
@@ -132,7 +133,7 @@ impl Ingredient for Project {
             Cow::Borrowed(columns)
         };
 
-        self.lookup(*self.src, &*in_cols, key, nodes, states)
+        self.lookup(*self.src, &*in_cols, key, nodes, states, mode)
             .map(|result| {
                 result.map(|rs| match emit {
                     Some(emit) => Box::new(rs.map(move |r| {
@@ -554,6 +555,7 @@ mod tests {
                 &KeyType::Single(&key),
                 &DomainNodes::default(),
                 &states,
+                LookupMode::Strict,
             )
             .unwrap()
             .unwrap();

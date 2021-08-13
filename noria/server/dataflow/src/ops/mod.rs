@@ -19,7 +19,7 @@ pub mod trigger;
 pub mod union;
 
 use crate::ops::grouped::concat::GroupConcat;
-use crate::processing::{ColumnMiss, ColumnSource, SuggestedIndex};
+use crate::processing::{ColumnMiss, ColumnSource, LookupMode, SuggestedIndex};
 pub use msql_srv::MysqlTime;
 
 /// Enum for distinguishing between the two parents of a union or join
@@ -204,8 +204,9 @@ impl Ingredient for NodeOperator {
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
+        mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states)
+        impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states, mode)
     }
     #[allow(clippy::type_complexity)]
     fn lookup<'a>(
@@ -215,8 +216,9 @@ impl Ingredient for NodeOperator {
         key: &KeyType,
         domain: &DomainNodes,
         states: &'a StateMap,
+        mode: LookupMode,
     ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states)
+        impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states, mode)
     }
     fn is_selective(&self) -> bool {
         impl_ingredient_fn_ref!(self, is_selective,)
