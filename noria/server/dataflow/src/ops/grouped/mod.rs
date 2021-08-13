@@ -8,7 +8,7 @@ use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
-use crate::processing::ColumnSource;
+use crate::processing::{ColumnSource, SuggestedIndex};
 use noria::errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
@@ -382,12 +382,12 @@ where
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         hashmap! {
             // index the parent for state repopulation purposes
-            self.src.as_global() => Index::hash_map(self.group_by.clone()),
+            self.src.as_global() => SuggestedIndex::Strict(Index::hash_map(self.group_by.clone())),
             // index by our primary key
-            this => Index::hash_map(self.out_key.clone())
+            this => SuggestedIndex::Strict(Index::hash_map(self.out_key.clone()))
         }
     }
 

@@ -214,6 +214,65 @@ impl ColumnSource {
     }
 }
 
+/// A request from an [`Ingredient`] for an index into the state of a node
+///
+/// For more information about the different kinds of indices, see [the documentation for the State
+/// trait](trait@crate::state::State)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum SuggestedIndex {
+    /// Request for a regular (strict) index
+    Strict(Index),
+
+    /// Request for a weak index.
+    ///
+    /// Because lookups into weak indices during replays are forbidden, a request for a weak index
+    /// will *also* create a [`Strict`] index with the same index type and columns.
+    Weak(Index),
+}
+
+#[allow(clippy::len_without_is_empty)]
+impl SuggestedIndex {
+    /// Return a reference to the underlying [`Index`]
+    pub fn index(&self) -> &Index {
+        match self {
+            SuggestedIndex::Strict(idx) => idx,
+            SuggestedIndex::Weak(idx) => idx,
+        }
+    }
+
+    /// Convert this SuggestedIndex into the underlying index, discarding information about whether
+    /// it's weak or strict
+    pub fn into_index(self) -> Index {
+        match self {
+            SuggestedIndex::Strict(idx) => idx,
+            SuggestedIndex::Weak(idx) => idx,
+        }
+    }
+
+    /// Return a reference to the set of columns in the underlying [`Index`]
+    pub fn columns(&self) -> &[usize] {
+        &self.index().columns
+    }
+
+    /// Return the length of the columns in the underlying [`Index`]
+    pub fn len(&self) -> usize {
+        self.index().len()
+    }
+
+    /// Returns `true` if the suggested index is [`Weak`].
+    pub fn is_weak(&self) -> bool {
+        matches!(self, Self::Weak(..))
+    }
+}
+
+impl std::ops::Index<usize> for SuggestedIndex {
+    type Output = usize;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.index()[index]
+    }
+}
+
 pub(crate) trait Ingredient
 where
     Self: Send,
@@ -240,7 +299,7 @@ where
     ///
     /// Note that a vector of length > 1 for any one node means that that node should be given a
     /// *compound* key, *not* that multiple columns should be independently indexed.
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index>;
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex>;
 
     /// Provide information about where the `cols` come from for the materialization planner
     /// (among other things) to make use of. (See the [`ColumnSource`] docs for more.)

@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::processing::SuggestedIndex;
 use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
@@ -333,10 +334,13 @@ impl Base {
         })
     }
 
-    pub(in crate::node) fn suggest_indexes(&self, n: NodeIndex) -> HashMap<NodeIndex, Index> {
+    pub(in crate::node) fn suggest_indexes(
+        &self,
+        n: NodeIndex,
+    ) -> HashMap<NodeIndex, SuggestedIndex> {
         if let Some(ref pk) = self.primary_key {
             hashmap! {
-                n => Index::hash_map(pk.clone())
+                n => SuggestedIndex::Strict(Index::hash_map(pk.clone()))
             }
         } else {
             HashMap::new()
@@ -402,8 +406,11 @@ mod tests {
             graph.node_weight_mut(global).unwrap().on_commit(&remap);
             graph.node_weight_mut(global).unwrap().add_to(0.into());
 
-            for (_, index) in graph[global].suggest_indexes(global) {
-                state.add_key(&index, None);
+            for (_, suggested_index) in graph[global].suggest_indexes(global) {
+                match suggested_index {
+                    SuggestedIndex::Strict(index) => state.add_key(&index, None),
+                    SuggestedIndex::Weak(index) => state.add_weak_key(&index),
+                }
             }
 
             let mut states = StateMap::new();

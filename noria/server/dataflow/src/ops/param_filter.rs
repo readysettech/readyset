@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::prelude::*;
-use crate::processing::ColumnSource;
+use crate::processing::{ColumnSource, SuggestedIndex};
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
@@ -72,7 +72,7 @@ impl Ingredient for ParamFilter {
         vec![self.src.as_global()]
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         HashMap::new()
     }
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::prelude::*;
 use crate::processing::ColumnSource;
+use crate::processing::SuggestedIndex;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
@@ -49,7 +50,7 @@ impl Ingredient for Identity {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         HashMap::new()
     }
 

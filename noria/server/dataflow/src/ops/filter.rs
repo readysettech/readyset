@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
-use crate::processing::ColumnSource;
+use crate::processing::{ColumnSource, SuggestedIndex};
 use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
@@ -63,7 +63,7 @@ impl Ingredient for Filter {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         HashMap::new()
     }
 

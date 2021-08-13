@@ -703,16 +703,19 @@ impl<'a> Plan<'a> {
             }
         } else {
             // not a reader
+
+            let weak = self.m.added_weak.remove(&self.node).unwrap_or_default();
+
             if self.partial {
-                let indices = self
+                let strict = self
                     .tags
                     .drain()
                     .map(|(k, paths)| (k, paths.into_iter().map(|(tag, _)| tag).collect()))
                     .collect();
-                InitialState::PartialLocal(indices)
+                InitialState::PartialLocal { strict, weak }
             } else {
-                let indices = self.tags.drain().map(|(k, _)| k).collect();
-                InitialState::IndexedLocal(indices)
+                let strict = self.tags.drain().map(|(k, _)| k).collect();
+                InitialState::IndexedLocal { strict, weak }
             }
         };
 

@@ -13,6 +13,7 @@ use std::num::NonZeroUsize;
 use crate::prelude::*;
 
 use crate::processing::ColumnSource;
+use crate::processing::SuggestedIndex;
 use nom_sql::OrderType;
 use noria::errors::{internal_err, ReadySetResult};
 
@@ -367,9 +368,9 @@ impl Ingredient for TopK {
         })
     }
 
-    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, noria::internal::Index> {
+    fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         hashmap! {
-            this => noria::internal::Index::hash_map(self.group_by.clone())
+            this => SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone()))
         }
     }
 
@@ -633,8 +634,8 @@ mod tests {
         let idx = g.node().suggest_indexes(me);
         assert_eq!(idx.len(), 1);
         assert_eq!(
-            *idx.iter().next().unwrap().1,
-            noria::internal::Index::hash_map(vec![1])
+            idx.values().next().unwrap(),
+            &SuggestedIndex::Strict(noria::internal::Index::hash_map(vec![1]))
         );
     }
 

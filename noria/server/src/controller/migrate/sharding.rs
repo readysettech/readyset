@@ -70,6 +70,7 @@ pub fn shard(
             // non-internal nodes are always pass-through
             HashMap::new()
         };
+
         if need_sharding.is_empty()
             && (input_shardings.len() == 1 || input_shardings.iter().all(|(_, &s)| s.is_none()))
         {
@@ -110,13 +111,7 @@ pub fn shard(
             continue;
         }
 
-        let mut complex = false;
-        for lookup_col in need_sharding.values() {
-            if lookup_col.len() != 1 {
-                complex = true;
-            }
-        }
-        if complex {
+        if need_sharding.values().any(|idx| idx.len() != 1) {
             if !graph[node].is_base() {
                 // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
@@ -190,9 +185,9 @@ pub fn shard(
                     // lookups based on any *other* columns in any ancestor. if we do, we must
                     // force no sharding :(
                     let mut ok = true;
-                    for (ni, lookup_col) in &need_sharding {
-                        invariant_eq!(lookup_col.len(), 1);
-                        let lookup_col = lookup_col[0];
+                    for (ni, suggested_index) in &need_sharding {
+                        invariant_eq!(suggested_index.len(), 1);
+                        let lookup_col = suggested_index[0];
 
                         if let Some(&in_shard_col) = want_sharding_input.get(ni) {
                             if in_shard_col != lookup_col {
@@ -300,7 +295,7 @@ pub fn shard(
 
                     for &(ni, src) in &srcs {
                         match need_sharding.get(&ni) {
-                            Some(col) if col.len() != 1 => {
+                            Some(index) if index.len() != 1 => {
                                 // we're looking up by a compound key -- that's hard to shard
                                 trace!(log, "column traces to node looked up in by compound key";
                                    "node" => ?node,
@@ -309,14 +304,14 @@ pub fn shard(
                                 // give up and just force no sharding
                                 break 'outer;
                             }
-                            Some(col) if col[0] != src => {
+                            Some(index) if index[0] != src => {
                                 // we're looking up by a different key. it's kind of weird that this
                                 // output column still resolved to a column in all our inputs...
                                 trace!(log, "column traces to node that is not looked up by";
-                                   "node" => ?node,
-                                   "ancestor" => ?ni,
-                                   "column" => src,
-                                   "lookup" => col[0]);
+                                       "node" => ?node,
+                                       "ancestor" => ?ni,
+                                       "column" => src,
+                                       "index" => ?index);
                                 // let's hope another column works instead
                                 continue 'outer;
                             }

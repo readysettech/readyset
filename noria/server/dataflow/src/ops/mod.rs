@@ -19,7 +19,7 @@ pub mod trigger;
 pub mod union;
 
 use crate::ops::grouped::concat::GroupConcat;
-use crate::processing::{ColumnMiss, ColumnSource};
+use crate::processing::{ColumnMiss, ColumnSource, SuggestedIndex};
 pub use msql_srv::MysqlTime;
 
 /// Enum for distinguishing between the two parents of a union or join
@@ -125,7 +125,7 @@ impl Ingredient for NodeOperator {
     fn must_replay_among(&self) -> Option<HashSet<NodeIndex>> {
         impl_ingredient_fn_ref!(self, must_replay_among,)
     }
-    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, you: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         impl_ingredient_fn_ref!(self, suggest_indexes, you)
     }
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
@@ -233,6 +233,7 @@ pub mod test {
 
     use crate::node;
     use crate::prelude::*;
+    use crate::processing::SuggestedIndex;
 
     use petgraph::graph::NodeIndex;
 
@@ -331,9 +332,12 @@ pub mod test {
 
             // we need to set the indices for all the base tables so they *actually* store things.
             let idx = self.graph[global].suggest_indexes(global);
-            for (tbl, index) in idx {
+            for (tbl, suggested_index) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
-                    s.add_key(&index, None);
+                    s.add_key(suggested_index.index(), None);
+                    if suggested_index.is_weak() {
+                        s.add_weak_key(suggested_index.index())
+                    }
                 }
             }
             // and get rid of states we don't need
@@ -407,9 +411,12 @@ pub mod test {
             let global = self.nut.unwrap().as_global();
             let idx = self.graph[global].suggest_indexes(global);
             let mut state = MemoryState::default();
-            for (tbl, index) in idx {
+            for (tbl, suggested_index) in idx {
                 if tbl == base.as_global() {
-                    state.add_key(&index, None);
+                    match suggested_index {
+                        SuggestedIndex::Strict(index) => state.add_key(&index, None),
+                        SuggestedIndex::Weak(index) => state.add_weak_key(&index),
+                    }
                 }
             }
 

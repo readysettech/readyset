@@ -209,7 +209,7 @@ impl GroupedOperation for GroupConcat {
 mod tests {
     use super::*;
 
-    use crate::ops;
+    use crate::{ops, SuggestedIndex};
     use std::convert::TryInto;
 
     fn setup(mat: bool) -> ops::test::MockGraph {
@@ -392,7 +392,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], Index::hash_map(vec![0]));
+        assert_eq!(idx[&me], SuggestedIndex::Strict(Index::hash_map(vec![0])));
     }
 
     #[test]

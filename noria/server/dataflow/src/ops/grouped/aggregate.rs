@@ -286,7 +286,7 @@ impl GroupedOperation for Aggregator {
 mod tests {
     use super::*;
 
-    use crate::ops;
+    use crate::{ops, SuggestedIndex};
 
     fn setup(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -1051,7 +1051,7 @@ mod tests {
         assert!(idx.contains_key(&me));
 
         // should only index on the group-by column
-        assert_eq!(idx[&me], Index::hash_map(vec![0]));
+        assert_eq!(idx[&me], SuggestedIndex::Strict(Index::hash_map(vec![0])));
     }
 
     #[test]

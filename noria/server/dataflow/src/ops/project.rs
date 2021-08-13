@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::iter;
 
 use crate::prelude::*;
-use crate::processing::ColumnSource;
+use crate::processing::{ColumnSource, SuggestedIndex};
 use dataflow_expression::Expression;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
@@ -231,7 +231,7 @@ impl Ingredient for Project {
         })
     }
 
-    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, Index> {
+    fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         HashMap::new()
     }
 

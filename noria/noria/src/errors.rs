@@ -45,6 +45,8 @@ pub fn wrap_boxed_error(
 /// [`ReadySetError::InvalidNodeType`]
 #[derive(Serialize, Deserialize, Debug, Display)]
 pub enum NodeType {
+    /// Base table nodes
+    Base,
     /// Egress nodes
     Egress,
     /// Reader nodes
