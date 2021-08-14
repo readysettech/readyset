@@ -1,0 +1,74 @@
+steps:
+  - label: ":docker: Build Substrate Rust Checks Image"
+    key: build-rust-checks-image
+    commands:
+      - "echo --- :docker: Building image"
+      - >-
+        docker build -f Dockerfile.rust-checks \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest \
+          .
+      - "echo --- :docker: Pushing image"
+      - "docker image push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks"
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
+  - label: ":rust: Check rustfmt"
+    key: check-rustfmt
+    commands:
+      - "cargo --locked fmt -- --check"
+    depends_on:
+      - build-rust-checks-image
+    plugins:
+      - docker#v3.7.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest"
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ":rust: :clippy: Check clippy"
+    key: check-clippy
+    commands:
+      - cargo --locked clippy --all -- -D warnings
+    depends_on:
+      - build-rust-checks-image
+    plugins:
+      - docker#v3.7.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest"
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ":rust: :docker: Build Substrate Runtime Image"
+    key: build-runtime-image
+    commands:
+      - "echo --- :docker: Building image"
+      - >-
+        docker build \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT} \
+          .
+      - "echo --- :docker: Add latest tag for caching"
+      - >-
+        docker image tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT} \
+          305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:latest
+      - "echo --- :docker: Pushing image"
+      - "docker image push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime"
+    depends_on:
+      - check-rustfmt
+      - check-clippy
+    plugins:
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ":pipeline: Upload Pipeline"
+    commands:
+      - buildkite-upload-pipeline
+    depends_on:
+      - build-runtime-image
+    plugins:
+      - docker#v3.7.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
+          shell: false
+          propagate-environment: true
+      - ecr#v2.2.0:
+          login: true
