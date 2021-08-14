@@ -11,7 +11,8 @@ use chrono_tz::Tz;
 use maths::int::integer_rnd;
 use msql_srv::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
-use noria::{unsupported, DataType, ReadySetError, ReadySetResult};
+use noria::util::like::{CaseInsensitive, CaseSensitive, LikePattern};
+use noria::{DataType, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +229,34 @@ impl Expression {
 
                 let left = left.eval(record)?;
                 let right = right.eval(record)?;
+
+                macro_rules! like {
+                    ($case_sensitivity: expr, $negated: expr) => {{
+                        match (
+                            left.coerce_to(&SqlType::Text),
+                            right.coerce_to(&SqlType::Text),
+                        ) {
+                            (Ok(left), Ok(right)) => {
+                                // NOTE(grfn): At some point, we may want to optimize this to
+                                // pre-cache the LikePattern if the value is constant, since
+                                // constructing a new LikePattern can be kinda slow
+                                let pat = LikePattern::new(
+                                    // unwrap: we just coerced it to Text, so it's definitely a string
+                                    String::try_from(right.as_ref()).unwrap().as_str(),
+                                    $case_sensitivity,
+                                );
+                                let matches =
+                                    // unwrap: we just coerced it to Text, so it's definitely a string
+                                    pat.matches(String::try_from(left.as_ref()).unwrap().as_str());
+                                Ok(Cow::Owned(if $negated { !matches } else { matches }.into()))
+                            }
+                            // Anything that isn't Text or text-coercible can never be LIKE
+                            // anything, so we return true if not negated, false otherwise
+                            _ => Ok(Cow::Owned(DataType::from(!$negated))),
+                        }
+                    }};
+                }
+
                 match op {
                     Add => Ok(Cow::Owned((non_null!(left) + non_null!(right))?)),
                     Subtract => Ok(Cow::Owned((non_null!(left) - non_null!(right))?)),
@@ -247,9 +276,10 @@ impl Expression {
                     LessOrEqual => Ok(Cow::Owned((non_null!(left) <= non_null!(right)).into())),
                     Is => Ok(Cow::Owned((left == right).into())),
                     IsNot => Ok(Cow::Owned((left != right).into())),
-                    Like | NotLike | ILike | NotILike => {
-                        unsupported!("Unsupported operator in expression: {}", op)
-                    }
+                    Like => like!(CaseSensitive, false),
+                    NotLike => like!(CaseSensitive, true),
+                    ILike => like!(CaseInsensitive, false),
+                    NotILike => like!(CaseInsensitive, true),
                 }
             }
             Cast(expr, ty) => match expr.eval(record)? {
@@ -1144,6 +1174,17 @@ mod tests {
             expr.eval(&[8.into()]).unwrap().as_ref(),
             &DataType::try_from("no").unwrap()
         );
+    }
+
+    #[test]
+    fn like_expr() {
+        let expr = Expression::Op {
+            left: Box::new(Expression::Literal("foo".into())),
+            op: BinaryOperator::Like,
+            right: Box::new(Expression::Literal("f%".into())),
+        };
+        let res = expr.eval(&[]).unwrap();
+        assert!(res.is_truthy());
     }
 
     mod builtin_funcs {
