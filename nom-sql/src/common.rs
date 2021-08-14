@@ -154,8 +154,8 @@ impl Hash for Real {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ItemPlaceholder {
     QuestionMark,
-    DollarNumber(i32),
-    ColonNumber(i32),
+    DollarNumber(u32),
+    ColonNumber(u32),
 }
 
 impl ToString for ItemPlaceholder {
@@ -1065,14 +1065,14 @@ pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
         map(
             preceded(
                 tag(":"),
-                map_res(map_res(digit1, str::from_utf8), i32::from_str),
+                map_res(map_res(digit1, str::from_utf8), u32::from_str),
             ),
             |num| Literal::Placeholder(ItemPlaceholder::ColonNumber(num)),
         ),
         map(
             preceded(
                 tag("$"),
-                map_res(map_res(digit1, str::from_utf8), i32::from_str),
+                map_res(map_res(digit1, str::from_utf8), u32::from_str),
             ),
             |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
         ),
