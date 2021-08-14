@@ -11,8 +11,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
-use super::Authority;
 use super::CONTROLLER_KEY;
+use super::{Authority, LeaderPayload};
 use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
 use backoff::backoff::Backoff;
@@ -157,10 +157,10 @@ impl ZookeeperAuthority {
 }
 
 impl Authority for ZookeeperAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Vec<u8>>, Error> {
+    fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let path = match self.zk.create(
             CONTROLLER_KEY,
-            payload_data.clone(),
+            serde_json::to_vec(&payload)?,
             Acl::open_unsafe().clone(),
             CreateMode::Ephemeral,
         ) {
@@ -170,10 +170,11 @@ impl Authority for ZookeeperAuthority {
         };
 
         let (ref current_data, ref stat) = self.zk.get_data(&path, false)?;
-        if *current_data == payload_data {
+        let current_payload = serde_json::from_slice::<LeaderPayload>(current_data)?;
+        if current_payload == payload {
             info!(self.log, "became leader at epoch {}", stat.czxid);
             self.update_leader_create_epoch(Some(stat.czxid))?;
-            Ok(Some(payload_data))
+            Ok(Some(payload))
         } else {
             Ok(None)
         }
@@ -184,12 +185,13 @@ impl Authority for ZookeeperAuthority {
         Ok(())
     }
 
-    fn get_leader(&self) -> Result<Vec<u8>, Error> {
+    fn get_leader(&self) -> Result<LeaderPayload, Error> {
         loop {
             match self.zk.get_data(CONTROLLER_KEY, false) {
                 Ok((data, stat)) => {
                     self.update_leader_create_epoch(Some(stat.czxid))?;
-                    return Ok(data);
+                    let payload = serde_json::from_slice(&data)?;
+                    return Ok(payload);
                 }
                 Err(ZkError::NoNode) => {}
                 Err(e) => bail!(e),
@@ -209,18 +211,19 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
-    fn try_get_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         match self.zk.get_data(CONTROLLER_KEY, false) {
             Ok((data, stat)) => {
                 self.update_leader_create_epoch(Some(stat.czxid))?;
-                Ok(Some(data))
+                let payload = serde_json::from_slice(&data)?;
+                Ok(Some(payload))
             }
             Err(ZkError::NoNode) => Ok(None),
             Err(e) => bail!(e),
         }
     }
 
-    fn await_new_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+    fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         let inner = self.read_inner()?;
         let current_epoch = inner.leader_create_epoch;
         let is_new_epoch = |stat: &Stat| {
@@ -236,7 +239,8 @@ impl Authority for ZookeeperAuthority {
                 Ok((_, ref stat)) if !is_new_epoch(stat) => {}
                 Ok((data, stat)) => {
                     self.update_leader_create_epoch(Some(stat.czxid))?;
-                    return Ok(Some(data));
+                    let payload = serde_json::from_slice(&data)?;
+                    return Ok(Some(payload));
                 }
                 Err(ZkError::NoNode) => return Ok(None),
                 Err(e) => bail!(e),
@@ -250,9 +254,9 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
-    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    fn try_read<P: DeserializeOwned>(&self, path: &str) -> Result<Option<P>, Error> {
         match self.zk.get_data(path, false) {
-            Ok((data, _)) => Ok(Some(data)),
+            Ok((data, _)) => Ok(Some(serde_json::from_slice(&data)?)),
             Err(ZkError::NoNode) => Ok(None),
             Err(e) => bail!(e),
         }
@@ -300,6 +304,14 @@ impl Authority for ZookeeperAuthority {
             }
         }
     }
+
+    fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+        match self.zk.get_data(path, false) {
+            Ok((data, _)) => Ok(Some(data)),
+            Err(ZkError::NoNode) => Ok(None),
+            Err(e) => bail!(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -313,24 +325,34 @@ mod tests {
     fn it_works() {
         let authority =
             Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works").unwrap());
-        assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
+        assert!(authority.try_read::<u32>("/a").unwrap().is_none());
         assert_eq!(
             authority
                 .read_modify_write("/a", |_: Option<u32>| -> Result<u32, u32> { Ok(12) })
                 .unwrap(),
             Ok(12)
         );
+        assert_eq!(authority.try_read("/a").unwrap(), Some(12));
+
+        let payload = LeaderPayload {
+            controller_uri: url::Url::parse("a").unwrap(),
+            nonce: 1,
+        };
+        let expected_leader_payload = payload.clone();
         assert_eq!(
-            authority.try_read("/a").unwrap(),
-            Some("12".bytes().collect())
+            authority.become_leader(payload.clone()).unwrap(),
+            Some(payload)
         );
-        authority.become_leader(vec![15]).unwrap();
-        assert_eq!(authority.get_leader().unwrap(), vec![15]);
+        assert_eq!(&authority.get_leader().unwrap(), &expected_leader_payload);
         {
             let authority = authority.clone();
-            thread::spawn(move || authority.become_leader(vec![20]).unwrap());
+            let payload = LeaderPayload {
+                controller_uri: url::Url::parse("b").unwrap(),
+                nonce: 2,
+            };
+            thread::spawn(move || authority.become_leader(payload).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap(), vec![15]);
+        assert_eq!(&authority.get_leader().unwrap(), &expected_leader_payload);
     }
 }

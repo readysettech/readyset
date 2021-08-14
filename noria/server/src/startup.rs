@@ -261,7 +261,7 @@ impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, path) if path.starts_with("/zookeeper/") => {
-                let res = match self.authority.try_read(&format!("/{}", &path[11..])) {
+                let res = match self.authority.try_read_raw(&format!("/{}", &path[11..])) {
                     Ok(Some(data)) => res
                         .header(CONTENT_TYPE, "application/json")
                         .body(hyper::Body::from(data)),
