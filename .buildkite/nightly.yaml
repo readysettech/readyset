@@ -8,6 +8,7 @@ steps:
       docker build -f build/Dockerfile \
         --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
         -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
+        .
     - 'echo --- :docker: Pushing image'
     - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
     plugins:
