@@ -2,7 +2,10 @@
 #[macro_use]
 extern crate tracing;
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use async_trait::async_trait;
+use clap::Clap;
 use tokio::net;
 
 use msql_srv::MysqlIntermediary;
@@ -32,14 +35,23 @@ impl ConnectionHandler for MysqlHandler {
     }
 }
 
-fn main() {
+#[derive(Clap)]
+struct Options {
+    #[clap(flatten)]
+    adapter_options: noria_client_adapter::Options,
+}
+
+fn main() -> anyhow::Result<()> {
+    let options = Options::parse();
+
     let mut adapter = NoriaAdapter {
         name: "noria-mysql",
         version: "0.0.1",
         description: "MySQL adapter for Noria.",
-        default_address: "127.0.0.1:3306",
+        default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
         connection_handler: MysqlHandler,
         database_type: DatabaseType::Mysql,
     };
-    adapter.run()
+
+    adapter.run(options.adapter_options)
 }
