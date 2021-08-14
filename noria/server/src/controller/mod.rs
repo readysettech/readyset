@@ -425,17 +425,15 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
     rt_handle: tokio::runtime::Handle,
     region: Option<String>,
 ) -> JoinHandle<()> {
-    let descriptor_bytes = serde_json::to_vec(&descriptor).unwrap();
     let handle = rt_handle.clone();
     let authority_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
-        let payload_to_event = |payload: Vec<u8>| -> Result<CampaignUpdate, anyhow::Error> {
-            let descriptor: ControllerDescriptor = serde_json::from_slice(&payload[..])?;
-            let leader_state = authority
-                .try_read(STATE_KEY)?
-                .ok_or_else(|| anyhow!("Key does not yet exist"))?;
-            let state: ControllerState = serde_json::from_slice(&leader_state)?;
-            Ok(CampaignUpdate::LeaderChange(state, descriptor))
-        };
+        let payload_to_event =
+            |descriptor: ControllerDescriptor| -> Result<CampaignUpdate, anyhow::Error> {
+                let state: ControllerState = authority
+                    .try_read(STATE_KEY)?
+                    .ok_or_else(|| anyhow!("Key does not yet exist"))?;
+                Ok(CampaignUpdate::LeaderChange(state, descriptor))
+            };
 
         let mut retries = 5;
         let mut leader_state_retries = 5;
@@ -503,7 +501,7 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
             // Becoming leader requires creating an ephemeral key and then doing an atomic
             // update to another.
             // TODO(harley): This still needs to be cleaned up further but leaving for now to minimize changes
-            let _leader_descriptor = match authority.become_leader(descriptor_bytes.clone())? {
+            let _leader_descriptor = match authority.become_leader(descriptor.clone())? {
                 Some(leader_descriptor) => leader_descriptor,
                 None => continue,
             };

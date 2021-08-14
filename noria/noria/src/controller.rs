@@ -35,7 +35,7 @@ use url::Url;
 ///
 /// A serialized version of this struct is stored in ZooKeeper so that clients can reach the
 /// currently active controller.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[doc(hidden)]
 pub struct ControllerDescriptor {
     pub controller_uri: Url,
@@ -97,10 +97,9 @@ where
                 if url.is_none() {
                     // TODO: don't do blocking things here...
                     // TODO: cache this value?
-                    let descriptor: ControllerDescriptor =
-                        serde_json::from_slice(&auth.get_leader().map_err(|e| {
-                            internal_err(format!("failed to get current leader: {}", e))
-                        })?)?;
+                    let descriptor: ControllerDescriptor = auth.get_leader().map_err(|e| {
+                        internal_err(format!("failed to get current leader: {}", e))
+                    })?;
 
                     url = Some(descriptor.controller_uri.join(path)?);
                 }

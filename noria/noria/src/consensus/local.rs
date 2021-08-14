@@ -15,8 +15,8 @@ use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use super::Authority;
 use super::CONTROLLER_KEY;
+use super::{Authority, LeaderPayload};
 use crate::errors::internal_err;
 
 struct LocalAuthorityStoreInner {
@@ -133,13 +133,13 @@ impl Clone for LocalAuthority {
 }
 
 impl Authority for LocalAuthority {
-    fn become_leader(&self, payload_data: Vec<u8>) -> Result<Option<Vec<u8>>, Error> {
+    fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let mut store_inner = self.store.inner_lock()?;
 
         if !store_inner.keys.contains_key(CONTROLLER_KEY) {
             store_inner
                 .keys
-                .insert(CONTROLLER_KEY.to_owned(), payload_data.clone());
+                .insert(CONTROLLER_KEY.to_owned(), serde_json::to_vec(&payload)?);
 
             store_inner.leader_epoch += 1;
 
@@ -147,7 +147,7 @@ impl Authority for LocalAuthority {
             inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
             self.store.inner_notify_all();
-            Ok(Some(payload_data))
+            Ok(Some(payload))
         } else {
             Ok(None)
         }
@@ -166,7 +166,7 @@ impl Authority for LocalAuthority {
         Ok(())
     }
 
-    fn get_leader(&self) -> Result<Vec<u8>, Error> {
+    fn get_leader(&self) -> Result<LeaderPayload, Error> {
         let mut store_inner = self.store.inner_lock()?;
         while !store_inner.keys.contains_key(CONTROLLER_KEY) {
             store_inner = self.store.inner_wait(store_inner)?;
@@ -175,25 +175,33 @@ impl Authority for LocalAuthority {
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
-        store_inner
-            .keys
-            .get(CONTROLLER_KEY)
-            .ok_or_else(|| {
-                anyhow::Error::from(internal_err("no keys found when looking for leader"))
-            })
-            .map(|keys| keys.clone())
+        match store_inner.keys.get(CONTROLLER_KEY) {
+            Some(data) => match serde_json::from_slice(data) {
+                Ok(payload) => Ok(payload),
+                Err(e) => bail!(internal_err(format!(
+                    "failed to deserialize leader payload '{}'",
+                    e
+                ))),
+            },
+            None => {
+                bail!(internal_err("no keys found when looking for leader"))
+            }
+        }
     }
 
-    fn try_get_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         let store_inner = self.store.inner_lock()?;
 
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
-        Ok(store_inner.keys.get(CONTROLLER_KEY).cloned())
+        Ok(store_inner
+            .keys
+            .get(CONTROLLER_KEY)
+            .and_then(|data| serde_json::from_slice(data).ok()))
     }
 
-    fn await_new_leader(&self) -> Result<Option<Vec<u8>>, Error> {
+    fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
             let inner = self.inner_read()?;
             if let Some(epoch) = inner.known_leader_epoch {
@@ -212,12 +220,21 @@ impl Authority for LocalAuthority {
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
 
-        Ok(store_inner.keys.get(CONTROLLER_KEY).cloned())
+        Ok(store_inner
+            .keys
+            .get(CONTROLLER_KEY)
+            .and_then(|data| serde_json::from_slice(data).ok()))
     }
 
-    fn try_read(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    where
+        P: DeserializeOwned,
+    {
         let store_inner = self.store.inner_lock()?;
-        Ok(store_inner.keys.get(path).cloned())
+        Ok(store_inner
+            .keys
+            .get(path)
+            .and_then(|data| serde_json::from_slice(data).ok()))
     }
 
     fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
@@ -238,6 +255,11 @@ impl Authority for LocalAuthority {
         }
         Ok(r)
     }
+
+    fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+        let store_inner = self.store.inner_lock()?;
+        Ok(store_inner.keys.get(path).cloned())
+    }
 }
 
 #[cfg(test)]
@@ -251,8 +273,7 @@ mod tests {
     fn it_works() {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-        assert!(authority.try_read(CONTROLLER_KEY).unwrap().is_none());
-        assert!(authority.try_read("/a").unwrap().is_none());
+        assert!(authority.try_read::<u32>("/a").unwrap().is_none());
         assert_eq!(
             authority
                 .read_modify_write("/a", |arg: Option<u32>| -> Result<u32, u32> {
@@ -262,17 +283,27 @@ mod tests {
                 .unwrap(),
             Ok(12)
         );
+        assert_eq!(authority.try_read("/a").unwrap(), Some(12));
+
+        let payload = LeaderPayload {
+            controller_uri: url::Url::parse("http://a").unwrap(),
+            nonce: 1,
+        };
+        let leader_payload = payload.clone();
         assert_eq!(
-            authority.try_read("/a").unwrap(),
-            Some("12".bytes().collect())
+            authority.become_leader(payload.clone()).unwrap(),
+            Some(payload)
         );
-        assert_eq!(authority.become_leader(vec![15]).unwrap(), Some(vec![15]));
-        assert_eq!(authority.get_leader().unwrap(), vec![15]);
+        assert_eq!(authority.get_leader().unwrap(), leader_payload);
         {
             let authority = authority.clone();
-            thread::spawn(move || authority.become_leader(vec![20]).unwrap());
+            let payload = LeaderPayload {
+                controller_uri: url::Url::parse("http://b").unwrap(),
+                nonce: 2,
+            };
+            thread::spawn(move || authority.become_leader(payload));
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap(), vec![15]);
+        assert_eq!(authority.get_leader().unwrap(), leader_payload);
     }
 }

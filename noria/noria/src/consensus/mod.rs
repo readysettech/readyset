@@ -11,17 +11,25 @@ use serde::Serialize;
 
 mod local;
 mod zk;
+use crate::ControllerDescriptor;
+
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::zk::ZookeeperAuthority;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
 
+// This should be an associated type on Authority but since Authority will only have one possible
+// type inside of Noria, we are using a type alias here instead.
+// If Authority ever moves out of Noria, it should become an associated type.
+// LeaderPayload must be Serialize + DeserializeOwned + PartialEq
+type LeaderPayload = ControllerDescriptor;
+
 pub trait Authority: Send + Sync {
     /// Attempt to become leader with a specific payload. The payload should be something that can
     /// be deserialized to get the information on how to connect to the leader. If it is successful
     /// the this will return Some(payload), otherwise None and another instance has become leader.
-    fn become_leader(&self, payload: Vec<u8>) -> Result<Option<Vec<u8>>, Error>;
+    fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error>;
 
     /// Voluntarily give up leadership, allowing another node to become leader. It is extremely
     /// important that the node calling this function is actually the leader.
@@ -29,32 +37,36 @@ pub trait Authority: Send + Sync {
 
     /// Returns the payload for the current leader, blocking if there is not currently a leader.
     /// This method is intended for clients to determine the current leader.
-    fn get_leader(&self) -> Result<Vec<u8>, Error>;
-
+    fn get_leader(&self) -> Result<LeaderPayload, Error>;
     /// Same as `get_leader` but return None if there is no leader instead of blocking.
-    fn try_get_leader(&self) -> Result<Option<Vec<u8>>, Error>;
+    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error>;
 
     /// Wait until a new leader has been elected, and then return the leader payload epoch or None
     /// if a new leader needs to be elected. This method enables a leader to watch to see if it has
     /// been overthrown.
-    fn await_new_leader(&self) -> Result<Option<Vec<u8>>, Error>;
+    fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error>;
 
     /// Do a non-blocking read at the indicated key.
-    fn try_read(&self, key: &str) -> Result<Option<Vec<u8>>, Error>;
+    fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    where
+        P: DeserializeOwned;
+
+    // Temporarily here to support arbitrary introspection into the authority. Will replace with
+    // better functions later.
+    fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error>;
 
     /// Repeatedly attempts to do a read modify write operation. Each attempt consists of a read of
     /// the indicated node, a call to `f` with the data read (or None if the node did not exist),
     /// and finally a write back to the node if it hasn't changed from when it was originally
     /// written. The process aborts when a write succeeds or a call to `f` returns `Err`. In either
     /// case, returns the last value produced by `f`.
-    fn read_modify_write<F, P, E>(&self, key: &str, f: F) -> Result<Result<P, E>, Error>
+    fn read_modify_write<F, P, E>(&self, path: &str, f: F) -> Result<Result<P, E>, Error>
     where
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned;
 
     // Currently all these APIs do not exist but are planned to.
 
-    // type LeaderPayload;
     // type WorkerPayload;
 
     // Register a worker with a payload. Returns a unique identifier that represents this worker if successful.
@@ -88,8 +100,6 @@ pub trait Authority: Send + Sync {
     // Will return an Err if this worker should not be attempting this. The status of this will be
     // returned on the next heartbeat
     //fn become_leader(&self, payload: LeaderPayload) -> Result<(), Error>
-    //where
-    //    LeaderPayload: Serialize;
 
     // Run this instead of heartbeat if you are the leader to get updates about other workers and
     // to confirm this worker is still the leader.
