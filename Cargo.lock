@@ -70,9 +70,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.41"
+version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15af2628f6890fe2609a3b91bef4c83450512802e59489f9c1cb1fa5df064a61"
+checksum = "595d3cfa7a60d4555cb5067b99f07142a08ea778de5cf993f7b75c7d8fabc486"
 
 [[package]]
 name = "arccstr"
@@ -3302,7 +3302,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 2.33.3",
+ "clap 3.0.0-beta.2",
  "futures-util",
  "maplit",
  "metrics",
@@ -3441,7 +3441,9 @@ dependencies = [
 name = "noria-mysql"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "async-trait",
+ "clap 3.0.0-beta.2",
  "msql-srv",
  "noria",
  "noria-client",
@@ -3454,9 +3456,11 @@ dependencies = [
 name = "noria-psql"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arccstr",
  "async-trait",
  "chrono",
+ "clap 3.0.0-beta.2",
  "msql-srv",
  "nom-sql",
  "noria",
