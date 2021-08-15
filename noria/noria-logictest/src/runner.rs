@@ -470,23 +470,22 @@ impl TestScript {
                 None => None,
             };
 
-            let backend_builder = BackendBuilder::new();
-
-            let backend_builder = if let Some(url) = binlog_url {
-                let writer = MySqlConnector::new(url);
-                backend_builder.writer(writer.await)
+            let writer = if let Some(url) = binlog_url {
+                MySqlConnector::new(url).await.into()
             } else {
-                let writer = NoriaConnector::new(ch, auto_increments, query_cache, None);
-                backend_builder.writer(writer.await)
+                NoriaConnector::new(ch, auto_increments, query_cache, None)
+                    .await
+                    .into()
             };
 
-            let backend = backend_builder
-                .reader(Reader {
-                    mysql_connector,
-                    noria_connector,
-                })
+            let reader = Reader {
+                mysql_connector,
+                noria_connector,
+            };
+
+            let backend = BackendBuilder::new()
                 .require_authentication(false)
-                .build();
+                .build(writer, reader);
 
             MysqlIntermediary::run_on_tcp(backend, s).await.unwrap();
         });

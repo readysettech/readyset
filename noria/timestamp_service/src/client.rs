@@ -27,6 +27,7 @@ pub enum WriteKey {
 // TODO(andrew): TimestampClient only works with MySQL.
 // https://app.clubhouse.io/readysettech/story/368
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct TimestampClient {}
 
 impl TimestampClient {
