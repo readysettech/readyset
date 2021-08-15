@@ -106,13 +106,11 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let b = BackendBuilder::new()
         .sanitize(sanitize)
         .static_responses(static_responses)
-        .writer(writer)
-        .reader(reader)
         .slowlog(slowlog)
         .permissive(permissive)
         .require_authentication(false)
         .enable_ryw(read_your_write)
-        .build();
+        .build(writer, reader);
 
     let jsclient = RefCell::new(JsClient::new(b, rt));
     Ok(cx.boxed(jsclient))
