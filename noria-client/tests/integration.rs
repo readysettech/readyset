@@ -1312,9 +1312,6 @@ fn reuse_similar_query() {
 }
 
 #[test]
-// Test is ignored due to quoted string literal issue
-// https://readysettech.atlassian.net/browse/ENG-164.
-#[ignore]
 fn insert_quoted_string() {
     let d = Deployment::new("insert_quoted_string");
     let opts = setup(&d, true);

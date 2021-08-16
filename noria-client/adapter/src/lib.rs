@@ -91,10 +91,6 @@ pub struct Options {
     #[clap(long)]
     no_static_responses: bool,
 
-    /// Disable query sanitization. Improves latency.
-    #[clap(long)]
-    no_sanitize: bool,
-
     /// Don't require authentication for any client connections
     #[clap(long)]
     no_require_authentication: bool,
@@ -215,7 +211,6 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let region = options.region.clone();
             let mysql_url = options.mysql_url.clone();
             let backend_builder = BackendBuilder::new()
-                .sanitize(!options.no_sanitize)
                 .static_responses(!options.no_static_responses)
                 .slowlog(options.log_slow)
                 .permissive(options.permissive)

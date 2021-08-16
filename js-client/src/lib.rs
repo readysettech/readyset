@@ -63,7 +63,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let deployment = parse_arg!("deployment", "myapp".to_string(), JsString);
     let zk_addr = parse_arg!("zookeeperAddress", "127.0.0.1:2181".to_string(), JsString);
     let mysql_address = parse_arg!("mySQLAddress", "".to_string(), JsString);
-    let sanitize = parse_arg!("sanitize", true, JsBoolean);
     let static_responses = parse_arg!("staticResponses", true, JsBoolean);
     let slowlog = parse_arg!("slowLog", false, JsBoolean);
     let permissive = parse_arg!("permissive", false, JsBoolean);
@@ -104,7 +103,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         noria_connector,
     };
     let b = BackendBuilder::new()
-        .sanitize(sanitize)
         .static_responses(static_responses)
         .slowlog(slowlog)
         .permissive(permissive)
