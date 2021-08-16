@@ -107,15 +107,14 @@ impl Writer {
         .await;
 
         let mut b = BackendBuilder::new()
+            .reader(backend::Reader {
+                mysql_connector,
+                noria_connector,
+            })
+            .writer(writer)
             .require_authentication(false)
             .enable_ryw(true)
-            .build(
-                writer,
-                backend::Reader {
-                    mysql_connector,
-                    noria_connector,
-                },
-            );
+            .build();
 
         ch.extend_recipe("QUERY w : SELECT * FROM articles WHERE id = ?;")
             .await?;

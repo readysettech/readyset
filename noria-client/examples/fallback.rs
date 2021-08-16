@@ -46,9 +46,11 @@ async fn main() {
     let writer = Writer::MySqlConnector(writer);
 
     let mut b = BackendBuilder::new()
+        .reader(reader)
+        .writer(writer)
         .require_authentication(false)
         .enable_ryw(true)
-        .build(writer, reader);
+        .build();
 
     let noria_res = b.query("select * from customers;").await;
     let mysql_res = b.query("show tables;").await;

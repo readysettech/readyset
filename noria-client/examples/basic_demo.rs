@@ -48,11 +48,13 @@ async fn main() -> Result<()> {
     let mut b = BackendBuilder::new()
         .sanitize(sanitize)
         .static_responses(static_responses)
+        .writer(writer)
+        .reader(reader)
         .slowlog(slowlog)
         .permissive(permissive)
         .users(users.clone())
         .require_authentication(require_authentication)
-        .build(writer, reader);
+        .build();
 
     let res = b.query("select * from employees;").await;
 

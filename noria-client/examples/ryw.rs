@@ -44,15 +44,14 @@ async fn main() {
     .await;
 
     let mut b = BackendBuilder::new()
+        .reader(Reader {
+            mysql_connector,
+            noria_connector,
+        })
+        .writer(writer)
         .require_authentication(false)
         .enable_ryw(true)
-        .build(
-            writer,
-            Reader {
-                mysql_connector,
-                noria_connector,
-            },
-        );
+        .build();
 
     // Install Query/Recipe to noria (must match the underlying mysql database structure)
     let test_sql_string = "

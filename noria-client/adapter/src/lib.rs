@@ -213,14 +213,12 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
+            let static_responses = !options.no_static_responses;
+            let sanitize = !options.no_sanitize;
+            let log_slow = options.log_slow;
+            let permissive = options.permissive;
+            let require_authentication = !options.no_require_authentication;
             let mysql_url = options.mysql_url.clone();
-            let backend_builder = BackendBuilder::new()
-                .sanitize(!options.no_sanitize)
-                .static_responses(!options.no_static_responses)
-                .slowlog(options.log_slow)
-                .permissive(options.permissive)
-                .users(users.clone())
-                .require_authentication(!options.no_require_authentication);
             let fut = async move {
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
@@ -260,9 +258,18 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     Writer::NoriaConnector(writer)
                 };
 
-                let backend = backend_builder.clone().build(writer, reader);
+                let b = BackendBuilder::new()
+                    .sanitize(sanitize)
+                    .static_responses(static_responses)
+                    .writer(writer)
+                    .reader(reader)
+                    .slowlog(log_slow)
+                    .permissive(permissive)
+                    .users(users.clone())
+                    .require_authentication(require_authentication)
+                    .build();
 
-                connection_handler.process_connection(s, backend).await;
+                connection_handler.process_connection(s, b).await;
 
                 debug!("disconnected");
             };
