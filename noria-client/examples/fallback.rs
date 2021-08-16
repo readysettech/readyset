@@ -24,7 +24,7 @@ async fn main() {
     let deployment = "fallback";
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
 
-    let ch = ControllerHandle::new(zk_auth).await.unwrap();
+    let ch = ControllerHandle::new(zk_auth).await;
 
     let noria_conn = NoriaConnector::new(
         ch.clone(),

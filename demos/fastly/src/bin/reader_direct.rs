@@ -168,7 +168,7 @@ impl Reader {
         run_for: &Option<u32>,
     ) -> anyhow::Result<()> {
         let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(authority).await?;
+            ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
 
         let mut last_thread_update = Instant::now();
@@ -394,7 +394,7 @@ impl Reader {
         let authority = Arc::new(ZookeeperAuthority::new(&self.zookeeper_url)?);
 
         let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(Arc::clone(&authority)).await?;
+            ControllerHandle::new(Arc::clone(&authority)).await;
         handle.ready().await.unwrap();
 
         let http_client = reqwest::Client::new();

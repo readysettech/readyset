@@ -210,9 +210,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         panic!("ControllerOuter failed: {}", e.to_string());
     }));
 
-    let handle = Handle::new(authority, handle_tx, trigger, our_descriptor).await?;
-
-    Ok(handle)
+    Ok(Handle::new(authority, handle_tx, trigger, our_descriptor))
 }
 
 /// The main Noria HTTP server object.

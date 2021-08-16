@@ -71,7 +71,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
-    let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
+    let ch = rt.block_on(ControllerHandle::new(zk_auth));
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let writer = if !mysql_address.is_empty() {

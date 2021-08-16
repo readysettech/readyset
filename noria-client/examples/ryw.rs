@@ -27,7 +27,7 @@ async fn main() {
     let deployment = "ryw";
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
 
-    let mut ch = ControllerHandle::new(zk_auth).await.unwrap();
+    let mut ch = ControllerHandle::new(zk_auth).await;
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);
@@ -60,7 +60,7 @@ async fn main() {
                 emp_no      INT             NOT NULL,
                 first_name  VARCHAR(14)     NOT NULL,
                 last_name   VARCHAR(16)     NOT NULL,
-                gender      VARCHAR(1)  NOT NULL,    
+                gender      VARCHAR(1)      NOT NULL,
                 PRIMARY KEY (emp_no)
             );
 

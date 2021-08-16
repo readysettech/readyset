@@ -90,7 +90,7 @@ impl NoriaAdapter<ZookeeperAuthority> {
         log: Option<Logger>,
     ) -> ReadySetResult<!> {
         let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment))?;
-        let noria = noria::ControllerHandle::new(authority).await?;
+        let noria = noria::ControllerHandle::new(authority).await;
         let log = log.unwrap_or_else(|| Logger::root(Discard, o!()));
 
         NoriaAdapter::start_inner(noria, options, log, None).await

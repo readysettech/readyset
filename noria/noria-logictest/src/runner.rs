@@ -451,7 +451,7 @@ impl TestScript {
         };
         let addr = listener.local_addr().unwrap();
 
-        let ch = ControllerHandle::<A>::new(authority).await.unwrap();
+        let ch = ControllerHandle::<A>::new(authority).await;
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();

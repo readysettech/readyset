@@ -117,7 +117,7 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
 
     debug!(logger, "Connecting to Noria...",);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
+    let ch = rt.block_on(ControllerHandle::new(zk_auth));
     debug!(logger, "Connected!");
 
     // no need for a barrier here since accept() acts as one

@@ -25,7 +25,7 @@ impl Replicate {
         let authority = Arc::new(ZookeeperAuthority::new(&self.zookeeper_url)?);
 
         let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(Arc::clone(&authority)).await?;
+            ControllerHandle::new(Arc::clone(&authority)).await;
         handle.ready().await.unwrap();
 
         for r in &self.reader_addrs {

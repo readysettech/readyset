@@ -175,7 +175,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
         zk_auth.log_with(log.clone());
 
         slog::debug!(log, "Connecting to Noria...",);
-        let ch = rt.block_on(ControllerHandle::new(zk_auth)).unwrap();
+        let ch = rt.block_on(ControllerHandle::new(zk_auth));
         slog::debug!(log, "Connected!");
 
         let ctrlc = tokio::signal::ctrl_c();

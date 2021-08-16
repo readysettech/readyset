@@ -118,7 +118,7 @@ impl Writer {
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
         let zk_auth = ZookeeperAuthority::new(&self.zookeeper_url).unwrap();
-        let mut ch = ControllerHandle::new(zk_auth).await.unwrap();
+        let mut ch = ControllerHandle::new(zk_auth).await;
 
         let writer = MySqlConnector::new(self.database_url.clone()).await;
         let writer: backend::Writer<ZookeeperAuthority> = backend::Writer::MySqlConnector(writer);

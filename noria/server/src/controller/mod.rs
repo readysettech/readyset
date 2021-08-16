@@ -303,15 +303,7 @@ where
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
                 let noria: noria::ControllerHandle<A> =
-                    match noria::ControllerHandle::new(Arc::clone(&authority)).await {
-                        Ok(noria) => noria,
-                        Err(err) => {
-                            // On each replication error we wait for 30 seconds and then try again
-                            error!(log, "Replication unable to get ControllerHandle {}", err);
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                            continue;
-                        }
-                    };
+                    noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
                 if let Err(err) =
                     replicators::NoriaAdapter::start_with_url(&url, noria, None, log.clone()).await
