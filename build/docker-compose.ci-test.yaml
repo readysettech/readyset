@@ -3,6 +3,16 @@ version: '3.8'
 # As such, context is now at root.
 
 services:
+  zookeeper:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/zookeeper
+  consul-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/consul
+  mysql:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mysql
+  postgres:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/postgres
+  redis:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/redis:6.2
   app:
     build:
       context: .
