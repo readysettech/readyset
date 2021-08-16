@@ -3,6 +3,9 @@ steps:
   - label: ':buildkite:'
     command: buildkite-agent meta-data set 'failure' '0'
 
+  - label: ':bk-status-pending:'
+    command: .buildkite/set_gerrit_running.sh
+
   - wait: ~
 
   - label: ':git: Lint commits'
