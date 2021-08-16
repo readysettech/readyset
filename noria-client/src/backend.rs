@@ -121,7 +121,6 @@ pub struct Reader<A: 'static + Authority> {
 /// Builder for a [`Backend`]
 #[derive(Clone)]
 pub struct BackendBuilder {
-    sanitize: bool,
     static_responses: bool,
     slowlog: bool,
     permissive: bool,
@@ -134,7 +133,6 @@ pub struct BackendBuilder {
 impl Default for BackendBuilder {
     fn default() -> Self {
         BackendBuilder {
-            sanitize: true,
             static_responses: true,
             slowlog: false,
             permissive: false,
@@ -156,7 +154,6 @@ impl BackendBuilder {
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
         Backend {
-            sanitize: self.sanitize,
             parsed_query_cache,
             prepared_queries,
             prepared_count,
@@ -170,11 +167,6 @@ impl BackendBuilder {
             ticket: self.ticket,
             timestamp_client: self.timestamp_client,
         }
-    }
-
-    pub fn sanitize(mut self, sanitize: bool) -> Self {
-        self.sanitize = sanitize;
-        self
     }
 
     pub fn static_responses(mut self, static_responses: bool) -> Self {
@@ -215,8 +207,6 @@ impl BackendBuilder {
 }
 
 pub struct Backend<A: 'static + Authority> {
-    //if false, queries are not sanitized which improves latency.
-    sanitize: bool,
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
     // all queries previously prepared, mapped by their ID
@@ -382,8 +372,7 @@ impl<A: 'static + Authority> Backend<A> {
         let span = span!(Level::DEBUG, "prepare", query);
         let _g = span.enter();
 
-        let query = self.sanitize_query(query);
-        let (parsed_query, _) = self.parse_query(&query, false)?;
+        let (parsed_query, _) = self.parse_query(query, false)?;
 
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(_) => {
@@ -531,9 +520,8 @@ impl<A: 'static + Authority> Backend<A> {
         let _g = span.enter();
 
         let start = time::Instant::now();
-        let query = self.sanitize_query(query);
 
-        let parse_result = self.parse_query(&query, true);
+        let parse_result = self.parse_query(query, true);
         let parse_time = start.elapsed().as_micros();
 
         // fallback to mysql database on query parse failure
@@ -543,9 +531,9 @@ impl<A: 'static + Authority> Backend<A> {
                 // TODO(Dan): Implement RYW for query_fallback
                 match self.reader.mysql_connector {
                     Some(_) => {
-                        let (res, _) = self.query_fallback(&query).await?;
+                        let (res, _) = self.query_fallback(query).await?;
                         if self.slowlog {
-                            warn_on_slow_query(&start, &query);
+                            warn_on_slow_query(&start, query);
                         }
                         return Ok(res);
                     }
@@ -646,7 +634,7 @@ impl<A: 'static + Authority> Backend<A> {
                     nom_sql::SqlQuery::Select(q) => {
                         let execution_timer = std::time::Instant::now();
                         let res = self
-                            .cascade_read(q, &query, use_params, self.ticket.clone())
+                            .cascade_read(q, query, use_params, self.ticket.clone())
                             .await;
                         //TODO(Dan): Implement fallback execution timing
                         let execution_time = execution_timer.elapsed().as_micros();
@@ -662,7 +650,7 @@ impl<A: 'static + Authority> Backend<A> {
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         let execution_timer = std::time::Instant::now();
                         let (query_result, identifier) = connector
-                            .handle_write(&query, self.timestamp_client.is_some())
+                            .handle_write(query, self.timestamp_client.is_some())
                             .await?;
 
                         // Update ticket if RYW enabled
@@ -712,7 +700,7 @@ impl<A: 'static + Authority> Backend<A> {
                         Ok(query_result)
                     }
                     _ => {
-                        let (query_result, _) = self.query_fallback(&query).await?;
+                        let (query_result, _) = self.query_fallback(query).await?;
                         Ok(query_result)
                     }
                 }
@@ -720,7 +708,7 @@ impl<A: 'static + Authority> Backend<A> {
         };
 
         if self.slowlog {
-            warn_on_slow_query(&start, &query);
+            warn_on_slow_query(&start, query);
         }
 
         res
@@ -729,17 +717,6 @@ impl<A: 'static + Authority> Backend<A> {
     // For debugging purposes
     pub fn ticket(&self) -> &Option<Timestamp> {
         &self.ticket
-    }
-
-    fn sanitize_query(&mut self, query: &str) -> String {
-        trace!("sanitize");
-        if self.sanitize {
-            let q = utils::sanitize_query(query);
-            trace!(%q, "sanitized");
-            q
-        } else {
-            query.to_owned()
-        }
     }
 
     fn parse_query(

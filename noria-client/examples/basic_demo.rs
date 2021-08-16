@@ -20,7 +20,6 @@ async fn main() -> Result<()> {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-    let sanitize = true;
     let static_responses = false;
     let writer = {
         let writer = NoriaConnector::new(
@@ -46,7 +45,6 @@ async fn main() -> Result<()> {
     let require_authentication = false;
 
     let mut b = BackendBuilder::new()
-        .sanitize(sanitize)
         .static_responses(static_responses)
         .slowlog(slowlog)
         .permissive(permissive)
