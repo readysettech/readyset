@@ -10,6 +10,7 @@ use std::collections::HashMap;
 type StatementID = u32;
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
+#[derive(Clone)]
 pub struct MySqlConnector {
     pool: Pool,
     prepared_statements: HashMap<StatementID, String>,

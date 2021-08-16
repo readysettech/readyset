@@ -30,6 +30,7 @@ thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 metrics = "0.14.2"
 noria-client-metrics = { version = "0.1.0", path = "metrics" }
+futures = "0.3.16"
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 native-tls = "0.2.7"

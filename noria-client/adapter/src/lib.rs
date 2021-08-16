@@ -93,6 +93,11 @@ pub struct Options {
     #[clap(long)]
     no_require_authentication: bool,
 
+    /// Make all reads run as two parallel threads, one against Noria and one against MySQL,
+    /// returning the first successful result
+    #[clap(long, requires("mysql-url"))]
+    race_reads: bool,
+
     /// Allow database connections authenticated as this user. Ignored if
     /// --no-require-authentication is passed
     #[clap(long, short = 'u')]
@@ -204,6 +209,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let backend_builder = BackendBuilder::new()
                 .static_responses(!options.no_static_responses)
                 .slowlog(options.log_slow)
+                .race_reads(options.race_reads)
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
                 .dialect(self.dialect);
