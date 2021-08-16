@@ -1,17 +1,18 @@
 #![warn(clippy::dbg_macro)]
 extern crate anyhow;
 #[macro_use]
-extern crate clap;
-#[macro_use]
 extern crate tracing;
 
 use std::collections::HashMap;
 use std::io;
 use std::marker::Send;
+use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
+use clap::Clap;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
@@ -50,149 +51,104 @@ pub struct NoriaAdapter<H> {
     pub name: &'static str,
     pub version: &'static str,
     pub description: &'static str,
-    pub default_address: &'static str,
+    pub default_address: SocketAddr,
     pub connection_handler: H,
     pub database_type: DatabaseType,
 }
 
+#[derive(Clap)]
+pub struct Options {
+    /// IP:PORT to listen on
+    #[clap(long, short = 'a', parse(try_from_str))]
+    address: Option<SocketAddr>,
+
+    /// ReadySet deployment ID to attach to
+    #[clap(long, env = "NORIA_DEPLOYMENT")]
+    deployment: String,
+
+    /// IP:PORT for Zookeeper
+    #[clap(
+        long,
+        short = 'z',
+        env = "ZOOKEEPER_ADDRESS",
+        default_value = "127.0.0.1:2181"
+    )]
+    zookeeper_address: String,
+
+    /// Log slow queries (> 5ms)
+    #[clap(long)]
+    log_slow: bool,
+
+    /// Be permissive in queries that the adapter accepts (rather than rejecting parse errors)
+    #[clap(long)]
+    permissive: bool,
+
+    /// Instead of logging trace events, time them and output metrics on exit
+    #[clap(long)]
+    time: bool,
+
+    /// Disable checking for queries requiring static responses. Improves latency.
+    #[clap(long)]
+    no_static_responses: bool,
+
+    /// Disable query sanitization. Improves latency.
+    #[clap(long)]
+    no_sanitize: bool,
+
+    /// Don't require authentication for any client connections
+    #[clap(long)]
+    no_require_authentication: bool,
+
+    /// Allow database connections authenticated as this user. Ignored if
+    /// --no-require-authentication is passed
+    #[clap(long, short = 'u')]
+    username: Option<String>,
+
+    /// Password to authenticate database connections with. Ignored if --no-require-authentication
+    /// is passed
+    #[clap(long, short = 'p')]
+    password: Option<String>,
+
+    /// URL for MySQL connection. Should include username and password if necessary
+    #[clap(long, env = "MYSQL_URL")]
+    mysql_url: Option<String>,
+
+    /// The region the worker is hosted in. Required to route view requests to specific regions.
+    #[clap(long, env = "NORIA_REGION")]
+    region: Option<String>,
+
+    /// Enable recording and exposing Prometheus metrics
+    #[clap(long)]
+    prometheus_metrics: bool,
+}
+
 impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
-    pub fn run(&mut self) {
-        use clap::{App, Arg};
+    pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
+        if options.deployment.contains('-') {
+            bail!(
+                "Invalid deployment name {}, cannot contain '-'",
+                options.deployment
+            );
+        }
 
-        let matches = App::new(self.name)
-            .version(self.version)
-            .about(self.description)
-            .arg(
-                Arg::with_name("address")
-                    .short("a")
-                    .long("address")
-                    .takes_value(true)
-                    .default_value(self.default_address)
-                    .help("IP:PORT to listen on"),
-            )
-            .arg(
-                Arg::with_name("deployment")
-                    .long("deployment")
-                    .takes_value(true)
-                    .required(true)
-                    .env("NORIA_DEPLOYMENT")
-                    .help("Noria deployment ID to attach to."),
-            )
-            .arg(
-                Arg::with_name("zk_addr")
-                    .long("zookeeper-address")
-                    .short("z")
-                    .default_value("127.0.0.1:2181")
-                    .env("ZOOKEEPER_URL")
-                    .help("IP:PORT for Zookeeper."),
-            )
-            .arg(
-                Arg::with_name("slowlog")
-                    .long("log-slow")
-                    .help("Log slow queries (> 5ms)"),
-            )
-            .arg(
-                Arg::with_name("trace")
-                    .long("trace")
-                    .takes_value(true)
-                    .help("Trace client-side execution of every Nth operation"),
-            )
-            .arg(
-                Arg::with_name("permissive")
-                    .long("permissive")
-                    .takes_value(false)
-                    .help("Be permissive in queries that the adapter accepts (rather than rejecting parse errors)"),
-            )
-            .arg(
-                Arg::with_name("time")
-                    .long("time")
-                    .help("Instead of logging trace events, time them and output metrics on exit"),
-            )
-            .arg(
-                Arg::with_name("no-static-responses")
-                    .long("no-static-responses")
-                    .takes_value(false)
-                    .help("Disable checking for queries requiring static responses. Improves latency."),
-            )
-            .arg(
-                Arg::with_name("no-sanitize")
-                    .long("no-sanitize")
-                    .takes_value(false)
-                    .help("Disable query sanitization. Improves latency."),
-            )
-            .arg(
-                Arg::with_name("no-require-authentication")
-                    .long("no-require-authentication")
-                    .takes_value(false)
-                    .help("Don't require authentication for any client connections")
-            )
-            .arg(
-                Arg::with_name("username")
-                    .long("username")
-                    .short("u")
-                    .takes_value(true)
-                    .default_value("root")
-                    .help("Allow database connections authenticated as this user. Ignored if --no-require-authentication is passed")
-            )
-            .arg(
-                Arg::with_name("password")
-                    .long("password")
-                    .short("p")
-                    .takes_value(true)
-                    .empty_values(false)
-                    .help("Password to authenticate database connections with. Ignored if --no-require-authentication is passed")
-            )
-            .arg(Arg::with_name("verbose").long("verbose").short("v"))
-            .arg(
-                Arg::with_name("mysql-url")
-                    .long("mysql-url")
-                    .takes_value(true)
-                    .required(false)
-                    .env("MYSQL_URL")
-                    .help("Host for mysql connection. Should include username and password if nececssary."),
-            )
-            .arg(
-                Arg::with_name("region")
-                .default_value("")
-                .env("NORIA_REGION")
-                .help("The region the worker is hosted in. Required to route view requests to specific regions."),
-            )
-            .arg(
-                Arg::with_name("prometheus-metrics")
-                    .long("prometheus-metrics")
-                    .takes_value(false)
-                    .help("Records and exposes Prometheus metrics."),
-            )
-            .get_matches();
-
-        let listen_addr = value_t_or_exit!(matches, "address", String);
-        let deployment = matches.value_of("deployment").unwrap().to_owned();
-        assert!(!deployment.contains('-'));
-
-        let histograms = matches.is_present("time");
-        let slowlog = matches.is_present("slowlog");
-        let zk_addr = matches.value_of("zk_addr").unwrap().to_owned();
-        let sanitize = !matches.is_present("no-sanitize");
-        let permissive = matches.is_present("permissive");
-        let static_responses = !matches.is_present("no-static-responses");
-        let mysql_url = matches.value_of("mysql-url").map(|s| s.to_owned());
-        let require_authentication = !matches.is_present("no-require-authentication");
-        let region = matches.value_of("region").map(|s| s.to_owned());
-
-        let users: &'static HashMap<String, String> =
-            Box::leak(Box::new(if require_authentication {
+        let users: &'static HashMap<String, String> = Box::leak(Box::new(
+            if !options.no_require_authentication {
                 hashmap! {
-                    matches.value_of("username").unwrap().to_owned() =>
-                        matches.value_of("password").unwrap().to_owned()
+                    options.username.ok_or_else(|| {
+                        anyhow!("Must specify --username/-u unless --no-require-authentication is passed")
+                    })? => options.password.ok_or_else(|| {
+                        anyhow!("Must specify --password/-p unless --no-require-authentication is passed")
+                    })?
                 }
             } else {
                 HashMap::new()
-            }));
+            },
+        ));
 
         use tracing_subscriber::Layer;
         let filter = tracing_subscriber::EnvFilter::from_default_env();
         let registry = tracing_subscriber::Registry::default();
-        let tracer = if histograms {
+        let tracer = if options.time {
             use tracing_timing::{Builder, Histogram};
             let s = Builder::default()
                 .layer(|| Histogram::new_with_bounds(1_000, 100_000_000, 3).unwrap());
@@ -205,19 +161,21 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
         };
         tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
         let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
-        let listen_socket: std::net::SocketAddr = listen_addr.parse().unwrap();
-
+        let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt
-            .block_on(tokio::net::TcpListener::bind(&listen_socket))
+            .block_on(tokio::net::TcpListener::bind(&listen_address))
             .unwrap();
 
         let log = logger_pls();
-        slog::info!(log, "listening on address {}", listen_addr);
+        slog::info!(log, "listening on address {}", listen_address);
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-        let mut zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
+        let mut zk_auth = ZookeeperAuthority::new(&format!(
+            "{}/{}",
+            options.zookeeper_address, options.deployment
+        ))?;
         zk_auth.log_with(log.clone());
 
         slog::debug!(log, "Connecting to Noria...",);
@@ -238,23 +196,29 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 .into_stream(),
         ));
 
-        if matches.is_present("prometheus-metrics") {
+        if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label: noria_client_metrics::recorded::DatabaseType =
                 self.database_type.into();
             PrometheusBuilder::new()
                 .add_global_label("database_type", database_label)
-                .add_global_label("deployment", deployment)
+                .add_global_label("deployment", &options.deployment)
                 .install()
                 .unwrap();
         }
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
+            // bunch of stuff to move into the async block below
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
-            let mysql_url = mysql_url.clone();
             let mut connection_handler = self.connection_handler.clone();
-            let r = region.clone();
+            let region = options.region.clone();
+            let static_responses = !options.no_static_responses;
+            let sanitize = !options.no_sanitize;
+            let log_slow = options.log_slow;
+            let permissive = options.permissive;
+            let require_authentication = !options.no_require_authentication;
+            let mysql_url = options.mysql_url.clone();
             let fut = async move {
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
@@ -269,14 +233,14 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     ch.clone(),
                     auto_increments.clone(),
                     query_cache.clone(),
-                    r.clone(),
+                    region.clone(),
                 )
                 .await;
 
                 let reader = Reader {
                     noria_connector: noria_conn,
-                    mysql_connector: if mysql_url.is_some() {
-                        Some(MySqlConnector::new(mysql_url.clone().unwrap()).await)
+                    mysql_connector: if let Some(mysql_url) = &mysql_url {
+                        Some(MySqlConnector::new(mysql_url.clone()).await)
                     } else {
                         None
                     },
@@ -290,7 +254,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     Writer::MySqlConnector(writer)
                 } else {
                     let writer =
-                        NoriaConnector::new(ch, auto_increments, query_cache, r.clone()).await;
+                        NoriaConnector::new(ch, auto_increments, query_cache, region.clone()).await;
                     Writer::NoriaConnector(writer)
                 };
 
@@ -299,7 +263,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                     .static_responses(static_responses)
                     .writer(writer)
                     .reader(reader)
-                    .slowlog(slowlog)
+                    .slowlog(log_slow)
                     .permissive(permissive)
                     .users(users.clone())
                     .require_authentication(require_authentication)
@@ -382,6 +346,8 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 }
             });
         }
+
+        Ok(())
     }
 }
 
