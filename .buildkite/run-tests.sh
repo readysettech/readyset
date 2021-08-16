@@ -9,5 +9,7 @@ upload_artifacts() {
 
 echo "+++ :rust: Running tests"
 cargo --locked test --all --exclude clustertest -- --skip integration_serial || upload_artifacts
+echo "+++ :rust: Running nom-sql postgres tests"
+cargo --locked test -p nom-sql --features postgres || upload_artifacts
 echo "+++ :rust: Running serial integration tests"
 cargo --locked test -p noria-server integration_serial -- --test-threads=1 || upload_artifacts
