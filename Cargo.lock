@@ -2231,6 +2231,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "futures 0.3.15",
  "proptest",
  "reqwest",
  "tokio 1.8.1",
