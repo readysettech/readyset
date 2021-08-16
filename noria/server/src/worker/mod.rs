@@ -144,12 +144,15 @@ pub struct Worker {
 }
 
 impl Worker {
-    async fn process_heartbeat(&mut self) -> ReadySetResult<()> {
+    async fn process_heartbeat(&mut self) {
         if let Some(wes) = self.election_state.as_ref() {
-            let uri = wes.controller_uri.join("/worker_rx/heartbeat")?;
+            #[allow(clippy::unwrap_used)] // This is given a known string, so can't fail
+            let uri = wes.controller_uri.join("/worker_rx/heartbeat").unwrap();
+            #[allow(clippy::unwrap_used)] // This is given a known-good value, so can't fail
             let body = bincode::serialize(&HeartbeatPayload {
                 worker_uri: self.worker_uri.clone(),
-            })?;
+            })
+            .unwrap();
             let log = self.log.clone();
             // this happens in a background task to avoid deadlocks
             tokio::spawn(
@@ -157,7 +160,6 @@ impl Worker {
                     .map_err(move |e| warn!(log, "heartbeat failed: {}", e)),
             );
         }
-        Ok(())
     }
 
     fn process_eviction(&mut self) {
@@ -345,8 +347,9 @@ impl Worker {
     }
 
     /// Run the worker continuously, processing worker requests, heartbeats, and domain failures.
-    /// This function returns if the worker fails, or the worker request sender is dropped.
-    pub async fn run(mut self) -> ReadySetResult<()> {
+    ///
+    /// This function returns if the worker request sender is dropped.
+    pub async fn run(mut self) {
         loop {
             fn poll_domains<'a>(
                 domains: &'a mut HashMap<(DomainIndex, usize), DomainHandle>,
@@ -393,7 +396,7 @@ impl Worker {
                     }
                     else {
                         info!(self.log, "worker shutting down after request handle dropped");
-                        return Ok(());
+                        return;
                     }
                 }
                 failed_domains = poll_domains(&mut self.domains) => {
@@ -405,13 +408,13 @@ impl Worker {
                 }
                 _ = shutdown_stream.next() => {
                     info!(self.log, "worker shutting down after valve shut");
-                    return Ok(());
+                    return;
                 }
                 _ = eviction => {
                     self.process_eviction();
                 }
                 _ = self.heartbeat_interval.tick() => {
-                    self.process_heartbeat().await?;
+                    self.process_heartbeat().await;
                 }
             }
         }

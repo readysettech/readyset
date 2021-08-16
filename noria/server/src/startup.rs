@@ -176,9 +176,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         volume_id,
     };
 
-    tokio::spawn(worker.run().map_err(|e| {
-        panic!("Worker failed: {}", e.to_string());
-    }));
+    tokio::spawn(worker.run());
 
     let our_descriptor = ControllerDescriptor {
         controller_uri: http_uri,
