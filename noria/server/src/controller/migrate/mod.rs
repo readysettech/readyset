@@ -41,7 +41,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::controller::migrate::materialization::Materializations;
-use crate::controller::{ControllerInner, WorkerIdentifier};
+use crate::controller::{
+    ControllerInner, DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier,
+};
 
 pub(crate) mod assignment;
 mod augmentation;
@@ -108,14 +110,13 @@ impl StoredDomainRequest {
 pub struct PlaceRequest {
     /// The index the new domain will have.
     idx: DomainIndex,
-    /// The number of shards the new domain will have.
-    num_shards: Option<usize>,
+    /// A map from domain shard to the worker to schedule the domain shard
+    /// onto.
+    shard_workers: Vec<WorkerIdentifier>,
     /// Indices of new nodes to add.
     ///
     /// FIXME: what the hell is the `bool` for? It seems entirely vestigial.
     nodes: Vec<(NodeIndex, bool)>,
-    /// The identifier of a specific worker to schedule the new domain onto, if specified.
-    worker_id_opt: Option<WorkerIdentifier>,
 }
 
 /// A store for planned migration operations (spawning domains and sending messages).
@@ -222,17 +223,14 @@ impl DomainMigrationPlan {
     pub fn add_new_domain(
         &mut self,
         idx: DomainIndex,
-        num_shards: Option<usize>,
+        shard_workers: Vec<WorkerIdentifier>,
         nodes: Vec<(NodeIndex, bool)>,
-        worker_id_opt: Option<WorkerIdentifier>,
     ) {
         self.place.push(PlaceRequest {
             idx,
-            num_shards,
+            shard_workers,
             nodes,
-            worker_id_opt,
         });
-        self.valid_domains.insert(idx, num_shards.unwrap_or(1));
     }
 
     /// Return the number of shards a given domain has.
@@ -253,13 +251,7 @@ impl DomainMigrationPlan {
         mainline: &mut ControllerInner,
     ) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
-            let d = mainline.place_domain(
-                place.idx,
-                place.num_shards,
-                log,
-                place.nodes,
-                place.worker_id_opt,
-            )?;
+            let d = mainline.place_domain(place.idx, place.shard_workers, log, place.nodes)?;
             mainline.domains.insert(place.idx, d);
         }
         for req in std::mem::take(&mut self.stored) {
@@ -810,7 +802,20 @@ impl Migration {
 
         // Boot up new domains (they'll ignore all updates for now)
         debug!(log, "booting new domains");
-        let mut fdh = DomainMigrationPlan::new(mainline);
+        let mut dmp = DomainMigrationPlan::new(mainline);
+
+        /// Verifies that the worker `worker` meets the domain placement restrictions
+        /// of all dataflow nodes that will be placed in a new domain on the worker.
+        /// If the set of restrictions in this domain are too stringent, no worker
+        /// may be able to satisfy the domain placement.
+        fn worker_meets_restrictions(
+            worker: &Worker,
+            restrictions: &[&DomainPlacementRestriction],
+        ) -> bool {
+            restrictions
+                .iter()
+                .all(|r| r.worker_volume == worker.volume_id)
+        }
 
         for domain in changed_domains {
             if mainline.domains.contains_key(&domain) {
@@ -819,12 +824,70 @@ impl Migration {
             }
 
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            fdh.add_new_domain(
-                domain,
-                ingredients[nodes[0].0].sharded_by().shards(),
-                nodes,
-                self.worker.clone(),
-            );
+            let num_shards = ingredients[nodes[0].0].sharded_by().shards();
+
+            #[allow(clippy::indexing_slicing)] // checked above
+            let is_reader_domain = nodes.iter().any(|(n, _)| ingredients[*n].is_reader());
+
+            // If this migration has a specified worker, we attempt to place
+            // the domains on to that worker.
+            let target_worker = self.worker.clone();
+            let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
+                (target_worker.is_none())
+                    || (target_worker
+                        .as_ref()
+                        .filter(|s_worker_id| **worker_id == **s_worker_id)
+                        .is_some())
+            };
+
+            let worker_set = mainline
+                .workers
+                .iter()
+                .filter(|(_, w)| w.healthy)
+                .filter(worker_selector)
+                .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
+
+            // We create a second iterator used to assign workers in a round robin
+            // fashion.
+            let mut round_robin = worker_set.clone().cycle();
+
+            let mut worker_shards: Vec<WorkerIdentifier> = Vec::new();
+            for i in 0..num_shards.unwrap_or(1) {
+                // Shards of certain dataflow nodes may have restrictions that
+                // limit the workers they are placed upon.
+                let dataflow_node_restrictions = nodes
+                    .iter()
+                    .filter_map(|(n, _)| {
+                        #[allow(clippy::indexing_slicing)] // checked above
+                        let node_name = ingredients[*n].name();
+                        mainline.node_restrictions.get(&NodeRestrictionKey {
+                            node_name: node_name.into(),
+                            shard: i,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                // If there are placement restrictions we select the first worker
+                // that meets the placement restrictions. This can lead to imbalance
+                // in the number of dataflow nodes placed on each server.
+                let (worker_id, _) = if !dataflow_node_restrictions.is_empty() {
+                    let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
+                        worker_meets_restrictions(*worker, &dataflow_node_restrictions)
+                    };
+                    worker_set.clone().find(restriction_filter)
+                } else {
+                    round_robin.next()
+                }
+                .ok_or(ReadySetError::NoAvailableWorkers {
+                    domain_index: domain.index(),
+                    shard: i,
+                })?;
+
+                worker_shards.push(worker_id.clone());
+            }
+
+            dmp.add_new_domain(domain, worker_shards, nodes.clone());
+            dmp.valid_domains.insert(domain, num_shards.unwrap_or(1));
         }
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
@@ -833,7 +896,7 @@ impl Migration {
             &log,
             source,
             &mut ingredients,
-            &mut fdh,
+            &mut dmp,
             uninformed_domain_nodes,
         )?;
 
@@ -871,20 +934,20 @@ impl Migration {
                     },
                 };
 
-                fdh.add_message(n.domain(), m)?;
+                dmp.add_message(n.domain(), m)?;
             }
         }
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
         info!(log, "bringing up inter-domain connections");
-        routing::connect(&log, &mut ingredients, &mut fdh, &new)?;
+        routing::connect(&log, &mut ingredients, &mut dmp, &new)?;
 
         // And now, the last piece of the puzzle -- set up materializations
         info!(log, "initializing new materializations");
         let mut materializations = mainline.materializations.clone();
 
-        materializations.commit(&mut ingredients, &new, &mut fdh)?;
+        materializations.commit(&mut ingredients, &new, &mut dmp)?;
 
         warn!(log, "migration planning completed"; "ms" => start.elapsed().as_millis());
 
@@ -894,7 +957,7 @@ impl Migration {
             ndomains,
             remap,
             materializations,
-            dmp: fdh,
+            dmp,
         })
     }
 }
