@@ -144,8 +144,10 @@ fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
         };
 
         let backend = BackendBuilder::new()
+            .writer(rt.block_on(writer))
+            .reader(reader)
             .require_authentication(false)
-            .build(rt.block_on(writer).into(), reader);
+            .build();
 
         rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
             .unwrap();

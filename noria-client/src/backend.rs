@@ -119,10 +119,11 @@ pub struct Reader<A: 'static + Authority> {
 }
 
 /// Builder for a [`Backend`]
-#[derive(Clone)]
-pub struct BackendBuilder {
+pub struct BackendBuilder<A: 'static + Authority> {
     sanitize: bool,
     static_responses: bool,
+    writer: Option<Writer<A>>,
+    reader: Option<Reader<A>>,
     slowlog: bool,
     permissive: bool,
     users: HashMap<String, String>,
@@ -131,11 +132,13 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
 }
 
-impl Default for BackendBuilder {
+impl<A: 'static + Authority> Default for BackendBuilder<A> {
     fn default() -> Self {
         BackendBuilder {
             sanitize: true,
             static_responses: true,
+            writer: None,
+            reader: None,
             slowlog: false,
             permissive: false,
             users: Default::default(),
@@ -146,12 +149,12 @@ impl Default for BackendBuilder {
     }
 }
 
-impl BackendBuilder {
+impl<A: 'static + Authority> BackendBuilder<A> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn build<A: 'static + Authority>(self, writer: Writer<A>, reader: Reader<A>) -> Backend<A> {
+    pub fn build(self) -> Backend<A> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
@@ -161,8 +164,8 @@ impl BackendBuilder {
             prepared_queries,
             prepared_count,
             static_responses: self.static_responses,
-            writer,
-            reader,
+            writer: self.writer.expect("BackendBuilder must be passed a writer"),
+            reader: self.reader.expect("BackendBuilder must be passed a reader"),
             slowlog: self.slowlog,
             permissive: self.permissive,
             users: self.users,
@@ -179,6 +182,16 @@ impl BackendBuilder {
 
     pub fn static_responses(mut self, static_responses: bool) -> Self {
         self.static_responses = static_responses;
+        self
+    }
+
+    pub fn writer<W: Into<Writer<A>>>(mut self, writer: W) -> Self {
+        self.writer = Some(writer.into());
+        self
+    }
+
+    pub fn reader(mut self, reader: Reader<A>) -> Self {
+        self.reader = Some(reader);
         self
     }
 
