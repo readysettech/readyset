@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     let zk_addr = "127.0.0.1:2181";
 
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment))?;
-    let ch = ControllerHandle::new(zk_auth).await?;
+    let ch = ControllerHandle::new(zk_auth).await;
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();

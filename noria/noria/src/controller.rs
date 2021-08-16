@@ -196,7 +196,7 @@ impl ControllerHandle<consensus::ZookeeperAuthority> {
     /// address, and create a `ControllerHandle` from that.
     pub async fn from_zk(zookeeper_address: &str) -> ReadySetResult<Self> {
         let auth = consensus::ZookeeperAuthority::new(zookeeper_address)?;
-        ControllerHandle::new(auth).await
+        Ok(ControllerHandle::new(auth).await)
     }
 }
 
@@ -213,10 +213,10 @@ const CONTROLLER_BUFFER_SIZE: usize = 8;
 
 impl<A: Authority + 'static> ControllerHandle<A> {
     #[doc(hidden)]
-    pub async fn make(authority: Arc<A>) -> ReadySetResult<Self> {
+    pub fn make(authority: Arc<A>) -> Self {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
-        Ok(ControllerHandle {
+        ControllerHandle {
             views: Default::default(),
             domains: Default::default(),
             handle: Buffer::new(
@@ -227,7 +227,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
                 CONTROLLER_BUFFER_SIZE,
             ),
             tracer,
-        })
+        }
     }
 
     /// Check that the `ControllerHandle` can accept another request.
@@ -252,11 +252,11 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `ControllerHandle::from_zk` instead.
-    pub async fn new<I: Into<Arc<A>>>(authority: I) -> ReadySetResult<Self>
+    pub async fn new<I: Into<Arc<A>>>(authority: I) -> Self
     where
         A: Send + 'static,
     {
-        Self::make(authority.into()).await
+        Self::make(authority.into())
     }
 
     /// Enumerate all known base tables.

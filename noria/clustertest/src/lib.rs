@@ -489,13 +489,13 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
 
     let zookeeper_connect_str = format!("{}/{}", &zookeeper_addr, &params.name);
     let authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
-    let mut handle = ControllerHandle::new(authority).await?;
+    let mut handle = ControllerHandle::new(authority).await;
     wait_until_worker_count(&mut handle, Duration::from_secs(15), params.servers.len()).await?;
 
     // Duplicate the authority and handle creation as the metrics client
     // owns its own handle.
     let metrics_authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
-    let metrics_handle = ControllerHandle::new(metrics_authority).await?;
+    let metrics_handle = ControllerHandle::new(metrics_authority).await;
     let metrics = MetricsClient::new(metrics_handle).unwrap();
 
     // Start a MySQL adapter instance.

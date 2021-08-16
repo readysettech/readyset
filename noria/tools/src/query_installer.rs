@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
         ";
 
     let authority = ZookeeperAuthority::new("127.0.0.1:2181/myapp")?;
-    let mut noria = ControllerHandle::new(authority).await?;
+    let mut noria = ControllerHandle::new(authority).await;
 
     println!("Waiting for noria");
     noria.install_recipe(test_sql_string).await.unwrap();

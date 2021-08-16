@@ -178,7 +178,7 @@ impl TestHandle {
         Ok(handle)
     }
 
-    async fn controller(&self) -> ReadySetResult<ControllerHandle<LocalAuthority>> {
+    async fn controller(&self) -> ControllerHandle<LocalAuthority> {
         ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await
     }
 
@@ -196,8 +196,7 @@ impl TestHandle {
 
     async fn start_repl(&mut self) -> ReadySetResult<()> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let controller =
-            ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await?;
+        let controller = ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await;
 
         let log = Logger::root(Discard, o!());
 
@@ -220,7 +219,7 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
-        let mut getter = self.controller().await?.view("noria_view").await?;
+        let mut getter = self.controller().await.view("noria_view").await?;
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.as_ref().to_owned();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves

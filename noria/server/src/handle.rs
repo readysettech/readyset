@@ -38,19 +38,19 @@ impl<A: Authority> DerefMut for Handle<A> {
 }
 
 impl<A: Authority + 'static> Handle<A> {
-    pub(super) async fn new(
+    pub(super) fn new(
         authority: Arc<A>,
         event_tx: Sender<HandleRequest>,
         kill: Trigger,
         descriptor: ControllerDescriptor,
-    ) -> Result<Self, anyhow::Error> {
-        let c = ControllerHandle::make(authority).await?;
-        Ok(Handle {
+    ) -> Self {
+        let c = ControllerHandle::make(authority);
+        Handle {
             c: Some(c),
             event_tx: Some(event_tx),
             kill: Some(kill),
             descriptor,
-        })
+        }
     }
 
     /// Returns the address of this Noria server.
