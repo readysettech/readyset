@@ -246,11 +246,9 @@ mod tests_postgres {
                 fields: vec![(
                     Column::from("hotness"),
                     Expression::Literal(Literal::FixedPoint(Real {
-                        mantissa: 5282204485892035,
-                        exponent: -38,
-                        sign: -1,
+                        value: -19216.5479744,
                         precision: 7,
-                    }),),
+                    })),
                 ),],
                 where_clause: expected_where_cond,
                 ..Default::default()

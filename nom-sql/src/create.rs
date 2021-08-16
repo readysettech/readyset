@@ -1279,7 +1279,8 @@ mod tests_postgres {
                     name: "id".into(),
                     table: Some("django_admin_log".into()),
                     function: None,
-                }])])
+                }])]),
+                if_not_exists: false,
             }
         );
 
@@ -1311,7 +1312,8 @@ mod tests_postgres {
                     name: "id".into(),
                     table: Some("auth_group".into()),
                     function: None,
-                }])])
+                }])]),
+                if_not_exists: false,
             }
         );
     }
@@ -1424,6 +1426,7 @@ mod tests_postgres {
                         function: None,
                     }]),
                 ]),
+                if_not_exists: false,
             }
         );
     }

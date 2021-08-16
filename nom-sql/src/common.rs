@@ -830,10 +830,13 @@ pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
 
 #[cfg(feature = "postgres")]
 pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &str> {
-    alt((
-        preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
-        delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
-    ))(i)
+    map_res(
+        alt((
+            preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
+            delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
+        )),
+        str::from_utf8,
+    )(i)
 }
 
 // Parses a SQL identifier (alphanumeric1 and "_").
