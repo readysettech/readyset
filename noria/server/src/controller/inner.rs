@@ -165,19 +165,6 @@ pub(super) fn graphviz(
     s
 }
 
-/// Verifies that the worker `worker` meets the domain placement restrictions
-/// of all dataflow nodes that will be placed in a new domain on the worker.
-/// If the set of restrictions in this domain are too stringent, no worker
-/// may be able to satisfy the domain placement.
-fn worker_meets_restrictions(
-    worker: &Worker,
-    restrictions: &[&DomainPlacementRestriction],
-) -> bool {
-    restrictions
-        .iter()
-        .all(|r| r.worker_volume == worker.volume_id)
-}
-
 impl ControllerInner {
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     pub(super) fn external_request<A: Authority + 'static>(
@@ -729,10 +716,9 @@ impl ControllerInner {
     pub(in crate::controller) fn place_domain(
         &mut self,
         idx: DomainIndex,
-        num_shards: Option<usize>,
+        shard_workers: Vec<WorkerIdentifier>,
         log: &Logger,
         nodes: Vec<(NodeIndex, bool)>,
-        worker_id_opt: Option<WorkerIdentifier>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
         // if any of its nodes is a reader.
@@ -746,9 +732,6 @@ impl ControllerInner {
             }
         }
 
-        #[allow(clippy::indexing_slicing)] // checked above
-        let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
-
         let domain_nodes: DomainNodes = nodes
             .iter()
             .map(|(ni, _)| {
@@ -759,68 +742,28 @@ impl ControllerInner {
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
 
-        let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
-            (worker_id_opt.is_none())
-                || (worker_id_opt
-                    .as_ref()
-                    .filter(|s_worker_id| **worker_id == **s_worker_id)
-                    .is_some())
-        };
-
-        let worker_set = self
-            .workers
-            .iter()
-            .filter(|(_, w)| w.healthy)
-            .filter(worker_selector)
-            .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
-
-        // We create a second iterator used to assign workers in a round robin
-        // fashion.
-        let mut round_robin = worker_set.clone().cycle();
-
         let mut domain_addresses = vec![];
         let mut assignments = vec![];
         let mut new_domain_restrictions = vec![];
-        // Send `AssignDomain` to each shard of the given domain
-        for i in 0..num_shards.unwrap_or(1) {
+
+        let num_shards = shard_workers.len();
+        for (shard, worker_id) in shard_workers.iter().enumerate() {
             let domain = DomainBuilder {
                 index: idx,
-                shard: if num_shards.is_some() { Some(i) } else { None },
-                nshards: num_shards.unwrap_or(1),
+                shard: if num_shards > 1 { Some(shard) } else { None },
+                nshards: num_shards,
                 config: self.domain_config.clone(),
                 nodes: domain_nodes.clone(),
                 persistence_parameters: self.persistence.clone(),
             };
 
-            // Shards of certain dataflow nodes may have restrictions that
-            // limit the workers they are placed upon.
-            let dataflow_node_restrictions = nodes
-                .iter()
-                .filter_map(|(n, _)| {
-                    #[allow(clippy::indexing_slicing)] // checked above
-                    let node_name = self.ingredients[*n].name();
-                    self.node_restrictions.get(&NodeRestrictionKey {
-                        node_name: node_name.into(),
-                        shard: i,
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            // If there are placement restrictions we select the first worker
-            // that meets the placement restrictions. This can lead to imbalance
-            // in the number of dataflow nodes placed on each server.
-            let (_, w) = if !dataflow_node_restrictions.is_empty() {
-                let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
-                    worker_meets_restrictions(*worker, &dataflow_node_restrictions)
-                };
-                worker_set.clone().find(restriction_filter)
-            } else {
-                round_robin.next()
-            }
-            .ok_or(ReadySetError::NoAvailableWorkers {
-                domain_index: idx.index(),
-                shard: i,
-            })?;
+            let w = self
+                .workers
+                .get(worker_id)
+                .ok_or(ReadySetError::NoAvailableWorkers {
+                    domain_index: idx.index(),
+                    shard,
+                })?;
 
             let idx = domain.index;
             let shard = domain.shard.unwrap_or(0);
