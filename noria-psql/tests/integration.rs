@@ -138,16 +138,13 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
             rt.block_on(NoriaConnector::new(ch, auto_increments, query_cache, None));
         let mysql_connector = None;
 
-        let backend = Backend(
-            BackendBuilder::new()
-                .writer(rt.block_on(writer))
-                .reader(Reader {
-                    mysql_connector,
-                    noria_connector,
-                })
-                .require_authentication(false)
-                .build(),
-        );
+        let backend = Backend(BackendBuilder::new().require_authentication(false).build(
+            rt.block_on(writer).into(),
+            Reader {
+                mysql_connector,
+                noria_connector,
+            },
+        ));
 
         rt.block_on(psql_srv::run_backend(backend, s));
         drop(rt);
