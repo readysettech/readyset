@@ -1,9 +1,6 @@
 #![warn(clippy::dbg_macro)]
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
 use async_trait::async_trait;
-use clap::Clap;
 use tokio::net;
 
 use noria_client::backend as cl;
@@ -26,23 +23,14 @@ impl ConnectionHandler for PsqlHandler {
     }
 }
 
-#[derive(Clap)]
-struct Options {
-    #[clap(flatten)]
-    adapter_options: noria_client_adapter::Options,
-}
-
-fn main() -> anyhow::Result<()> {
-    let options = Options::parse();
-
+fn main() {
     let mut adapter = NoriaAdapter {
         name: "noria-psql",
         version: "0.1.0",
         description: "PostgreSQL adapter for Noria.",
-        default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
+        default_address: "127.0.0.1:5432",
         connection_handler: PsqlHandler,
         database_type: DatabaseType::Psql,
     };
-
-    adapter.run(options.adapter_options)
+    adapter.run()
 }
