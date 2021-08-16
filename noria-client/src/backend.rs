@@ -6,9 +6,11 @@ use std::time;
 
 use async_trait::async_trait;
 use derive_more::From;
+use futures::FutureExt;
 use metrics::histogram;
 use nom_sql::Dialect;
 use tokio::io::AsyncWrite;
+use tokio::sync::mpsc;
 use tokio_postgres as pgsql;
 use tracing::Level;
 
@@ -141,6 +143,7 @@ pub struct BackendBuilder {
     static_responses: bool,
     slowlog: bool,
     dialect: Dialect,
+    race_reads: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
     ticket: Option<Timestamp>,
@@ -153,6 +156,7 @@ impl Default for BackendBuilder {
             static_responses: true,
             slowlog: false,
             dialect: Dialect::MySQL,
+            race_reads: false,
             users: Default::default(),
             require_authentication: true,
             ticket: None,
@@ -179,6 +183,7 @@ impl BackendBuilder {
             reader,
             slowlog: self.slowlog,
             dialect: self.dialect,
+            race_reads: self.race_reads,
             users: self.users,
             require_authentication: self.require_authentication,
             ticket: self.ticket,
@@ -198,6 +203,11 @@ impl BackendBuilder {
 
     pub fn dialect(mut self, dialect: Dialect) -> Self {
         self.dialect = dialect;
+        self
+    }
+
+    pub fn race_reads(mut self, race_reads: bool) -> Self {
+        self.race_reads = race_reads;
         self
     }
 
@@ -235,6 +245,9 @@ pub struct Backend<A: 'static + Authority> {
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
+    /// If set to true and a MySQL backend is configured for fallback, all reads will be performed
+    /// simultaneously in Noria and MySQL, with the first successful result being returned.
+    race_reads: bool,
     /// Map from username to password for all users allowed to connect to the db
     users: HashMap<String, String>,
     require_authentication: bool,
@@ -331,8 +344,8 @@ pub enum QueryResult {
 ///    most appropriate MySQL error code and write that back to the caller without dropping the
 ///    connection.
 impl<A: 'static + Authority> Backend<A> {
-    /// Executes query on mysql_backend, if present, when it cannot be parsed_query
-    /// or executed by noria. Returns the query result and RYW ticket.
+    /// Executes query on mysql_backend, if present, when it cannot be parsed or executed by noria.
+    /// Returns the query result and RYW ticket.
     pub async fn query_fallback(
         &mut self,
         query: &str,
@@ -354,6 +367,63 @@ impl<A: 'static + Authority> Backend<A> {
     fn is_read(&self, query: &str) -> bool {
         let q = query.to_string().trim_start().to_lowercase();
         q.starts_with("select") || q.starts_with("show") || q.starts_with("describe")
+    }
+
+    /// Executes the given read against both noria and mysql in simultaneous racing tasks, returning
+    /// the result of the first query that completes successfully, or the error from MySQL if both fail
+    ///
+    /// If fallback is not configured, returns an error
+    pub async fn race_read(
+        &mut self,
+        q: nom_sql::SelectStatement,
+        query_str: String,
+        use_params: Vec<Literal>,
+        ticket: Option<Timestamp>,
+    ) -> Result<QueryResult, Error> {
+        let mut mysql = self
+            .reader
+            .mysql_connector
+            // TODO(grfn): Find a way to avoid this clone
+            .clone()
+            .ok_or_else(|| internal_err("race_read called without fallback configured"))?;
+        let mut noria = self.reader.noria_connector.clone();
+
+        macro_rules! grab_err {
+            ($sender: expr) => {
+                |result| async move {
+                    match result {
+                        Ok(res) => Ok(res),
+                        Err(e) => {
+                            // TODO(grfn): Also log the error, especially if it came from noria
+                            $sender.send(e).await.unwrap();
+                            Err(())
+                        }
+                    }
+                }
+            };
+        }
+
+        let (noria_err_sender, mut noria_err) = mpsc::channel(1);
+        let noria_read = tokio::spawn(async move {
+            noria
+                .handle_select(q, use_params, ticket)
+                .then(grab_err!(noria_err_sender))
+                .await
+        });
+        let (mysql_err_sender, mut mysql_err) = mpsc::channel(1);
+        let mysql_read = tokio::spawn(async move {
+            mysql
+                .handle_select(&query_str)
+                .then(grab_err!(mysql_err_sender))
+                .await
+        });
+        let errs = tokio::spawn(async move { tokio::join!(noria_err.recv(), mysql_err.recv()) });
+
+        tokio::select! {
+            Ok(Ok(noria_res)) = noria_read => Ok(noria_res),
+            Ok(Ok(mysql_res)) = mysql_read => Ok(mysql_res),
+            Ok((_, Some(e))) = errs => Err(e)
+        }
     }
 
     /// Executes the given read against noria, and on failure sends the read to fallback instead.
@@ -644,9 +714,13 @@ impl<A: 'static + Authority> Backend<A> {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
                         let execution_timer = std::time::Instant::now();
-                        let res = self
-                            .cascade_read(q, query, use_params, self.ticket.clone())
-                            .await;
+                        let res = if self.race_reads {
+                            self.race_read(q, query.to_owned(), use_params, self.ticket.clone())
+                                .await
+                        } else {
+                            self.cascade_read(q, query, use_params, self.ticket.clone())
+                                .await
+                        };
                         //TODO(Dan): Implement fallback execution timing
                         let execution_time = execution_timer.elapsed().as_micros();
                         measure_parse_and_execution_time(

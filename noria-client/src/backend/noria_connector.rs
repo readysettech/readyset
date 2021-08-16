@@ -64,6 +64,19 @@ pub struct NoriaBackendInner<A: 'static + Authority> {
     outputs: BTreeMap<String, View>,
 }
 
+impl<A> Clone for NoriaBackendInner<A>
+where
+    A: 'static + Authority,
+{
+    fn clone(&self) -> Self {
+        Self {
+            noria: self.noria.clone(),
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+        }
+    }
+}
+
 macro_rules! noria_await {
     ($self:expr, $fut:expr) => {{
         let noria = &mut $self.noria;
@@ -144,6 +157,19 @@ pub struct NoriaConnector<A: 'static + Authority> {
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
     /// The region to pass to noria for replica selection.
     region: Option<String>,
+}
+
+impl<A: 'static + Authority> Clone for NoriaConnector<A> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            auto_increments: self.auto_increments.clone(),
+            cached: self.cached.clone(),
+            tl_cached: self.tl_cached.clone(),
+            prepared_statement_cache: self.prepared_statement_cache.clone(),
+            region: self.region.clone(),
+        }
+    }
 }
 
 impl<A: 'static + Authority> NoriaConnector<A> {
