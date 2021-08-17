@@ -240,47 +240,60 @@ pub(crate) fn collapse_where_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom_sql::Dialect;
 
     #[test]
     fn collapsed_where_placeholders() {
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y IN (?, ?, ?)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y IN (?, ?, ?)").unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE x.y = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE y IN (?, ?, ?)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y IN (?, ?, ?)").unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE y = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)")
+                .unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE AVG(y) = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?")
-            .unwrap();
+        let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?",
+        )
+        .unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
         assert_eq!(rewritten.0, 1);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?").unwrap()
+            nom_sql::parse_query(
+                Dialect::MySQL,
+                "SELECT * FROM t WHERE x = ? AND y = ? OR z = ?"
+            )
+            .unwrap()
         );
 
         let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
         )
         .unwrap();
@@ -290,12 +303,14 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query(
+                Dialect::MySQL,
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
             )
             .unwrap()
         );
 
         let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
         )
         .unwrap();
@@ -305,6 +320,7 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query(
+                Dialect::MySQL,
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
             )
             .unwrap()
@@ -313,99 +329,127 @@ mod tests {
 
     #[test]
     fn collapsed_where_literals() {
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap();
         assert_eq!(collapse_where_in(&mut q, false).unwrap(), None);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y IN (1, 2, 3)").unwrap();
         let rewritten = collapse_where_in(&mut q, true).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE x.y = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE y IN (1, 2, 3)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y IN (1, 2, 3)").unwrap();
         let rewritten = collapse_where_in(&mut q, true).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE y = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) IN (1, 2, 3)").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE AVG(y) IN (1, 2, 3)")
+                .unwrap();
         let rewritten = collapse_where_in(&mut q, true).unwrap().unwrap();
         assert_eq!(rewritten.0, 0);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) = ?").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE AVG(y) = ?").unwrap()
         );
 
-        let mut q = nom_sql::parse_query("SELECT COUNT(*) FROM x WHERE id IN (1, 2, 3)").unwrap();
+        let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
+            "SELECT COUNT(*) FROM x WHERE id IN (1, 2, 3)",
+        )
+        .unwrap();
         assert!(collapse_where_in(&mut q, true).unwrap().is_none());
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT COUNT(*) FROM x WHERE (id=1 OR id=2) OR id=3").unwrap()
+            nom_sql::parse_query(
+                Dialect::MySQL,
+                "SELECT COUNT(*) FROM x WHERE (id=1 OR id=2) OR id=3"
+            )
+            .unwrap()
         );
     }
 
     #[test]
     fn noninterference() {
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y = 'foo'").unwrap();
+        let mut q =
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y = 'foo'").unwrap();
         assert_eq!(collapse_where_in(&mut q, true).unwrap(), None);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM x WHERE x.y = 'foo'").unwrap()
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y = 'foo'").unwrap()
         );
     }
 
     #[test]
     fn collapsed_where_dollarsign_placeholders() {
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE x.y IN ($1, $2, $3)").unwrap();
-        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
-        assert_eq!(rewritten.0, 0);
-        assert_eq!(rewritten.1.len(), 3);
-        assert_eq!(
-            q,
-            nom_sql::parse_query("SELECT * FROM x WHERE x.y = ?").unwrap()
-        );
-
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE y IN ($1, $2, $3)").unwrap();
-        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
-        assert_eq!(rewritten.0, 0);
-        assert_eq!(rewritten.1.len(), 3);
-        assert_eq!(
-            q,
-            nom_sql::parse_query("SELECT * FROM x WHERE y = ?").unwrap()
-        );
-
-        let mut q = nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)").unwrap();
-        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
-        assert_eq!(rewritten.0, 0);
-        assert_eq!(rewritten.1.len(), 3);
-        assert_eq!(
-            q,
-            nom_sql::parse_query("SELECT * FROM x WHERE AVG(y) = ?").unwrap()
-        );
-
         let mut q =
-            nom_sql::parse_query("SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5")
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y IN ($1, $2, $3)")
                 .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE x.y = ?").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y IN ($1, $2, $3)")
+            .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE y = ?").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)",
+        )
+        .unwrap();
+        let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
+        assert_eq!(rewritten.0, 0);
+        assert_eq!(rewritten.1.len(), 3);
+        assert_eq!(
+            q,
+            nom_sql::parse_query(Dialect::MySQL, "SELECT * FROM x WHERE AVG(y) = ?").unwrap()
+        );
+
+        let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5",
+        )
+        .unwrap();
         let rewritten = collapse_where_in(&mut q, false).unwrap().unwrap();
         assert_eq!(rewritten.0, 1);
         assert_eq!(rewritten.1.len(), 3);
         assert_eq!(
             q,
-            nom_sql::parse_query("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5").unwrap()
+            nom_sql::parse_query(
+                Dialect::MySQL,
+                "SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5"
+            )
+            .unwrap()
         );
 
         let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
         )
         .unwrap();
@@ -415,12 +459,14 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query(
+                Dialect::MySQL,
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4"
             )
             .unwrap()
         );
 
         let mut q = nom_sql::parse_query(
+            Dialect::MySQL,
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
         )
         .unwrap();
@@ -430,6 +476,7 @@ mod tests {
         assert_eq!(
             q,
             nom_sql::parse_query(
+                Dialect::MySQL,
                 "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = ?) OR z = $4",
             )
             .unwrap()

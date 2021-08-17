@@ -63,22 +63,21 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
     }
 }
 
-pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
+pub fn parse_query_bytes<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<[u8]>,
 {
-    // TODO(grfn): Add Dialect as an argument to this and `parse_query`
-    match sql_query(Dialect::MySQL)(input.as_ref()) {
+    match sql_query(dialect)(input.as_ref()) {
         Ok((_, o)) => Ok(o),
         Err(_) => Err("failed to parse query"),
     }
 }
 
-pub fn parse_query<T>(input: T) -> Result<SqlQuery, &'static str>
+pub fn parse_query<T>(dialect: Dialect, input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<str>,
 {
-    parse_query_bytes(input.as_ref().trim().as_bytes())
+    parse_query_bytes(dialect, input.as_ref().trim().as_bytes())
 }
 
 #[cfg(test)]
@@ -95,12 +94,12 @@ mod tests {
             "SELECT name, password FROM users AS u WHERE ((user = 'aaa') AND (password = 'xxx'))";
         let qstring5 = "SELECT (name * 2) AS double_name FROM users";
 
-        let res0 = parse_query(qstring0);
-        let res1 = parse_query(qstring1);
-        let res2 = parse_query(qstring2);
-        let res3 = parse_query(qstring3);
-        let res4 = parse_query(qstring4);
-        let res5 = parse_query(qstring5);
+        let res0 = parse_query(Dialect::MySQL, qstring0);
+        let res1 = parse_query(Dialect::MySQL, qstring1);
+        let res2 = parse_query(Dialect::MySQL, qstring2);
+        let res3 = parse_query(Dialect::MySQL, qstring3);
+        let res4 = parse_query(Dialect::MySQL, qstring4);
+        let res5 = parse_query(Dialect::MySQL, qstring5);
 
         assert!(res0.is_ok());
         assert!(res1.is_ok());
@@ -127,9 +126,9 @@ mod tests {
         let expected2 = "SELECT name, password FROM users AS u";
         let expected3 = "SELECT name, password FROM users AS u WHERE (user_id = '1')";
 
-        let res1 = parse_query(qstring1);
-        let res2 = parse_query(qstring2);
-        let res3 = parse_query(qstring3);
+        let res1 = parse_query(Dialect::MySQL, qstring1);
+        let res2 = parse_query(Dialect::MySQL, qstring2);
+        let res3 = parse_query(Dialect::MySQL, qstring3);
 
         assert!(res1.is_ok());
         assert!(res2.is_ok());
@@ -150,8 +149,8 @@ mod tests {
         let expected1 =
             "SELECT name, password FROM users AS u WHERE ((user = ?) AND (password = ?))";
 
-        let res0 = parse_query(qstring0);
-        let res1 = parse_query(qstring1);
+        let res0 = parse_query(Dialect::MySQL, qstring0);
+        let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
         assert_eq!(expected0, format!("{}", res0.unwrap()));
@@ -163,7 +162,7 @@ mod tests {
         let qstring1 = "select count(*) from users";
         let expected1 = "SELECT count(*) FROM users";
 
-        let res1 = parse_query(qstring1);
+        let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res1.is_ok());
         assert_eq!(expected1, format!("{}", res1.unwrap()));
     }
@@ -171,7 +170,7 @@ mod tests {
     #[test]
     fn display_insert_query() {
         let qstring = "INSERT INTO users (name, password) VALUES ('aaa', 'xxx')";
-        let res = parse_query(qstring);
+        let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(qstring, format!("{}", res.unwrap()));
     }
@@ -180,7 +179,7 @@ mod tests {
     fn display_insert_query_no_columns() {
         let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
         let expected = "INSERT INTO users VALUES ('aaa', 'xxx')";
-        let res = parse_query(qstring);
+        let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
     }
@@ -189,7 +188,7 @@ mod tests {
     fn format_insert_query() {
         let qstring = "insert into users (name, password) values ('aaa', 'xxx')";
         let expected = "INSERT INTO users (name, password) VALUES ('aaa', 'xxx')";
-        let res = parse_query(qstring);
+        let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
     }
@@ -198,7 +197,7 @@ mod tests {
     fn format_update_query() {
         let qstring = "update users set name=42, password='xxx' where id=1";
         let expected = "UPDATE users SET name = 42, password = 'xxx' WHERE (id = 1)";
-        let res = parse_query(qstring);
+        let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
     }
@@ -211,143 +210,139 @@ mod tests {
         let expected0 = "DELETE FROM users WHERE ((user = 'aaa') AND (password = 'xxx'))";
         let expected1 = "DELETE FROM users WHERE ((user = ?) AND (password = ?))";
 
-        let res0 = parse_query(qstring0);
-        let res1 = parse_query(qstring1);
+        let res0 = parse_query(Dialect::MySQL, qstring0);
+        let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res0.is_ok());
         assert!(res1.is_ok());
         assert_eq!(expected0, format!("{}", res0.unwrap()));
         assert_eq!(expected1, format!("{}", res1.unwrap()));
     }
-}
 
-#[cfg(not(feature = "postgres"))]
-#[cfg(test)]
-mod tests_mysql {
-    use super::*;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    mod mysql {
+        use super::*;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
-    use crate::table::Table;
+        use crate::table::Table;
 
-    #[test]
-    fn trim_query() {
-        let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
+        #[test]
+        fn trim_query() {
+            let qstring = "   INSERT INTO users VALUES (42, \"test\");     ";
+            let res = parse_query(Dialect::MySQL, qstring);
+            assert!(res.is_ok());
+        }
+
+        #[test]
+        fn parse_byte_slice() {
+            let qstring: &[u8] = b"INSERT INTO users VALUES (42, \"test\");";
+            let res = parse_query_bytes(Dialect::MySQL, qstring);
+            assert!(res.is_ok());
+        }
+
+        #[test]
+        fn parse_byte_vector() {
+            let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
+            let res = parse_query_bytes(Dialect::MySQL, &qstring);
+            assert!(res.is_ok());
+        }
+
+        #[test]
+        fn hash_query() {
+            let qstring = "INSERT INTO users VALUES (42, \"test\");";
+            let res = parse_query(Dialect::MySQL, qstring);
+            assert!(res.is_ok());
+
+            let expected = SqlQuery::Insert(InsertStatement {
+                table: Table::from("users"),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            });
+            let mut h0 = DefaultHasher::new();
+            let mut h1 = DefaultHasher::new();
+            res.unwrap().hash(&mut h0);
+            expected.hash(&mut h1);
+            assert_eq!(h0.finish(), h1.finish());
+        }
+
+        #[test]
+        fn format_query_with_escaped_keyword() {
+            let qstring0 = "delete from articles where `key`='aaa'";
+            let qstring1 = "delete from `where` where user=?";
+
+            let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
+            let expected1 = "DELETE FROM `where` WHERE (user = ?)";
+
+            let res0 = parse_query(Dialect::MySQL, qstring0);
+            let res1 = parse_query(Dialect::MySQL, qstring1);
+            assert!(res0.is_ok());
+            assert!(res1.is_ok());
+            assert_eq!(expected0, format!("{}", res0.unwrap()));
+            assert_eq!(expected1, format!("{}", res1.unwrap()));
+        }
     }
 
-    #[test]
-    fn parse_byte_slice() {
-        let qstring: &[u8] = b"INSERT INTO users VALUES (42, \"test\");";
-        let res = parse_query_bytes(qstring);
-        assert!(res.is_ok());
-    }
+    mod tests_postgres {
+        use super::*;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
-    #[test]
-    fn parse_byte_vector() {
-        let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, \"test\");".to_vec();
-        let res = parse_query_bytes(&qstring);
-        assert!(res.is_ok());
-    }
+        use crate::table::Table;
 
-    #[test]
-    fn hash_query() {
-        let qstring = "INSERT INTO users VALUES (42, \"test\");";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
+        #[test]
+        fn trim_query() {
+            let qstring = "   INSERT INTO users VALUES (42, 'test');     ";
+            let res = parse_query(Dialect::PostgreSQL, qstring);
+            assert!(res.is_ok());
+        }
 
-        let expected = SqlQuery::Insert(InsertStatement {
-            table: Table::from("users"),
-            fields: None,
-            data: vec![vec![42.into(), "test".into()]],
-            ..Default::default()
-        });
-        let mut h0 = DefaultHasher::new();
-        let mut h1 = DefaultHasher::new();
-        res.unwrap().hash(&mut h0);
-        expected.hash(&mut h1);
-        assert_eq!(h0.finish(), h1.finish());
-    }
+        #[test]
+        fn parse_byte_slice() {
+            let qstring: &[u8] = b"INSERT INTO users VALUES (42, 'test');";
+            let res = parse_query_bytes(Dialect::PostgreSQL, qstring);
+            assert!(res.is_ok());
+        }
 
-    #[test]
-    fn format_query_with_escaped_keyword() {
-        let qstring0 = "delete from articles where `key`='aaa'";
-        let qstring1 = "delete from `where` where user=?";
+        #[test]
+        fn parse_byte_vector() {
+            let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, 'test');".to_vec();
+            let res = parse_query_bytes(Dialect::PostgreSQL, &qstring);
+            assert!(res.is_ok());
+        }
 
-        let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
-        let expected1 = "DELETE FROM `where` WHERE (user = ?)";
+        #[test]
+        fn hash_query() {
+            let qstring = "INSERT INTO users VALUES (42, 'test');";
+            let res = parse_query(Dialect::PostgreSQL, qstring);
+            assert!(res.is_ok());
 
-        let res0 = parse_query(qstring0);
-        let res1 = parse_query(qstring1);
-        assert!(res0.is_ok());
-        assert!(res1.is_ok());
-        assert_eq!(expected0, format!("{}", res0.unwrap()));
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
-    }
-}
+            let expected = SqlQuery::Insert(InsertStatement {
+                table: Table::from("users"),
+                fields: None,
+                data: vec![vec![42.into(), "test".into()]],
+                ..Default::default()
+            });
+            let mut h0 = DefaultHasher::new();
+            let mut h1 = DefaultHasher::new();
+            res.unwrap().hash(&mut h0);
+            expected.hash(&mut h1);
+            assert_eq!(h0.finish(), h1.finish());
+        }
 
-#[cfg(feature = "postgres")]
-#[cfg(test)]
-mod tests_postgres {
-    use super::*;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+        #[test]
+        fn format_query_with_escaped_keyword() {
+            let qstring0 = "delete from articles where \"key\"='aaa'";
+            let qstring1 = "delete from \"where\" where user=?";
 
-    use crate::table::Table;
+            let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
+            let expected1 = "DELETE FROM `where` WHERE (user = ?)";
 
-    #[test]
-    fn trim_query() {
-        let qstring = "   INSERT INTO users VALUES (42, 'test');     ";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn parse_byte_slice() {
-        let qstring: &[u8] = b"INSERT INTO users VALUES (42, 'test');";
-        let res = parse_query_bytes(qstring);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn parse_byte_vector() {
-        let qstring: Vec<u8> = b"INSERT INTO users VALUES (42, 'test');".to_vec();
-        let res = parse_query_bytes(&qstring);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn hash_query() {
-        let qstring = "INSERT INTO users VALUES (42, 'test');";
-        let res = parse_query(qstring);
-        assert!(res.is_ok());
-
-        let expected = SqlQuery::Insert(InsertStatement {
-            table: Table::from("users"),
-            fields: None,
-            data: vec![vec![42.into(), "test".into()]],
-            ..Default::default()
-        });
-        let mut h0 = DefaultHasher::new();
-        let mut h1 = DefaultHasher::new();
-        res.unwrap().hash(&mut h0);
-        expected.hash(&mut h1);
-        assert_eq!(h0.finish(), h1.finish());
-    }
-
-    #[test]
-    fn format_query_with_escaped_keyword() {
-        let qstring0 = "delete from articles where \"key\"='aaa'";
-        let qstring1 = "delete from \"where\" where user=?";
-
-        let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
-        let expected1 = "DELETE FROM `where` WHERE (user = ?)";
-
-        let res0 = parse_query(qstring0);
-        let res1 = parse_query(qstring1);
-        assert!(res0.is_ok());
-        assert!(res1.is_ok());
-        assert_eq!(expected0, format!("{}", res0.unwrap()));
-        assert_eq!(expected1, format!("{}", res1.unwrap()));
+            let res0 = parse_query(Dialect::PostgreSQL, qstring0);
+            let res1 = parse_query(Dialect::PostgreSQL, qstring1);
+            assert!(res0.is_ok());
+            assert!(res1.is_ok());
+            assert_eq!(expected0, format!("{}", res0.unwrap()));
+            assert_eq!(expected1, format!("{}", res1.unwrap()));
+        }
     }
 }

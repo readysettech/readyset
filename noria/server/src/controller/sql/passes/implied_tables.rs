@@ -342,7 +342,7 @@ impl ImpliedTableExpansion for SqlQuery {
 mod tests {
     use super::*;
     use maplit::hashmap;
-    use nom_sql::{parse_query, Column, FieldDefinitionExpression, SqlQuery, Table};
+    use nom_sql::{parse_query, Column, Dialect, FieldDefinitionExpression, SqlQuery, Table};
     use std::collections::HashMap;
 
     #[test]
@@ -401,8 +401,12 @@ mod tests {
 
     #[test]
     fn in_where() {
-        let orig = parse_query("SELECT name FROM users WHERE id = ?").unwrap();
-        let expected = parse_query("SELECT users.name FROM users WHERE users.id = ?").unwrap();
+        let orig = parse_query(Dialect::MySQL, "SELECT name FROM users WHERE id = ?").unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT users.name FROM users WHERE users.id = ?",
+        )
+        .unwrap();
         let schema = hashmap! {
             "users".into() => vec![
                 "id".into(),
@@ -417,11 +421,13 @@ mod tests {
     #[test]
     fn case_when() {
         let orig = parse_query(
+            Dialect::MySQL,
             "SELECT COUNT(CASE WHEN aid = 5 THEN aid END) AS count
              FROM votes GROUP BY votes.userid",
         )
         .unwrap();
         let expected = parse_query(
+            Dialect::MySQL,
             "SELECT COUNT(CASE WHEN votes.aid = 5 THEN votes.aid END) AS count
              FROM votes GROUP BY votes.userid",
         )
@@ -440,11 +446,14 @@ mod tests {
     #[test]
     fn in_cte() {
         let orig = parse_query(
+            Dialect::MySQL,
             "With votes AS (SELECT COUNT(id), story_id FROM votes GROUP BY story_id )
              SELECT title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
         let expected = parse_query(
+
+Dialect::MySQL,
             "With votes AS(SELECT COUNT(votes.id), votes.story_id FROM votes GROUP BY votes.story_id )
              SELECT stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
@@ -467,11 +476,13 @@ mod tests {
     #[test]
     fn referencing_cte() {
         let orig = parse_query(
+            Dialect::MySQL,
             "With votes AS (SELECT COUNT(id) as count, story_id FROM votes GROUP BY story_id )
              SELECT count, title FROM stories JOIN votes ON stories.id = votes.story_id",
         )
         .unwrap();
         let expected = parse_query(
+Dialect::MySQL,
             "With votes AS (SELECT COUNT(votes.id) as count, votes.story_id FROM votes GROUP BY votes.story_id )
              SELECT votes.count, stories.title FROM stories JOIN votes ON stories.id = votes.story_id",
         )

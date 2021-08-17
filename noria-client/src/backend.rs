@@ -7,6 +7,7 @@ use std::time;
 use async_trait::async_trait;
 use derive_more::From;
 use metrics::histogram;
+use nom_sql::Dialect;
 use tokio::io::AsyncWrite;
 use tracing::Level;
 
@@ -124,6 +125,7 @@ pub struct BackendBuilder {
     static_responses: bool,
     slowlog: bool,
     permissive: bool,
+    dialect: Dialect,
     users: HashMap<String, String>,
     require_authentication: bool,
     ticket: Option<Timestamp>,
@@ -136,6 +138,7 @@ impl Default for BackendBuilder {
             static_responses: true,
             slowlog: false,
             permissive: false,
+            dialect: Dialect::MySQL,
             users: Default::default(),
             require_authentication: true,
             ticket: None,
@@ -162,6 +165,7 @@ impl BackendBuilder {
             reader,
             slowlog: self.slowlog,
             permissive: self.permissive,
+            dialect: self.dialect,
             users: self.users,
             require_authentication: self.require_authentication,
             ticket: self.ticket,
@@ -181,6 +185,11 @@ impl BackendBuilder {
 
     pub fn permissive(mut self, permissive: bool) -> Self {
         self.permissive = permissive;
+        self
+    }
+
+    pub fn dialect(mut self, dialect: Dialect) -> Self {
+        self.dialect = dialect;
         self
     }
 
@@ -217,6 +226,8 @@ pub struct Backend<A: 'static + Authority> {
     reader: Reader<A>,
     slowlog: bool,
     permissive: bool,
+    /// SQL dialect to use when parsing queries from clients
+    dialect: Dialect,
     /// Map from username to password for all users allowed to connect to the db
     users: HashMap<String, String>,
     require_authentication: bool,
@@ -728,7 +739,7 @@ impl<A: 'static + Authority> Backend<A> {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
                 trace!("Parsing query");
-                match nom_sql::parse_query(query) {
+                match nom_sql::parse_query(self.dialect, query) {
                     Ok(mut parsed_query) => {
                         trace!("collapsing where-in clauses");
                         let mut use_params = Vec::new();

@@ -528,13 +528,13 @@ pub(crate) fn coerce_params(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::{self, SqlQuery};
+    use nom_sql::{self, Dialect, SqlQuery};
 
     fn compare_flatten<I>(cond_query: &str, key: Vec<&str>, expected: Option<Vec<Vec<I>>>)
     where
         I: Into<DataType>,
     {
-        let cond = match nom_sql::parse_query(cond_query).unwrap() {
+        let cond = match nom_sql::parse_query(Dialect::MySQL, cond_query).unwrap() {
             SqlQuery::Update(u) => u.where_clause.unwrap(),
             SqlQuery::Delete(d) => d.where_clause.unwrap(),
             _ => unreachable!(),
@@ -566,7 +566,7 @@ mod tests {
     }
 
     fn get_schema(query: &str) -> CreateTableStatement {
-        match nom_sql::parse_query(query).unwrap() {
+        match nom_sql::parse_query(Dialect::MySQL, query).unwrap() {
             SqlQuery::CreateTable(c) => c,
             _ => unreachable!(),
         }
@@ -795,7 +795,7 @@ mod tests {
         let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
                      AND `votes`.`story_id` = ? AND `votes`.`comment_id` IS NULL \
                      ORDER BY `votes`.`id` ASC LIMIT 1";
-        let q = nom_sql::parse_query(query).unwrap();
+        let q = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
 
         let pc = get_parameter_columns(&q);
 
@@ -807,7 +807,7 @@ mod tests {
         let query = "SELECT  `votes`.* FROM `votes` WHERE `votes`.`user_id` = 1 \
                      AND `votes`.`story_id` = $1 AND `votes`.`comment_id` IS NULL \
                      ORDER BY `votes`.`id` ASC LIMIT 1";
-        let q = nom_sql::parse_query(query).unwrap();
+        let q = nom_sql::parse_query(Dialect::MySQL, query).unwrap();
 
         let pc = get_parameter_columns(&q);
 

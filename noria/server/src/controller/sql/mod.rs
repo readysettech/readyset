@@ -21,6 +21,7 @@ use crate::errors::internal_err;
 use crate::{invariant, ReadySetResult, ReuseConfigType};
 
 use super::mir_to_flow::mir_query_to_flow_parts;
+use super::recipe::CANONICAL_DIALECT;
 
 use self::mir::SqlToMirConverter;
 use self::query_graph::{to_query_graph, QueryGraph};
@@ -1061,7 +1062,7 @@ impl<'a> ToFlowParts for &'a str {
         mig: &mut Migration,
     ) -> Result<QueryFlowParts, ReadySetError> {
         // try parsing the incoming SQL
-        let parsed_query = sql_parser::parse_query(self);
+        let parsed_query = sql_parser::parse_query(CANONICAL_DIALECT, self);
 
         // if ok, manufacture a node for the query structure we got
         match parsed_query {
@@ -1076,7 +1077,7 @@ impl<'a> ToFlowParts for &'a str {
 #[cfg(test)]
 mod tests {
     use dataflow::prelude::*;
-    use nom_sql::{BinaryOperator, Column, Expression, FunctionExpression, Literal};
+    use nom_sql::{BinaryOperator, Column, Dialect, Expression, FunctionExpression, Literal};
 
     use crate::controller::Migration;
     use crate::integration_utils;
@@ -1946,7 +1947,7 @@ mod tests {
             // Add a new "full table" query as a non leaf query. The view does not contain a
             // 'bogokey' literal column because it is for a non leaf query.
             let res = inc.add_parsed_query(
-                sql_parser::parse_query("SELECT id, name FROM users;").unwrap(),
+                sql_parser::parse_query(Dialect::MySQL, "SELECT id, name FROM users;").unwrap(),
                 Some("short_users".into()),
                 false,
                 mig,
@@ -2189,8 +2190,11 @@ mod tests {
 
             // Add a new query
             let res = inc.add_parsed_query(
-                sql_parser::parse_query("SELECT COUNT(uid) AS vc FROM votes GROUP BY aid;")
-                    .unwrap(),
+                sql_parser::parse_query(
+                    Dialect::MySQL,
+                    "SELECT COUNT(uid) AS vc FROM votes GROUP BY aid;",
+                )
+                .unwrap(),
                 Some("votecount".into()),
                 false,
                 mig,
@@ -2201,6 +2205,7 @@ mod tests {
             let ncount = mig.graph().node_count();
             let res = inc.add_parsed_query(
                 sql_parser::parse_query(
+                    Dialect::MySQL,
                     "SELECT COUNT(uid) AS vc FROM votes GROUP BY aid HAVING vc > 5;",
                 )
                 .unwrap(),

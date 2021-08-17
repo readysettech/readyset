@@ -396,17 +396,17 @@ mod tests {
     use super::{AliasRemoval, TableAliasRewrite};
     use maplit::hashmap;
     use nom_sql::{
-        parse_query, parser, BinaryOperator, Column, Expression, FieldDefinitionExpression,
-        ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal,
-        SelectStatement, SqlQuery, Table,
+        parse_query, parser, BinaryOperator, Column, Dialect, Expression,
+        FieldDefinitionExpression, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator,
+        JoinRightSide, Literal, SelectStatement, SqlQuery, Table,
     };
     use std::collections::HashMap;
     use std::convert::TryInto;
 
     macro_rules! rewrites_to {
         ($before: expr, $after: expr) => {{
-            let mut res = parse_query($before).unwrap();
-            let expected = parse_query($after).unwrap();
+            let mut res = parse_query(Dialect::MySQL, $before).unwrap();
+            let expected = parse_query(Dialect::MySQL, $after).unwrap();
             let context = hashmap! {"t1".to_owned() => "global".try_into().unwrap()};
             res.rewrite_table_aliases("query", &context);
             assert_eq!(
@@ -572,6 +572,7 @@ mod tests {
     #[test]
     fn it_rewrites_duplicate_aliases() {
         let mut res = parser::parse_query(
+            Dialect::MySQL,
             "SELECT t1.id, t2.name FROM tab t1 JOIN tab t2 ON (t1.other = t2.id)",
         )
         .unwrap();

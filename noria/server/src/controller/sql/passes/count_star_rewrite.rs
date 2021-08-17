@@ -75,7 +75,7 @@ impl CountStarRewrite for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::{Column, FieldDefinitionExpression, SqlQuery};
+    use nom_sql::{Column, Dialect, FieldDefinitionExpression, SqlQuery};
     use std::collections::HashMap;
 
     #[test]
@@ -86,7 +86,7 @@ mod tests {
         // SELECT COUNT(*) FROM users;
         // -->
         // SELECT COUNT(users.id) FROM users;
-        let q = parse_query("SELECT COUNT(*) FROM users;").unwrap();
+        let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) FROM users;").unwrap();
         let mut schema = HashMap::new();
         schema.insert(
             "users".into(),
@@ -120,7 +120,7 @@ mod tests {
         // SELECT COUNT(*) FROM users GROUP BY id;
         // -->
         // SELECT COUNT(users.name) FROM users GROUP BY id;
-        let q = parse_query("SELECT COUNT(*) FROM users GROUP BY id;").unwrap();
+        let q = parse_query(Dialect::MySQL, "SELECT COUNT(*) FROM users GROUP BY id;").unwrap();
         let mut schema = HashMap::new();
         schema.insert(
             "users".into(),

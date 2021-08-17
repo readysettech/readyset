@@ -1,4 +1,4 @@
-use std::str;
+use std::str::{self, FromStr};
 
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
@@ -7,6 +7,7 @@ use nom::combinator::{map, map_res, not, peek};
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::IResult;
+use thiserror::Error;
 
 use crate::keywords::sql_keyword;
 
@@ -76,6 +77,22 @@ pub enum Dialect {
     /// Identifiers are escaped with backticks (`\``) or square brackets (`[` and `]`) and strings
     /// use either single quotes (`'`) or double quotes (`"`)
     MySQL,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Error)]
+#[error("Unknown dialect `{0}`, expected one of mysql or postgresql")]
+pub struct UnknownDialect(String);
+
+impl FromStr for Dialect {
+    type Err = UnknownDialect;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "mysql" => Ok(Dialect::MySQL),
+            "postgresql" => Ok(Dialect::PostgreSQL),
+            _ => Err(UnknownDialect(s.to_owned())),
+        }
+    }
 }
 
 impl Dialect {

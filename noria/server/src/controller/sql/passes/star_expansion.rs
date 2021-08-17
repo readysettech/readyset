@@ -97,12 +97,12 @@ impl StarExpansion for SqlQuery {
 mod tests {
     use super::StarExpansion;
     use maplit::hashmap;
-    use nom_sql::parse_query;
+    use nom_sql::{parse_query, Dialect};
 
     macro_rules! expands_stars {
 	    ($source: expr, $expected: expr, schema: {$($schema:tt)*}) => {{
-            let q = parse_query($source).unwrap();
-            let expected = parse_query($expected).unwrap();
+            let q = parse_query(Dialect::MySQL, $source).unwrap();
+            let expected = parse_query(Dialect::MySQL, $expected).unwrap();
             let schema = hashmap!($($schema)*);
             let res = q.expand_stars(&schema).unwrap();
             assert_eq!(res, expected, "{} != {}", res, expected);

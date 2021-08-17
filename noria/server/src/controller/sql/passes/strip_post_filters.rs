@@ -78,20 +78,25 @@ impl StripPostFilters for SqlQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::parse_query;
+    use nom_sql::{parse_query, Dialect};
 
     #[test]
     fn strip_ilike() {
-        let query = parse_query("SELECT id FROM posts WHERE title ILIKE ?;").unwrap();
-        let expected = parse_query("SELECT id FROM posts;").unwrap();
+        let query =
+            parse_query(Dialect::MySQL, "SELECT id FROM posts WHERE title ILIKE ?;").unwrap();
+        let expected = parse_query(Dialect::MySQL, "SELECT id FROM posts;").unwrap();
         let result = query.strip_post_filters();
         assert_eq!(result, expected, "result = {}", result);
     }
 
     #[test]
     fn strip_ilike_with_other_conds() {
-        let query = parse_query("SELECT id FROM posts WHERE title ILIKE ? AND id < 5;").unwrap();
-        let expected = parse_query("SELECT id FROM posts WHERE id < 5;").unwrap();
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT id FROM posts WHERE title ILIKE ? AND id < 5;",
+        )
+        .unwrap();
+        let expected = parse_query(Dialect::MySQL, "SELECT id FROM posts WHERE id < 5;").unwrap();
         let result = query.strip_post_filters();
         assert_eq!(result, expected, "result = {}", result);
     }

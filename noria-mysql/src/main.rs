@@ -9,6 +9,7 @@ use clap::Clap;
 use tokio::net;
 
 use msql_srv::MysqlIntermediary;
+use nom_sql::Dialect;
 use noria_client::backend::Backend;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 
@@ -51,6 +52,7 @@ fn main() -> anyhow::Result<()> {
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
         connection_handler: MysqlHandler,
         database_type: DatabaseType::Mysql,
+        dialect: Dialect::MySQL,
     };
 
     adapter.run(options.adapter_options)
