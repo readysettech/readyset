@@ -32,11 +32,11 @@ steps:
                 - "ops/**"
 
             - label: ':docker: Build prettier image'
-              exclude:
+              include:
                 - "js-client/**"
 
             - label: ':prettier: Check prettier'
-              exclude:
+              include:
                 - "js-client/**"
 
             - label: ':docker: Build cargo-audit image'
