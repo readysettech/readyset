@@ -7,16 +7,15 @@ use launchpad::arbitrary::{
     arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
 };
 use nom::branch::alt;
-use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_until, take_while1};
+use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{digit1, line_ending, multispace0, multispace1};
-use nom::character::is_alphanumeric;
-use nom::combinator::{map, not, peek};
+use nom::combinator::{map, peek};
 use nom::combinator::{map_parser, map_res};
 use nom::combinator::{opt, recognize};
 use nom::error::{ErrorKind, ParseError};
-use nom::multi::{fold_many0, many0, many1, separated_list};
+use nom::multi::{many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use nom::{char, complete, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
+use nom::{call, char, complete, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
 use proptest::prelude as prop;
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
@@ -24,8 +23,9 @@ use std::fmt::{self, Display};
 use test_strategy::Arbitrary;
 
 use crate::column::Column;
+use crate::dialect::Dialect;
 use crate::expression::expression;
-use crate::keywords::{escape_if_keyword, sql_keyword};
+use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
 
@@ -458,11 +458,6 @@ pub enum Sign {
     Signed,
 }
 
-#[inline]
-pub fn is_sql_identifier(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == b'_' || chr == b'@'
-}
-
 fn digit_as_u16(len: &[u8]) -> IResult<&[u8], u16> {
     match str::from_utf8(len) {
         Ok(s) => match u16::from_str(s) {
@@ -594,87 +589,89 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
-fn type_identifier_first_half(i: &[u8]) -> IResult<&[u8], SqlType> {
-    alt((
-        |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, 8, i),
-        |i| {
-            int_type(
-                "smallint",
-                SqlType::UnsignedSmallint,
-                SqlType::Smallint,
-                16,
-                i,
-            )
-        },
-        |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, 32, i),
-        |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, 32, i),
-        |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, 64, i),
-        map(tag_no_case("bool"), |_| SqlType::Bool),
-        map(
-            tuple((
-                tag_no_case("char"),
-                delim_u16,
-                multispace0,
-                opt(tag_no_case("binary")),
-            )),
-            |t| SqlType::Char(t.1),
-        ),
-        map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
-            SqlType::DateTime(fsp.unwrap_or(0_u16))
-        }),
-        map(tag_no_case("date"), |_| SqlType::Date),
-        map(
-            tuple((tag_no_case("double"), multispace0, opt_signed)),
-            |_| SqlType::Double,
-        ),
-        map(
-            terminated(
-                preceded(
-                    tag_no_case("enum"),
-                    delimited(tag("("), value_list, tag(")")),
-                ),
-                multispace0,
-            ),
-            SqlType::Enum,
-        ),
-        map(
-            tuple((
-                tag_no_case("float"),
-                multispace0,
-                opt(precision),
-                multispace0,
-            )),
-            |_| SqlType::Float,
-        ),
-        map(
-            tuple((tag_no_case("real"), multispace0, opt_signed)),
-            |_| SqlType::Real,
-        ),
-        map(tag_no_case("text"), |_| SqlType::Text),
-        map(
-            tuple((tag_no_case("timestamp"), opt(delim_digit), multispace0)),
-            |_| SqlType::Timestamp,
-        ),
-        map(
-            tuple((
-                alt((
-                    // The alt expects the same type to be returned for both entries,
-                    // so both have to be tuples with same number of elements
-                    tuple((tag_no_case("varchar"), multispace0, multispace0)),
-                    tuple((
-                        tag_no_case("character"),
-                        multispace1,
-                        tag_no_case("varying"),
-                    )),
+fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        alt((
+            |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, 8, i),
+            |i| {
+                int_type(
+                    "smallint",
+                    SqlType::UnsignedSmallint,
+                    SqlType::Smallint,
+                    16,
+                    i,
+                )
+            },
+            |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, 32, i),
+            |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, 32, i),
+            |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, 64, i),
+            map(tag_no_case("bool"), |_| SqlType::Bool),
+            map(
+                tuple((
+                    tag_no_case("char"),
+                    delim_u16,
+                    multispace0,
+                    opt(tag_no_case("binary")),
                 )),
-                delim_u16,
-                multispace0,
-                opt(tag_no_case("binary")),
-            )),
-            |t| SqlType::Varchar(t.1),
-        ),
-        map(tag_no_case("time"), |_| SqlType::Time),
-    ))(i)
+                |t| SqlType::Char(t.1),
+            ),
+            map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
+                SqlType::DateTime(fsp.unwrap_or(0_u16))
+            }),
+            map(tag_no_case("date"), |_| SqlType::Date),
+            map(
+                tuple((tag_no_case("double"), multispace0, opt_signed)),
+                |_| SqlType::Double,
+            ),
+            map(
+                terminated(
+                    preceded(
+                        tag_no_case("enum"),
+                        delimited(tag("("), value_list(dialect), tag(")")),
+                    ),
+                    multispace0,
+                ),
+                SqlType::Enum,
+            ),
+            map(
+                tuple((
+                    tag_no_case("float"),
+                    multispace0,
+                    opt(precision),
+                    multispace0,
+                )),
+                |_| SqlType::Float,
+            ),
+            map(
+                tuple((tag_no_case("real"), multispace0, opt_signed)),
+                |_| SqlType::Real,
+            ),
+            map(tag_no_case("text"), |_| SqlType::Text),
+            map(
+                tuple((tag_no_case("timestamp"), opt(delim_digit), multispace0)),
+                |_| SqlType::Timestamp,
+            ),
+            map(
+                tuple((
+                    alt((
+                        // The alt expects the same type to be returned for both entries,
+                        // so both have to be tuples with same number of elements
+                        tuple((tag_no_case("varchar"), multispace0, multispace0)),
+                        tuple((
+                            tag_no_case("character"),
+                            multispace1,
+                            tag_no_case("varying"),
+                        )),
+                    )),
+                    delim_u16,
+                    multispace0,
+                    opt(tag_no_case("binary")),
+                )),
+                |t| SqlType::Varchar(t.1),
+            ),
+            map(tag_no_case("time"), |_| SqlType::Time),
+        ))(i)
+    }
 }
 
 fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
@@ -699,157 +696,165 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
 }
 
 // A SQL type specifier.
-pub fn type_identifier(i: &[u8]) -> IResult<&[u8], SqlType> {
-    alt((type_identifier_first_half, type_identifier_second_half))(i)
+pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
+    move |i| {
+        alt((
+            type_identifier_first_half(dialect),
+            type_identifier_second_half,
+        ))(i)
+    }
 }
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn function_arguments(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
-    let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
-    let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression))(i)?;
-    Ok((remaining_input, (args, distinct.is_some())))
+pub fn function_arguments(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
+    move |i| {
+        let distinct_parser = opt(tuple((tag_no_case("distinct"), multispace1)));
+        let (remaining_input, (distinct, args)) = tuple((distinct_parser, expression(dialect)))(i)?;
+        Ok((remaining_input, (args, distinct.is_some())))
+    }
 }
 
-fn group_concat_fx_helper(i: &[u8]) -> IResult<&[u8], String> {
-    let ws_sep = delimited(multispace0, tag_no_case("separator"), multispace0);
-    let (remaining_input, sep) = delimited(
-        ws_sep,
-        opt(map_res(
-            alt((raw_string_single_quoted, raw_string_double_quoted)),
-            String::from_utf8,
-        )),
-        multispace0,
-    )(i)?;
+fn group_concat_fx_helper(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], String> {
+    move |i| {
+        let ws_sep = delimited(multispace0, tag_no_case("separator"), multispace0);
+        let (i, sep) = delimited(
+            ws_sep,
+            opt(map_res(
+                move |i| dialect.string_literal()(i),
+                String::from_utf8,
+            )),
+            multispace0,
+        )(i)?;
 
-    Ok((remaining_input, sep.unwrap_or_default()))
+        Ok((i, sep.unwrap_or_default()))
+    }
 }
 
-fn group_concat_fx(i: &[u8]) -> IResult<&[u8], (Column, Option<String>)> {
-    pair(column_identifier_no_alias, opt(group_concat_fx_helper))(i)
+fn group_concat_fx(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Option<String>)> {
+    move |i| {
+        pair(
+            column_identifier_no_alias(dialect),
+            opt(group_concat_fx_helper(dialect)),
+        )(i)
+    }
 }
 
-fn delim_fx_args(i: &[u8]) -> IResult<&[u8], (Expression, bool)> {
-    delimited(tag("("), function_arguments, tag(")"))(i)
+fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
+    move |i| delimited(tag("("), function_arguments(dialect), tag(")"))(i)
 }
 
-named!(cast(&[u8]) -> FunctionExpression, do_parse!(
+named_with_dialect!(cast(dialect) -> FunctionExpression, do_parse!(
     complete!(tag_no_case!("cast"))
         >> multispace0
         >> complete!(char!('('))
-        >> arg: expression
+        >> arg: call!(expression(dialect))
         >> multispace1
         >> complete!(tag_no_case!("as"))
         >> multispace1
-        >> type_: type_identifier
+        >> type_: call!(type_identifier(dialect))
         >> multispace0
         >> complete!(char!(')'))
         >> (FunctionExpression::Cast(Box::new(arg), type_))
 ));
 
-pub fn column_function(i: &[u8]) -> IResult<&[u8], FunctionExpression> {
-    let delim_group_concat_fx = delimited(tag("("), group_concat_fx, tag(")"));
-    alt((
-        map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
-        map(preceded(tag_no_case("count"), delim_fx_args), |args| {
-            FunctionExpression::Count {
-                expr: Box::new(args.0.clone()),
-                distinct: args.1,
-                count_nulls: false,
-            }
-        }),
-        map(preceded(tag_no_case("sum"), delim_fx_args), |args| {
-            FunctionExpression::Sum {
-                expr: Box::new(args.0.clone()),
-                distinct: args.1,
-            }
-        }),
-        map(preceded(tag_no_case("avg"), delim_fx_args), |args| {
-            FunctionExpression::Avg {
-                expr: Box::new(args.0.clone()),
-                distinct: args.1,
-            }
-        }),
-        map(preceded(tag_no_case("max"), delim_fx_args), |args| {
-            FunctionExpression::Max(Box::new(args.0))
-        }),
-        map(preceded(tag_no_case("min"), delim_fx_args), |args| {
-            FunctionExpression::Min(Box::new(args.0))
-        }),
-        cast,
-        map(
-            preceded(tag_no_case("group_concat"), delim_group_concat_fx),
-            |spec| {
-                let (ref col, sep) = spec;
-                let separator = match sep {
-                    // default separator is a comma, see MySQL manual §5.7
-                    None => String::from(","),
-                    Some(s) => s,
-                };
-                FunctionExpression::GroupConcat {
-                    expr: Box::new(Expression::Column(col.clone())),
-                    separator,
-                }
-            },
-        ),
-        map(
-            tuple((
-                sql_identifier,
-                multispace0,
-                tag("("),
-                separated_list(tag(","), delimited(multispace0, expression, multispace0)),
-                tag(")"),
-            )),
-            |tuple| {
-                let (name, _, _, arguments, _) = tuple;
-                FunctionExpression::Call {
+pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpression> {
+    move |i| {
+        alt((
+            map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
+            map(
+                preceded(tag_no_case("count"), delim_fx_args(dialect)),
+                |args| FunctionExpression::Count {
+                    expr: Box::new(args.0.clone()),
+                    distinct: args.1,
+                    count_nulls: false,
+                },
+            ),
+            map(
+                preceded(tag_no_case("sum"), delim_fx_args(dialect)),
+                |args| FunctionExpression::Sum {
+                    expr: Box::new(args.0.clone()),
+                    distinct: args.1,
+                },
+            ),
+            map(
+                preceded(tag_no_case("avg"), delim_fx_args(dialect)),
+                |args| FunctionExpression::Avg {
+                    expr: Box::new(args.0.clone()),
+                    distinct: args.1,
+                },
+            ),
+            map(
+                preceded(tag_no_case("max"), delim_fx_args(dialect)),
+                |args| FunctionExpression::Max(Box::new(args.0)),
+            ),
+            map(
+                preceded(tag_no_case("min"), delim_fx_args(dialect)),
+                |args| FunctionExpression::Min(Box::new(args.0)),
+            ),
+            cast(dialect),
+            map(
+                preceded(
+                    tag_no_case("group_concat"),
+                    delimited(tag("("), group_concat_fx(dialect), tag(")")),
+                ),
+                |spec| {
+                    let (ref col, sep) = spec;
+                    let separator = match sep {
+                        // default separator is a comma, see MySQL manual §5.7
+                        None => String::from(","),
+                        Some(s) => s,
+                    };
+                    FunctionExpression::GroupConcat {
+                        expr: Box::new(Expression::Column(col.clone())),
+                        separator,
+                    }
+                },
+            ),
+            map(
+                tuple((
+                    dialect.identifier(),
+                    multispace0,
+                    tag("("),
+                    separated_list(
+                        tag(","),
+                        delimited(multispace0, expression(dialect), multispace0),
+                    ),
+                    tag(")"),
+                )),
+                |(name, _, _, arguments, _)| FunctionExpression::Call {
                     name: name.to_string(),
                     arguments,
-                }
-            },
-        ),
-    ))(i)
+                },
+            ),
+        ))(i)
+    }
 }
 
 // Parses a SQL column identifier in the table.column format
-pub fn column_identifier_no_alias(i: &[u8]) -> IResult<&[u8], Column> {
-    let table_parser = pair(opt(terminated(sql_identifier, tag("."))), sql_identifier);
-    alt((
-        map(column_function, |f| Column {
-            name: format!("{}", f),
-            table: None,
-            function: Some(Box::new(f)),
-        }),
-        map(table_parser, |tup| Column {
-            name: tup.1.to_string(),
-            table: tup.0.map(|t| t.to_string()),
-            function: None,
-        }),
-    ))(i)
-}
-
-#[cfg(feature = "postgres")]
-pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &str> {
-    map_res(
+pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Column> {
+    move |i| {
         alt((
-            preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
-            delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
-        )),
-        str::from_utf8,
-    )(i)
-}
-
-// Parses a SQL identifier (alphanumeric1 and "_").
-#[cfg(not(feature = "postgres"))]
-pub fn sql_identifier(i: &[u8]) -> IResult<&[u8], &str> {
-    map_res(
-        alt((
-            preceded(not(peek(sql_keyword)), take_while1(is_sql_identifier)),
-            delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
-            delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
-        )),
-        str::from_utf8,
-    )(i)
+            map(column_function(dialect), |f| Column {
+                name: format!("{}", f),
+                table: None,
+                function: Some(Box::new(f)),
+            }),
+            map(
+                pair(
+                    opt(terminated(dialect.identifier(), tag("."))),
+                    dialect.identifier(),
+                ),
+                |tup| Column {
+                    name: tup.1.to_string(),
+                    table: tup.0.map(|t| t.to_string()),
+                    function: None,
+                },
+            ),
+        ))(i)
+    }
 }
 
 // Parse an unsigned integer.
@@ -874,23 +879,27 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse rule for AS-based aliases for SQL entities.
-pub fn as_alias(i: &[u8]) -> IResult<&[u8], &str> {
-    map(
-        tuple((
-            multispace1,
-            opt(pair(tag_no_case("as"), multispace1)),
-            sql_identifier,
-        )),
-        |a| a.2,
-    )(i)
+pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], &str> {
+    move |i| {
+        map(
+            tuple((
+                multispace1,
+                opt(pair(tag_no_case("as"), multispace1)),
+                dialect.identifier(),
+            )),
+            |a| a.2,
+        )(i)
+    }
 }
 
-fn assignment_expr(i: &[u8]) -> IResult<&[u8], (Column, Expression)> {
-    separated_pair(
-        column_identifier_no_alias,
-        delimited(multispace0, tag("="), multispace0),
-        expression,
-    )(i)
+fn assignment_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, Expression)> {
+    move |i| {
+        separated_pair(
+            column_identifier_no_alias(dialect),
+            delimited(multispace0, tag("="), multispace0),
+            expression(dialect),
+        )(i)
+    }
 }
 
 /// Whitespace surrounded optionally on either side by a comma
@@ -908,45 +917,64 @@ where
     delimited(multispace0, tag("="), multispace0)(i)
 }
 
-pub fn assignment_expr_list(i: &[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
-    many1(terminated(assignment_expr, opt(ws_sep_comma)))(i)
+pub fn assignment_expr_list(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<(Column, Expression)>> {
+    move |i| many1(terminated(assignment_expr(dialect), opt(ws_sep_comma)))(i)
 }
 
 // Parse rule for a comma-separated list of fields without aliases.
-pub fn field_list(i: &[u8]) -> IResult<&[u8], Vec<Column>> {
-    many0(terminated(column_identifier_no_alias, opt(ws_sep_comma)))(i)
+pub fn field_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Column>> {
+    move |i| {
+        many0(terminated(
+            column_identifier_no_alias(dialect),
+            opt(ws_sep_comma),
+        ))(i)
+    }
 }
 
-named!(
-    expression_field(&[u8]) -> FieldDefinitionExpression,
-    do_parse!(
-        expr: expression
-            >> alias: opt!(map!(as_alias, |a| a.to_owned()))
-            >> (FieldDefinitionExpression::Expression { expr, alias })
-    )
-);
+fn expression_field(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], FieldDefinitionExpression> {
+    move |i| {
+        do_parse!(
+            i,
+            expr: call!(expression(dialect))
+                >> alias: opt!(map!(as_alias(dialect), |a| a.to_owned()))
+                >> (FieldDefinitionExpression::Expression { expr, alias })
+        )
+    }
+}
 
 // Parse list of column/field definitions.
-pub fn field_definition_expr(i: &[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
-    terminated(
-        separated_list(
-            ws_sep_comma,
-            alt((
-                map(tag("*"), |_| FieldDefinitionExpression::All),
-                map(terminated(table_reference, tag(".*")), |t| {
-                    FieldDefinitionExpression::AllInTable(t.name)
-                }),
-                expression_field,
-            )),
-        ),
-        opt(ws_sep_comma),
-    )(i)
+pub fn field_definition_expr(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<FieldDefinitionExpression>> {
+    move |i| {
+        terminated(
+            separated_list(
+                ws_sep_comma,
+                alt((
+                    map(tag("*"), |_| FieldDefinitionExpression::All),
+                    map(terminated(table_reference(dialect), tag(".*")), |t| {
+                        FieldDefinitionExpression::AllInTable(t.name)
+                    }),
+                    expression_field(dialect),
+                )),
+            ),
+            opt(ws_sep_comma),
+        )(i)
+    }
 }
 
 // Parse list of table names.
-// XXX(malte): add support for aliases
-pub fn table_list(i: &[u8]) -> IResult<&[u8], Vec<Table>> {
-    many1(terminated(schema_table_reference, opt(ws_sep_comma)))(i)
+pub fn table_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Table>> {
+    move |i| {
+        many1(terminated(
+            schema_table_reference(dialect),
+            opt(ws_sep_comma),
+        ))(i)
+    }
 }
 
 // Integer literal value
@@ -989,123 +1017,66 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     )(i)
 }
 
-/// String literal value
-fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<u8>> {
-    // TODO: clean up these assignments. lifetimes and temporary values made it difficult
-    let quote_slice: &[u8] = if is_single_quote { b"\'" } else { b"\"" };
-    let double_quote_slice: &[u8] = if is_single_quote { b"\'\'" } else { b"\"\"" };
-    let backslash_quote: &[u8] = if is_single_quote { b"\\\'" } else { b"\\\"" };
-    delimited(
-        tag(quote_slice),
-        fold_many0(
-            alt((
-                is_not(backslash_quote),
-                map(tag(double_quote_slice), |_| -> &[u8] {
-                    if is_single_quote {
-                        b"\'"
-                    } else {
-                        b"\""
-                    }
-                }),
-                map(tag("\\\\"), |_| &b"\\"[..]),
-                map(tag("\\b"), |_| &b"\x7f"[..]),
-                map(tag("\\r"), |_| &b"\r"[..]),
-                map(tag("\\n"), |_| &b"\n"[..]),
-                map(tag("\\t"), |_| &b"\t"[..]),
-                map(tag("\\0"), |_| &b"\0"[..]),
-                map(tag("\\Z"), |_| &b"\x1A"[..]),
-                preceded(tag("\\"), take(1usize)),
-            )),
-            Vec::new(),
-            |mut acc: Vec<u8>, bytes: &[u8]| {
-                acc.extend(bytes);
-                acc
-            },
-        ),
-        tag(quote_slice),
-    )(input)
-}
-
-fn raw_string_single_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
-    raw_string_quoted(i, true)
-}
-
-fn raw_string_double_quoted(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
-    raw_string_quoted(i, false)
-}
-
-#[cfg(feature = "postgres")]
-pub fn string_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(raw_string_single_quoted, |bytes| {
-        match String::from_utf8(bytes) {
-            Ok(s) => Literal::String(s),
-            Err(err) => Literal::Blob(err.into_bytes()),
-        }
-    })(i)
-}
-
-#[cfg(not(feature = "postgres"))]
-pub fn string_literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    map(
-        alt((raw_string_single_quoted, raw_string_double_quoted)),
-        |bytes| match String::from_utf8(bytes) {
-            Ok(s) => Literal::String(s),
-            Err(err) => Literal::Blob(err.into_bytes()),
-        },
-    )(i)
-}
-
 // Any literal value.
-pub fn literal(i: &[u8]) -> IResult<&[u8], Literal> {
-    alt((
-        float_literal,
-        integer_literal,
-        string_literal,
-        map(tag_no_case("null"), |_| Literal::Null),
-        map(tag_no_case("current_timestamp"), |_| {
-            Literal::CurrentTimestamp
-        }),
-        map(tag_no_case("current_date"), |_| Literal::CurrentDate),
-        map(tag_no_case("current_time"), |_| Literal::CurrentTime),
-        map(tag("?"), |_| {
-            Literal::Placeholder(ItemPlaceholder::QuestionMark)
-        }),
-        map(
-            preceded(
-                tag(":"),
-                map_res(map_res(digit1, str::from_utf8), u32::from_str),
+pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
+    move |i| {
+        alt((
+            float_literal,
+            integer_literal,
+            map(dialect.string_literal(), |bytes| {
+                match String::from_utf8(bytes) {
+                    Ok(s) => Literal::String(s),
+                    Err(err) => Literal::Blob(err.into_bytes()),
+                }
+            }),
+            map(tag_no_case("null"), |_| Literal::Null),
+            map(tag_no_case("current_timestamp"), |_| {
+                Literal::CurrentTimestamp
+            }),
+            map(tag_no_case("current_date"), |_| Literal::CurrentDate),
+            map(tag_no_case("current_time"), |_| Literal::CurrentTime),
+            map(tag("?"), |_| {
+                Literal::Placeholder(ItemPlaceholder::QuestionMark)
+            }),
+            map(
+                preceded(
+                    tag(":"),
+                    map_res(map_res(digit1, str::from_utf8), u32::from_str),
+                ),
+                |num| Literal::Placeholder(ItemPlaceholder::ColonNumber(num)),
             ),
-            |num| Literal::Placeholder(ItemPlaceholder::ColonNumber(num)),
-        ),
-        map(
-            preceded(
-                tag("$"),
-                map_res(map_res(digit1, str::from_utf8), u32::from_str),
+            map(
+                preceded(
+                    tag("$"),
+                    map_res(map_res(digit1, str::from_utf8), u32::from_str),
+                ),
+                |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
             ),
-            |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
-        ),
-    ))(i)
+        ))(i)
+    }
 }
 
 // Parse a list of values (e.g., for INSERT syntax).
-pub fn value_list(i: &[u8]) -> IResult<&[u8], Vec<Literal>> {
-    many0(delimited(multispace0, literal, opt(ws_sep_comma)))(i)
+pub fn value_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Literal>> {
+    move |i| many0(delimited(multispace0, literal(dialect), opt(ws_sep_comma)))(i)
 }
 
 // Parse a reference to a named schema.table, with an optional alias
-pub fn schema_table_reference(i: &[u8]) -> IResult<&[u8], Table> {
-    map(
-        tuple((
-            opt(pair(sql_identifier, tag("."))),
-            sql_identifier,
-            opt(as_alias),
-        )),
-        |tup| Table {
-            name: String::from(tup.1),
-            alias: tup.2.map(String::from),
-            schema: tup.0.map(|(s, _)| s.to_string()),
-        },
-    )(i)
+pub fn schema_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        map(
+            tuple((
+                opt(pair(dialect.identifier(), tag("."))),
+                dialect.identifier(),
+                opt(as_alias(dialect)),
+            )),
+            |tup| Table {
+                name: String::from(tup.1),
+                alias: tup.2.map(String::from),
+                schema: tup.0.map(|(s, _)| s.to_string()),
+            },
+        )(i)
+    }
 }
 
 named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
@@ -1119,12 +1090,16 @@ named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
     )), |o| o.is_some()));
 
 // Parse a reference to a named table, with an optional alias
-pub fn table_reference(i: &[u8]) -> IResult<&[u8], Table> {
-    map(pair(sql_identifier, opt(as_alias)), |tup| Table {
-        name: String::from(tup.0),
-        alias: tup.1.map(String::from),
-        schema: None,
-    })(i)
+pub fn table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        map(pair(dialect.identifier(), opt(as_alias(dialect))), |tup| {
+            Table {
+                name: String::from(tup.0),
+                alias: tup.1.map(String::from),
+                schema: None,
+            }
+        })(i)
+    }
 }
 
 // Parse rule for a comment part.
@@ -1179,7 +1154,7 @@ mod tests {
 
         let res_ok: Vec<_> = ok
             .iter()
-            .map(|t| type_identifier(t.as_bytes()).unwrap().1)
+            .map(|t| type_identifier(Dialect::MySQL)(t.as_bytes()).unwrap().1)
             .collect();
 
         assert_eq!(
@@ -1189,7 +1164,7 @@ mod tests {
 
         assert!(not_ok
             .iter()
-            .map(|t| type_identifier(t.as_bytes()).is_ok())
+            .map(|t| type_identifier(Dialect::MySQL)(t.as_bytes()).is_ok())
             .all(|r| !r));
     }
 
@@ -1200,7 +1175,7 @@ mod tests {
             expr: Box::new(Expression::Column(Column::from("x"))),
             separator: ", ".to_owned(),
         };
-        let res = column_function(qs);
+        let res = column_function(Dialect::MySQL)(qs);
         assert_eq!(res.unwrap().1, expected);
     }
 
@@ -1213,7 +1188,7 @@ mod tests {
             "coalesce(a, b,c)".as_bytes(),
         ];
         for q in qlist.iter() {
-            let res = column_function(q);
+            let res = column_function(Dialect::MySQL)(q);
             let expected = FunctionExpression::Call {
                 name: "coalesce".to_string(),
                 arguments: vec![
@@ -1228,7 +1203,7 @@ mod tests {
 
     #[test]
     fn nested_function_call() {
-        let res = column_function(b"max(cast(foo as int))");
+        let res = column_function(Dialect::MySQL)(b"max(cast(foo as int))");
         let (rem, res) = res.unwrap();
         assert!(rem.is_empty());
         assert_eq!(
@@ -1242,7 +1217,7 @@ mod tests {
 
     #[test]
     fn generic_function_with_int_literal() {
-        let (_, res) = column_function(b"ifnull(x, 0)").unwrap();
+        let (_, res) = column_function(Dialect::MySQL)(b"ifnull(x, 0)").unwrap();
         assert_eq!(
             res,
             FunctionExpression::Call {
@@ -1259,13 +1234,6 @@ mod tests {
     fn comment_data() {
         let res = parse_comment(b" COMMENT 'test'");
         assert_eq!(res.unwrap().1, "test");
-    }
-
-    #[test]
-    fn literal_string_single_quote() {
-        let res = string_literal(b"'a''b'");
-        let expected = Literal::String("a'b".to_string());
-        assert_eq!(res, Ok((&b""[..], expected)));
     }
 
     #[test]
@@ -1315,154 +1283,88 @@ mod tests {
         prop_assume!(!matches!(lit, Literal::FixedPoint(_)));
         let s = lit.to_string();
         eprintln!("to_string(): {}", s);
-        assert_eq!(literal(s.as_bytes()).unwrap().1, lit)
-    }
-}
-
-#[cfg(not(feature = "postgres"))]
-#[cfg(test)]
-mod tests_mysql {
-    use super::*;
-
-    #[test]
-    fn cast() {
-        let qs = b"cast(`lp`.`start_ddtm` as date)";
-        let expected = FunctionExpression::Cast(
-            Box::new(Expression::Column(Column {
-                table: Some("lp".to_owned()),
-                name: "start_ddtm".to_owned(),
-                function: None,
-            })),
-            SqlType::Date,
-        );
-        let res = column_function(qs);
-        assert_eq!(res.unwrap().1, expected);
+        assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
     }
 
-    #[test]
-    fn simple_generic_function_with_literal() {
-        let qlist = [
-            "coalesce(\"a\",b,c)".as_bytes(),
-            "coalesce (\"a\",b,c)".as_bytes(),
-            "coalesce(\"a\" ,b,c)".as_bytes(),
-            "coalesce(\"a\", b,c)".as_bytes(),
-        ];
-        for q in qlist.iter() {
-            let res = column_function(q);
-            let expected = FunctionExpression::Call {
-                name: "coalesce".to_string(),
-                arguments: vec![
-                    Expression::Literal(Literal::String("a".to_owned())),
-                    Expression::Column(Column::from("b")),
-                    Expression::Column(Column::from("c")),
-                ],
-            };
-            assert_eq!(res, Ok((&b""[..], expected)));
+    mod mysql {
+        use super::*;
+
+        #[test]
+        fn cast() {
+            let qs = b"cast(`lp`.`start_ddtm` as date)";
+            let expected = FunctionExpression::Cast(
+                Box::new(Expression::Column(Column {
+                    table: Some("lp".to_owned()),
+                    name: "start_ddtm".to_owned(),
+                    function: None,
+                })),
+                SqlType::Date,
+            );
+            let res = column_function(Dialect::MySQL)(qs);
+            assert_eq!(res.unwrap().1, expected);
+        }
+
+        #[test]
+        fn simple_generic_function_with_literal() {
+            let qlist = [
+                "coalesce(\"a\",b,c)".as_bytes(),
+                "coalesce (\"a\",b,c)".as_bytes(),
+                "coalesce(\"a\" ,b,c)".as_bytes(),
+                "coalesce(\"a\", b,c)".as_bytes(),
+            ];
+            for q in qlist.iter() {
+                let res = column_function(Dialect::MySQL)(q);
+                let expected = FunctionExpression::Call {
+                    name: "coalesce".to_string(),
+                    arguments: vec![
+                        Expression::Literal(Literal::String("a".to_owned())),
+                        Expression::Column(Column::from("b")),
+                        Expression::Column(Column::from("c")),
+                    ],
+                };
+                assert_eq!(res, Ok((&b""[..], expected)));
+            }
         }
     }
 
-    #[test]
-    fn literal_string_single_backslash_escape() {
-        let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
-        for quote in [&b"'"[..], &b"\""[..]].iter() {
-            let quoted = &[quote, &all_escaped[..], quote].concat();
-            let res = string_literal(quoted);
-            let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-            assert_eq!(res, Ok((&b""[..], expected)));
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn cast() {
+            let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
+            let expected = FunctionExpression::Cast(
+                Box::new(Expression::Column(Column {
+                    table: Some("lp".to_owned()),
+                    name: "start_ddtm".to_owned(),
+                    function: None,
+                })),
+                SqlType::Date,
+            );
+            let res = column_function(Dialect::PostgreSQL)(qs);
+            assert_eq!(res.unwrap().1, expected);
         }
-    }
 
-    #[test]
-    fn sql_identifiers() {
-        let id1 = b"foo";
-        let id2 = b"f_o_o";
-        let id3 = b"foo12";
-        let id4 = b":fo oo";
-        let id5 = b"primary ";
-        let id6 = b"`primary`";
-
-        assert!(sql_identifier(id1).is_ok());
-        assert!(sql_identifier(id2).is_ok());
-        assert!(sql_identifier(id3).is_ok());
-        assert!(sql_identifier(id4).is_err());
-        assert!(sql_identifier(id5).is_err());
-        assert!(sql_identifier(id6).is_ok());
-    }
-
-    #[test]
-    fn literal_string_double_quote() {
-        let res = string_literal(br#""a""b""#);
-        let expected = Literal::String(r#"a"b"#.to_string());
-        assert_eq!(res, Ok((&b""[..], expected)));
-    }
-}
-
-#[cfg(feature = "postgres")]
-#[cfg(test)]
-mod tests_postgres {
-    use super::*;
-
-    #[test]
-    fn cast() {
-        let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
-        let expected = FunctionExpression::Cast(
-            Box::new(Expression::Column(Column {
-                table: Some("lp".to_owned()),
-                name: "start_ddtm".to_owned(),
-                function: None,
-            })),
-            SqlType::Date,
-        );
-        let res = column_function(qs);
-        assert_eq!(res.unwrap().1, expected);
-    }
-
-    #[test]
-    fn simple_generic_function_with_literal() {
-        let qlist = [
-            "coalesce('a',b,c)".as_bytes(),
-            "coalesce ('a',b,c)".as_bytes(),
-            "coalesce('a' ,b,c)".as_bytes(),
-            "coalesce('a', b,c)".as_bytes(),
-        ];
-        for q in qlist.iter() {
-            let res = column_function(q);
-            let expected = FunctionExpression::Call {
-                name: "coalesce".to_string(),
-                arguments: vec![
-                    Expression::Literal(Literal::String("a".to_owned())),
-                    Expression::Column(Column::from("b")),
-                    Expression::Column(Column::from("c")),
-                ],
-            };
-            assert_eq!(res, Ok((&b""[..], expected)));
+        #[test]
+        fn simple_generic_function_with_literal() {
+            let qlist = [
+                "coalesce('a',b,c)".as_bytes(),
+                "coalesce ('a',b,c)".as_bytes(),
+                "coalesce('a' ,b,c)".as_bytes(),
+                "coalesce('a', b,c)".as_bytes(),
+            ];
+            for q in qlist.iter() {
+                let res = column_function(Dialect::PostgreSQL)(q);
+                let expected = FunctionExpression::Call {
+                    name: "coalesce".to_string(),
+                    arguments: vec![
+                        Expression::Literal(Literal::String("a".to_owned())),
+                        Expression::Column(Column::from("b")),
+                        Expression::Column(Column::from("c")),
+                    ],
+                };
+                assert_eq!(res, Ok((&b""[..], expected)));
+            }
         }
-    }
-
-    #[test]
-    fn literal_string_single_backslash_escape() {
-        let all_escaped = br#"\0\'\"\b\n\r\t\Z\\\%\_"#;
-        let quote = &b"'"[..];
-        let quoted = &[quote, &all_escaped[..], quote].concat();
-        let res = string_literal(quoted);
-        let expected = Literal::String("\0\'\"\x7F\n\r\t\x1a\\%_".to_string());
-        assert_eq!(res, Ok((&b""[..], expected)));
-    }
-
-    #[test]
-    fn sql_identifiers() {
-        let id1 = b"foo";
-        let id2 = b"f_o_o";
-        let id3 = b"foo12";
-        let id4 = b":fo oo";
-        let id5 = b"primary ";
-        let id6 = b"\"primary\"";
-
-        assert!(sql_identifier(id1).is_ok());
-        assert!(sql_identifier(id2).is_ok());
-        assert!(sql_identifier(id3).is_ok());
-        assert!(sql_identifier(id4).is_err());
-        assert!(sql_identifier(id5).is_err());
-        assert!(sql_identifier(id6).is_ok());
     }
 }

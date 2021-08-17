@@ -4,12 +4,12 @@
 use std::{fmt, str};
 
 use nom::character::complete::{multispace0, multispace1};
-use nom::{alt, complete, do_parse, named, opt, preceded, separated_list, tag_no_case, terminated};
+use nom::{
+    alt, call, complete, do_parse, named, opt, preceded, separated_list, tag_no_case, terminated,
+};
 
 use crate::column::{column_specification, ColumnSpecification};
-use crate::common::{
-    literal, schema_table_reference, sql_identifier, statement_terminator, ws_sep_comma, Literal,
-};
+use crate::common::{literal, schema_table_reference, statement_terminator, ws_sep_comma, Literal};
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 
@@ -105,13 +105,13 @@ impl fmt::Display for AlterTableStatement {
     }
 }
 
-named!(
-    add_column<AlterTableDefinition>,
+named_with_dialect!(
+    add_column(dialect) -> AlterTableDefinition,
     do_parse!(
         tag_no_case!("add")
             >> opt!(preceded!(multispace1, tag_no_case!("column")))
             >> multispace1
-            >> column: column_specification
+            >> column: call!(column_specification(dialect))
             >> (AlterTableDefinition::AddColumn(column))
     )
 );
@@ -124,14 +124,14 @@ named!(
     )
 );
 
-named!(
-    drop_column<AlterTableDefinition>,
+named_with_dialect!(
+    drop_column(dialect) -> AlterTableDefinition,
     do_parse!(
         tag_no_case!("drop")
             >> multispace1
             >> tag_no_case!("column")
             >> multispace1
-            >> name: sql_identifier
+            >> name: call!(dialect.identifier())
             >> behavior: opt!(preceded!(multispace1, drop_behavior))
             >> (AlterTableDefinition::DropColumn {
                 name: name.to_string(),
@@ -140,13 +140,13 @@ named!(
     )
 );
 
-named!(
-    set_default<AlterColumnOperation>,
+named_with_dialect!(
+    set_default(dialect) -> AlterColumnOperation,
     do_parse!(
         opt!(terminated!(tag_no_case!("set"), multispace1))
             >> tag_no_case!("default")
             >> multispace1
-            >> value: literal
+            >> value: call!(literal(dialect))
             >> (AlterColumnOperation::SetColumnDefault(value))
     )
 );
@@ -161,21 +161,21 @@ named!(
     )
 );
 
-named!(
-    alter_column_operation<AlterColumnOperation>,
-    alt!(set_default | drop_default)
+named_with_dialect!(
+    alter_column_operation(dialect) -> AlterColumnOperation,
+    alt!(call!(set_default(dialect)) | drop_default)
 );
 
-named!(
-    alter_column<AlterTableDefinition>,
+named_with_dialect!(
+    alter_column(dialect) -> AlterTableDefinition,
     do_parse!(
         tag_no_case!("alter")
             >> multispace1
             >> tag_no_case!("column")
             >> multispace1
-            >> name: sql_identifier
+            >> name: call!(dialect.identifier())
             >> multispace1
-            >> operation: alter_column_operation
+            >> operation: call!(alter_column_operation(dialect))
             >> (AlterTableDefinition::AlterColumn {
                 name: name.to_string(),
                 operation
@@ -183,21 +183,24 @@ named!(
     )
 );
 
-named!(
-    alter_table_definition<AlterTableDefinition>,
-    alt!(add_column | drop_column | alter_column)
+named_with_dialect!(
+    alter_table_definition(dialect) -> AlterTableDefinition,
+    alt!(
+        call!(add_column(dialect))
+            | call!(drop_column(dialect))
+            | call!(alter_column(dialect)))
 );
 
-named!(
-    pub alter_table_statement<AlterTableStatement>,
+named_with_dialect!(
+    pub alter_table_statement(dialect) -> AlterTableStatement,
     complete!(do_parse!(
         tag_no_case!("alter")
             >> multispace1
             >> tag_no_case!("table")
             >> multispace1
-            >> table: schema_table_reference
+            >> table: call!(schema_table_reference(dialect))
             >> multispace1
-            >> definitions: separated_list!(ws_sep_comma, alter_table_definition)
+            >> definitions: separated_list!(ws_sep_comma, alter_table_definition(dialect))
             >> multispace0
             >> statement_terminator
             >> (AlterTableStatement { table, definitions })
@@ -207,7 +210,7 @@ named!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Column, SqlType};
+    use crate::{Column, Dialect, SqlType};
 
     #[test]
     fn display_add_column() {
@@ -261,53 +264,25 @@ mod tests {
                 }),
             ],
         };
-        let result = alter_table_statement(qstring);
+        let result = alter_table_statement(Dialect::MySQL)(qstring);
         assert_eq!(result.unwrap().1, expected);
     }
-}
 
-#[cfg(test)]
-#[cfg(not(feature = "postgres"))]
-mod tests_mysql {
-    use crate::{Column, SqlType};
+    mod mysql {
+        use crate::{Column, SqlType};
 
-    use super::*;
+        use super::*;
 
-    #[test]
-    fn parse_add_column() {
-        let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                column: Column {
-                    name: "c".into(),
-                    table: None,
-                    function: None,
+        #[test]
+        fn parse_add_column() {
+            let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
                 },
-                sql_type: SqlType::Int(32),
-                constraints: vec![],
-                comment: None,
-            })],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
-
-    #[test]
-    fn parse_add_two_columns() {
-        let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT, ADD COLUMN `d` TEXT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![
-                AlterTableDefinition::AddColumn(ColumnSpecification {
+                definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "c".into(),
                         table: None,
@@ -316,137 +291,137 @@ mod tests_mysql {
                     sql_type: SqlType::Int(32),
                     constraints: vec![],
                     comment: None,
-                }),
-                AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "d".into(),
-                        table: None,
-                        function: None,
-                    },
-                    sql_type: SqlType::Text,
-                    constraints: vec![],
-                    comment: None,
-                }),
-            ],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
+                })],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
 
-    #[test]
-    fn parse_drop_column_no_behavior() {
-        let qstring = "ALTER TABLE `t` DROP COLUMN c";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::DropColumn {
-                name: "c".into(),
-                behavior: None,
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
-
-    #[test]
-    fn parse_drop_column_cascade() {
-        let qstring = "ALTER TABLE `t` DROP COLUMN c CASCADE";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::DropColumn {
-                name: "c".into(),
-                behavior: Some(DropBehavior::Cascade),
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
-
-    #[test]
-    fn parse_alter_column_set_default() {
-        let qstring = "ALTER TABLE `t` ALTER COLUMN c SET DEFAULT 'foo'";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AlterColumn {
-                name: "c".into(),
-                operation: AlterColumnOperation::SetColumnDefault(Literal::String("foo".into())),
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
-
-    #[test]
-    fn parse_alter_column_drop_default() {
-        let qstring = "ALTER TABLE `t` ALTER COLUMN c DROP DEFAULT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AlterColumn {
-                name: "c".into(),
-                operation: AlterColumnOperation::DropColumnDefault,
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
-}
-
-#[cfg(test)]
-#[cfg(feature = "postgres")]
-mod tests_postgres {
-    use super::*;
-    use crate::{Column, SqlType};
-
-    #[test]
-    fn parse_add_column() {
-        let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
-                column: Column {
-                    name: "c".into(),
-                    table: None,
-                    function: None,
+        #[test]
+        fn parse_add_two_columns() {
+            let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT, ADD COLUMN `d` TEXT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
                 },
-                sql_type: SqlType::Int(32),
-                constraints: vec![],
-                comment: None,
-            })],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
+                definitions: vec![
+                    AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: SqlType::Int(32),
+                        constraints: vec![],
+                        comment: None,
+                    }),
+                    AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column {
+                            name: "d".into(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    }),
+                ],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_drop_column_no_behavior() {
+            let qstring = "ALTER TABLE `t` DROP COLUMN c";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::DropColumn {
+                    name: "c".into(),
+                    behavior: None,
+                }],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_drop_column_cascade() {
+            let qstring = "ALTER TABLE `t` DROP COLUMN c CASCADE";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::DropColumn {
+                    name: "c".into(),
+                    behavior: Some(DropBehavior::Cascade),
+                }],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_column_set_default() {
+            let qstring = "ALTER TABLE `t` ALTER COLUMN c SET DEFAULT 'foo'";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::AlterColumn {
+                    name: "c".into(),
+                    operation: AlterColumnOperation::SetColumnDefault(Literal::String(
+                        "foo".into(),
+                    )),
+                }],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_column_drop_default() {
+            let qstring = "ALTER TABLE `t` ALTER COLUMN c DROP DEFAULT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::AlterColumn {
+                    name: "c".into(),
+                    operation: AlterColumnOperation::DropColumnDefault,
+                }],
+            };
+            let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
     }
 
-    #[test]
-    fn parse_add_two_columns() {
-        let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT, ADD COLUMN \"d\" TEXT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![
-                AlterTableDefinition::AddColumn(ColumnSpecification {
+    mod postgres {
+        use super::*;
+        use crate::{Column, SqlType};
+
+        #[test]
+        fn parse_add_column() {
+            let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
                     column: Column {
                         name: "c".into(),
                         table: None,
@@ -455,92 +430,120 @@ mod tests_postgres {
                     sql_type: SqlType::Int(32),
                     constraints: vec![],
                     comment: None,
-                }),
-                AlterTableDefinition::AddColumn(ColumnSpecification {
-                    column: Column {
-                        name: "d".into(),
-                        table: None,
-                        function: None,
-                    },
-                    sql_type: SqlType::Text,
-                    constraints: vec![],
-                    comment: None,
-                }),
-            ],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
+                })],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
 
-    #[test]
-    fn parse_drop_column_no_behavior() {
-        let qstring = "ALTER TABLE \"t\" DROP COLUMN c";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::DropColumn {
-                name: "c".into(),
-                behavior: None,
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
+        #[test]
+        fn parse_add_two_columns() {
+            let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT, ADD COLUMN \"d\" TEXT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![
+                    AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column {
+                            name: "c".into(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: SqlType::Int(32),
+                        constraints: vec![],
+                        comment: None,
+                    }),
+                    AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column {
+                            name: "d".into(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    }),
+                ],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
 
-    #[test]
-    fn parse_drop_column_cascade() {
-        let qstring = "ALTER TABLE \"t\" DROP COLUMN c CASCADE";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::DropColumn {
-                name: "c".into(),
-                behavior: Some(DropBehavior::Cascade),
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
+        #[test]
+        fn parse_drop_column_no_behavior() {
+            let qstring = "ALTER TABLE \"t\" DROP COLUMN c";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::DropColumn {
+                    name: "c".into(),
+                    behavior: None,
+                }],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
 
-    #[test]
-    fn parse_alter_column_set_default() {
-        let qstring = "ALTER TABLE \"t\" ALTER COLUMN c SET DEFAULT 'foo'";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AlterColumn {
-                name: "c".into(),
-                operation: AlterColumnOperation::SetColumnDefault(Literal::String("foo".into())),
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
-    }
+        #[test]
+        fn parse_drop_column_cascade() {
+            let qstring = "ALTER TABLE \"t\" DROP COLUMN c CASCADE";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::DropColumn {
+                    name: "c".into(),
+                    behavior: Some(DropBehavior::Cascade),
+                }],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
 
-    #[test]
-    fn parse_alter_column_drop_default() {
-        let qstring = "ALTER TABLE \"t\" ALTER COLUMN c DROP DEFAULT";
-        let expected = AlterTableStatement {
-            table: Table {
-                name: "t".into(),
-                schema: None,
-                alias: None,
-            },
-            definitions: vec![AlterTableDefinition::AlterColumn {
-                name: "c".into(),
-                operation: AlterColumnOperation::DropColumnDefault,
-            }],
-        };
-        let result = alter_table_statement(qstring.as_bytes());
-        assert_eq!(result.unwrap().1, expected);
+        #[test]
+        fn parse_alter_column_set_default() {
+            let qstring = "ALTER TABLE \"t\" ALTER COLUMN c SET DEFAULT 'foo'";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::AlterColumn {
+                    name: "c".into(),
+                    operation: AlterColumnOperation::SetColumnDefault(Literal::String(
+                        "foo".into(),
+                    )),
+                }],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn parse_alter_column_drop_default() {
+            let qstring = "ALTER TABLE \"t\" ALTER COLUMN c DROP DEFAULT";
+            let expected = AlterTableStatement {
+                table: Table {
+                    name: "t".into(),
+                    schema: None,
+                    alias: None,
+                },
+                definitions: vec![AlterTableDefinition::AlterColumn {
+                    name: "c".into(),
+                    operation: AlterColumnOperation::DropColumnDefault,
+                }],
+            };
+            let result = alter_table_statement(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(result.unwrap().1, expected);
+        }
     }
 }

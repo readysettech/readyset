@@ -5,6 +5,7 @@ use std::str;
 use crate::common::{opt_delimited, statement_terminator};
 use crate::order::{order_clause, OrderClause};
 use crate::select::{limit_clause, nested_selection, LimitClause, SelectStatement};
+use crate::Dialect;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -89,43 +90,51 @@ fn compound_op(i: &[u8]) -> IResult<&[u8], CompoundSelectOperator> {
     ))(i)
 }
 
-fn other_selects(i: &[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
-    let (remaining_input, (_, op, _, select)) = tuple((
-        multispace0,
-        compound_op,
-        multispace1,
-        opt_delimited(
-            tag("("),
-            delimited(multispace0, nested_selection, multispace0),
-            tag(")"),
-        ),
-    ))(i)?;
+fn other_selects(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], (Option<CompoundSelectOperator>, SelectStatement)> {
+    move |i| {
+        let (remaining_input, (_, op, _, select)) = tuple((
+            multispace0,
+            compound_op,
+            multispace1,
+            opt_delimited(
+                tag("("),
+                delimited(multispace0, nested_selection(dialect), multispace0),
+                tag(")"),
+            ),
+        ))(i)?;
 
-    Ok((remaining_input, (Some(op), select)))
+        Ok((remaining_input, (Some(op), select)))
+    }
 }
 
 // Parse compound selection
-pub fn compound_selection(i: &[u8]) -> IResult<&[u8], CompoundSelectStatement> {
-    let (remaining_input, (first_select, other_selects, _, order, limit, _)) = tuple((
-        opt_delimited(tag("("), nested_selection, tag(")")),
-        many1(other_selects),
-        multispace0,
-        opt(order_clause),
-        opt(limit_clause),
-        statement_terminator,
-    ))(i)?;
+pub fn compound_selection(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], CompoundSelectStatement> {
+    move |i| {
+        let (remaining_input, (first_select, other_selects, _, order, limit, _)) = tuple((
+            opt_delimited(tag("("), nested_selection(dialect), tag(")")),
+            many1(other_selects(dialect)),
+            multispace0,
+            opt(order_clause(dialect)),
+            opt(limit_clause),
+            statement_terminator,
+        ))(i)?;
 
-    let mut selects = vec![(None, first_select)];
-    selects.extend(other_selects);
+        let mut selects = vec![(None, first_select)];
+        selects.extend(other_selects);
 
-    Ok((
-        remaining_input,
-        CompoundSelectStatement {
-            selects,
-            order,
-            limit,
-        },
-    ))
+        Ok((
+            remaining_input,
+            CompoundSelectStatement {
+                selects,
+                order,
+                limit,
+            },
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -140,8 +149,8 @@ mod tests {
     fn union() {
         let qstr = "SELECT id, 1 FROM Vote UNION SELECT id, stars from Rating;";
         let qstr2 = "(SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating);";
-        let res = compound_selection(qstr.as_bytes());
-        let res2 = compound_selection(qstr2.as_bytes());
+        let res = compound_selection(Dialect::MySQL)(qstr.as_bytes());
+        let res2 = compound_selection(Dialect::MySQL)(qstr2.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -177,9 +186,9 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote);";
         let qstr2 = "(SELECT id, 1 FROM Vote;";
         let qstr3 = "SELECT id, 1 FROM Vote) UNION (SELECT id, stars from Rating;";
-        let res = compound_selection(qstr.as_bytes());
-        let res2 = compound_selection(qstr2.as_bytes());
-        let res3 = compound_selection(qstr3.as_bytes());
+        let res = compound_selection(Dialect::MySQL)(qstr.as_bytes());
+        let res2 = compound_selection(Dialect::MySQL)(qstr2.as_bytes());
+        let res3 = compound_selection(Dialect::MySQL)(qstr3.as_bytes());
 
         assert!(&res.is_err());
         assert_eq!(
@@ -206,7 +215,7 @@ mod tests {
         let qstr = "SELECT id, 1 FROM Vote \
                     UNION SELECT id, stars from Rating \
                     UNION DISTINCT SELECT 42, 5 FROM Vote;";
-        let res = compound_selection(qstr.as_bytes());
+        let res = compound_selection(Dialect::MySQL)(qstr.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],
@@ -249,7 +258,7 @@ mod tests {
     #[test]
     fn union_all() {
         let qstr = "SELECT id, 1 FROM Vote UNION ALL SELECT id, stars from Rating;";
-        let res = compound_selection(qstr.as_bytes());
+        let res = compound_selection(Dialect::MySQL)(qstr.as_bytes());
 
         let first_select = SelectStatement {
             tables: vec![Table::from("Vote")],

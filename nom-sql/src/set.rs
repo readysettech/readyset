@@ -2,7 +2,8 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
-use crate::common::{literal, sql_identifier, statement_terminator, Literal};
+use crate::common::{literal, statement_terminator, Literal};
+use crate::Dialect;
 use nom::sequence::tuple;
 use nom::IResult;
 
@@ -20,19 +21,21 @@ impl fmt::Display for SetStatement {
     }
 }
 
-pub fn set(i: &[u8]) -> IResult<&[u8], SetStatement> {
-    let (remaining_input, (_, _, var, _, _, _, value, _)) = tuple((
-        tag_no_case("set"),
-        multispace1,
-        sql_identifier,
-        multispace0,
-        tag_no_case("="),
-        multispace0,
-        literal,
-        statement_terminator,
-    ))(i)?;
-    let variable = String::from(var);
-    Ok((remaining_input, SetStatement { variable, value }))
+pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
+    move |i| {
+        let (remaining_input, (_, _, var, _, _, _, value, _)) = tuple((
+            tag_no_case("set"),
+            multispace1,
+            dialect.identifier(),
+            multispace0,
+            tag_no_case("="),
+            multispace0,
+            literal(dialect),
+            statement_terminator,
+        ))(i)?;
+        let variable = String::from(var);
+        Ok((remaining_input, SetStatement { variable, value }))
+    }
 }
 
 #[cfg(test)]
@@ -42,7 +45,7 @@ mod tests {
     #[test]
     fn simple_set() {
         let qstring = "SET SQL_AUTO_IS_NULL = 0;";
-        let res = set(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -55,7 +58,7 @@ mod tests {
     #[test]
     fn user_defined_vars() {
         let qstring = "SET @var = 123;";
-        let res = set(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             SetStatement {
@@ -69,7 +72,7 @@ mod tests {
     fn format_set() {
         let qstring = "set autocommit=1";
         let expected = "SET autocommit = 1";
-        let res = set(qstring.as_bytes());
+        let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }

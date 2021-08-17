@@ -1,5 +1,5 @@
 use crate::expression::expression;
-use crate::Expression;
+use crate::{Dialect, Expression};
 
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::{multispace0, multispace1};
@@ -7,34 +7,37 @@ use nom::combinator::opt;
 use nom::sequence::{delimited, terminated, tuple};
 use nom::IResult;
 
-pub fn case_when(i: &[u8]) -> IResult<&[u8], Expression> {
-    let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) = tuple((
-        tag_no_case("case"),
-        multispace1,
-        tag_no_case("when"),
-        multispace0,
-        expression,
-        multispace0,
-        tag_no_case("then"),
-        multispace0,
-        expression,
-        multispace0,
-        opt(delimited(
-            terminated(tag_no_case("else"), multispace0),
-            expression,
-            multispace0,
-        )),
-        tag_no_case("end"),
-    ))(i)?;
+pub fn case_when(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (remaining_input, (_, _, _, _, condition, _, _, _, then_expr, _, else_expr, _)) =
+            tuple((
+                tag_no_case("case"),
+                multispace1,
+                tag_no_case("when"),
+                multispace0,
+                expression(dialect),
+                multispace0,
+                tag_no_case("then"),
+                multispace0,
+                expression(dialect),
+                multispace0,
+                opt(delimited(
+                    terminated(tag_no_case("else"), multispace0),
+                    expression(dialect),
+                    multispace0,
+                )),
+                tag_no_case("end"),
+            ))(i)?;
 
-    Ok((
-        remaining_input,
-        Expression::CaseWhen {
-            condition: Box::new(condition),
-            then_expr: Box::new(then_expr),
-            else_expr: else_expr.map(Box::new),
-        },
-    ))
+        Ok((
+            remaining_input,
+            Expression::CaseWhen {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: else_expr.map(Box::new),
+            },
+        ))
+    }
 }
 
 #[cfg(test)]

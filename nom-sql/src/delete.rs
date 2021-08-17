@@ -5,7 +5,7 @@ use crate::common::{schema_table_reference, statement_terminator};
 use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
-use crate::Expression;
+use crate::{Dialect, Expression};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::{delimited, tuple};
@@ -29,22 +29,24 @@ impl fmt::Display for DeleteStatement {
     }
 }
 
-pub fn deletion(i: &[u8]) -> IResult<&[u8], DeleteStatement> {
-    let (remaining_input, (_, _, table, where_clause, _)) = tuple((
-        tag_no_case("delete"),
-        delimited(multispace1, tag_no_case("from"), multispace1),
-        schema_table_reference,
-        opt(where_clause),
-        statement_terminator,
-    ))(i)?;
+pub fn deletion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DeleteStatement> {
+    move |i| {
+        let (remaining_input, (_, _, table, where_clause, _)) = tuple((
+            tag_no_case("delete"),
+            delimited(multispace1, tag_no_case("from"), multispace1),
+            schema_table_reference(dialect),
+            opt(where_clause(dialect)),
+            statement_terminator,
+        ))(i)?;
 
-    Ok((
-        remaining_input,
-        DeleteStatement {
-            table,
-            where_clause,
-        },
-    ))
+        Ok((
+            remaining_input,
+            DeleteStatement {
+                table,
+                where_clause,
+            },
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -58,7 +60,7 @@ mod tests {
     #[test]
     fn simple_delete() {
         let qstring = "DELETE FROM users;";
-        let res = deletion(qstring.as_bytes());
+        let res = deletion(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
@@ -71,7 +73,7 @@ mod tests {
     #[test]
     fn simple_delete_schema() {
         let qstring = "DELETE FROM db1.users;";
-        let res = deletion(qstring.as_bytes());
+        let res = deletion(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
@@ -84,7 +86,7 @@ mod tests {
     #[test]
     fn delete_with_where_clause() {
         let qstring = "DELETE FROM users WHERE id = 1;";
-        let res = deletion(qstring.as_bytes());
+        let res = deletion(Dialect::MySQL)(qstring.as_bytes());
         let expected_left = Expression::Column(Column::from("id"));
         let expected_where_cond = Some(Expression::BinaryOp {
             lhs: Box::new(expected_left),
@@ -104,7 +106,7 @@ mod tests {
     fn format_delete() {
         let qstring = "DELETE FROM users WHERE id = 1";
         let expected = "DELETE FROM users WHERE (id = 1)";
-        let res = deletion(qstring.as_bytes());
+        let res = deletion(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
 }

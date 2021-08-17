@@ -7,14 +7,14 @@ use test_strategy::Arbitrary;
 
 use nom::character::complete::{multispace0, multispace1};
 use nom::{
-    alt, char, complete, delimited, do_parse, many0, map, named, opt, preceded, separated_list,
-    tag, tag_no_case, terminated, tuple,
+    alt, call, char, complete, delimited, do_parse, many0, map, named, opt, preceded,
+    separated_list, tag, tag_no_case, terminated, tuple, IResult,
 };
 
 use crate::case::case_when;
 use crate::common::{column_function, column_identifier_no_alias, literal, ws_sep_comma};
 use crate::select::nested_selection;
-use crate::{Column, Literal, SelectStatement, SqlType};
+use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
 /// Function call expressions
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -428,29 +428,29 @@ named!(prefix(&[u8]) -> TokenTree, map!(alt!(
     tag_no_case!("not") => { |_| UnaryOperator::Not }
 ), TokenTree::Prefix));
 
-named!(primary(&[u8]) -> TokenTree, alt!(
+named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, alt!(
     do_parse!(
         multispace0 >>
             char!('(') >>
             multispace0 >>
-            group: token_tree >>
+            group: call!(token_tree(dialect)) >>
             multispace0 >>
             char!(')') >>
             (TokenTree::Group(group))
     ) |
-    preceded!(multispace0, simple_expr) => { |s| TokenTree::Primary(s) }
+    preceded!(multispace0, simple_expr(dialect)) => { |s| TokenTree::Primary(s) }
 ));
 
-named!(rest(&[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
+named_with_dialect!(rest(dialect, &[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
     preceded!(multispace0, infix),
     delimited!(multispace0, many0!(prefix), multispace0),
-    primary
+    call!(primary(dialect))
 )));
 
-named!(token_tree(&[u8]) -> Vec<TokenTree>, do_parse!(
+named_with_dialect!(token_tree(dialect, &[u8]) -> Vec<TokenTree>, do_parse!(
     prefix: many0!(prefix)
-        >> primary: primary
-        >> rest: rest
+        >> primary: call!(primary(dialect))
+        >> rest: call!(rest(dialect))
         >> ({
             let mut res = prefix;
             res.push(primary);
@@ -463,16 +463,16 @@ named!(token_tree(&[u8]) -> Vec<TokenTree>, do_parse!(
         })
 ));
 
-named!(rest_no_and_or(&[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
+named_with_dialect!(rest_no_and_or(dialect) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
     preceded!(multispace0, infix_no_and_or),
     delimited!(multispace0, many0!(prefix), multispace0),
-    primary
+    call!(primary(dialect))
 )));
 
-named!(token_tree_no_and_or(&[u8]) -> Vec<TokenTree>, do_parse!(
+named_with_dialect!(token_tree_no_and_or(dialect) -> Vec<TokenTree>, do_parse!(
     prefix: many0!(prefix)
-        >> primary: primary
-        >> rest: rest_no_and_or
+        >> primary: call!(primary(dialect))
+        >> rest: call!(rest_no_and_or(dialect))
         >> ({
             let mut res = prefix;
             res.push(primary);
@@ -580,27 +580,27 @@ where
     }
 }
 
-named!(pub(crate) in_lhs(&[u8]) -> Expression, alt!(
-    column_function => { |f| Expression::Call(f) } |
-    literal => { |l| Expression::Literal(l) } |
-    case_when |
-    column_identifier_no_alias => { |c| Expression::Column(c) }
+named_with_dialect!(pub(crate) in_lhs(dialect) -> Expression, alt!(
+    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
+    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(case_when(dialect)) |
+    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
 ));
 
-named!(in_rhs(&[u8]) -> InValue, alt!(
-    nested_selection => { |sel| InValue::Subquery(Box::new(sel)) } |
-    separated_list!(ws_sep_comma, expression) => { |exprs| InValue::List(exprs) }
+named_with_dialect!(in_rhs(dialect) -> InValue, alt!(
+    call!(nested_selection(dialect)) => { |sel| InValue::Subquery(Box::new(sel)) } |
+    separated_list!(ws_sep_comma, call!(expression(dialect))) => { |exprs| InValue::List(exprs) }
 ));
 
-named!(in_expr(&[u8]) -> Expression, do_parse!(
-    lhs: in_lhs
+named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
+    lhs: call!(in_lhs(dialect))
         >> multispace1
         >> not: opt!(terminated!(tag_no_case!("not"), multispace1))
         >> tag_no_case!("in")
         >> multispace0
         >> char!('(')
         >> multispace0
-        >> rhs: in_rhs
+        >> rhs: call!(in_rhs(dialect))
         >> multispace0
         >> char!(')')
         >> (Expression::In {
@@ -610,32 +610,32 @@ named!(in_expr(&[u8]) -> Expression, do_parse!(
         })
 ));
 
-named!(pub(crate) between_operand(&[u8]) -> Expression, alt!(
-    parenthesized_expr |
-    column_function => { |f| Expression::Call(f) } |
-    literal => { |l| Expression::Literal(l) } |
-    case_when |
-    column_identifier_no_alias => { |c| Expression::Column(c) }
+named_with_dialect!(pub(crate) between_operand(dialect) -> Expression, alt!(
+    call!(parenthesized_expr(dialect)) |
+    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
+    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(case_when(dialect)) |
+    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
 ));
 
-named!(pub(crate) between_max(&[u8]) -> Expression, alt!(
-    map!(token_tree_no_and_or, |tt| {
+named_with_dialect!(pub(crate) between_max(dialect) -> Expression, alt!(
+    map!(call!(token_tree_no_and_or(dialect)), |tt| {
         ExprParser.parse(&mut tt.into_iter()).unwrap()
     }) |
-    simple_expr
+    call!(simple_expr(dialect))
 ));
 
-named!(between_expr(&[u8]) -> Expression, do_parse!(
-    operand: map!(between_operand, Box::new)
+named_with_dialect!(between_expr(dialect) -> Expression, do_parse!(
+    operand: map!(call!(between_operand(dialect)), Box::new)
         >> multispace1
         >> not: opt!(terminated!(tag_no_case!("not"), multispace1))
         >> tag_no_case!("between")
         >> multispace1
-        >> min: map!(simple_expr, Box::new)
+        >> min: map!(call!(simple_expr(dialect)), Box::new)
         >> multispace1
         >> tag_no_case!("and")
         >> multispace1
-        >> max: map!(between_max, Box::new)
+        >> max: map!(call!(between_max(dialect)), Box::new)
         >> (Expression::Between {
             operand,
             min,
@@ -644,54 +644,58 @@ named!(between_expr(&[u8]) -> Expression, do_parse!(
         })
 ));
 
-named!(exists_expr(&[u8]) -> Expression, do_parse!(
+named_with_dialect!(exists_expr(dialect) -> Expression, do_parse!(
     tag_no_case!("exists")
         >> multispace0
         >> char!('(')
         >> multispace0
-        >> statement: nested_selection
+        >> statement: call!(nested_selection(dialect))
         >> multispace0
         >> char!(')')
         >> (Expression::Exists(Box::new(statement)))
 ));
 
-named!(nested_select(&[u8]) -> Expression, do_parse!(
+named_with_dialect!(nested_select(dialect) -> Expression, do_parse!(
     char!('(')
         >> multispace0
-        >> statement: nested_selection
+        >> statement: call!(nested_selection(dialect))
         >> multispace0
         >> char!(')')
         >> (Expression::NestedSelect(Box::new(statement)))
 ));
 
-named!(parenthesized_expr(&[u8]) -> Expression, do_parse!(
+named_with_dialect!(parenthesized_expr(dialect) -> Expression, do_parse!(
     char!('(')
         >> multispace0
-        >> expr: expression
+        >> expr: call!(expression(dialect))
         >> multispace0
         >> char!(')')
         >> (expr)
 ));
 
 // Expressions without (binary or unary) operators
-named!(pub(crate) simple_expr(&[u8]) -> Expression, alt!(
-    parenthesized_expr |
-    nested_select |
-    exists_expr |
-    between_expr |
-    in_expr |
-    column_function => { |f| Expression::Call(f) } |
-    literal => { |l| Expression::Literal(l) } |
-    case_when |
-    column_identifier_no_alias => { |c| Expression::Column(c) }
+named_with_dialect!(pub(crate) simple_expr(dialect, &[u8]) -> Expression, alt!(
+    call!(parenthesized_expr(dialect)) |
+    call!(nested_select(dialect)) |
+    call!(exists_expr(dialect)) |
+    call!(between_expr(dialect)) |
+    call!(in_expr(dialect)) |
+    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
+    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(case_when(dialect)) |
+    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
 ));
 
-named!(pub(crate) expression(&[u8]) -> Expression, alt!(
-    map!(token_tree, |tt| {
-        ExprParser.parse(&mut tt.into_iter()).unwrap()
-    }) |
-    simple_expr
-));
+pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        alt!(
+            i,
+            map!(call!(token_tree(dialect)), |tt| {
+                ExprParser.parse(&mut tt.into_iter()).unwrap()
+            }) | call!(simple_expr(dialect))
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -699,7 +703,7 @@ mod tests {
 
     #[test]
     fn column_then_column() {
-        let (rem, res) = expression(b"x y").unwrap();
+        let (rem, res) = expression(Dialect::MySQL)(b"x y").unwrap();
         assert_eq!(res, Expression::Column("x".into()));
         assert_eq!(rem, b" y");
     }
@@ -707,25 +711,30 @@ mod tests {
     pub mod precedence {
         use super::*;
 
-        pub fn parses_same(implicit: &str, explicit: &str) {
-            let implicit_res = expression(implicit.as_bytes()).unwrap().1;
-            let explicit_res = expression(explicit.as_bytes()).unwrap().1;
+        pub fn parses_same(dialect: Dialect, implicit: &str, explicit: &str) {
+            let implicit_res = expression(dialect)(implicit.as_bytes()).unwrap().1;
+            let explicit_res = expression(dialect)(explicit.as_bytes()).unwrap().1;
             assert_eq!(implicit_res, explicit_res);
         }
 
         #[test]
         fn plus_times() {
-            parses_same("1 + 2 * 3", "(1 + (2 * 3))");
+            parses_same(Dialect::MySQL, "1 + 2 * 3", "(1 + (2 * 3))");
         }
 
         #[test]
         fn between_and_or() {
-            parses_same("x between y and z or w", "(x between y and z) or w");
+            parses_same(
+                Dialect::MySQL,
+                "x between y and z or w",
+                "(x between y and z) or w",
+            );
         }
 
         #[test]
         fn not_between_or() {
             parses_same(
+                Dialect::MySQL,
                 "(table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5)",
                 "(table_1.column_2 NOT BETWEEN 1 AND 5) OR (table_1.column_2 NOT BETWEEN 1 AND 5)",
             )
@@ -768,7 +777,7 @@ mod tests {
         }
 
         fn x_equality_variable_placeholder(cond: &str, literal: Literal) {
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -791,7 +800,7 @@ mod tests {
         fn simple_arithmetic_expression() {
             let cond = "x + 3";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Add, 3.into())
@@ -802,7 +811,7 @@ mod tests {
         fn simple_arithmetic_expression_with_parenthesis() {
             let cond = "( x - 2 )";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Subtract, 2.into())
@@ -813,7 +822,7 @@ mod tests {
         fn parenthetical_arithmetic_expression() {
             let cond = "( x * 5 )";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 x_operator_value(BinaryOperator::Multiply, 5.into())
@@ -824,7 +833,7 @@ mod tests {
         fn expression_with_arithmetics() {
             let cond = "x * 3 = 21";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -838,7 +847,7 @@ mod tests {
         fn expression_with_arithmetics_and_parenthesis() {
             let cond = "(x - 7 = 15)";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -853,7 +862,7 @@ mod tests {
         fn expression_with_arithmetics_in_parenthesis() {
             let cond = "( x + 2) = 15";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -868,7 +877,7 @@ mod tests {
         fn expression_with_arithmetics_in_parenthesis_in_both_side() {
             let cond = "( x + 2) =(x*3)";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -884,7 +893,7 @@ mod tests {
             let cond1 = "foo >= 42";
             let cond2 = "foo <= 5";
 
-            let res1 = expression(cond1.as_bytes());
+            let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
             assert_eq!(
                 res1.unwrap().1,
                 Expression::BinaryOp {
@@ -894,7 +903,7 @@ mod tests {
                 }
             );
 
-            let res2 = expression(cond2.as_bytes());
+            let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
             assert_eq!(
                 res2.unwrap().1,
                 Expression::BinaryOp {
@@ -909,7 +918,7 @@ mod tests {
         fn empty_string_literal() {
             let cond = "foo = ''";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(
                 res.unwrap().1,
                 Expression::BinaryOp {
@@ -958,7 +967,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1000,7 +1009,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1031,7 +1040,7 @@ mod tests {
                 rhs: Box::new(right),
             };
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             assert_eq!(res.unwrap().1, complete);
         }
 
@@ -1042,7 +1051,7 @@ mod tests {
 
             let cond = "bar in (select col from foo)";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![Table::from("foo")],
@@ -1066,7 +1075,7 @@ mod tests {
 
             let cond = "exists (  select col from foo  )";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![Table::from("foo")],
@@ -1086,7 +1095,7 @@ mod tests {
 
             let cond = "not exists (select col from foo)";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![Table::from("foo")],
@@ -1109,7 +1118,7 @@ mod tests {
 
             let cond = "paperId in (select paperId from PaperConflict) and size > 0";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let nested_select = Box::new(SelectStatement {
                 tables: vec![Table::from("PaperConflict")],
@@ -1142,7 +1151,7 @@ mod tests {
         fn in_list_of_values() {
             let cond = "bar in (0, 1)";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let expected = Expression::In {
                 lhs: Box::new(Expression::Column("bar".into())),
@@ -1160,7 +1169,7 @@ mod tests {
         fn is_null() {
             let cond = "bar IS NULL";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
 
             let expected = Expression::BinaryOp {
                 lhs: Box::new(Expression::Column("bar".into())),
@@ -1174,7 +1183,7 @@ mod tests {
         fn is_not_null() {
             let cond = "bar IS NOT NULL";
 
-            let res = expression(cond.as_bytes());
+            let res = expression(Dialect::MySQL)(cond.as_bytes());
             let expected = Expression::BinaryOp {
                 lhs: Box::new(Expression::Column("bar".into())),
                 op: BinaryOperator::IsNot,
@@ -1186,7 +1195,7 @@ mod tests {
         #[test]
         fn not_in_comparison() {
             let qs1 = b"id not in (1,2)";
-            let res1 = expression(qs1);
+            let res1 = expression(Dialect::MySQL)(qs1);
 
             let c1 = res1.unwrap().1;
             let expected1 = Expression::In {
@@ -1212,7 +1221,7 @@ mod tests {
                 max: Box::new(Expression::Literal(2.into())),
                 negated: false,
             };
-            let (remaining, result) = expression(qs).unwrap();
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1226,7 +1235,7 @@ mod tests {
                 max: Box::new(Expression::Literal(2.into())),
                 negated: true,
             };
-            let (remaining, result) = expression(qs).unwrap();
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1246,7 +1255,7 @@ mod tests {
                 max: Box::new(Expression::Literal(2.into())),
                 negated: false,
             };
-            let (remaining, result) = expression(qs).unwrap();
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(String::from_utf8_lossy(remaining), "");
             assert_eq!(result, expected);
         }
@@ -1268,7 +1277,7 @@ mod tests {
                 }),
                 negated: false,
             };
-            let res = expression(qs);
+            let res = expression(Dialect::MySQL)(qs);
             let (remaining, result) = res.unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             eprintln!("{}", result);
@@ -1285,7 +1294,7 @@ mod tests {
                     ItemPlaceholder::QuestionMark,
                 ))),
             };
-            let (remaining, result) = expression(qs).unwrap();
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
@@ -1301,43 +1310,42 @@ mod tests {
                     rhs: Box::new(Expression::Column("y".into())),
                 }),
             };
-            let (remaining, result) = expression(qs).unwrap();
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
             assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
             assert_eq!(result, expected);
         }
     }
-}
 
-#[cfg(not(feature = "postgres"))]
-#[cfg(test)]
-mod tests_mysql {
-    use super::*;
+    mod mysql {
+        use super::*;
 
-    mod precedence {
-        use super::tests::precedence::parses_same;
+        mod precedence {
+            use super::tests::precedence::parses_same;
+            use crate::Dialect;
 
-        #[test]
-        fn is_and_between() {
-            parses_same(
-                "`h`.`local_date` is null
+            #[test]
+            fn is_and_between() {
+                parses_same(
+                    Dialect::MySQL,
+                    "`h`.`local_date` is null
                  and month(`lp`.`local_date`) between `peak`.`start_month` and `peak`.`end_month`
                  and dayofweek(`lp`.`local_date`) between 2 and 6",
-                "((`h`.`local_date` is null)
+                    "((`h`.`local_date` is null)
                  and (month(`lp`.`local_date`) between `peak`.`start_month` and `peak`.`end_month`)
                  and (dayofweek(`lp`.`local_date`) between 2 and 6))",
-            )
+                )
+            }
         }
-    }
 
-    mod conditions {
-        use super::*;
-        use crate::ItemPlaceholder;
+        mod conditions {
+            use super::*;
+            use crate::ItemPlaceholder;
 
-        #[test]
-        fn complex_bracketing() {
-            use crate::common::Literal;
+            #[test]
+            fn complex_bracketing() {
+                use crate::common::Literal;
 
-            let cond = "`read_ribbons`.`is_following` = 1 \
+                let cond = "`read_ribbons`.`is_following` = 1 \
                     AND `comments`.`user_id` <> `read_ribbons`.`user_id` \
                     AND `saldo` >= 0 \
                     AND ( `parent_comments`.`user_id` = `read_ribbons`.`user_id` \
@@ -1347,58 +1355,27 @@ mod tests_mysql {
                     OR `saldo` >= 0 ) \
                     AND `read_ribbons`.`user_id` = ?";
 
-            let res = expression(cond.as_bytes());
-            let expected = Expression::BinaryOp {
-                op: BinaryOperator::And,
-                lhs: Box::new(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(1.into())),
-                }),
-                rhs: Box::new(Expression::BinaryOp {
+                let res = expression(Dialect::MySQL)(cond.as_bytes());
+                let expected = Expression::BinaryOp {
                     op: BinaryOperator::And,
                     lhs: Box::new(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("comments.user_id".into())),
-                        op: BinaryOperator::NotEqual,
-                        rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
+                        lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(1.into())),
                     }),
                     rhs: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::And,
                         lhs: Box::new(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("saldo".into())),
-                            op: BinaryOperator::GreaterOrEqual,
-                            rhs: Box::new(Expression::Literal(0.into())),
+                            lhs: Box::new(Expression::Column("comments.user_id".into())),
+                            op: BinaryOperator::NotEqual,
+                            rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
                         }),
                         rhs: Box::new(Expression::BinaryOp {
                             op: BinaryOperator::And,
                             lhs: Box::new(Expression::BinaryOp {
-                                op: BinaryOperator::Or,
-                                lhs: Box::new(Expression::BinaryOp {
-                                    lhs: Box::new(Expression::Column(
-                                        "parent_comments.user_id".into(),
-                                    )),
-                                    op: BinaryOperator::Equal,
-                                    rhs: Box::new(Expression::Column(
-                                        "read_ribbons.user_id".into(),
-                                    )),
-                                }),
-                                rhs: Box::new(Expression::BinaryOp {
-                                    op: BinaryOperator::And,
-                                    lhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column(
-                                            "parent_comments.user_id".into(),
-                                        )),
-                                        op: BinaryOperator::Is,
-                                        rhs: Box::new(Expression::Literal(Literal::Null)),
-                                    }),
-                                    rhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column("stories.user_id".into())),
-                                        op: BinaryOperator::Equal,
-                                        rhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
-                                    }),
-                                }),
+                                lhs: Box::new(Expression::Column("saldo".into())),
+                                op: BinaryOperator::GreaterOrEqual,
+                                rhs: Box::new(Expression::Literal(0.into())),
                             }),
                             rhs: Box::new(Expression::BinaryOp {
                                 op: BinaryOperator::And,
@@ -1406,75 +1383,108 @@ mod tests_mysql {
                                     op: BinaryOperator::Or,
                                     lhs: Box::new(Expression::BinaryOp {
                                         lhs: Box::new(Expression::Column(
-                                            "parent_comments.id".into(),
+                                            "parent_comments.user_id".into(),
                                         )),
-                                        op: BinaryOperator::Is,
-                                        rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        op: BinaryOperator::Equal,
+                                        rhs: Box::new(Expression::Column(
+                                            "read_ribbons.user_id".into(),
+                                        )),
                                     }),
                                     rhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column("saldo".into())),
-                                        op: BinaryOperator::GreaterOrEqual,
-                                        rhs: Box::new(Expression::Literal(0.into())),
+                                        op: BinaryOperator::And,
+                                        lhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "parent_comments.user_id".into(),
+                                            )),
+                                            op: BinaryOperator::Is,
+                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        }),
+                                        rhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "stories.user_id".into(),
+                                            )),
+                                            op: BinaryOperator::Equal,
+                                            rhs: Box::new(Expression::Column(
+                                                "read_ribbons.user_id".into(),
+                                            )),
+                                        }),
                                     }),
                                 }),
                                 rhs: Box::new(Expression::BinaryOp {
-                                    op: BinaryOperator::Equal,
-                                    lhs: Box::new(Expression::Column(
-                                        "read_ribbons.user_id".into(),
-                                    )),
-                                    rhs: Box::new(Expression::Literal(Literal::Placeholder(
-                                        ItemPlaceholder::QuestionMark,
-                                    ))),
+                                    op: BinaryOperator::And,
+                                    lhs: Box::new(Expression::BinaryOp {
+                                        op: BinaryOperator::Or,
+                                        lhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "parent_comments.id".into(),
+                                            )),
+                                            op: BinaryOperator::Is,
+                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        }),
+                                        rhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column("saldo".into())),
+                                            op: BinaryOperator::GreaterOrEqual,
+                                            rhs: Box::new(Expression::Literal(0.into())),
+                                        }),
+                                    }),
+                                    rhs: Box::new(Expression::BinaryOp {
+                                        op: BinaryOperator::Equal,
+                                        lhs: Box::new(Expression::Column(
+                                            "read_ribbons.user_id".into(),
+                                        )),
+                                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                                            ItemPlaceholder::QuestionMark,
+                                        ))),
+                                    }),
                                 }),
                             }),
                         }),
                     }),
-                }),
-            };
-            let (rem, res) = res.unwrap();
-            assert_eq!(std::str::from_utf8(rem).unwrap(), "");
-            assert_eq!(res, expected);
-        }
+                };
+                let (rem, res) = res.unwrap();
+                assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+                assert_eq!(res, expected);
+            }
 
-        #[test]
-        fn equality_literals() {
-            let cond1 = "foo = 42";
-            let cond2 = "foo = \"hello\"";
+            #[test]
+            fn equality_literals() {
+                let cond1 = "foo = 42";
+                let cond2 = "foo = \"hello\"";
 
-            let res1 = expression(cond1.as_bytes());
-            assert_eq!(
-                res1.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
-                }
-            );
+                let res1 = expression(Dialect::MySQL)(cond1.as_bytes());
+                assert_eq!(
+                    res1.unwrap().1,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
+                    }
+                );
 
-            let res2 = expression(cond2.as_bytes());
-            assert_eq!(
-                res2.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
-                }
-            );
+                let res2 = expression(Dialect::MySQL)(cond2.as_bytes());
+                assert_eq!(
+                    res2.unwrap().1,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
+                    }
+                );
+            }
         }
     }
-}
 
-#[cfg(feature = "postgres")]
-#[cfg(test)]
-mod tests_postgres {
-    use super::*;
+    mod postgres {
+        use super::*;
 
-    mod precedence {
-        use super::tests::precedence::parses_same;
+        mod precedence {
+            use super::tests::precedence::parses_same;
+            use crate::Dialect;
 
-        #[test]
-        fn is_and_between() {
-            parses_same(
+            #[test]
+            fn is_and_between() {
+                parses_same(
+                    Dialect::PostgreSQL,
                 "\"h\".\"local_date\" is null
                  and month(\"lp\".\"local_date\") between \"peak\".\"start_month\" and \"peak\".\"end_month\"
                  and dayofweek(\"lp\".\"local_date\") between 2 and 6",
@@ -1482,18 +1492,18 @@ mod tests_postgres {
                  and (month(\"lp\".\"local_date\") between \"peak\".\"start_month\" and \"peak\".\"end_month\")
                  and (dayofweek(\"lp\".\"local_date\") between 2 and 6))",
             )
+            }
         }
-    }
 
-    mod conditions {
-        use super::*;
-        use crate::ItemPlaceholder;
+        mod conditions {
+            use super::*;
+            use crate::ItemPlaceholder;
 
-        #[test]
-        fn complex_bracketing() {
-            use crate::common::Literal;
+            #[test]
+            fn complex_bracketing() {
+                use crate::common::Literal;
 
-            let cond = "\"read_ribbons\".\"is_following\" = 1 \
+                let cond = "\"read_ribbons\".\"is_following\" = 1 \
                     AND \"comments\".\"user_id\" <> \"read_ribbons\".\"user_id\" \
                     AND \"saldo\" >= 0 \
                     AND ( \"parent_comments\".\"user_id\" = \"read_ribbons\".\"user_id\" \
@@ -1503,58 +1513,27 @@ mod tests_postgres {
                     OR \"saldo\" >= 0 ) \
                     AND \"read_ribbons\".\"user_id\" = ?";
 
-            let res = expression(cond.as_bytes());
-            let expected = Expression::BinaryOp {
-                op: BinaryOperator::And,
-                lhs: Box::new(Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(1.into())),
-                }),
-                rhs: Box::new(Expression::BinaryOp {
+                let res = expression(Dialect::PostgreSQL)(cond.as_bytes());
+                let expected = Expression::BinaryOp {
                     op: BinaryOperator::And,
                     lhs: Box::new(Expression::BinaryOp {
-                        lhs: Box::new(Expression::Column("comments.user_id".into())),
-                        op: BinaryOperator::NotEqual,
-                        rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
+                        lhs: Box::new(Expression::Column("read_ribbons.is_following".into())),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(1.into())),
                     }),
                     rhs: Box::new(Expression::BinaryOp {
                         op: BinaryOperator::And,
                         lhs: Box::new(Expression::BinaryOp {
-                            lhs: Box::new(Expression::Column("saldo".into())),
-                            op: BinaryOperator::GreaterOrEqual,
-                            rhs: Box::new(Expression::Literal(0.into())),
+                            lhs: Box::new(Expression::Column("comments.user_id".into())),
+                            op: BinaryOperator::NotEqual,
+                            rhs: Box::new(Expression::Column("read_ribbons.user_id".into())),
                         }),
                         rhs: Box::new(Expression::BinaryOp {
                             op: BinaryOperator::And,
                             lhs: Box::new(Expression::BinaryOp {
-                                op: BinaryOperator::Or,
-                                lhs: Box::new(Expression::BinaryOp {
-                                    lhs: Box::new(Expression::Column(
-                                        "parent_comments.user_id".into(),
-                                    )),
-                                    op: BinaryOperator::Equal,
-                                    rhs: Box::new(Expression::Column(
-                                        "read_ribbons.user_id".into(),
-                                    )),
-                                }),
-                                rhs: Box::new(Expression::BinaryOp {
-                                    op: BinaryOperator::And,
-                                    lhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column(
-                                            "parent_comments.user_id".into(),
-                                        )),
-                                        op: BinaryOperator::Is,
-                                        rhs: Box::new(Expression::Literal(Literal::Null)),
-                                    }),
-                                    rhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column("stories.user_id".into())),
-                                        op: BinaryOperator::Equal,
-                                        rhs: Box::new(Expression::Column(
-                                            "read_ribbons.user_id".into(),
-                                        )),
-                                    }),
-                                }),
+                                lhs: Box::new(Expression::Column("saldo".into())),
+                                op: BinaryOperator::GreaterOrEqual,
+                                rhs: Box::new(Expression::Literal(0.into())),
                             }),
                             rhs: Box::new(Expression::BinaryOp {
                                 op: BinaryOperator::And,
@@ -1562,60 +1541,94 @@ mod tests_postgres {
                                     op: BinaryOperator::Or,
                                     lhs: Box::new(Expression::BinaryOp {
                                         lhs: Box::new(Expression::Column(
-                                            "parent_comments.id".into(),
+                                            "parent_comments.user_id".into(),
                                         )),
-                                        op: BinaryOperator::Is,
-                                        rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        op: BinaryOperator::Equal,
+                                        rhs: Box::new(Expression::Column(
+                                            "read_ribbons.user_id".into(),
+                                        )),
                                     }),
                                     rhs: Box::new(Expression::BinaryOp {
-                                        lhs: Box::new(Expression::Column("saldo".into())),
-                                        op: BinaryOperator::GreaterOrEqual,
-                                        rhs: Box::new(Expression::Literal(0.into())),
+                                        op: BinaryOperator::And,
+                                        lhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "parent_comments.user_id".into(),
+                                            )),
+                                            op: BinaryOperator::Is,
+                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        }),
+                                        rhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "stories.user_id".into(),
+                                            )),
+                                            op: BinaryOperator::Equal,
+                                            rhs: Box::new(Expression::Column(
+                                                "read_ribbons.user_id".into(),
+                                            )),
+                                        }),
                                     }),
                                 }),
                                 rhs: Box::new(Expression::BinaryOp {
-                                    op: BinaryOperator::Equal,
-                                    lhs: Box::new(Expression::Column(
-                                        "read_ribbons.user_id".into(),
-                                    )),
-                                    rhs: Box::new(Expression::Literal(Literal::Placeholder(
-                                        ItemPlaceholder::QuestionMark,
-                                    ))),
+                                    op: BinaryOperator::And,
+                                    lhs: Box::new(Expression::BinaryOp {
+                                        op: BinaryOperator::Or,
+                                        lhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column(
+                                                "parent_comments.id".into(),
+                                            )),
+                                            op: BinaryOperator::Is,
+                                            rhs: Box::new(Expression::Literal(Literal::Null)),
+                                        }),
+                                        rhs: Box::new(Expression::BinaryOp {
+                                            lhs: Box::new(Expression::Column("saldo".into())),
+                                            op: BinaryOperator::GreaterOrEqual,
+                                            rhs: Box::new(Expression::Literal(0.into())),
+                                        }),
+                                    }),
+                                    rhs: Box::new(Expression::BinaryOp {
+                                        op: BinaryOperator::Equal,
+                                        lhs: Box::new(Expression::Column(
+                                            "read_ribbons.user_id".into(),
+                                        )),
+                                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                                            ItemPlaceholder::QuestionMark,
+                                        ))),
+                                    }),
                                 }),
                             }),
                         }),
                     }),
-                }),
-            };
-            let (rem, res) = res.unwrap();
-            assert_eq!(std::str::from_utf8(rem).unwrap(), "");
-            assert_eq!(res, expected);
-        }
+                };
+                let (rem, res) = res.unwrap();
+                assert_eq!(std::str::from_utf8(rem).unwrap(), "");
+                assert_eq!(res, expected);
+            }
 
-        #[test]
-        fn equality_literals() {
-            let cond1 = "foo = 42";
-            let cond2 = "foo = 'hello'";
+            #[test]
+            fn equality_literals() {
+                let cond1 = "foo = 42";
+                let cond2 = "foo = 'hello'";
 
-            let res1 = expression(cond1.as_bytes());
-            assert_eq!(
-                res1.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
-                }
-            );
+                let res1 = expression(Dialect::PostgreSQL)(cond1.as_bytes());
+                assert_eq!(
+                    res1.unwrap().1,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(Literal::Integer(42_i64)))
+                    }
+                );
 
-            let res2 = expression(cond2.as_bytes());
-            assert_eq!(
-                res2.unwrap().1,
-                Expression::BinaryOp {
-                    lhs: Box::new(Expression::Column(Column::from("foo"))),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
-                }
-            );
+                let res2 = expression(Dialect::PostgreSQL)(cond2.as_bytes());
+                assert_eq!(
+                    res2.unwrap().1,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("foo"))),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(Expression::Literal(Literal::String(String::from("hello"))))
+                    }
+                );
+            }
         }
     }
 }

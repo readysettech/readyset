@@ -10,7 +10,7 @@ use nom::character::complete::multispace0;
 use nom::combinator::opt;
 use nom::multi::many1;
 use nom::sequence::preceded;
-use nom_sql::{sql_query, SqlQuery};
+use nom_sql::{sql_query, Dialect, SqlQuery};
 use query_generator::{TableName, TableSpec};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -79,7 +79,7 @@ pub struct DatabaseSchema {
 }
 
 fn parse_ddl(input: &[u8]) -> anyhow::Result<Vec<SqlQuery>> {
-    let (_, query) = many1(preceded(opt(multispace0), sql_query))(input)
+    let (_, query) = many1(preceded(opt(multispace0), sql_query(Dialect::MySQL)))(input)
         .map_err(|_| anyhow!("Error parsing ddl into SqlQuery"))?;
 
     Ok(query)

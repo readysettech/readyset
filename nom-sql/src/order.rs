@@ -5,6 +5,7 @@ use test_strategy::Arbitrary;
 
 use crate::column::Column;
 use crate::common::{column_identifier_no_alias, ws_sep_comma};
+use crate::Dialect;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -54,31 +55,35 @@ pub fn order_type(i: &[u8]) -> IResult<&[u8], OrderType> {
     ))(i)
 }
 
-fn order_expr(i: &[u8]) -> IResult<&[u8], (Column, OrderType)> {
-    let (remaining_input, (field_name, ordering, _)) = tuple((
-        column_identifier_no_alias,
-        opt(preceded(multispace0, order_type)),
-        opt(ws_sep_comma),
-    ))(i)?;
+fn order_expr(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column, OrderType)> {
+    move |i| {
+        let (remaining_input, (field_name, ordering, _)) = tuple((
+            column_identifier_no_alias(dialect),
+            opt(preceded(multispace0, order_type)),
+            opt(ws_sep_comma),
+        ))(i)?;
 
-    Ok((
-        remaining_input,
-        (field_name, ordering.unwrap_or(OrderType::OrderAscending)),
-    ))
+        Ok((
+            remaining_input,
+            (field_name, ordering.unwrap_or(OrderType::OrderAscending)),
+        ))
+    }
 }
 
 // Parse ORDER BY clause
-pub fn order_clause(i: &[u8]) -> IResult<&[u8], OrderClause> {
-    let (remaining_input, (_, _, _, _, _, columns)) = tuple((
-        multispace0,
-        tag_no_case("order"),
-        multispace1,
-        tag_no_case("by"),
-        multispace1,
-        many0(order_expr),
-    ))(i)?;
+pub fn order_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], OrderClause> {
+    move |i| {
+        let (remaining_input, (_, _, _, _, _, columns)) = tuple((
+            multispace0,
+            tag_no_case("order"),
+            multispace1,
+            tag_no_case("by"),
+            multispace1,
+            many0(order_expr(dialect)),
+        ))(i)?;
 
-    Ok((remaining_input, OrderClause { columns }))
+        Ok((remaining_input, OrderClause { columns }))
+    }
 }
 
 #[cfg(test)]
@@ -105,9 +110,9 @@ mod tests {
             columns: vec![("name".into(), OrderType::OrderAscending)],
         };
 
-        let res1 = selection(qstring1.as_bytes());
-        let res2 = selection(qstring2.as_bytes());
-        let res3 = selection(qstring3.as_bytes());
+        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
+        let res2 = selection(Dialect::MySQL)(qstring2.as_bytes());
+        let res3 = selection(Dialect::MySQL)(qstring3.as_bytes());
         assert_eq!(res1.unwrap().1.order, Some(expected_ord1));
         assert_eq!(res2.unwrap().1.order, Some(expected_ord2));
         assert_eq!(res3.unwrap().1.order, Some(expected_ord3));
