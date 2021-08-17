@@ -221,7 +221,9 @@ where
             )?;
         }
         // TODO(Dan): Implement
-        QueryResult::MySqlSelect { data: _ } => {
+        QueryResult::MySqlSelect { .. }
+        | QueryResult::PgSqlSelect { .. }
+        | QueryResult::PgSqlWrite { .. } => {
             unimplemented!("Query fallback processing not implemented for js-client")
         }
     }

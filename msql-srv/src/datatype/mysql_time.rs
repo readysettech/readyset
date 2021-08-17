@@ -1,7 +1,11 @@
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
+use launchpad::arbitrary::arbitrary_duration;
+use proptest::arbitrary::Arbitrary;
+use proptest::strategy::Strategy;
 use serde::de;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeStruct, Serializer};
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -363,6 +367,18 @@ impl Hash for MysqlTime {
     }
 }
 
+impl From<MysqlTime> for Duration {
+    fn from(t: MysqlTime) -> Self {
+        t.duration
+    }
+}
+
+impl Borrow<Duration> for MysqlTime {
+    fn borrow(&self) -> &Duration {
+        &self.duration
+    }
+}
+
 mod parse {
     use super::*;
     use nom::bytes::complete::take_while_m_n;
@@ -513,6 +529,17 @@ impl From<NaiveTime> for MysqlTime {
             + (s * MICROSECS_IN_SECOND)
             + us;
         MysqlTime::new(Duration::microseconds(sum))
+    }
+}
+
+impl From<MysqlTime> for NaiveTime {
+    fn from(t: MysqlTime) -> Self {
+        NaiveTime::from_hms_micro(
+            t.hour().into(),
+            t.minutes().into(),
+            t.seconds().into(),
+            t.microseconds(),
+        )
     }
 }
 
@@ -723,10 +750,21 @@ impl<'de> serde::Deserialize<'de> for MysqlTime {
     }
 }
 
+impl Arbitrary for MysqlTime {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<MysqlTime>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        arbitrary_duration().prop_map(Self::new).boxed()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use launchpad::arbitrary::{arbitrary_duration, arbitrary_naive_date_time};
+    use launchpad::arbitrary::{
+        arbitrary_duration, arbitrary_naive_date_time, arbitrary_naive_time,
+    };
     use serde_test::{assert_tokens, Token};
     use std::collections::hash_map::DefaultHasher;
     use test_strategy::proptest;
@@ -1333,5 +1371,12 @@ mod tests {
         } else {
             format!("{}{:02}:{:02}:{:02}", sign, h, m, s)
         }
+    }
+
+    #[proptest]
+    fn naive_time_from_into_round_trip(#[strategy(arbitrary_naive_time())] naive_time: NaiveTime) {
+        let mt = MysqlTime::from(naive_time);
+        let round_trip = NaiveTime::from(mt);
+        assert_eq!(naive_time, round_trip);
     }
 }

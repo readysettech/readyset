@@ -2688,7 +2688,7 @@ dependencies = [
  "mysql_async 0.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mysql_common 0.26.0",
  "nom",
- "postgres",
+ "postgres 0.19.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "proptest",
  "regex",
  "serde",
@@ -3189,6 +3189,7 @@ dependencies = [
  "bincode",
  "bufstream",
  "byteorder",
+ "bytes 1.0.1",
  "chrono",
  "derive_more",
  "futures-util",
@@ -3286,15 +3287,18 @@ dependencies = [
  "msql-srv",
  "mysql 20.1.0",
  "mysql_async 0.27.0",
+ "native-tls",
  "nom-sql",
  "noria",
  "noria-client-metrics",
  "noria-server",
+ "postgres-native-tls",
  "regex",
  "slog",
  "thiserror",
  "timestamp_service",
  "tokio 1.8.1",
+ "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "tracing",
  "vec1",
  "zookeeper",
@@ -3472,7 +3476,7 @@ dependencies = [
  "noria-client",
  "noria-client-adapter",
  "noria-server",
- "postgres",
+ "postgres 0.19.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "psql-srv",
  "slog",
  "tokio 1.8.1",
@@ -4023,6 +4027,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres"
+version = "0.19.1"
+source = "git+https://github.com/readysettech/rust-postgres.git#e899d18e0044f3f3674f52ef7505ca39780204db"
+dependencies = [
+ "bytes 1.0.1",
+ "fallible-iterator",
+ "futures 0.3.15",
+ "log",
+ "tokio 1.8.1",
+ "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
+]
+
+[[package]]
 name = "postgres-native-tls"
 version = "0.5.0"
 source = "git+https://github.com/readysettech/rust-postgres.git#e899d18e0044f3f3674f52ef7505ca39780204db"
@@ -4214,10 +4231,11 @@ dependencies = [
  "chrono",
  "futures 0.3.15",
  "nom-sql",
- "postgres",
- "postgres-types 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "postgres 0.19.1 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "thiserror",
  "tokio 1.8.1",
+ "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "tokio-test 0.4.2",
  "tokio-util 0.6.7",
 ]
