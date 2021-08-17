@@ -188,9 +188,11 @@ fn having_clause(i: &[u8]) -> IResult<&[u8], Expression> {
 
 // Parse GROUP BY clause
 pub fn group_by_clause(i: &[u8]) -> IResult<&[u8], GroupByClause> {
-    let (remaining_input, (_, _, _, columns, having)) = tuple((
+    let (remaining_input, (_, _, _, _, _, columns, having)) = tuple((
         multispace0,
-        tag_no_case("group by"),
+        tag_no_case("group"),
+        multispace1,
+        tag_no_case("by"),
         multispace1,
         field_list,
         opt(having_clause),
