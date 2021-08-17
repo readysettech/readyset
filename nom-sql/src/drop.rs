@@ -1,4 +1,4 @@
-use nom::character::complete::multispace0;
+use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use crate::common::{statement_terminator, table_list};
@@ -33,13 +33,17 @@ impl fmt::Display for DropTableStatement {
 }
 
 pub fn drop_table(i: &[u8]) -> IResult<&[u8], DropTableStatement> {
-    let (remaining_input, (_, opt_if_exists, _, tables, _, _, _, _)) = tuple((
-        tag_no_case("drop table"),
-        opt(delimited(
+    let (remaining_input, (_, _, _, opt_if_exists, _, tables, _, _, _, _)) = tuple((
+        tag_no_case("drop"),
+        multispace1,
+        tag_no_case("table"),
+        opt(tuple((
             multispace0,
-            tag_no_case("if exists"),
+            tag_no_case("if"),
+            multispace1,
+            tag_no_case("exists"),
             multispace0,
-        )),
+        ))),
         multispace0,
         table_list,
         multispace0,
