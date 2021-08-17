@@ -16,7 +16,7 @@ futures-executor = "0.3.14"
 futures-util = "0.3.14"
 lazy_static = "1.0.0"
 mysql = "20.1.0"
-mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"} 
+mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"}
 nom-sql = { version =  "0.0.11", path = "../nom-sql" }
 regex = "1.0.0"
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time"] }
@@ -30,6 +30,9 @@ thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 metrics = "0.14.2"
 noria-client-metrics = { version = "0.1.0", path = "metrics" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+native-tls = "0.2.7"
 
 [dev-dependencies]
 slog = "2.4.0"

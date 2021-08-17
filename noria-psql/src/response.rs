@@ -88,6 +88,13 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
             MySqlSelect { .. } => Err(ps::Error::Unimplemented(
                 "QueryResult::MySqlSelect not handled in psql_backend".to_string(),
             )),
+            PgSqlSelect { .. } => {
+                // TODO(grfn): Implement this
+                Err(ps::Error::Unimplemented(
+                    "Handling of pgsql select results not yet implemented".to_string(),
+                ))
+            }
+            PgSqlWrite { num_rows_affected } => Ok(Insert(num_rows_affected)),
         }
     }
 }

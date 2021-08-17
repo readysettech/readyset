@@ -47,4 +47,7 @@ pub enum Error {
 
     #[error("unsupported type: {0}")]
     UnsupportedType(ColType),
+
+    #[error(transparent)]
+    PostgresError(#[from] tokio_postgres::error::Error),
 }

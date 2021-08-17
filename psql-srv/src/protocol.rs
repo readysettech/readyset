@@ -387,6 +387,7 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
         Error::Unsupported(_) => SqlState::FEATURE_NOT_SUPPORTED,
         Error::UnsupportedMessage(_) => SqlState::FEATURE_NOT_SUPPORTED,
         Error::UnsupportedType(_) => SqlState::FEATURE_NOT_SUPPORTED,
+        Error::PostgresError(ref e) => e.code().cloned().unwrap_or(SqlState::INTERNAL_ERROR),
     };
     ErrorResponse {
         severity: ErrorSeverity::Error,

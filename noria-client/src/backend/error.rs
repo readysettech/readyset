@@ -18,6 +18,8 @@ pub enum Error {
     ReadySet(ReadySetError),
     #[error("MsqlSrvError: {0}")]
     MsqlSrv(#[from] MsqlSrvError),
+    #[error(transparent)]
+    PostgreSql(#[from] tokio_postgres::error::Error),
 }
 
 /// Everything in `noria-client` involves doing a Noria RPC call, so this `From` implementation

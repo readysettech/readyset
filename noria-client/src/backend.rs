@@ -9,6 +9,7 @@ use derive_more::From;
 use metrics::histogram;
 use nom_sql::Dialect;
 use tokio::io::AsyncWrite;
+use tokio_postgres as pgsql;
 use tracing::Level;
 
 use msql_srv::{self, *};
@@ -31,6 +32,7 @@ use crate::utils;
 
 pub mod mysql_connector;
 pub mod noria_connector;
+pub mod postgresql_connector;
 
 pub mod error;
 
@@ -318,6 +320,12 @@ pub enum QueryResult {
     },
     MySqlSelect {
         data: Vec<mysql_async::Row>,
+    },
+    PgSqlSelect {
+        data: Vec<pgsql::Row>,
+    },
+    PgSqlWrite {
+        num_rows_affected: u64,
     },
 }
 
@@ -1026,6 +1034,10 @@ where
                     let rw = results.start(&[]).await?;
                     rw.finish().await
                 }
+            }
+            Ok(QueryResult::PgSqlSelect { .. } | QueryResult::PgSqlWrite { .. }) => {
+                // TODO(grfn): Implement this
+                unsupported!("Postgresql result handling not yet implemented")
             }
             Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
                 code,

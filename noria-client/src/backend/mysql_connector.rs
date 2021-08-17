@@ -48,8 +48,10 @@ impl MySqlConnector {
         Ok(statement_id)
     }
 
-    /// Executes the prepared statement with the given ID but param parsing doesnt work
-    /// so this will not work either. Clubhouse ticket attached.
+    /// Executes the prepared statement with the given ID, returning the number of rows affected and
+    /// the last inserted ID.
+    ///
+    /// param parsing doesnt work so this will not work either. Clubhouse ticket attached.
     pub async fn on_execute(
         &mut self,
         id: u32,

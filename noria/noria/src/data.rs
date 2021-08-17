@@ -1,12 +1,15 @@
 use arccstr::ArcCStr;
 
+use bytes::BytesMut;
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Either;
+use tokio_postgres::types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 
 use crate::{internal, ReadySetError, ReadySetResult};
 use nom_sql::{Literal, Real, SqlType};
 
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
 use std::{borrow::Cow, mem};
@@ -1425,6 +1428,30 @@ impl TryFrom<&mysql_common::value::Value> for DataType {
             }
         }
     }
+}
+
+impl ToSql for DataType {
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
+        match self {
+            Self::None => None::<i8>.to_sql(ty, out),
+            Self::Int(x) => x.to_sql(ty, out),
+            Self::UnsignedInt(x) => x.to_sql(ty, out),
+            Self::BigInt(x) => x.to_sql(ty, out),
+            Self::UnsignedBigInt(x) => (*x as i64).to_sql(ty, out),
+            Self::Real(x, _) => x.to_sql(ty, out),
+            Self::Text(_) | Self::TinyText(_) => <&str>::try_from(self).unwrap().to_sql(ty, out),
+            Self::Timestamp(x) => x.to_sql(ty, out),
+            Self::Time(x) => NaiveTime::from(**x).to_sql(ty, out),
+        }
+    }
+
+    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
+
+    to_sql_checked!();
 }
 
 // Performs an arithmetic operation on two numeric DataTypes,
