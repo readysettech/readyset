@@ -1,6 +1,7 @@
 use nom::character::complete::{alphanumeric1, multispace0, multispace1};
 
-use crate::common::{integer_literal, sql_identifier, string_literal, ws_sep_comma, ws_sep_equals};
+use crate::common::{integer_literal, ws_sep_comma, ws_sep_equals};
+use crate::Dialect;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -8,32 +9,36 @@ use nom::multi::separated_list;
 use nom::sequence::tuple;
 use nom::IResult;
 
-pub fn table_options(i: &[u8]) -> IResult<&[u8], ()> {
+pub fn table_options(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ()> {
     // TODO: make the create options accessible
-    map(
-        separated_list(table_options_separator, create_option),
-        |_| (),
-    )(i)
+    move |i| {
+        map(
+            separated_list(table_options_separator, create_option(dialect)),
+            |_| (),
+        )(i)
+    }
 }
 
 fn table_options_separator(i: &[u8]) -> IResult<&[u8], ()> {
     map(alt((multispace1, ws_sep_comma)), |_| ())(i)
 }
 
-fn create_option(i: &[u8]) -> IResult<&[u8], ()> {
-    alt((
-        create_option_type,
-        create_option_pack_keys,
-        create_option_engine,
-        create_option_auto_increment,
-        create_option_default_charset,
-        create_option_collate,
-        create_option_comment,
-        create_option_max_rows,
-        create_option_avg_row_length,
-        create_option_row_format,
-        create_option_key_block_size,
-    ))(i)
+fn create_option(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ()> {
+    move |i| {
+        alt((
+            create_option_type,
+            create_option_pack_keys,
+            create_option_engine,
+            create_option_auto_increment,
+            create_option_default_charset,
+            create_option_collate(dialect),
+            create_option_comment(dialect),
+            create_option_max_rows,
+            create_option_avg_row_length,
+            create_option_row_format,
+            create_option_key_block_size,
+        ))(i)
+    }
 }
 
 /// Helper to parse equals-separated create option pairs.
@@ -86,16 +91,18 @@ fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], ()> {
     )(i)
 }
 
-fn create_option_collate(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("collate"),
-        // TODO(malte): imprecise hack, should not accept everything
-        sql_identifier,
-    )(i)
+fn create_option_collate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ()> {
+    move |i| {
+        create_option_equals_pair(
+            tag_no_case("collate"),
+            // TODO(malte): imprecise hack, should not accept everything
+            dialect.identifier(),
+        )(i)
+    }
 }
 
-fn create_option_comment(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(tag_no_case("comment"), string_literal)(i)
+fn create_option_comment(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ()> {
+    move |i| create_option_equals_pair(tag_no_case("comment"), dialect.string_literal())(i)
 }
 
 fn create_option_max_rows(i: &[u8]) -> IResult<&[u8], ()> {
@@ -140,7 +147,10 @@ mod tests {
     use super::*;
 
     fn should_parse_all(qstring: &str) {
-        assert_eq!(Ok((&b""[..], ())), table_options(qstring.as_bytes()))
+        assert_eq!(
+            Ok((&b""[..], ())),
+            table_options(Dialect::MySQL)(qstring.as_bytes())
+        )
     }
 
     #[test]

@@ -2,8 +2,7 @@ use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 use crate::{ReadySetResult, ReuseConfigType};
 
-use nom_sql::parser as sql_parser;
-use nom_sql::SqlQuery;
+use nom_sql::{parser as sql_parser, Dialect, SqlQuery};
 use noria::{internal, ActivationResult, ReadySetError};
 use petgraph::graph::NodeIndex;
 
@@ -12,6 +11,11 @@ use nom_sql::CreateTableStatement;
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
+
+/// The canonical SQL dialect used for central Noria server recipes. All direct clients of
+/// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
+/// must translate into this dialect as part of handling requests from users
+pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 
 type QueryID = u64;
 
@@ -96,7 +100,7 @@ fn query_expr(input: &str) -> nom::IResult<&str, (bool, Option<&str>, SqlQuery)>
     use nom::combinator::opt;
     let (input, prefix) = opt(query_prefix)(input)?;
     // NOTE: some massaging since nom_sql operates on &[u8], not &str
-    let (input, expr) = match sql_parser::sql_query(input.as_bytes()) {
+    let (input, expr) = match sql_parser::sql_query(CANONICAL_DIALECT)(input.as_bytes()) {
         Ok((i, e)) => Ok((std::str::from_utf8(i).unwrap(), e)),
         Err(nom::Err::Incomplete(n)) => Err(nom::Err::Incomplete(n)),
         Err(nom::Err::Error((i, e))) => Err(nom::Err::Error((std::str::from_utf8(i).unwrap(), e))),

@@ -112,14 +112,14 @@ mod tests {
     use super::*;
     use crate::common::FieldDefinitionExpression;
     use crate::select::{selection, JoinClause, SelectStatement};
-    use crate::BinaryOperator;
+    use crate::{BinaryOperator, Dialect};
 
     #[test]
     fn inner_join() {
         let qstring = "SELECT tags.* FROM tags \
                        INNER JOIN taggings ON (tags.id = taggings.tag_id)";
 
-        let res = selection(qstring.as_bytes());
+        let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
         let join_cond = Expression::BinaryOp {
             lhs: Box::new(Expression::Column(Column::from("tags.id"))),

@@ -18,6 +18,7 @@ pub use self::common::{
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};
 pub use self::delete::DeleteStatement;
+pub use self::dialect::Dialect;
 pub use self::expression::{
     BinaryOperator, Expression, FunctionExpression, InValue, UnaryOperator,
 };
@@ -36,7 +37,8 @@ pub mod analysis;
 pub mod parser;
 
 #[macro_use]
-mod keywords;
+mod dialect;
+
 mod alter;
 mod case;
 mod column;
@@ -49,6 +51,7 @@ mod drop;
 mod expression;
 mod insert;
 mod join;
+mod keywords;
 mod order;
 mod select;
 mod set;

@@ -10,6 +10,7 @@ use crate::insert::{insertion, InsertStatement};
 use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::update::{updating, UpdateStatement};
+use crate::Dialect;
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::IResult;
@@ -45,26 +46,29 @@ impl fmt::Display for SqlQuery {
     }
 }
 
-pub fn sql_query(i: &[u8]) -> IResult<&[u8], SqlQuery> {
-    alt((
-        map(creation, SqlQuery::CreateTable),
-        map(insertion, SqlQuery::Insert),
-        map(compound_selection, SqlQuery::CompoundSelect),
-        map(selection, SqlQuery::Select),
-        map(deletion, SqlQuery::Delete),
-        map(drop_table, SqlQuery::DropTable),
-        map(updating, SqlQuery::Update),
-        map(set, SqlQuery::Set),
-        map(view_creation, SqlQuery::CreateView),
-        map(alter_table_statement, SqlQuery::AlterTable),
-    ))(i)
+pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
+    move |i| {
+        alt((
+            map(creation(dialect), SqlQuery::CreateTable),
+            map(insertion(dialect), SqlQuery::Insert),
+            map(compound_selection(dialect), SqlQuery::CompoundSelect),
+            map(selection(dialect), SqlQuery::Select),
+            map(deletion(dialect), SqlQuery::Delete),
+            map(drop_table(dialect), SqlQuery::DropTable),
+            map(updating(dialect), SqlQuery::Update),
+            map(set(dialect), SqlQuery::Set),
+            map(view_creation(dialect), SqlQuery::CreateView),
+            map(alter_table_statement(dialect), SqlQuery::AlterTable),
+        ))(i)
+    }
 }
 
 pub fn parse_query_bytes<T>(input: T) -> Result<SqlQuery, &'static str>
 where
     T: AsRef<[u8]>,
 {
-    match sql_query(input.as_ref()) {
+    // TODO(grfn): Add Dialect as an argument to this and `parse_query`
+    match sql_query(Dialect::MySQL)(input.as_ref()) {
         Ok((_, o)) => Ok(o),
         Err(_) => Err("failed to parse query"),
     }

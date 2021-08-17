@@ -4,12 +4,10 @@ use std::str;
 use std::str::FromStr;
 
 use crate::keywords::escape_if_keyword;
+use crate::Dialect;
 use crate::FunctionExpression;
 use crate::{
-    common::{
-        column_identifier_no_alias, parse_comment, sql_identifier, type_identifier, Literal,
-        SqlType,
-    },
+    common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType},
     Real,
 };
 use nom::bytes::complete::{tag_no_case, take_until};
@@ -348,151 +346,165 @@ named!(
     )
 );
 
-pub fn column_constraint(i: &[u8]) -> IResult<&[u8], ColumnConstraint> {
-    let not_null = map(
-        delimited(multispace0, tag_no_case("not null"), multispace0),
-        |_| ColumnConstraint::NotNull,
-    );
-    let null = map(
-        delimited(multispace0, tag_no_case("null"), multispace0),
-        |_| ColumnConstraint::Null,
-    );
-    let auto_increment = map(
-        delimited(multispace0, tag_no_case("auto_increment"), multispace0),
-        |_| ColumnConstraint::AutoIncrement,
-    );
-    let primary_key = map(
-        delimited(multispace0, tag_no_case("primary key"), multispace0),
-        |_| ColumnConstraint::PrimaryKey,
-    );
-    let unique = map(
-        delimited(
-            multispace0,
-            delimited(tag_no_case("unique"), multispace0, opt(tag_no_case("key"))),
-            multispace0,
-        ),
-        |_| ColumnConstraint::Unique,
-    );
-    let character_set = map(
-        preceded(
-            delimited(multispace0, tag_no_case("character set"), multispace1),
-            sql_identifier,
-        ),
-        |cs| {
-            let char_set = cs.to_owned();
-            ColumnConstraint::CharacterSet(char_set)
-        },
-    );
-    let collate = map(
-        preceded(
-            delimited(multispace0, tag_no_case("collate"), multispace1),
-            sql_identifier,
-        ),
-        |c| {
-            let collation = c.to_owned();
-            ColumnConstraint::Collation(collation)
-        },
-    );
+pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnConstraint> {
+    move |i| {
+        let not_null = map(
+            delimited(multispace0, tag_no_case("not null"), multispace0),
+            |_| ColumnConstraint::NotNull,
+        );
+        let null = map(
+            delimited(multispace0, tag_no_case("null"), multispace0),
+            |_| ColumnConstraint::Null,
+        );
+        let auto_increment = map(
+            delimited(multispace0, tag_no_case("auto_increment"), multispace0),
+            |_| ColumnConstraint::AutoIncrement,
+        );
+        let primary_key = map(
+            delimited(multispace0, tag_no_case("primary key"), multispace0),
+            |_| ColumnConstraint::PrimaryKey,
+        );
+        let unique = map(
+            delimited(
+                multispace0,
+                delimited(tag_no_case("unique"), multispace0, opt(tag_no_case("key"))),
+                multispace0,
+            ),
+            |_| ColumnConstraint::Unique,
+        );
+        let character_set = map(
+            preceded(
+                delimited(multispace0, tag_no_case("character set"), multispace1),
+                dialect.identifier(),
+            ),
+            |cs| {
+                let char_set = cs.to_owned();
+                ColumnConstraint::CharacterSet(char_set)
+            },
+        );
+        let collate = map(
+            preceded(
+                delimited(multispace0, tag_no_case("collate"), multispace1),
+                dialect.identifier(),
+            ),
+            |c| {
+                let collation = c.to_owned();
+                ColumnConstraint::Collation(collation)
+            },
+        );
 
-    alt((
-        not_null,
-        null,
-        auto_increment,
-        default,
-        primary_key,
-        unique,
-        character_set,
-        collate,
-        on_update_current_timestamp,
-    ))(i)
+        alt((
+            not_null,
+            null,
+            auto_increment,
+            default,
+            primary_key,
+            unique,
+            character_set,
+            collate,
+            on_update_current_timestamp,
+        ))(i)
+    }
 }
 
 /// Parse rule for a column specification
-pub fn column_specification(i: &[u8]) -> IResult<&[u8], ColumnSpecification> {
-    let (remaining_input, (column, field_type, constraints, comment)) = tuple((
-        column_identifier_no_alias,
-        opt(delimited(multispace1, type_identifier, multispace0)),
-        many0(column_constraint),
-        opt(parse_comment),
-    ))(i)?;
+pub fn column_specification(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], ColumnSpecification> {
+    move |i| {
+        let (remaining_input, (column, field_type, constraints, comment)) = tuple((
+            column_identifier_no_alias(dialect),
+            opt(delimited(
+                multispace1,
+                type_identifier(dialect),
+                multispace0,
+            )),
+            many0(column_constraint(dialect)),
+            opt(parse_comment),
+        ))(i)?;
 
-    let sql_type = match field_type {
-        None => SqlType::Text,
-        Some(ref t) => t.clone(),
-    };
-    Ok((
-        remaining_input,
-        ColumnSpecification {
-            column,
-            sql_type,
-            constraints,
-            comment,
-        },
-    ))
-}
+        let sql_type = match field_type {
+            None => SqlType::Text,
+            Some(ref t) => t.clone(),
+        };
 
-#[cfg(not(feature = "postgres"))]
-#[cfg(test)]
-mod tests_mysql {
-    use super::*;
-
-    #[test]
-    fn multiple_constraints() {
-        let (_, res) =
-            column_specification(b"`created_at` timestamp NOT NULL DEFAULT current_timestamp()")
-                .unwrap();
-        assert_eq!(
-            res,
+        Ok((
+            remaining_input,
             ColumnSpecification {
-                column: Column {
-                    name: "created_at".to_owned(),
-                    table: None,
-                    function: None
-                },
-                sql_type: SqlType::Timestamp,
-                comment: None,
-                constraints: vec![
-                    ColumnConstraint::NotNull,
-                    ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
-                ]
-            }
-        );
-    }
-
-    #[test]
-    fn null_round_trip() {
-        let input = b"c INT(32) NULL";
-        let cspec = column_specification(input).unwrap().1;
-        let res = cspec.to_string();
-        assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
+                column,
+                sql_type,
+                constraints,
+                comment,
+            },
+        ))
     }
 }
 
-#[cfg(feature = "postgres")]
 #[cfg(test)]
-mod tests_postgres {
+mod tests {
     use super::*;
 
-    #[test]
-    fn multiple_constraints() {
-        let (_, res) =
-            column_specification(b"\"created_at\" timestamp NOT NULL DEFAULT current_timestamp()")
-                .unwrap();
-        assert_eq!(
-            res,
-            ColumnSpecification {
-                column: Column {
-                    name: "created_at".to_owned(),
-                    table: None,
-                    function: None
-                },
-                sql_type: SqlType::Timestamp,
-                comment: None,
-                constraints: vec![
-                    ColumnConstraint::NotNull,
-                    ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
-                ]
-            }
-        );
+    mod mysql {
+        use super::*;
+
+        #[test]
+        fn multiple_constraints() {
+            let (_, res) = column_specification(Dialect::MySQL)(
+                b"`created_at` timestamp NOT NULL DEFAULT current_timestamp()",
+            )
+            .unwrap();
+            assert_eq!(
+                res,
+                ColumnSpecification {
+                    column: Column {
+                        name: "created_at".to_owned(),
+                        table: None,
+                        function: None
+                    },
+                    sql_type: SqlType::Timestamp,
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::NotNull,
+                        ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
+                    ]
+                }
+            );
+        }
+
+        #[test]
+        fn null_round_trip() {
+            let input = b"c INT(32) NULL";
+            let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
+            let res = cspec.to_string();
+            assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());
+        }
+    }
+
+    mod postgres {
+        use super::*;
+
+        #[test]
+        fn multiple_constraints() {
+            let (_, res) = column_specification(Dialect::PostgreSQL)(
+                b"\"created_at\" timestamp NOT NULL DEFAULT current_timestamp()",
+            )
+            .unwrap();
+            assert_eq!(
+                res,
+                ColumnSpecification {
+                    column: Column {
+                        name: "created_at".to_owned(),
+                        table: None,
+                        function: None
+                    },
+                    sql_type: SqlType::Timestamp,
+                    comment: None,
+                    constraints: vec![
+                        ColumnConstraint::NotNull,
+                        ColumnConstraint::DefaultValue(Literal::CurrentTimestamp),
+                    ]
+                }
+            );
+        }
     }
 }
