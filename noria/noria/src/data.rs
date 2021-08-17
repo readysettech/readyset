@@ -315,12 +315,11 @@ impl DataType {
                 src_type: "DataType".to_string(),
                 target_type: format!("{:?}", ty),
                 details: format!(
-                    "Coercion Error (source SqlType inside an option is: {:?}): {}: {}",
-                    self.sql_type(),
+                    "{}{}",
                     message,
                     source
-                        .map(|x| x.to_string())
-                        .unwrap_or_else(|| "<empty>".into())
+                        .map(|err| format!(" (caused by: {})", err))
+                        .unwrap_or_default()
                 ),
             }
         };
