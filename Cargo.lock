@@ -3163,6 +3163,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "test-strategy",
+ "thiserror",
 ]
 
 [[package]]
@@ -3448,6 +3449,7 @@ dependencies = [
  "async-trait",
  "clap 3.0.0-beta.2",
  "msql-srv",
+ "nom-sql",
  "noria",
  "noria-client",
  "noria-client-adapter",

@@ -178,15 +178,20 @@ fn rewrite_between_condition(operand: Expression, min: Expression, max: Expressi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::parse_query;
+    use nom_sql::{parse_query, Dialect};
 
     #[test]
     fn test_rewrite_top_level_between_in_select() {
-        let query =
-            parse_query("SELECT id FROM things WHERE frobulation BETWEEN 10 AND 17;").unwrap();
-        let expected =
-            parse_query("SELECT id FROM things WHERE frobulation >= 10 AND frobulation <= 17;")
-                .unwrap();
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT id FROM things WHERE frobulation BETWEEN 10 AND 17;",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT id FROM things WHERE frobulation >= 10 AND frobulation <= 17;",
+        )
+        .unwrap();
         let result = query.rewrite_between();
         assert_eq!(result, expected, "result = {}", result);
     }

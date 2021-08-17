@@ -65,12 +65,12 @@ impl NormalizeTopKWithAggregate for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, LimitClause, OrderClause, OrderType};
+    use nom_sql::{parse_query, Dialect, LimitClause, OrderClause, OrderType};
 
     use super::*;
 
     fn removes_all_topk(input: &str) {
-        let input_query = parse_query(input).unwrap();
+        let input_query = parse_query(Dialect::MySQL, input).unwrap();
         let actual = input_query.normalize_topk_with_aggregate().unwrap();
         match actual {
             SqlQuery::Select(stmt) => {
@@ -127,9 +127,11 @@ mod tests {
 
     #[test]
     fn no_aggregate_leaves_topk() {
-        let query =
-            parse_query("SELECT table_1.column_1 FROM table_1 order by column_3 asc limit 4;")
-                .unwrap();
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT table_1.column_1 FROM table_1 order by column_3 asc limit 4;",
+        )
+        .unwrap();
         let result = query.normalize_topk_with_aggregate().unwrap();
 
         match result {
@@ -156,6 +158,7 @@ mod tests {
     #[test]
     fn order_by_not_in_group_by_returns_error() {
         let query = parse_query(
+            Dialect::MySQL,
             "SELECT sum(table_1.column_1)
              FROM table_1
              GROUP BY column_2
@@ -173,6 +176,7 @@ mod tests {
     #[test]
     fn order_by_in_group_by_does_nothing() {
         let query = parse_query(
+            Dialect::MySQL,
             "SELECT sum(table_1.column_1)
              FROM table_1
              GROUP BY column_2
@@ -186,6 +190,7 @@ mod tests {
     #[test]
     fn order_by_aggregate_alias_does_nothing() {
         let query = parse_query(
+            Dialect::MySQL,
             "SELECT sum(table_1.column_1) as sum
              FROM table_1
              GROUP BY column_2
@@ -200,6 +205,7 @@ mod tests {
     #[ignore] // TODO once we can properly parse expressions in ORDER position (ENG-418)
     fn order_by_aggregate_expr_does_nothing() {
         let query = parse_query(
+            Dialect::MySQL,
             "SELECT sum(table_1.column_1)
              FROM table_1
              GROUP BY column_2

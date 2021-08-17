@@ -157,7 +157,7 @@ impl Signature for QueryGraph {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, SqlQuery};
+    use nom_sql::{parse_query, Dialect, SqlQuery};
 
     use crate::controller::sql::query_graph::to_query_graph;
 
@@ -166,7 +166,7 @@ mod tests {
     /// Parse a SQL query that is expected to be a SelectQuery. Returns None if
     /// parsing fails *or* if the query is something other than a Select
     pub fn parse_select<T: AsRef<str>>(input: T) -> Option<nom_sql::SelectStatement> {
-        match parse_query(input) {
+        match parse_query(Dialect::MySQL, input) {
             Ok(SqlQuery::Select(sel)) => Some(sel),
             _ => None,
         }
@@ -207,10 +207,17 @@ mod tests {
         use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
-        let qa =
-            parse_query("SELECT a.c1, b.c3 FROM a, b WHERE a.c1 = b.c1 AND a.c2 = 42;").unwrap();
-        let qb = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = b.c1;").unwrap();
-        let qc = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = b.c1 AND b.c4 = 21;").unwrap();
+        let qa = parse_query(
+            Dialect::MySQL,
+            "SELECT a.c1, b.c3 FROM a, b WHERE a.c1 = b.c1 AND a.c2 = 42;",
+        )
+        .unwrap();
+        let qb = parse_query(Dialect::MySQL, "SELECT b.c3 FROM a, b WHERE a.c1 = b.c1;").unwrap();
+        let qc = parse_query(
+            Dialect::MySQL,
+            "SELECT b.c3 FROM a, b WHERE a.c1 = b.c1 AND b.c4 = 21;",
+        )
+        .unwrap();
 
         let qga = match qa {
             SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),
@@ -246,10 +253,18 @@ mod tests {
         use crate::controller::sql::query_graph::to_query_graph;
         use nom_sql::parser::{parse_query, SqlQuery};
 
-        let qa = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();
-        let qb = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 > 42;").unwrap();
-        let qc = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 42 AND b.c4 = a.c2;").unwrap();
-        let qd = parse_query("SELECT b.c3 FROM a, b WHERE a.c1 = 21 AND b.c4 = a.c2;").unwrap();
+        let qa = parse_query(Dialect::MySQL, "SELECT b.c3 FROM a, b WHERE a.c1 = 42;").unwrap();
+        let qb = parse_query(Dialect::MySQL, "SELECT b.c3 FROM a, b WHERE a.c1 > 42;").unwrap();
+        let qc = parse_query(
+            Dialect::MySQL,
+            "SELECT b.c3 FROM a, b WHERE a.c1 = 42 AND b.c4 = a.c2;",
+        )
+        .unwrap();
+        let qd = parse_query(
+            Dialect::MySQL,
+            "SELECT b.c3 FROM a, b WHERE a.c1 = 21 AND b.c4 = a.c2;",
+        )
+        .unwrap();
 
         let qga = match qa {
             SqlQuery::Select(ref q) => to_query_graph(q).unwrap(),

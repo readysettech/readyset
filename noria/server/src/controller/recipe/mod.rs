@@ -687,8 +687,9 @@ mod tests {
     #[test]
     fn it_computes_delta() {
         let r0 = Recipe::blank(None);
-        let q0 = sql_parser::parse_query("SELECT a FROM b;").unwrap();
-        let q1 = sql_parser::parse_query("SELECT a, c FROM b WHERE x = 42;").unwrap();
+        let q0 = sql_parser::parse_query(Dialect::MySQL, "SELECT a FROM b;").unwrap();
+        let q1 =
+            sql_parser::parse_query(Dialect::MySQL, "SELECT a, c FROM b WHERE x = 42;").unwrap();
 
         let q0_id = hash_query(&q0);
         let q1_id = hash_query(&q1);
@@ -709,7 +710,7 @@ mod tests {
         assert_eq!(removed.len(), 0);
 
         // bring on a new query set
-        let q2 = sql_parser::parse_query("SELECT c FROM b;").unwrap();
+        let q2 = sql_parser::parse_query(Dialect::MySQL, "SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
         let pq_b = vec![(None, q0, true), (None, q2, true)];
         let r2 = Recipe::from_queries(pq_b, None);

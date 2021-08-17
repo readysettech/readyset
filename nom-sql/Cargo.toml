@@ -23,6 +23,7 @@ proptest = "1.0.0"
 test-strategy = "0.1.1"
 launchpad = { path = "../launchpad" }
 msql-srv = { path = "../msql-srv" }
+thiserror = "1.0.26"
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

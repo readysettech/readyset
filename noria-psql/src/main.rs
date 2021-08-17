@@ -4,6 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;
 use clap::Clap;
+use nom_sql::Dialect;
 use tokio::net;
 
 use noria_client::backend as cl;
@@ -42,6 +43,7 @@ fn main() -> anyhow::Result<()> {
         default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3306),
         connection_handler: PsqlHandler,
         database_type: DatabaseType::Psql,
+        dialect: Dialect::PostgreSQL,
     };
 
     adapter.run(options.adapter_options)

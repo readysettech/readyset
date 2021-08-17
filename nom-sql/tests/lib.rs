@@ -5,12 +5,14 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
+use nom_sql::Dialect;
+
+fn parse_queryset(dialect: Dialect, queries: Vec<String>) -> (i32, i32) {
     let mut parsed_ok = Vec::new();
     let mut parsed_err = 0;
     for query in queries.iter() {
         println!("Trying to parse '{}': ", &query);
-        match nom_sql::parser::parse_query(&query) {
+        match nom_sql::parser::parse_query(dialect, &query) {
             Ok(_) => {
                 println!("ok");
                 parsed_ok.push(query);
@@ -32,7 +34,7 @@ fn parse_queryset(queries: Vec<String>) -> (i32, i32) {
     (parsed_ok.len() as i32, parsed_err)
 }
 
-fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
+fn test_queries_from_file(dialect: Dialect, f: &Path, name: &str) -> Result<i32, i32> {
     let mut f = File::open(f).unwrap();
     let mut s = String::new();
 
@@ -57,7 +59,7 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     println!("\nLoaded {} {} queries", lines.len(), name);
 
     // Try parsing them all
-    let (ok, err) = parse_queryset(lines);
+    let (ok, err) = parse_queryset(dialect, lines);
 
     if err > 0 {
         return Err(err);
@@ -65,7 +67,7 @@ fn test_queries_from_file(f: &Path, name: &str) -> Result<i32, i32> {
     Ok(ok)
 }
 
-fn parse_file(path: &str) -> (i32, i32) {
+fn parse_file(dialect: Dialect, path: &str) -> (i32, i32) {
     let mut f = File::open(Path::new(path)).unwrap();
     let mut s = String::new();
 
@@ -97,29 +99,47 @@ fn parse_file(path: &str) -> (i32, i32) {
     println!("Loaded {} table definitions", queries.len());
 
     // Try parsing them all
-    parse_queryset(queries)
+    parse_queryset(dialect, queries)
 }
 
-#[cfg(not(features = "postgres"))]
 #[test]
 #[ignore]
 fn hotcrp_queries() {
-    assert!(test_queries_from_file(Path::new("tests/hotcrp-queries.txt"), "HotCRP").is_ok());
+    assert!(test_queries_from_file(
+        Dialect::MySQL,
+        Path::new("tests/hotcrp-queries.txt"),
+        "HotCRP"
+    )
+    .is_ok());
 }
 
 #[test]
 fn hyrise_test_queries() {
-    assert!(test_queries_from_file(Path::new("tests/hyrise-test-queries.txt"), "HyRise").is_ok());
+    assert!(test_queries_from_file(
+        Dialect::MySQL,
+        Path::new("tests/hyrise-test-queries.txt"),
+        "HyRise"
+    )
+    .is_ok());
 }
 
 #[test]
 fn tpcw_test_queries() {
-    assert!(test_queries_from_file(Path::new("tests/tpc-w-queries.txt"), "TPC-W").is_ok());
+    assert!(test_queries_from_file(
+        Dialect::MySQL,
+        Path::new("tests/tpc-w-queries.txt"),
+        "TPC-W"
+    )
+    .is_ok());
 }
 
 #[test]
 fn tpcw_test_tables() {
-    let res = test_queries_from_file(Path::new("tests/tpc-w-tables.txt"), "TPC-W tables");
+    let res = test_queries_from_file(
+        Dialect::MySQL,
+        Path::new("tests/tpc-w-tables.txt"),
+        "TPC-W tables",
+    );
     assert!(res.is_ok());
     // There are 10 tables
     assert_eq!(res.unwrap(), 10);
@@ -128,6 +148,7 @@ fn tpcw_test_tables() {
 #[test]
 fn exists_test_queries() {
     let res = test_queries_from_file(
+        Dialect::MySQL,
         Path::new("tests/exists-queries.txt"),
         "exists/not-exists queries",
     );
@@ -138,13 +159,16 @@ fn exists_test_queries() {
 
 #[test]
 fn finkelstein82_test_queries() {
-    let res = test_queries_from_file(Path::new("tests/finkelstein82.txt"), "Finkelstein 1982");
+    let res = test_queries_from_file(
+        Dialect::MySQL,
+        Path::new("tests/finkelstein82.txt"),
+        "Finkelstein 1982",
+    );
     assert!(res.is_ok());
     // There are 3 tables and 6 queries
     assert_eq!(res.unwrap(), 9);
 }
 
-#[cfg(not(feature = "postgres"))]
 #[test]
 fn hotcrp_schema() {
     let mut f = File::open(Path::new("tests/hotcrp-schema.txt")).unwrap();
@@ -179,7 +203,7 @@ fn hotcrp_schema() {
     println!("Loaded {} table definitions", queries.len());
 
     // Try parsing them all
-    let (ok, fail) = parse_queryset(queries);
+    let (ok, fail) = parse_queryset(Dialect::MySQL, queries);
 
     // There are 24 CREATE TABLE queries in the schema
     assert_eq!(ok, 24);
@@ -188,27 +212,25 @@ fn hotcrp_schema() {
 
 #[test]
 fn mediawiki_schema() {
-    let (ok, fail) = parse_file("tests/mediawiki-schema.txt");
+    let (ok, fail) = parse_file(Dialect::MySQL, "tests/mediawiki-schema.txt");
 
     // There are 17 CREATE TABLE queries in the schema
     assert_eq!(ok, 17);
     assert_eq!(fail, 0);
 }
 
-#[cfg(not(feature = "postgres"))]
 #[test]
 fn parse_comments() {
-    let (ok, fail) = parse_file("tests/comments.txt");
+    let (ok, fail) = parse_file(Dialect::MySQL, "tests/comments.txt");
 
     // There are 2 CREATE TABLE queries in the schema
     assert_eq!(ok, 2);
     assert_eq!(fail, 0);
 }
 
-#[cfg(not(feature = "postgres"))]
 #[test]
 fn parse_autoincrement() {
-    let (ok, fail) = parse_file("tests/autoincrement.txt");
+    let (ok, fail) = parse_file(Dialect::MySQL, "tests/autoincrement.txt");
 
     // There is 1 CREATE TABLE queries in the schema
     assert_eq!(ok, 1);
@@ -217,14 +239,14 @@ fn parse_autoincrement() {
 
 #[test]
 fn parse_select() {
-    let (ok, fail) = parse_file("tests/select.txt");
+    let (ok, fail) = parse_file(Dialect::MySQL, "tests/select.txt");
     assert_eq!(fail, 1);
     assert_eq!(ok, 27);
 }
 
 #[test]
 fn parse_alter_table() {
-    let (ok, fail) = parse_file("tests/alter-table.txt");
+    let (ok, fail) = parse_file(Dialect::MySQL, "tests/alter-table.txt");
     assert_eq!(fail, 3);
     assert_eq!(ok, 8);
 }

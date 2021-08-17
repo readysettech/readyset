@@ -216,10 +216,10 @@ mod tests {
 
     mod unsupported {
         use super::*;
-        use nom_sql::parse_query;
+        use nom_sql::{parse_query, Dialect};
 
         fn is_unsupported(query_str: &str) {
-            let query = parse_query(query_str).unwrap();
+            let query = parse_query(Dialect::MySQL, query_str).unwrap();
             let res = query.detect_problematic_self_joins();
             assert!(res.is_err());
             let err = res.err().unwrap();
@@ -315,10 +315,10 @@ mod tests {
 
     mod supported {
         use super::*;
-        use nom_sql::parse_query;
+        use nom_sql::{parse_query, Dialect};
 
         fn is_supported(query_str: &str) {
-            let query = parse_query(query_str).unwrap();
+            let query = parse_query(Dialect::MySQL, query_str).unwrap();
             let res = query.clone().detect_problematic_self_joins();
             assert!(res.is_ok());
             assert_eq!(res.unwrap(), query);

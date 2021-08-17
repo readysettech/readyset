@@ -142,7 +142,7 @@ fn main() {
         let formatted_queries = reformat(queries);
 
         for (ql, q) in formatted_queries {
-            match nom_sql::parse_query(&q) {
+            match nom_sql::parse_query(nom_sql::Dialect::MySQL, &q) {
                 Ok(_) => ok.push((ql, q)),
                 Err(_) => rejected.push((ql, q)),
             }

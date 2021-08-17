@@ -14,7 +14,8 @@ use mysql::prelude::Queryable;
 use mysql::Params;
 use mysql_async as mysql;
 use nom_sql::{
-    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Expression, SqlQuery, Table,
+    parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expression,
+    SqlQuery, Table,
 };
 use query_generator::{GeneratorState, QuerySeed};
 
@@ -146,7 +147,8 @@ impl TryFrom<PathBuf> for Seed {
         for record in script.records() {
             match record {
                 Record::Statement(Statement { command, .. }) => {
-                    match parse_query(command).map_err(|s| anyhow!("{}", s))? {
+                    // TODO(grfn): Make dialect configurable
+                    match parse_query(Dialect::MySQL, command).map_err(|s| anyhow!("{}", s))? {
                         SqlQuery::CreateTable(tbl) => {
                             relations_to_drop.push(Relation::Table(tbl.table.name.clone()));
                             tables.push(tbl)

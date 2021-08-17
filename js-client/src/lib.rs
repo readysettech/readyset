@@ -6,9 +6,10 @@ mod utils;
 
 use neon::prelude::*;
 use std::cell::RefCell;
+use std::str::FromStr;
 use tokio::runtime::Runtime;
 
-use nom_sql::SelectStatement;
+use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
@@ -68,6 +69,11 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let permissive = parse_arg!("permissive", false, JsBoolean);
     let read_your_write = parse_arg!("readYourWrite", false, JsBoolean);
     let region = parse_arg!("region", "".to_string(), JsString);
+    let dialect_name = parse_arg!("dialect", "mysql".to_string(), JsString);
+    let dialect = match Dialect::from_str(&dialect_name) {
+        Ok(dialect) => dialect,
+        Err(e) => return cx.throw_error(e.to_string()),
+    };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
@@ -108,6 +114,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         .permissive(permissive)
         .require_authentication(false)
         .enable_ryw(read_your_write)
+        .dialect(dialect)
         .build(writer, reader);
 
     let jsclient = RefCell::new(JsClient::new(b, rt));

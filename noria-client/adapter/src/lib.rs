@@ -21,7 +21,7 @@ use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::Level;
 
-use nom_sql::SelectStatement;
+use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
@@ -54,6 +54,8 @@ pub struct NoriaAdapter<H> {
     pub default_address: SocketAddr,
     pub connection_handler: H,
     pub database_type: DatabaseType,
+    /// SQL dialect to use when parsing queries
+    pub dialect: Dialect,
 }
 
 #[derive(Clap)]
@@ -208,7 +210,8 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
                 .slowlog(options.log_slow)
                 .permissive(options.permissive)
                 .users(users.clone())
-                .require_authentication(!options.no_require_authentication);
+                .require_authentication(!options.no_require_authentication)
+                .dialect(self.dialect);
             let fut = async move {
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
