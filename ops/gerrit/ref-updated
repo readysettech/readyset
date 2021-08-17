@@ -46,6 +46,11 @@ if [[ "$refname" == refs/notes* ]]; then
     exit 0
 fi
 
+if [ "$refname" = "refs/meta/config" ]; then
+    echo "Ignoring update to refs/meta/config"
+    exit 0
+fi
+
 if [[ "$refname" == refs/changes/* ]]; then
     # This is a change to a CL, so kick off a CL build
 
