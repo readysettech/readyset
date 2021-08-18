@@ -1,4 +1,5 @@
 use noria::consensus::Authority;
+use noria::results::Results;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
@@ -24,8 +25,8 @@ use crate::schema::{self, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
+use crate::backend::PrepareResult;
 use crate::backend::SelectSchema;
-use crate::backend::{PrepareResult, QueryResult};
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
@@ -145,6 +146,27 @@ impl<A: 'static + Authority> NoriaBackendInner<A> {
         }
         Ok(self.outputs.get_mut(view).unwrap())
     }
+}
+
+#[derive(Debug)]
+pub enum QueryResult {
+    CreateTable,
+    CreateView,
+    Insert {
+        num_rows_inserted: u64,
+        first_inserted_id: u64,
+    },
+    Select {
+        data: Vec<Results>,
+        select_schema: SelectSchema,
+    },
+    Update {
+        num_rows_updated: u64,
+        last_inserted_id: u64,
+    },
+    Delete {
+        num_rows_deleted: u64,
+    },
 }
 
 pub struct NoriaConnector<A: 'static + Authority> {
@@ -300,7 +322,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
-            .ok_or(PreparedStatementMissing)?
+            .ok_or(PreparedStatementMissing { statement_id: q_id })?
             .clone();
         trace!("delegate");
         match prep {
@@ -350,7 +372,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
         trace!("delete::flatten conditionals");
         match utils::flatten_conditional(&cond, &pkey)? {
-            None => Ok(QueryResult::NoriaDelete {
+            None => Ok(QueryResult::Delete {
                 num_rows_deleted: 0_u64,
             }),
             Some(ref flattened) if flattened.is_empty() => {
@@ -366,7 +388,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                     };
                 }
                 trace!("delete::done");
-                Ok(QueryResult::NoriaDelete {
+                Ok(QueryResult::Delete {
                     num_rows_deleted: count,
                 })
             }
@@ -429,7 +451,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
-            .ok_or(PreparedStatementMissing)?
+            .ok_or(PreparedStatementMissing { statement_id: q_id })?
             .clone();
 
         trace!("delegate");
@@ -453,7 +475,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             self.inner.noria.extend_recipe(&format!("{};", q))
         )?;
         trace!("table::created");
-        Ok(QueryResult::NoriaCreateTable)
+        Ok(QueryResult::CreateTable)
     }
 }
 
@@ -668,7 +690,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             r
         };
         result?;
-        Ok(QueryResult::NoriaInsert {
+        Ok(QueryResult::Insert {
             num_rows_inserted: data.len() as u64,
             first_inserted_id: first_inserted_id.unwrap_or(0) as u64,
         })
@@ -783,7 +805,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let data = getter.raw_lookup(vq).await?;
         trace!("select::complete");
 
-        Ok(QueryResult::NoriaSelect {
+        Ok(QueryResult::Select {
             data,
             select_schema: SelectSchema {
                 use_bogo,
@@ -819,7 +841,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         mutator.update(key, updates).await?;
         trace!("update::complete");
         // TODO: return meaningful fields for (num_rows_updated, last_inserted_id) rather than hardcoded (1,0)
-        Ok(QueryResult::NoriaUpdate {
+        Ok(QueryResult::Update {
             num_rows_updated: 1,
             last_inserted_id: 0,
         })
@@ -925,7 +947,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
                 Some(e) => e.clone(),
-                None => return Err(PreparedStatementMissing.into()),
+                None => return Err(PreparedStatementMissing { statement_id: q_id }.into()),
             }
         };
 
@@ -995,6 +1017,6 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
         )?;
 
-        Ok(QueryResult::NoriaCreateView)
+        Ok(QueryResult::CreateView)
     }
 }

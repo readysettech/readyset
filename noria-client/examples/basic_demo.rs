@@ -2,9 +2,9 @@ use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::{
-    noria_connector::NoriaConnector, BackendBuilder, QueryResult, Reader, Writer,
-};
+use noria_client::backend::mysql_connector::MySqlConnector;
+use noria_client::backend::noria_connector::{self, NoriaConnector};
+use noria_client::backend::{BackendBuilder, QueryResult, Reader, Writer};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -22,19 +22,20 @@ async fn main() -> Result<()> {
 
     let static_responses = false;
     let writer = {
-        let writer = NoriaConnector::new(
-            ch.clone(),
-            auto_increments.clone(),
-            query_cache.clone(),
-            None,
+        Writer::Noria(
+            NoriaConnector::new(
+                ch.clone(),
+                auto_increments.clone(),
+                query_cache.clone(),
+                None,
+            )
+            .await,
         )
-        .await;
-        Writer::NoriaConnector(writer)
     };
-    let mysql_connector = None;
+    let mysql_connector: Option<MySqlConnector> = None;
     let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
     let reader = Reader {
-        mysql_connector,
+        upstream: mysql_connector,
         noria_connector,
     };
     let slowlog = false;
@@ -53,10 +54,10 @@ async fn main() -> Result<()> {
     let res = b.query("select * from employees;").await;
 
     match res {
-        Ok(QueryResult::NoriaSelect {
+        Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
             data,
             select_schema: _,
-        }) => print!("{:#?}", data),
+        })) => print!("{:#?}", data),
         _ => print!("Select had an issue"),
     };
 

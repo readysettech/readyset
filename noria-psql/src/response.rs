@@ -1,6 +1,8 @@
 use crate::resultset::Resultset;
 use crate::schema::{MysqlSchema, SelectSchema};
-use noria_client::backend as cl;
+use noria_client::backend::noria_connector;
+use noria_client::backend::postgresql_connector::PostgreSqlConnector;
+use noria_client::backend::{self as cl, UpstreamPrepare};
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
@@ -42,9 +44,9 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: MysqlSchema(params).try_into()?,
                 row_schema: vec![],
             }),
-            // TODO(DAN): MySqlPrepare probably shouldn't be seen?
-            MySqlPrepare { statement_id, .. } => Ok(ps::PrepareResponse {
+            Upstream(UpstreamPrepare { statement_id, .. }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
+                // TODO(grfn): Fill these in
                 param_schema: vec![],
                 row_schema: vec![],
             }),
@@ -54,24 +56,26 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
 
 /// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
 /// `psql_srv::QueryResponse`.
-pub struct QueryResponse(pub cl::QueryResult);
+pub struct QueryResponse(pub cl::QueryResult<PostgreSqlConnector>);
 
 impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
     type Error = ps::Error;
 
     fn try_from(r: QueryResponse) -> Result<Self, Self::Error> {
         use cl::QueryResult::*;
+        use noria_connector::QueryResult as NoriaResult;
         use ps::QueryResponse::*;
+
         match r.0 {
-            NoriaCreateTable => Ok(Command),
-            NoriaCreateView => Ok(Command),
-            NoriaInsert {
+            Noria(NoriaResult::CreateTable) => Ok(Command),
+            Noria(NoriaResult::CreateView) => Ok(Command),
+            Noria(NoriaResult::Insert {
                 num_rows_inserted, ..
-            } => Ok(Insert(num_rows_inserted)),
-            NoriaSelect {
+            }) => Ok(Insert(num_rows_inserted)),
+            Noria(NoriaResult::Select {
                 data,
                 select_schema,
-            } => {
+            }) => {
                 let select_schema = SelectSchema(select_schema);
                 let resultset = Resultset::try_new(data, &select_schema)?;
                 Ok(Select {
@@ -79,23 +83,17 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
                     resultset,
                 })
             }
-            NoriaUpdate {
+            Noria(NoriaResult::Update {
                 num_rows_updated, ..
-            } => Ok(Update(num_rows_updated)),
-            NoriaDelete { num_rows_deleted } => Ok(Delete(num_rows_deleted)),
-            MySqlWrite { .. } => Err(ps::Error::Unimplemented(
-                "QueryResult::MySqlWrite not handled in psql_backend".to_string(),
-            )),
-            MySqlSelect { .. } => Err(ps::Error::Unimplemented(
-                "QueryResult::MySqlSelect not handled in psql_backend".to_string(),
-            )),
-            PgSqlSelect { .. } => {
+            }) => Ok(Update(num_rows_updated)),
+            Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
+            UpstreamRead(_rows) => {
                 // TODO(grfn): Implement this
                 Err(ps::Error::Unimplemented(
                     "Handling of pgsql select results not yet implemented".to_string(),
                 ))
             }
-            PgSqlWrite { num_rows_affected } => Ok(Insert(num_rows_affected)),
+            UpstreamWrite(num_rows_affected) => Ok(Insert(num_rows_affected)),
         }
     }
 }

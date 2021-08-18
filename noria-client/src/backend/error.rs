@@ -10,14 +10,19 @@ use thiserror::Error;
 pub enum Error {
     #[error(transparent)]
     MySql(#[from] mysql::error::Error),
+
     #[error(transparent)]
     MySqlAsync(#[from] mysql_async::Error),
+
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
     #[error(transparent)]
     ReadySet(ReadySetError),
+
     #[error("MsqlSrvError: {0}")]
     MsqlSrv(#[from] MsqlSrvError),
+
     #[error(transparent)]
     PostgreSql(#[from] tokio_postgres::error::Error),
 }

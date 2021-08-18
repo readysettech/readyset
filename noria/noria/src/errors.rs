@@ -220,8 +220,11 @@ pub enum ReadySetError {
     EmptyKey,
 
     /// A prepared statement is missing.
-    #[error("a prepared statement is missing")]
-    PreparedStatementMissing,
+    #[error("Prepared statement with ID {statement_id} not found")]
+    PreparedStatementMissing {
+        /// The prepared statement ID supplied by the user
+        statement_id: u32,
+    },
 
     /// An internal invariant has been violated.
     ///

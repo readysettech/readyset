@@ -7,6 +7,7 @@ use nom_sql::SelectStatement;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
 use noria_client::backend::Reader;
+use noria_client::backend::Writer;
 use noria_psql::backend::Backend;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use postgres::{config::Config, Client, NoTls, SimpleQueryMessage};
@@ -144,9 +145,9 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
                 .require_authentication(false)
                 .dialect(Dialect::PostgreSQL)
                 .build(
-                    rt.block_on(writer).into(),
+                    Writer::Noria(rt.block_on(writer)),
                     Reader {
-                        mysql_connector,
+                        upstream: mysql_connector,
                         noria_connector,
                     },
                 ),

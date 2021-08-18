@@ -19,8 +19,8 @@ impl From<Error> for ps::Error {
             MySqlAsync(e) => ps::Error::Unknown(e.to_string()),
             Io(e) => ps::Error::IoError(e),
             ReadySet(ReadySetError::UnparseableQuery { query }) => ps::Error::ParseError(query),
-            ReadySet(ReadySetError::PreparedStatementMissing) => {
-                ps::Error::MissingPreparedStatement("unknown".to_string())
+            ReadySet(ReadySetError::PreparedStatementMissing { statement_id }) => {
+                ps::Error::MissingPreparedStatement(statement_id.to_string())
             }
             ReadySet(ReadySetError::Unsupported(s)) => ps::Error::Unsupported(s),
             ReadySet(e) => ps::Error::Unknown(e.to_string()),

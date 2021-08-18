@@ -6,9 +6,13 @@ use std::{
 
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::{
-    mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder, QueryResult,
-    Reader, Writer,
+use noria_client::{
+    backend::{
+        mysql_connector::MySqlConnector,
+        noria_connector::{self, NoriaConnector},
+        BackendBuilder, QueryResult, Reader, Writer,
+    },
+    UpstreamDatabase,
 };
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
@@ -31,10 +35,9 @@ async fn main() {
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);
-    let writer = MySqlConnector::new(mysql_url.clone()).await;
-    let writer = Writer::MySqlConnector(writer);
+    let writer = Writer::Upstream(MySqlConnector::connect(mysql_url.clone()).await.unwrap());
 
-    let mysql_connector = Some(MySqlConnector::new(mysql_url).await);
+    let mysql_connector = Some(MySqlConnector::connect(mysql_url).await.unwrap());
     let noria_connector = NoriaConnector::new(
         ch.clone(),
         auto_increments.clone(),
@@ -49,7 +52,7 @@ async fn main() {
         .build(
             writer,
             Reader {
-                mysql_connector,
+                upstream: mysql_connector,
                 noria_connector,
             },
         );
@@ -91,10 +94,10 @@ async fn main() {
     let res = b.query("select * from employees;").await;
 
     match res {
-        Ok(QueryResult::NoriaSelect {
+        Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
             data,
             select_schema: _,
-        }) => print!("{:#?}", data),
+        })) => print!("{:#?}", data),
         _ => print!("Select had an issue"),
     };
 }

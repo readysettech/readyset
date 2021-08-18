@@ -6,6 +6,7 @@ use crate::value::Value;
 use async_trait::async_trait;
 use noria::{DataType, ZookeeperAuthority};
 use noria_client::backend as cl;
+use noria_client::backend::postgresql_connector::PostgreSqlConnector;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
@@ -13,7 +14,7 @@ use std::convert::{TryFrom, TryInto};
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
-pub struct Backend(pub cl::Backend<ZookeeperAuthority>);
+pub struct Backend(pub cl::Backend<ZookeeperAuthority, PostgreSqlConnector>);
 
 impl Backend {
     async fn query(&mut self, query: &str) -> Result<QueryResponse, Error> {
