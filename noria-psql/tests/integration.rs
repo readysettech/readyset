@@ -2,6 +2,7 @@
 extern crate slog;
 
 use chrono::{NaiveDate, NaiveDateTime};
+use nom_sql::Dialect;
 use nom_sql::SelectStatement;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
@@ -138,13 +139,18 @@ fn setup(deployment: &Deployment, partial: bool) -> Config {
             rt.block_on(NoriaConnector::new(ch, auto_increments, query_cache, None));
         let mysql_connector = None;
 
-        let backend = Backend(BackendBuilder::new().require_authentication(false).build(
-            rt.block_on(writer).into(),
-            Reader {
-                mysql_connector,
-                noria_connector,
-            },
-        ));
+        let backend = Backend(
+            BackendBuilder::new()
+                .require_authentication(false)
+                .dialect(Dialect::PostgreSQL)
+                .build(
+                    rt.block_on(writer).into(),
+                    Reader {
+                        mysql_connector,
+                        noria_connector,
+                    },
+                ),
+        );
 
         rt.block_on(psql_srv::run_backend(backend, s));
         drop(rt);
@@ -201,7 +207,7 @@ fn delete_only_constraint() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
@@ -358,7 +364,7 @@ fn delete_other_column() {
     sleep();
 
     assert!(matches!(
-        conn.simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = \"Bob\""),
+        conn.simple_query("DELETE FROM Cats WHERE Cats.id = 1 OR Cats.name = 'Bob'"),
         Err(_)
     ));
 }
@@ -431,16 +437,13 @@ fn update_basic() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
-            .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1",
-                &[],
-            )
+            .execute("UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = 1", &[])
             .unwrap();
         assert_eq!(updated, 1);
         sleep();
@@ -462,14 +465,14 @@ fn update_basic_prepared() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
             .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = $1",
+                "UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = $1",
                 &[&1],
             )
             .unwrap();
@@ -512,16 +515,16 @@ fn update_compound_primary_key() {
     .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 2, \"okay\")")
+    conn.simple_query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 2, 'okay')")
         .unwrap();
-    conn.simple_query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 3, \"still okay\")")
+    conn.simple_query("INSERT INTO Vote (aid, uid, reason) VALUES (1, 3, 'still okay')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
             .execute(
-                "UPDATE Vote SET Vote.reason = \"better\" WHERE Vote.aid = 1 AND Vote.uid = 2",
+                "UPDATE Vote SET Vote.reason = 'better' WHERE Vote.aid = 1 AND Vote.uid = 2",
                 &[],
             )
             .unwrap();
@@ -558,16 +561,13 @@ fn update_only_constraint() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
-            .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1",
-                &[],
-            )
+            .execute("UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = 1", &[])
             .unwrap();
         assert_eq!(updated, 1);
         sleep();
@@ -589,14 +589,14 @@ fn update_pkey() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
             .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\", Cats.id = 10 WHERE Cats.id = 1",
+                "UPDATE Cats SET Cats.name = 'Rusty', Cats.id = 10 WHERE Cats.id = 1",
                 &[],
             )
             .unwrap();
@@ -625,16 +625,13 @@ fn update_separate() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
     {
         let updated = conn
-            .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1",
-                &[],
-            )
+            .execute("UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = 1", &[])
             .unwrap();
         assert_eq!(updated, 1);
         sleep();
@@ -643,7 +640,7 @@ fn update_separate() {
     {
         let updated = conn
             .execute(
-                "UPDATE Cats SET Cats.name = \"Rusty II\" WHERE Cats.id = 1",
+                "UPDATE Cats SET Cats.name = 'Rusty II' WHERE Cats.id = 1",
                 &[],
             )
             .unwrap();
@@ -667,7 +664,7 @@ fn update_no_keys() {
         .unwrap();
     sleep();
 
-    let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE 1 = 1";
+    let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE 1 = 1";
     assert!(matches!(conn.simple_query(query), Err(_)));
 }
 
@@ -680,7 +677,7 @@ fn update_other_column() {
         .unwrap();
     sleep();
 
-    let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.name = \"Bob\"";
+    let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.name = 'Bob'";
     assert!(matches!(conn.simple_query(query), Err(_)));
 }
 
@@ -693,11 +690,11 @@ fn update_bogus() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
     sleep();
 
-    let query = "UPDATE Cats SET Cats.name = \"Rusty\" WHERE Cats.id = 1 AND Cats.id = 2";
+    let query = "UPDATE Cats SET Cats.name = 'Rusty' WHERE Cats.id = 1 AND Cats.id = 2";
     assert!(matches!(conn.simple_query(query), Err(_)));
 }
 
@@ -710,9 +707,9 @@ fn select_collapse_where_in() {
         .unwrap();
     sleep();
 
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (1, 'Bob')")
         .unwrap();
-    conn.simple_query("INSERT INTO Cats (id, name) VALUES (2, \"Jane\")")
+    conn.simple_query("INSERT INTO Cats (id, name) VALUES (2, 'Jane')")
         .unwrap();
     sleep();
 
@@ -880,9 +877,6 @@ fn prepared_select() {
 }
 
 #[test]
-// Test is ignored due to quoted identifier issue
-// https://readysettech.atlassian.net/browse/ENG-165.
-#[ignore]
 fn select_quoting_names() {
     let d = Deployment::new("select_quoting_names");
     let opts = setup(&d, true);
