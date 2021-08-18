@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::Clap;
 use futures_util::future::FutureExt;
@@ -120,13 +120,6 @@ pub struct Options {
 
 impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
-        if options.deployment.contains('-') {
-            bail!(
-                "Invalid deployment name {}, cannot contain '-'",
-                options.deployment
-            );
-        }
-
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.no_require_authentication {
                 hashmap! {
