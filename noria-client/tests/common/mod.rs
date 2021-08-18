@@ -10,7 +10,8 @@ use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::NoriaConnector;
-use noria_client::backend::{BackendBuilder, Reader};
+use noria_client::backend::{BackendBuilder, Reader, Writer};
+use noria_client::UpstreamDatabase;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use slog::{debug, o};
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
@@ -146,17 +147,17 @@ pub fn setup(
         );
 
         let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None);
-        let mysql_connector = if fallback {
-            Some(rt.block_on(MySqlConnector::new(mysql_url())))
+        let upstream = if fallback {
+            Some(rt.block_on(MySqlConnector::connect(mysql_url())).unwrap())
         } else {
             None
         };
         let reader = Reader {
-            mysql_connector,
+            upstream,
             noria_connector: rt.block_on(noria_connector),
         };
 
-        let backend = backend_builder.build(rt.block_on(writer).into(), reader);
+        let backend = backend_builder.build(Writer::Noria(rt.block_on(writer)), reader);
 
         rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
             .unwrap();

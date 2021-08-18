@@ -5,9 +5,14 @@ use std::{
 
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::{
-    error::Error, mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder,
-    QueryResult, Reader, Writer,
+use noria_client::{
+    backend::{
+        error::Error,
+        mysql_connector::{self, MySqlConnector},
+        noria_connector::{self, NoriaConnector},
+        BackendBuilder, QueryResult, Reader, Writer,
+    },
+    UpstreamDatabase,
 };
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
@@ -38,12 +43,11 @@ async fn main() {
 
     let reader = Reader {
         noria_connector: noria_conn,
-        mysql_connector: Some(MySqlConnector::new(mysql_url.clone()).await),
+        upstream: Some(MySqlConnector::connect(mysql_url.clone()).await.unwrap()),
     };
 
     // Construct the Writer (to an underlying DB)
-    let writer = MySqlConnector::new(mysql_url).await;
-    let writer = Writer::MySqlConnector(writer);
+    let writer = Writer::Upstream(MySqlConnector::connect(mysql_url).await.unwrap());
 
     let mut b = BackendBuilder::new()
         .require_authentication(false)
@@ -53,16 +57,16 @@ async fn main() {
     let noria_res = b.query("select * from customers;").await;
     let mysql_res = b.query("show tables;").await;
 
-    fn print_res(res: Result<QueryResult, Error>) {
+    fn print_res(res: Result<QueryResult<MySqlConnector>, Error>) {
         match res {
-            Ok(QueryResult::NoriaSelect {
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema: _,
-            }) => {
+            })) => {
                 println!("Noria Result:");
                 println!("{:#?}", data);
             }
-            Ok(QueryResult::MySqlSelect { data, .. }) => {
+            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, .. })) => {
                 println!("MySQL Result:");
                 println!("{:#?}", data);
             }

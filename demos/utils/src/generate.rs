@@ -4,7 +4,7 @@
 use crate::spec::DatabaseGenerationSpec;
 use anyhow::{Context, Result};
 use noria::ZookeeperAuthority;
-use noria_client::backend::Backend;
+use noria_client::backend::{mysql_connector::MySqlConnector, Backend};
 use noria_logictest::generate::DatabaseConnection;
 use std::convert::TryInto;
 
@@ -56,7 +56,7 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
 }
 
 pub async fn load_to_backend(
-    db: &mut Backend<ZookeeperAuthority>,
+    db: &mut Backend<ZookeeperAuthority, MySqlConnector>,
     mut spec: DatabaseGenerationSpec,
 ) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random

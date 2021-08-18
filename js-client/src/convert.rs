@@ -3,7 +3,11 @@ use chrono::NaiveDateTime;
 use msql_srv::Column;
 use neon::{prelude::*, types::JsDate};
 use noria::{results::Results, DataType};
-use noria_client::backend::{error::Error, PrepareResult, QueryResult, SelectSchema};
+use noria_client::backend::{
+    error::Error,
+    mysql_connector::{MySqlConnector, WriteResult},
+    PrepareResult, QueryResult, SelectSchema, UpstreamPrepare,
+};
 use std::convert::TryFrom;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
@@ -76,7 +80,7 @@ where
                 js_params.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::MySqlPrepare { statement_id, .. } => {
+        PrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
         }
     }
@@ -145,18 +149,20 @@ where
 
 pub(crate) fn convert_query_result<'a, C>(
     cx: &mut C,
-    raw_query_result: QueryResult,
+    raw_query_result: QueryResult<MySqlConnector>,
 ) -> NeonResult<Handle<'a, JsObject>>
 where
     C: Context<'a>,
 {
+    use noria_client::backend::noria_connector::QueryResult as NoriaResult;
+
     let js_query_result = cx.empty_object();
     match raw_query_result {
-        QueryResult::NoriaCreateTable | QueryResult::NoriaCreateView => (),
-        QueryResult::NoriaInsert {
+        QueryResult::Noria(NoriaResult::CreateTable | NoriaResult::CreateView) => (),
+        QueryResult::Noria(NoriaResult::Insert {
             num_rows_inserted,
             first_inserted_id,
-        } => {
+        }) => {
             utils::set_num_field(
                 cx,
                 &js_query_result,
@@ -170,18 +176,18 @@ where
                 first_inserted_id as f64,
             )?;
         }
-        QueryResult::NoriaSelect {
+        QueryResult::Noria(NoriaResult::Select {
             data,
             select_schema,
-        } => {
+        }) => {
             let js_data = convert_data(cx, data, &select_schema)?;
             utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
             // TODO: convert select_schema?
         }
-        QueryResult::NoriaUpdate {
+        QueryResult::Noria(NoriaResult::Update {
             num_rows_updated,
             last_inserted_id,
-        } => {
+        }) => {
             utils::set_num_field(
                 cx,
                 &js_query_result,
@@ -195,7 +201,7 @@ where
                 last_inserted_id as f64,
             )?;
         }
-        QueryResult::NoriaDelete { num_rows_deleted } => {
+        QueryResult::Noria(NoriaResult::Delete { num_rows_deleted }) => {
             utils::set_num_field(
                 cx,
                 &js_query_result,
@@ -203,10 +209,10 @@ where
                 num_rows_deleted as f64,
             )?;
         }
-        QueryResult::MySqlWrite {
+        QueryResult::UpstreamWrite(WriteResult {
             num_rows_affected,
             last_inserted_id,
-        } => {
+        }) => {
             utils::set_num_field(
                 cx,
                 &js_query_result,
@@ -221,9 +227,7 @@ where
             )?;
         }
         // TODO(Dan): Implement
-        QueryResult::MySqlSelect { .. }
-        | QueryResult::PgSqlSelect { .. }
-        | QueryResult::PgSqlWrite { .. } => {
+        QueryResult::UpstreamRead(..) => {
             unimplemented!("Query fallback processing not implemented for js-client")
         }
     }

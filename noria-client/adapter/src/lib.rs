@@ -17,23 +17,24 @@ use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use noria_client::UpstreamDatabase;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::Level;
 
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::{
-    mysql_connector::MySqlConnector, noria_connector::NoriaConnector, Backend, BackendBuilder,
-    Reader, Writer,
-};
+use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::{Reader, Writer};
+use noria_client::{Backend, BackendBuilder};
 
 #[async_trait]
 pub trait ConnectionHandler {
+    type UpstreamDatabase: UpstreamDatabase;
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: Backend<ZookeeperAuthority>,
+        backend: Backend<ZookeeperAuthority, Self::UpstreamDatabase>,
     );
 }
 
@@ -108,9 +109,10 @@ pub struct Options {
     #[clap(long, short = 'p')]
     password: Option<String>,
 
-    /// URL for MySQL connection. Should include username and password if necessary
-    #[clap(long, env = "MYSQL_URL")]
-    mysql_url: Option<String>,
+    /// URL for the upstream database to connect to. Should include username and password if
+    /// necessary
+    #[clap(long, env = "UPSTREAM_DB_URL")]
+    upstream_db_url: Option<String>,
 
     /// The region the worker is hosted in. Required to route view requests to specific regions.
     #[clap(long, env = "NORIA_REGION")]
@@ -121,7 +123,10 @@ pub struct Options {
     prometheus_metrics: bool,
 }
 
-impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
+impl<H> NoriaAdapter<H>
+where
+    H: ConnectionHandler + Clone + Send + Sync + 'static,
+{
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
             if !options.no_require_authentication {
@@ -205,7 +210,7 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
-            let mysql_url = options.mysql_url.clone();
+            let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .static_responses(!options.no_static_responses)
                 .slowlog(options.log_slow)
@@ -233,8 +238,13 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
                 let reader = Reader {
                     noria_connector: noria_conn,
-                    mysql_connector: if let Some(mysql_url) = &mysql_url {
-                        Some(MySqlConnector::new(mysql_url.clone()).await)
+                    upstream: if let Some(upstream_db_url) = &upstream_db_url {
+                        // TODO(grfn): properly handle errors connecting to the upstream here (but how?)
+                        Some(
+                            H::UpstreamDatabase::connect(upstream_db_url.clone())
+                                .await
+                                .unwrap(),
+                        )
                     } else {
                         None
                     },
@@ -242,16 +252,20 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
 
                 let _g = connection.enter();
 
-                let writer: Writer<ZookeeperAuthority> = if let Some(url) = mysql_url {
-                    let writer = MySqlConnector::new(url).await;
-
-                    Writer::MySqlConnector(writer)
+                let writer: Writer<ZookeeperAuthority, _> = if let Some(upstream_db_url) =
+                    &upstream_db_url
+                {
+                    // TODO(grfn): properly handle errors connecting to the upstream here (but how?)
+                    Writer::Upstream(
+                        H::UpstreamDatabase::connect(upstream_db_url.clone())
+                            .await
+                            .unwrap(),
+                    )
                 } else {
                     let writer =
                         NoriaConnector::new(ch, auto_increments, query_cache, region.clone()).await;
-                    Writer::NoriaConnector(writer)
+                    Writer::Noria(writer)
                 };
-
                 let backend = backend_builder.clone().build(writer, reader);
 
                 connection_handler.process_connection(s, backend).await;

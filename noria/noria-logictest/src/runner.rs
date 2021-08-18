@@ -5,6 +5,8 @@ use mysql_async as mysql;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use noria_client::backend::Reader;
+use noria_client::backend::Writer;
+use noria_client::UpstreamDatabase;
 use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -467,20 +469,18 @@ impl TestScript {
             // cannot use .await inside map
             #[allow(clippy::manual_map)]
             let mysql_connector = match binlog_url.clone() {
-                Some(url) => Some(MySqlConnector::new(url.clone()).await),
+                Some(url) => Some(MySqlConnector::connect(url.clone()).await.unwrap()),
                 None => None,
             };
 
             let writer = if let Some(url) = binlog_url {
-                MySqlConnector::new(url).await.into()
+                Writer::Upstream(MySqlConnector::connect(url).await.unwrap())
             } else {
-                NoriaConnector::new(ch, auto_increments, query_cache, None)
-                    .await
-                    .into()
+                Writer::Noria(NoriaConnector::new(ch, auto_increments, query_cache, None).await)
             };
 
             let reader = Reader {
-                mysql_connector,
+                upstream: mysql_connector,
                 noria_connector,
             };
 

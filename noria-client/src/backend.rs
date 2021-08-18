@@ -1,27 +1,28 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt;
+use std::fmt::Debug;
 use std::io;
 use std::time;
-use std::{collections::hash_map::Entry, sync::Arc};
 
 use async_trait::async_trait;
-use derive_more::From;
 use futures::FutureExt;
 use metrics::histogram;
 use nom_sql::Dialect;
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
-use tokio_postgres as pgsql;
 use tracing::Level;
 
-use msql_srv::{self, *};
+use msql_srv::{
+    Column, ColumnFlags, ColumnType, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
+};
 use mysql_connector::MySqlConnector;
-use nom_sql::{self, DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
+use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria::results::Results;
 use noria::{internal, unsupported, DataType, ReadySetError};
 use noria_client_metrics::recorded::SqlQueryType;
 use noria_connector::NoriaConnector;
@@ -29,8 +30,10 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::backend::error::Error;
 use crate::convert::ToDataType;
-use crate::rewrite;
-use crate::utils;
+pub use crate::upstream_database::UpstreamPrepare;
+use crate::{rewrite, utils, UpstreamDatabase};
+
+use self::mysql_connector::WriteResult;
 
 pub mod mysql_connector;
 pub mod noria_connector;
@@ -163,22 +166,30 @@ fn is_read(query: &str) -> bool {
     .is_ok()
 }
 
-#[derive(From)]
-pub enum Writer<A: 'static + Authority> {
-    MySqlConnector(MySqlConnector),
-    NoriaConnector(NoriaConnector<A>),
+/// A database connection for performing writes
+///
+/// Noria-client can be either configured to pass-through writes to an [upstream
+/// database](Self::Upstream) or write [directly to noria](Self::Noria)
+#[allow(clippy::large_enum_variant)]
+pub enum Writer<A: 'static + Authority, DB> {
+    Upstream(DB),
+    Noria(NoriaConnector<A>),
 }
 
-pub struct Reader<A: 'static + Authority> {
-    pub mysql_connector: Option<MySqlConnector>,
+/// A database connection for performing reads
+///
+/// A reader consists of a connection to noria, plus optionally a connection to an upstream database
+/// to use for query fallback
+pub struct Reader<A: 'static + Authority, DB> {
+    pub upstream: Option<DB>,
     pub noria_connector: NoriaConnector<A>,
 }
 
 #[derive(Clone)]
 pub enum PreparedStatement {
     NoriaPrepStatement(u32),
-    MySqlPrepWrite(u32),
-    MySqlPrepRead(u32),
+    UpstreamPrepWrite(u32),
+    UpstreamPrepRead(u32),
 }
 
 /// Builder for a [`Backend`]
@@ -214,7 +225,11 @@ impl BackendBuilder {
         Self::default()
     }
 
-    pub fn build<A: 'static + Authority>(self, writer: Writer<A>, reader: Reader<A>) -> Backend<A> {
+    pub fn build<A: 'static + Authority, DB>(
+        self,
+        writer: Writer<A, DB>,
+        reader: Reader<A, DB>,
+    ) -> Backend<A, DB> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
@@ -278,15 +293,15 @@ impl BackendBuilder {
     }
 }
 
-pub struct Backend<A: 'static + Authority> {
+pub struct Backend<A: 'static + Authority, DB> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
     // all queries previously prepared, mapped by their ID
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     static_responses: bool,
-    writer: Writer<A>,
-    reader: Reader<A>,
+    writer: Writer<A, DB>,
+    reader: Reader<A, DB>,
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
@@ -339,55 +354,31 @@ pub enum PrepareResult {
         statement_id: u64,
         params: Vec<Column>,
     },
-    MySqlPrepare {
-        statement_id: u32,
-        params: Vec<msql_srv::Column>,
-        schema: Vec<Column>,
-        is_read: bool,
-    },
+    Upstream(UpstreamPrepare),
 }
 
-/// The type returned when a query is carried out by `Backend`,
-/// through either the `query` or `execute` functions.
-/// Variants prefixed with `Noria` come from a `NoriaConnector` writer or reader.
-/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer or reader.
-#[derive(Debug)]
-pub enum QueryResult {
-    NoriaCreateTable,
-    NoriaCreateView,
-    NoriaInsert {
-        num_rows_inserted: u64,
-        first_inserted_id: u64,
-    },
-    NoriaSelect {
-        data: Vec<Results>,
-        select_schema: SelectSchema,
-    },
-    NoriaUpdate {
-        num_rows_updated: u64,
-        last_inserted_id: u64,
-    },
-    NoriaDelete {
-        num_rows_deleted: u64,
-    },
-    /// `last_inserted_id` is 0 if not applicable
-    MySqlWrite {
-        num_rows_affected: u64,
-        last_inserted_id: u64,
-    },
-    MySqlSelect {
-        data: Vec<mysql_async::Row>,
-        // columns optionally provides a list of columns if applicable. This is necessary for
-        // writing back an empty result set from fallback, where we need to capture what the
-        // columns were so we can write an empty header row.
-        columns: Option<Arc<[mysql_async::Column]>>,
-    },
-    PgSqlSelect {
-        data: Vec<pgsql::Row>,
-    },
-    PgSqlWrite {
-        num_rows_affected: u64,
-    },
+/// The type returned when a query is carried out by `Backend`, through either the `query` or
+/// `execute` functions.
+pub enum QueryResult<DB: UpstreamDatabase> {
+    /// Results from noria
+    Noria(noria_connector::QueryResult),
+    /// Write results from an upstream database
+    UpstreamWrite(DB::WriteResult),
+    /// Read results from an upstream database
+    UpstreamRead(DB::ReadResult),
+}
+
+impl<DB> Debug for QueryResult<DB>
+where
+    DB: UpstreamDatabase,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
+            Self::UpstreamWrite(r) => f.debug_tuple("UpstreamWrite").field(r).finish(),
+            Self::UpstreamRead(r) => f.debug_tuple("UpstreamRead").field(r).finish(),
+        }
+    }
 }
 
 /// TODO: The ideal approach for query handling is as follows:
@@ -400,24 +391,31 @@ pub enum QueryResult {
 /// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the
 ///    most appropriate MySQL error code and write that back to the caller without dropping the
 ///    connection.
-impl<A: 'static + Authority> Backend<A> {
-    /// Executes query on mysql_backend, if present, when it cannot be parsed or executed by noria.
-    /// Returns the query result and RYW ticket.
-    pub async fn query_fallback(
-        &mut self,
-        query: &str,
-    ) -> Result<(QueryResult, Option<String>), Error> {
+impl<A, DB> Backend<A, DB>
+where
+    A: 'static + Authority,
+    DB: 'static + UpstreamDatabase,
+{
+    /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
+    /// Returns the query result, or an error if fallback is not configured
+    pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, Error> {
         let is_read = is_read(query);
-        match self.reader.mysql_connector {
-            Some(ref mut connector) => {
-                let (res, id) = if is_read {
-                    (connector.handle_select(query).await?, None)
-                } else {
-                    connector.handle_write(query, false).await?
-                };
-                Ok((res, id))
-            }
-            None => Err(Error::ReadySet(ReadySetError::FallbackNoConnector)),
+        let upstream = self
+            .reader
+            .upstream
+            .as_mut()
+            .ok_or(Error::ReadySet(ReadySetError::FallbackNoConnector))?;
+
+        if is_read {
+            upstream
+                .handle_read(query)
+                .await
+                .map(QueryResult::UpstreamRead)
+        } else {
+            upstream
+                .handle_write(query)
+                .await
+                .map(QueryResult::UpstreamWrite)
         }
     }
 
@@ -426,13 +424,17 @@ impl<A: 'static + Authority> Backend<A> {
     pub async fn prepare_fallback(&mut self, query: &str) -> Result<PrepareResult, Error> {
         let q = query.to_string().trim_start().to_lowercase();
         if is_read(&q) {
-            match self.reader.mysql_connector {
-                Some(ref mut connector) => connector.on_prepare(query).await,
+            match self.reader.upstream {
+                Some(ref mut connector) => {
+                    connector.prepare(query).await.map(PrepareResult::Upstream)
+                }
                 None => Err(ReadySetError::FallbackNoConnector.into()),
             }
         } else {
             match self.writer {
-                Writer::MySqlConnector(ref mut connector) => connector.on_prepare(query).await,
+                Writer::Upstream(ref mut connector) => {
+                    connector.prepare(query).await.map(PrepareResult::Upstream)
+                }
                 _ => Err(ReadySetError::FallbackNoConnector.into()),
             }
         }
@@ -454,24 +456,25 @@ impl<A: 'static + Authority> Backend<A> {
                     PreparedStatement::NoriaPrepStatement(*statement_id as u32),
                 );
             }
-            PrepareResult::MySqlPrepare {
+            PrepareResult::Upstream(UpstreamPrepare {
                 statement_id,
                 is_read,
                 ..
-            } => {
+            }) => {
                 self.prepared_statements.insert(self.prepared_count, {
                     if *is_read {
-                        PreparedStatement::MySqlPrepRead(*statement_id)
+                        PreparedStatement::UpstreamPrepRead(*statement_id)
                     } else {
-                        PreparedStatement::MySqlPrepWrite(*statement_id)
+                        PreparedStatement::UpstreamPrepWrite(*statement_id)
                     }
                 });
             }
         }
     }
 
-    /// Executes the given read against both noria and mysql in simultaneous racing tasks, returning
-    /// the result of the first query that completes successfully, or the error from MySQL if both fail
+    /// Executes the given read against both noria and the upstream database in simultaneous racing
+    /// tasks, returning the result of the first query that completes successfully, or the error
+    /// from the upstream database if both fail.
     ///
     /// If fallback is not configured, returns an error
     pub async fn race_read(
@@ -480,14 +483,15 @@ impl<A: 'static + Authority> Backend<A> {
         query_str: String,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
-    ) -> Result<QueryResult, Error> {
+    ) -> Result<QueryResult<DB>, Error> {
         let url = self
             .reader
-            .mysql_connector
+            .upstream
             .as_ref()
-            .ok_or_else(|| internal_err("race read called without fallback configured"))?
-            .url();
-        let mut mysql = MySqlConnector::new(url.to_string()).await;
+            .ok_or_else(|| internal_err("race_read called without fallback configured"))?
+            .url()
+            .to_owned();
+        let mut upstream = DB::connect(url).await?;
         let mut noria = self.reader.noria_connector.clone();
 
         macro_rules! grab_err {
@@ -512,18 +516,18 @@ impl<A: 'static + Authority> Backend<A> {
                 .then(grab_err!(noria_err_sender))
                 .await
         });
-        let (mysql_err_sender, mut mysql_err) = mpsc::channel(1);
-        let mysql_read = tokio::spawn(async move {
-            mysql
-                .handle_select(&query_str)
-                .then(grab_err!(mysql_err_sender))
+        let (upstream_err_sender, mut upstream_err) = mpsc::channel(1);
+        let upstream_read = tokio::spawn(async move {
+            upstream
+                .handle_read(&query_str)
+                .then(grab_err!(upstream_err_sender))
                 .await
         });
-        let errs = tokio::spawn(async move { tokio::join!(noria_err.recv(), mysql_err.recv()) });
+        let errs = tokio::spawn(async move { tokio::join!(noria_err.recv(), upstream_err.recv()) });
 
         tokio::select! {
-            Ok(Ok(noria_res)) = noria_read => Ok(noria_res),
-            Ok(Ok(mysql_res)) = mysql_read => Ok(mysql_res),
+            Ok(Ok(noria_res)) = noria_read => Ok(QueryResult::Noria(noria_res)),
+            Ok(Ok(upstream_res)) = upstream_read => Ok(QueryResult::UpstreamRead(upstream_res)),
             Ok((_, Some(e))) = errs => Err(e)
         }
     }
@@ -539,19 +543,22 @@ impl<A: 'static + Authority> Backend<A> {
         query_str: &str,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
-    ) -> Result<QueryResult, Error> {
+    ) -> Result<QueryResult<DB>, Error> {
         match self
             .reader
             .noria_connector
             .handle_select(q, use_params, ticket)
             .await
         {
-            Ok(r) => Ok(r),
+            Ok(r) => Ok(QueryResult::Noria(r)),
             Err(e) => {
                 // Check if we have fallback setup. If not, we need to return this error,
                 // otherwise, we transition to fallback.
-                match self.reader.mysql_connector {
-                    Some(ref mut connector) => connector.handle_select(query_str).await,
+                match self.reader.upstream {
+                    Some(ref mut connector) => connector
+                        .handle_read(query_str)
+                        .await
+                        .map(QueryResult::UpstreamRead),
                     None => Err(e),
                 }
             }
@@ -573,7 +580,7 @@ impl<A: 'static + Authority> Backend<A> {
             .await
         {
             Ok(res) => Ok(res),
-            Err(e) => match self.reader.mysql_connector {
+            Err(e) => match self.reader.upstream {
                 Some(_) => self.prepare_fallback(query).await,
                 None => Err(e),
             },
@@ -593,41 +600,40 @@ impl<A: 'static + Authority> Backend<A> {
         let res = self.parse_query(query, false);
         let parsed_query = match res {
             Ok((parsed_query, _)) => parsed_query,
-            Err(e) => match self.reader.mysql_connector {
-                Some(_) => {
+            Err(e) => {
+                if self.reader.upstream.is_some() {
                     // Fallback prepare will always go to the reader connector
                     let res = self.prepare_fallback(query).await;
                     if let Ok(ref result) = res {
                         self.store_prep_statement(result);
                     }
                     return res;
-                }
-                None => {
+                } else {
                     return Err(e);
                 }
-            },
+            }
         };
 
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => self.cascade_prepare(stmt.clone(), query).await,
             nom_sql::SqlQuery::Insert(_) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+                Writer::Noria(connector) => {
                     connector
                         .prepare_insert(parsed_query.clone(), self.prepared_count)
                         .await
                 }
-                Writer::MySqlConnector(connector) => {
-                    return connector.on_prepare(query).await;
+                Writer::Upstream(connector) => {
+                    return connector.prepare(query).await.map(PrepareResult::Upstream);
                 }
             },
             nom_sql::SqlQuery::Update(_) => match &mut self.writer {
-                Writer::NoriaConnector(connector) => {
+                Writer::Noria(connector) => {
                     connector
                         .prepare_update(parsed_query.clone(), self.prepared_count)
                         .await
                 }
-                Writer::MySqlConnector(connector) => {
-                    return connector.on_prepare(query).await;
+                Writer::Upstream(connector) => {
+                    return connector.prepare(query).await.map(PrepareResult::Upstream);
                 }
             },
             _ => {
@@ -649,7 +655,11 @@ impl<A: 'static + Authority> Backend<A> {
     /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
     /// belonging to the calling `Backend` struct.
     // TODO(andrew, justin): add RYW support for executing prepared queries
-    pub async fn execute(&mut self, id: u32, params: Vec<DataType>) -> Result<QueryResult, Error> {
+    pub async fn execute(
+        &mut self,
+        id: u32,
+        params: Vec<DataType>,
+    ) -> Result<QueryResult<DB>, Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
@@ -659,68 +669,84 @@ impl<A: 'static + Authority> Backend<A> {
             .prepared_statements
             .get(&id)
             .cloned()
-            .ok_or(PreparedStatementMissing)?;
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         match prepared_statement {
-            PreparedStatement::MySqlPrepRead(id) => {
+            PreparedStatement::UpstreamPrepRead(id) => {
                 let connector = self
                     .reader
-                    .mysql_connector
+                    .upstream
                     .as_mut()
                     .ok_or(Error::ReadySet(ReadySetError::FallbackNoConnector))?;
-                return connector.execute_read(id, params).await;
+                return connector
+                    .execute_read(id, params)
+                    .await
+                    .map(QueryResult::UpstreamRead);
             }
-            PreparedStatement::MySqlPrepWrite(id) => {
+            PreparedStatement::UpstreamPrepWrite(id) => {
                 let connector = match &mut self.writer {
-                    Writer::MySqlConnector(conn) => conn,
+                    Writer::Upstream(conn) => conn,
                     _ => return Err(ReadySetError::FallbackNoConnector.into()),
                 };
-                return connector.execute_write(id, params).await;
+                return connector
+                    .execute_write(id, params)
+                    .await
+                    .map(QueryResult::UpstreamWrite);
             }
-            PreparedStatement::NoriaPrepStatement(id) => {
+            PreparedStatement::NoriaPrepStatement(statement_id) => {
                 let prep: SqlQuery = self
                     .prepared_queries
-                    .get(&id)
+                    .get(&statement_id)
                     .cloned()
-                    .ok_or(PreparedStatementMissing)?;
+                    .ok_or(PreparedStatementMissing { statement_id })?;
                 let res = match prep {
                     SqlQuery::Select(_) => {
                         let try_read = self
                             .reader
                             .noria_connector
-                            .execute_prepared_select(id, params.clone(), self.ticket.clone())
+                            .execute_prepared_select(
+                                statement_id,
+                                params.clone(),
+                                self.ticket.clone(),
+                            )
                             .await;
                         // fallback on failure, however we must extract the original query because
                         // it was not prepared on the underlying db
                         match try_read {
-                            Ok(read) => Ok(read),
-                            Err(e) => match &mut self.reader.mysql_connector {
+                            Ok(read) => Ok(QueryResult::Noria(read)),
+                            Err(e) => match &mut self.reader.upstream {
                                 Some(conn) => {
-                                    //TODO(DAN): Instead of executing the statement on fallback,
-                                    //prepare the statement then execute. The prepared statement id
-                                    //should be returned to the backend so that it can be stored
-                                    conn.execute_select_query_string(&prep.to_string(), params)
+                                    // TODO(DAN): The prepared statement id should be returned to
+                                    // the backend so that it can be stored
+                                    let UpstreamPrepare { statement_id, .. } =
+                                        conn.prepare(&prep.to_string()).await?;
+                                    conn.execute_read(statement_id, params)
                                         .await
+                                        .map(QueryResult::UpstreamRead)
                                 }
                                 None => Err(e),
                             },
                         }
                     }
                     SqlQuery::Insert(ref _q) => match &mut self.writer {
-                        Writer::NoriaConnector(connector) => {
-                            connector.execute_prepared_insert(id, params).await
-                        }
-                        Writer::MySqlConnector(connector) => {
-                            connector.execute_write(id, params).await
-                        }
+                        Writer::Noria(connector) => connector
+                            .execute_prepared_insert(statement_id, params)
+                            .await
+                            .map(QueryResult::Noria),
+                        Writer::Upstream(connector) => connector
+                            .execute_write(statement_id, params)
+                            .await
+                            .map(QueryResult::UpstreamWrite),
                     },
                     SqlQuery::Update(ref _q) => match &mut self.writer {
-                        Writer::NoriaConnector(connector) => {
-                            connector.execute_prepared_update(id, params).await
-                        }
-                        Writer::MySqlConnector(connector) => {
-                            connector.execute_write(id, params).await
-                        }
+                        Writer::Noria(connector) => connector
+                            .execute_prepared_update(statement_id, params)
+                            .await
+                            .map(QueryResult::Noria),
+                        Writer::Upstream(connector) => connector
+                            .execute_write(statement_id, params)
+                            .await
+                            .map(QueryResult::UpstreamWrite),
                     },
                     _ => internal!(),
                 };
@@ -747,7 +773,7 @@ impl<A: 'static + Authority> Backend<A> {
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
 
@@ -756,7 +782,7 @@ impl<A: 'static + Authority> Backend<A> {
         let parse_result = self.parse_query(query, true);
         let parse_time = start.elapsed().as_micros();
 
-        // fallback to mysql database on query parse failure
+        // fallback to upstream database on query parse failure
         let (parsed_query, use_params) = match parse_result {
             Ok(parsed_tuple) => parsed_tuple,
             Err(e) => {
@@ -768,9 +794,9 @@ impl<A: 'static + Authority> Backend<A> {
                     return Err(e);
                 }
                 // TODO(Dan): Implement RYW for query_fallback
-                match self.reader.mysql_connector {
+                match self.reader.upstream {
                     Some(_) => {
-                        let (res, _) = self.query_fallback(query).await?;
+                        let res = self.query_fallback(query).await?;
                         if self.slowlog {
                             warn_on_slow_query(&start, query);
                         }
@@ -783,9 +809,8 @@ impl<A: 'static + Authority> Backend<A> {
             }
         };
 
-        // If we have a mysql backend then we will pass valid set statements
-        // across the mysql connector.
-        // If no mysql connector is present we will ignore the statement
+        // If we have an upstream then we will pass valid set statements across to that upstream.
+        // If no upstream is present we will ignore the statement
         // Disallowed set statements always produce an error
         if let nom_sql::SqlQuery::Set(s) = &parsed_query {
             if !is_allowed_set(s) {
@@ -800,12 +825,12 @@ impl<A: 'static + Authority> Backend<A> {
             // Interacting directly with Noria writer (No RYW support)
             //
             // This is relatively unintuitive and could use a re-write. We only have a single
-            // writer, and potentially multiple readers. If our writer is MySQL, then we have
-            // fallback setup, and can assume we have two readers, noria and MySQL. Otherwise, if
-            // our single writer is noria, we assume that there's only a single reader setup -
-            // noria.
+            // writer, and potentially multiple readers. If our writer is an upstream database, then
+            // we have fallback setup, and can assume we have two readers, noria and an upstream
+            // database. Otherwise, if our single writer is noria, we assume that there's only a
+            // single reader setup - noria.
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-            Writer::NoriaConnector(connector) => match parsed_query {
+            Writer::Noria(connector) => match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = std::time::Instant::now();
                     let res = self
@@ -867,8 +892,9 @@ impl<A: 'static + Authority> Backend<A> {
                     error!("unsupported query");
                     unsupported!("query type unsupported");
                 }
-            },
-            Writer::MySqlConnector(connector) => {
+            }
+            .map(QueryResult::Noria),
+            Writer::Upstream(connector) => {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
                         let execution_timer = std::time::Instant::now();
@@ -892,35 +918,37 @@ impl<A: 'static + Authority> Backend<A> {
                     | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                     | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
                         let execution_timer = std::time::Instant::now();
-                        let (query_result, identifier) = connector
-                            .handle_write(query, self.timestamp_client.is_some())
-                            .await?;
 
                         // Update ticket if RYW enabled
-                        if let Some(timestamp_service) = &mut self.timestamp_client {
-                            let identifier = identifier.ok_or_else(|| internal_err("RYW enabled writes should always produce a transaction identifier"))?;
+                        let query_result =
+                            if let Some(timestamp_service) = &mut self.timestamp_client {
+                                let (query_result, identifier) =
+                                    connector.handle_ryw_write(query).await?;
 
-                            // TODO(andrew): Move table name to table index conversion to timestamp service
-                            // https://app.clubhouse.io/readysettech/story/331
-                            let index = self
-                                .reader
-                                .noria_connector
-                                .node_index_of(t.name.as_str())
-                                .await?;
-                            let affected_tables = vec![WriteKey::TableIndex(index)];
+                                // TODO(andrew): Move table name to table index conversion to timestamp service
+                                // https://app.clubhouse.io/readysettech/story/331
+                                let index = self
+                                    .reader
+                                    .noria_connector
+                                    .node_index_of(t.name.as_str())
+                                    .await?;
+                                let affected_tables = vec![WriteKey::TableIndex(index)];
 
-                            let new_timestamp = timestamp_service
-                                .append_write(WriteId::MySqlGtid(identifier), affected_tables)
-                                .map_err(|e| internal_err(e.to_string()))?;
+                                let new_timestamp = timestamp_service
+                                    .append_write(WriteId::MySqlGtid(identifier), affected_tables)
+                                    .map_err(|e| internal_err(e.to_string()))?;
 
-                            // TODO(andrew, justin): solidify error handling in client
-                            // https://app.clubhouse.io/readysettech/story/366
-                            let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
-                                internal_err("RYW enabled backends must have a current ticket")
-                            })?;
+                                // TODO(andrew, justin): solidify error handling in client
+                                // https://app.clubhouse.io/readysettech/story/366
+                                let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
+                                    internal_err("RYW enabled backends must have a current ticket")
+                                })?;
 
-                            self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
-                        }
+                                self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
+                                query_result
+                            } else {
+                                connector.handle_write(query).await?
+                            };
                         let execution_time = execution_timer.elapsed().as_micros();
 
                         measure_parse_and_execution_time(
@@ -929,7 +957,7 @@ impl<A: 'static + Authority> Backend<A> {
                             SqlQueryType::Write,
                         );
 
-                        Ok(query_result)
+                        Ok(QueryResult::UpstreamWrite(query_result))
                     }
 
                     // Table Create / Drop (RYW not supported)
@@ -937,16 +965,11 @@ impl<A: 'static + Authority> Backend<A> {
                     nom_sql::SqlQuery::CreateView(_)
                     | nom_sql::SqlQuery::CreateTable(_)
                     | nom_sql::SqlQuery::DropTable(_)
-                    | nom_sql::SqlQuery::Set(_) => {
-                        let (query_result, _) = connector
-                            .handle_write(&parsed_query.to_string(), false)
-                            .await?;
-                        Ok(query_result)
-                    }
-                    _ => {
-                        let (query_result, _) = self.query_fallback(query).await?;
-                        Ok(query_result)
-                    }
+                    | nom_sql::SqlQuery::Set(_) => connector
+                        .handle_write(&parsed_query.to_string())
+                        .await
+                        .map(QueryResult::UpstreamWrite),
+                    _ => self.query_fallback(query).await,
                 }
             }
         };
@@ -1017,7 +1040,7 @@ fn measure_parse_and_execution_time(
 }
 
 #[async_trait]
-impl<W, A> MysqlShim<W> for Backend<A>
+impl<W, A> MysqlShim<W> for Backend<A, MySqlConnector>
 where
     W: AsyncWrite + Unpin + Send + 'static,
     A: 'static + Authority,
@@ -1050,7 +1073,7 @@ where
             Ok(PrepareResult::NoriaPrepareUpdate { params, .. }) => {
                 info.reply(self.prepared_count, &params[..], &[]).await
             }
-            Ok(PrepareResult::MySqlPrepare { params, schema, .. }) => {
+            Ok(PrepareResult::Upstream(UpstreamPrepare { params, schema, .. })) => {
                 info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
                     .await
             }
@@ -1073,7 +1096,7 @@ where
     async fn on_execute(
         &mut self,
         id: u32,
-        params: ParamParser<'_>,
+        params: msql_srv::ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
         let mut datatype_params = Vec::new();
@@ -1084,10 +1107,10 @@ where
         }
 
         let res = match self.execute(id, datatype_params).await {
-            Ok(QueryResult::NoriaSelect {
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,
-            }) => {
+            } )) => {
                 let mut rw = results.start(&select_schema.schema).await?;
                 for resultsets in data {
                     for r in resultsets {
@@ -1109,25 +1132,25 @@ where
                 }
                 rw.finish().await
             }
-            Ok(QueryResult::NoriaInsert {
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
-            }) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
-            Ok(QueryResult::NoriaUpdate {
+            } )) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
                 num_rows_updated,
                 last_inserted_id
-            }) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
-            Ok(QueryResult::MySqlWrite {
+            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            Ok(QueryResult::UpstreamWrite(mysql_connector::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
-            }) => {
+            })) => {
                 write_query_results(
                     Ok((num_rows_affected, last_inserted_id)),
                     results,
                 )
                 .await
             }
-            Ok(QueryResult::MySqlSelect { data, columns }) => {
+            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, columns })) => {
                 let mut data = data.iter().peekable();
                 if let Some(cols) = data.peek() {
                     let cols = cols.columns_ref();
@@ -1155,10 +1178,10 @@ where
                     rw.finish().await
                 }
             }
-            e @ Err(Error::ReadySet(ReadySetError::PreparedStatementMissing)) => {
+            Err(e @ Error::ReadySet(ReadySetError::PreparedStatementMissing { .. })) => {
                 return results
                     .error(
-                        e.unwrap_err().error_kind(),
+                        e.error_kind(),
                         "non-existent statement".as_bytes(),
                     )
                     .await
@@ -1207,16 +1230,18 @@ where
         }
 
         let res = match self.query(query).await {
-            Ok(QueryResult::NoriaCreateTable) => results.completed(0, 0).await,
-            Ok(QueryResult::NoriaCreateView) => results.completed(0, 0).await,
-            Ok(QueryResult::NoriaInsert {
+            Ok(QueryResult::Noria(
+                noria_connector::QueryResult::CreateTable
+                | noria_connector::QueryResult::CreateView,
+            )) => results.completed(0, 0).await,
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
-            }) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
-            Ok(QueryResult::NoriaSelect {
+            })) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,
-            }) => {
+            })) => {
                 let mut rw = results.start(&select_schema.schema).await?;
                 for resultsets in data {
                     for r in resultsets {
@@ -1238,18 +1263,18 @@ where
                 }
                 rw.finish().await
             }
-            Ok(QueryResult::NoriaUpdate {
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
                 num_rows_updated,
                 last_inserted_id,
-            }) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
-            Ok(QueryResult::NoriaDelete { num_rows_deleted }) => {
+            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 results.completed(num_rows_deleted, 0).await
             }
-            Ok(QueryResult::MySqlWrite {
+            Ok(QueryResult::UpstreamWrite(WriteResult {
                 num_rows_affected,
                 last_inserted_id,
-            }) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
-            Ok(QueryResult::MySqlSelect { data, columns }) => {
+            })) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
+            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, columns })) => {
                 if let Some(cols) = data.get(0).cloned() {
                     let cols = cols.columns_ref();
                     let formatted_cols = cols.iter().map(|c| c.into()).collect::<Vec<Column>>();
@@ -1277,10 +1302,6 @@ where
                     let rw = results.start(&formatted_cols).await?;
                     rw.finish().await
                 }
-            }
-            Ok(QueryResult::PgSqlSelect { .. } | QueryResult::PgSqlWrite { .. }) => {
-                // TODO(grfn): Implement this
-                unsupported!("Postgresql result handling not yet implemented")
             }
             Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
                 code,

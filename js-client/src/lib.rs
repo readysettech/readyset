@@ -5,6 +5,7 @@ mod convert;
 mod utils;
 
 use neon::prelude::*;
+use noria_client::UpstreamDatabase;
 use std::cell::RefCell;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
@@ -22,14 +23,14 @@ use std::sync::{Arc, RwLock};
 type BoxedClient = JsBox<RefCell<JsClient>>;
 
 struct JsClient {
-    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority>>>,
+    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority, MySqlConnector>>>,
     runtime: Runtime,
 }
 
 impl Finalize for JsClient {}
 
 impl JsClient {
-    pub fn new(b: Backend<ZookeeperAuthority>, rt: Runtime) -> Self {
+    pub fn new(b: Backend<ZookeeperAuthority, MySqlConnector>, rt: Runtime) -> Self {
         JsClient {
             backend: Arc::new(tokio::sync::Mutex::new(b)),
             runtime: rt,
@@ -80,8 +81,10 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let writer = if !mysql_address.is_empty() {
-        let writer = rt.block_on(MySqlConnector::new(mysql_address.clone()));
-        Writer::MySqlConnector(writer)
+        let writer = rt
+            .block_on(MySqlConnector::connect(mysql_address.clone()))
+            .unwrap();
+        Writer::Upstream(writer)
     } else {
         let writer = rt.block_on(NoriaConnector::new(
             ch.clone(),
@@ -89,7 +92,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
             query_cache.clone(),
             Some(region.clone()),
         ));
-        Writer::NoriaConnector(writer)
+        Writer::Noria(writer)
     };
     let noria_connector = rt.block_on(NoriaConnector::new(
         ch,
@@ -98,13 +101,13 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         Some(region),
     ));
     let mysql_connector = if !mysql_address.is_empty() {
-        Some(rt.block_on(MySqlConnector::new(mysql_address)))
+        Some(rt.block_on(MySqlConnector::connect(mysql_address)).unwrap())
     } else {
         None
     };
 
     let reader = Reader {
-        mysql_connector,
+        upstream: mysql_connector,
         noria_connector,
     };
     let b = BackendBuilder::new()

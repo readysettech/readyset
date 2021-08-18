@@ -24,6 +24,7 @@ use noria_client::backend::{self, Backend};
 use noria_client::backend::{
     mysql_connector::MySqlConnector, noria_connector::NoriaConnector, BackendBuilder,
 };
+use noria_client::UpstreamDatabase;
 use query_generator::ColumnGenerationSpec;
 use reqwest::Url;
 use rinfluxdb::line_protocol::LineBuilder;
@@ -120,9 +121,9 @@ impl Writer {
         let zk_auth = ZookeeperAuthority::new(&self.zookeeper_url).unwrap();
         let mut ch = ControllerHandle::new(zk_auth).await;
 
-        let writer = MySqlConnector::new(self.database_url.clone()).await;
-        let writer: backend::Writer<ZookeeperAuthority> = backend::Writer::MySqlConnector(writer);
-        let mysql_connector = Some(MySqlConnector::new(self.database_url.clone()).await);
+        let writer = MySqlConnector::connect(self.database_url.clone()).await?;
+        let writer: backend::Writer<_, _> = backend::Writer::Upstream(writer);
+        let mysql_connector = Some(MySqlConnector::connect(self.database_url.clone()).await?);
         let noria_connector = NoriaConnector::new(
             ch.clone(),
             auto_increments.clone(),
@@ -137,7 +138,7 @@ impl Writer {
             .build(
                 writer,
                 backend::Reader {
-                    mysql_connector,
+                    upstream: mysql_connector,
                     noria_connector,
                 },
             );
@@ -201,7 +202,7 @@ impl Writer {
         &self,
         article: usize,
         schema: DatabaseSchema,
-        mut backend: &mut Backend<ZookeeperAuthority>,
+        mut backend: &mut Backend<ZookeeperAuthority, MySqlConnector>,
     ) -> anyhow::Result<()> {
         let mut database_spec = DatabaseGenerationSpec::new(schema).table_rows("articles", 1);
         // Article table overrides.
