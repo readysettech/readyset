@@ -321,7 +321,7 @@ steps:
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
     env:
       ONLY_VALIDATE: 1
-      DEPLOY_ARTIFACTS_BUCKET: readysettech-deploy-artifacts-us-west-2/readyset
+      PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
     depends_on:
       - packer-lint
 
