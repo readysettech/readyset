@@ -60,9 +60,9 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ":pipeline: Upload Pipeline"
+  - label: ":pipeline: Upload Validate All Pipeline"
     commands:
-      - buildkite-upload-pipeline
+      - buildkite-terraform-upload-validate-all-pipeline
     depends_on:
       - build-runtime-image
     plugins:
@@ -70,5 +70,7 @@ steps:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
           shell: false
           propagate-environment: true
+          environment:
+            - "RUST_LOG=xtask=debug"
       - ecr#v2.2.0:
           login: true
