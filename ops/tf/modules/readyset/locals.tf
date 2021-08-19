@@ -1,5 +1,5 @@
 locals {
-  ami_account_id     = "069491470376"
+  ami_account_id     = "305232526136"
   device_name        = "/dev/xvdd"
   private_subnet_ids = length(var.private_subnet_ids) == 0 ? tolist(data.aws_subnet_ids.private[0].ids) : var.private_subnet_ids
 
