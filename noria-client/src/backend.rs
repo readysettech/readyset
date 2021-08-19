@@ -97,6 +97,20 @@ async fn write_column<W: AsyncWrite + Unpin>(
     Ok(written?)
 }
 
+async fn write_query_results<W: AsyncWrite + Unpin>(
+    r: Result<(u64, u64), Error>,
+    results: QueryResultWriter<'_, W>,
+) -> io::Result<()> {
+    match r {
+        Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
+        Err(e) => {
+            results
+                .error(e.error_kind(), e.to_string().as_bytes())
+                .await
+        }
+    }
+}
+
 pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
     let took = start.elapsed();
     if took.as_secs_f32() > time::Duration::from_millis(5).as_secs_f32() {
@@ -764,20 +778,6 @@ impl<A: 'static + Authority> Backend<A> {
             }
         }
     }
-
-    async fn write_query_results<W: AsyncWrite + Unpin>(
-        r: Result<(u64, u64), Error>,
-        results: QueryResultWriter<'_, W>,
-    ) -> io::Result<()> {
-        match r {
-            Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
-            Err(e) => {
-                results
-                    .error(e.error_kind(), e.to_string().as_bytes())
-                    .await
-            }
-        }
-    }
 }
 
 fn measure_parse_and_execution_time(
@@ -890,16 +890,16 @@ where
             Ok(QueryResult::NoriaInsert {
                 num_rows_inserted,
                 first_inserted_id,
-            }) => Backend::<A>::write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            }) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
             Ok(QueryResult::NoriaUpdate {
                 num_rows_updated,
                 last_inserted_id
-            }) => Backend::<A>::write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            }) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
             Ok(QueryResult::MySqlWrite {
                 num_rows_affected,
                 last_inserted_id,
             }) => {
-                Backend::<A>::write_query_results(
+                write_query_results(
                     Ok((num_rows_affected, last_inserted_id)),
                     results,
                 )
@@ -962,13 +962,7 @@ where
             Ok(QueryResult::NoriaInsert {
                 num_rows_inserted,
                 first_inserted_id,
-            }) => {
-                Backend::<A>::write_query_results(
-                    Ok((num_rows_inserted, first_inserted_id)),
-                    results,
-                )
-                .await
-            }
+            }) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
             Ok(QueryResult::NoriaSelect {
                 data,
                 select_schema,
@@ -997,23 +991,14 @@ where
             Ok(QueryResult::NoriaUpdate {
                 num_rows_updated,
                 last_inserted_id,
-            }) => {
-                Backend::<A>::write_query_results(Ok((num_rows_updated, last_inserted_id)), results)
-                    .await
-            }
+            }) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
             Ok(QueryResult::NoriaDelete { num_rows_deleted }) => {
                 results.completed(num_rows_deleted, 0).await
             }
             Ok(QueryResult::MySqlWrite {
                 num_rows_affected,
                 last_inserted_id,
-            }) => {
-                Backend::<A>::write_query_results(
-                    Ok((num_rows_affected, last_inserted_id)),
-                    results,
-                )
-                .await
-            }
+            }) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
             Ok(QueryResult::MySqlSelect { data }) => {
                 if let Some(cols) = data.get(0).cloned() {
                     let cols = cols.columns_ref();
