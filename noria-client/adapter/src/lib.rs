@@ -81,10 +81,6 @@ pub struct Options {
     #[clap(long)]
     log_slow: bool,
 
-    /// Be permissive in queries that the adapter accepts (rather than rejecting parse errors)
-    #[clap(long)]
-    permissive: bool,
-
     /// Instead of logging trace events, time them and output metrics on exit
     #[clap(long)]
     time: bool,
@@ -208,7 +204,6 @@ impl<H: ConnectionHandler + Clone + Send + Sync + 'static> NoriaAdapter<H> {
             let backend_builder = BackendBuilder::new()
                 .static_responses(!options.no_static_responses)
                 .slowlog(options.log_slow)
-                .permissive(options.permissive)
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
                 .dialect(self.dialect);

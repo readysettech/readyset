@@ -38,7 +38,6 @@ async fn main() -> Result<()> {
         noria_connector,
     };
     let slowlog = false;
-    let permissive = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()
     }));
@@ -47,7 +46,6 @@ async fn main() -> Result<()> {
     let mut b = BackendBuilder::new()
         .static_responses(static_responses)
         .slowlog(slowlog)
-        .permissive(permissive)
         .users(users.clone())
         .require_authentication(require_authentication)
         .build(writer, reader);
