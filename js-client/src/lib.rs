@@ -66,7 +66,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let mysql_address = parse_arg!("mySQLAddress", "".to_string(), JsString);
     let static_responses = parse_arg!("staticResponses", true, JsBoolean);
     let slowlog = parse_arg!("slowLog", false, JsBoolean);
-    let permissive = parse_arg!("permissive", false, JsBoolean);
     let read_your_write = parse_arg!("readYourWrite", false, JsBoolean);
     let region = parse_arg!("region", "".to_string(), JsString);
     let dialect_name = parse_arg!("dialect", "mysql".to_string(), JsString);
@@ -111,7 +110,6 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let b = BackendBuilder::new()
         .static_responses(static_responses)
         .slowlog(slowlog)
-        .permissive(permissive)
         .require_authentication(false)
         .enable_ryw(read_your_write)
         .dialect(dialect)

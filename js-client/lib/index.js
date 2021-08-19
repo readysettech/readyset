@@ -26,7 +26,6 @@ class Client {
    *  sanitize: boolean,
    *  staticResponses: boolean,
    *  slowLog: boolean,
-   *  permissive: boolean,
    *  readYourWrite: boolean
    * }} config Connection configuration options.
    * Any option can be left out of the configuration object to use the
@@ -37,7 +36,6 @@ class Client {
    * @prop {boolean} config.sanitize defaults to true
    * @prop {boolean} config.staticResponses defaults to true
    * @prop {boolean} config.slowLog defaults to false
-   * @prop {boolean} config.permissive defaults to false
    * @prop {boolean} config.readYourWrite defaults to false
    */
   constructor(config) {

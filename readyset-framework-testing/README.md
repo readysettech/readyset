@@ -47,7 +47,7 @@ Using noria as an example:
 ```bash
 docker run --name zookeeper --restart always -p 2181:2181 -d zookeeper
 cargo r --release --bin noria-server -- --deployment myapp --no-reuse --address 127.0.0.1 --shards 0
-cargo run --release --bin noria-mysql -- --deployment myapp --no-require-authentication --permissive -a 127.0.0.1:3333
+cargo run --release --bin noria-mysql -- --deployment myapp --no-require-authentication  -a 127.0.0.1:3333
 export RS_HOST="127.0.0.1"
 export RS_PORT=3333
 export RS_USERNAME=

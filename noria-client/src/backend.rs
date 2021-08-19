@@ -140,7 +140,6 @@ pub struct Reader<A: 'static + Authority> {
 pub struct BackendBuilder {
     static_responses: bool,
     slowlog: bool,
-    permissive: bool,
     dialect: Dialect,
     users: HashMap<String, String>,
     require_authentication: bool,
@@ -153,7 +152,6 @@ impl Default for BackendBuilder {
         BackendBuilder {
             static_responses: true,
             slowlog: false,
-            permissive: false,
             dialect: Dialect::MySQL,
             users: Default::default(),
             require_authentication: true,
@@ -180,7 +178,6 @@ impl BackendBuilder {
             writer,
             reader,
             slowlog: self.slowlog,
-            permissive: self.permissive,
             dialect: self.dialect,
             users: self.users,
             require_authentication: self.require_authentication,
@@ -196,11 +193,6 @@ impl BackendBuilder {
 
     pub fn slowlog(mut self, slowlog: bool) -> Self {
         self.slowlog = slowlog;
-        self
-    }
-
-    pub fn permissive(mut self, permissive: bool) -> Self {
-        self.permissive = permissive;
         self
     }
 
@@ -241,7 +233,6 @@ pub struct Backend<A: 'static + Authority> {
     writer: Writer<A>,
     reader: Reader<A>,
     slowlog: bool,
-    permissive: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
     /// Map from username to password for all users allowed to connect to the db
@@ -643,19 +634,6 @@ impl<A: 'static + Authority> Backend<A> {
                         SqlQueryType::Write,
                     );
                     res
-                }
-
-                nom_sql::SqlQuery::DropTable(_) => {
-                    warn!("Ignoring drop table because using Noria writer not Mysql writer.");
-                    if self.permissive {
-                        warn!("Permissive flag enabled, so returning successful drop table despite failure.");
-                        Ok(QueryResult::MySqlWrite {
-                            num_rows_affected: 0,
-                            last_inserted_id: 0,
-                        })
-                    } else {
-                        unimplemented!()
-                    }
                 }
                 _ => {
                     error!("unsupported query");
