@@ -171,6 +171,30 @@ steps:
       - ecr#v2.2.0:
           login: true
 
+  - label: ':rust: Build noria-psql release binary'
+    key: build-noria-psql-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-psql
+    - strip target/release/noria-psql
+    artifact_paths:
+    - target/release/noria-psql
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.7.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.2.0:
+          login: true
+
   - label: ':s3: Set release binary version in S3'
     key: set-release-version
     commands:
