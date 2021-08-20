@@ -166,15 +166,7 @@ impl Ingredient for TopK {
             });
         }
 
-        // First, we want to be smart about multiple added/removed rows with same group.
-        // For example, if we get a -, then a +, for the same group, we don't want to
-        // execute two queries. We'll do this by sorting the batch by our group by.
-        let mut rs: Vec<_> = rs.into();
-        rs.sort_by(|a: &Record, b: &Record| {
-            self.project_group(&***a)
-                .unwrap_or_default()
-                .cmp(&self.project_group(&***b).unwrap_or_default())
-        });
+        let rs: Vec<_> = rs.into();
 
         let us = self.us.unwrap();
         let db: &dyn State = state
