@@ -152,7 +152,7 @@ data "aws_iam_policy_document" "developer_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
 
-     principals {
+    principals {
       type        = "AWS"
       identifiers = ["arn:aws:iam::716876017850:role/Developer"]
     }

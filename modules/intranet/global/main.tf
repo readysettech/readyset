@@ -24,23 +24,9 @@ data "aws_iam_policy_document" "credential-factory" {
   }
 }
 
-data "aws_iam_policy_document" "substrate-apigateway-authenticator" {
-  statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["*"]
-  }
-}
-
 data "aws_iam_policy_document" "substrate-apigateway-authorizer" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["*"]
-  }
-}
-
-data "aws_iam_policy_document" "substrate-apigateway-index" {
-  statement {
-    actions   = ["apigateway:GET"]
     resources = ["*"]
   }
 }
@@ -96,6 +82,16 @@ data "aws_iam_policy_document" "substrate-intranet" {
     resources = ["*"]
     sid       = "Accounts"
   }
+  statement {
+    actions   = ["apigateway:GET"]
+    resources = ["*"]
+    sid       = "Index"
+  }
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["*"]
+    sid       = "Login"
+  }
   /*
   statement {
     actions   = ["iam:PassRole"]
@@ -117,21 +113,9 @@ data "aws_iam_user" "credential-factory" {
   user_name = "CredentialFactory"
 }
 
-module "substrate-apigateway-authenticator" {
-  name   = "substrate-apigateway-authenticator"
-  policy = data.aws_iam_policy_document.substrate-apigateway-authenticator.json
-  source = "../../lambda-function/global"
-}
-
 module "substrate-apigateway-authorizer" {
   name   = "substrate-apigateway-authorizer"
   policy = data.aws_iam_policy_document.substrate-apigateway-authorizer.json
-  source = "../../lambda-function/global"
-}
-
-module "substrate-apigateway-index" {
-  name   = "substrate-apigateway-index"
-  policy = data.aws_iam_policy_document.substrate-apigateway-index.json
   source = "../../lambda-function/global"
 }
 

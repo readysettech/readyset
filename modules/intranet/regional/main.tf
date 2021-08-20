@@ -6,16 +6,8 @@ data "aws_iam_role" "apigateway" {
   name = "IntranetAPIGateway"
 }
 
-data "aws_iam_role" "substrate-apigateway-authenticator" {
-  name = "substrate-apigateway-authenticator"
-}
-
 data "aws_iam_role" "substrate-apigateway-authorizer" {
   name = "substrate-apigateway-authorizer"
-}
-
-data "aws_iam_role" "substrate-apigateway-index" {
-  name = "substrate-apigateway-index"
 }
 
 data "aws_iam_role" "substrate-credential-factory" {
@@ -47,27 +39,11 @@ locals {
   }
 }
 
-module "substrate-apigateway-authenticator" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-apigateway-authenticator.zip"
-  name                     = "substrate-apigateway-authenticator"
-  role_arn                 = data.aws_iam_role.substrate-apigateway-authenticator.arn
-  source                   = "../../lambda-function/regional"
-}
-
 module "substrate-apigateway-authorizer" {
   apigateway_execution_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.intranet.id}/*"
   filename                 = "${path.module}/substrate-apigateway-authorizer.zip"
   name                     = "substrate-apigateway-authorizer"
   role_arn                 = data.aws_iam_role.substrate-apigateway-authorizer.arn
-  source                   = "../../lambda-function/regional"
-}
-
-module "substrate-apigateway-index" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-apigateway-index.zip"
-  name                     = "substrate-apigateway-index"
-  role_arn                 = data.aws_iam_role.substrate-apigateway-index.arn
   source                   = "../../lambda-function/regional"
 }
 
@@ -91,6 +67,28 @@ module "substrate-intranet" {
   apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
   filename                 = "${path.module}/substrate-intranet.zip"
   name                     = "substrate-intranet"
+  role_arn                 = data.aws_iam_role.substrate-intranet.arn
+  source                   = "../../lambda-function/regional"
+}
+
+# Dead resources that must hang around a little longer to break a dependency
+# cycle. To allow us to still move on by deleting cmd/... for these programs,
+# they're now using the new cmd/substrate-intranet code, which doesn't matter
+# because nothing's invoking them.
+#
+# Remove these one release after every Intranet endpoint transitions to
+# cmd/substrate-intranet.
+module "substrate-apigateway-authenticator" {
+  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
+  filename                 = "${path.module}/substrate-apigateway-authenticator.zip"
+  name                     = "substrate-apigateway-authenticator"
+  role_arn                 = data.aws_iam_role.substrate-intranet.arn
+  source                   = "../../lambda-function/regional"
+}
+module "substrate-apigateway-index" {
+  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
+  filename                 = "${path.module}/substrate-apigateway-index.zip"
+  name                     = "substrate-apigateway-index"
   role_arn                 = data.aws_iam_role.substrate-intranet.arn
   source                   = "../../lambda-function/regional"
 }
@@ -133,8 +131,10 @@ resource "aws_api_gateway_deployment" "intranet" {
   rest_api_id = aws_api_gateway_rest_api.intranet.id
   stage_name  = var.stage_name
   triggers = {
-    redeployment = sha1(join(",", list(
+    redeployment = sha1(join(",", [
       jsonencode(aws_api_gateway_authorizer.substrate),
+      jsonencode(aws_api_gateway_gateway_response.ACCESS_DENIED),
+      jsonencode(aws_api_gateway_gateway_response.UNAUTHORIZED),
       jsonencode(aws_api_gateway_integration.GET-accounts),
       jsonencode(aws_api_gateway_integration.GET-credential-factory),
       jsonencode(aws_api_gateway_integration.GET-credential-factory-authorize),
@@ -159,10 +159,9 @@ resource "aws_api_gateway_deployment" "intranet" {
       jsonencode(aws_api_gateway_resource.credential-factory-fetch),
       jsonencode(aws_api_gateway_resource.instance-factory),
       jsonencode(aws_api_gateway_resource.login),
-      jsonencode(aws_api_gateway_gateway_response.ACCESS_DENIED),
-      jsonencode(aws_api_gateway_gateway_response.UNAUTHORIZED),
       jsonencode(aws_cloudwatch_log_group.apigateway),
-    )))
+      module.substrate-intranet.source_code_hash,
+    ]))
   }
   variables = {
     "OAuthOIDCClientID"              = var.oauth_oidc_client_id
@@ -252,7 +251,7 @@ resource "aws_api_gateway_integration" "GET-index" {
   resource_id             = aws_api_gateway_rest_api.intranet.root_resource_id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-apigateway-index.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-instance-factory" {
@@ -274,7 +273,7 @@ resource "aws_api_gateway_integration" "GET-login" {
   resource_id             = aws_api_gateway_resource.login.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-apigateway-authenticator.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "POST-instance-factory" {
@@ -296,7 +295,7 @@ resource "aws_api_gateway_integration" "POST-login" {
   resource_id             = aws_api_gateway_resource.login.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-apigateway-authenticator.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_method" "GET-accounts" {
@@ -420,25 +419,16 @@ resource "aws_api_gateway_rest_api" "intranet" {
     types = ["REGIONAL"]
   }
   name = "Intranet"
-  tags = {
-    Manager = "Terraform"
-  }
 }
 
 resource "aws_cloudwatch_log_group" "apigateway" {
   name              = "API-Gateway-Execution-Logs_${aws_api_gateway_rest_api.intranet.id}/${var.stage_name}"
   retention_in_days = 1
-  tags = {
-    Manager = "Terraform"
-  }
 }
 
 resource "aws_cloudwatch_log_group" "apigateway-welcome" {
   name              = "/aws/apigateway/welcome"
   retention_in_days = 1
-  tags = {
-    Manager = "Terraform"
-  }
 }
 
 resource "aws_route53_record" "intranet" {
@@ -471,7 +461,6 @@ resource "aws_security_group" "substrate-instance-factory" {
   vpc_id      = module.substrate.vpc_id
   tags = {
     Environment = module.substrate.tags.environment
-    Manager     = "Terraform"
     Name        = "substrate-instance-factory"
     Quality     = module.substrate.tags.quality
   }

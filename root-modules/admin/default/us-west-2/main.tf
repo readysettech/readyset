@@ -6,6 +6,9 @@ module "intranet" {
   oauth_oidc_client_secret_timestamp = "2021-05-20T14:40:19-07:00"
   okta_hostname                      = "unused-by-Google-IDP"
   selected_regions = [
+    "ap-northeast-1",
+    "eu-west-1",
+    "sa-east-1",
     "us-east-2",
     "us-west-2",
   ]
