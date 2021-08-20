@@ -410,17 +410,7 @@ impl Ingredient for Join {
             });
         }
 
-        // First, we want to be smart about multiple added/removed rows with the same join key
-        // value. For example, if we get a -, then a +, for the same key, we don't want to execute
-        // two queries. We'll do this by sorting the batch by our join key.
         let mut rs: Vec<_> = rs.into();
-        {
-            rs.sort_by(|a: &Record, b: &Record| {
-                a.indices(from_key.clone())
-                    .unwrap_or_default()
-                    .cmp(&b.indices(from_key.clone()).unwrap_or_default())
-            });
-        }
 
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
         let mut at = 0;
