@@ -1,8 +1,8 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io;
 use std::time;
+use std::{collections::hash_map::Entry, sync::Arc};
 
 use async_trait::async_trait;
 use derive_more::From;
@@ -339,6 +339,10 @@ pub enum QueryResult {
     },
     MySqlSelect {
         data: Vec<mysql_async::Row>,
+        // columns optionally provides a list of columns if applicable. This is necessary for
+        // writing back an empty result set from fallback, where we need to capture what the
+        // columns were so we can write an empty header row.
+        columns: Option<Arc<[mysql_async::Column]>>,
     },
     PgSqlSelect {
         data: Vec<pgsql::Row>,
@@ -1096,7 +1100,7 @@ where
                 num_rows_affected,
                 last_inserted_id,
             }) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
-            Ok(QueryResult::MySqlSelect { data }) => {
+            Ok(QueryResult::MySqlSelect { data, columns }) => {
                 if let Some(cols) = data.get(0).cloned() {
                     let cols = cols.columns_ref();
                     let formatted_cols = cols
@@ -1117,10 +1121,19 @@ where
                     }
                     rw.finish().await
                 } else {
-                    // TODO: (Dan) msql-srv will respond Query Ok in this case instead of "Empty
-                    // set". Passing a dummy column to result.start() will trigger an empty set
-                    // response. A better solution could be to modify msql-srv.
-                    let rw = results.start(&[]).await?;
+                    let formatted_cols = if let Some(c) = columns {
+                        c.iter()
+                            .map(|c| Column {
+                                table: c.table_str().to_string(),
+                                column: c.name_str().to_string(),
+                                coltype: c.column_type(),
+                                colflags: c.flags(),
+                            })
+                            .collect::<Vec<Column>>()
+                    } else {
+                        vec![]
+                    };
+                    let rw = results.start(&formatted_cols).await?;
                     rw.finish().await
                 }
             }

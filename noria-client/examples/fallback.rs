@@ -62,7 +62,7 @@ async fn main() {
                 println!("Noria Result:");
                 println!("{:#?}", data);
             }
-            Ok(QueryResult::MySqlSelect { data }) => {
+            Ok(QueryResult::MySqlSelect { data, .. }) => {
                 println!("MySQL Result:");
                 println!("{:#?}", data);
             }
