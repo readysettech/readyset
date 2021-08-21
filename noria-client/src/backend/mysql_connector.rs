@@ -78,8 +78,13 @@ impl MySqlConnector {
 
     pub async fn handle_select(&mut self, query: &str) -> std::result::Result<QueryResult, Error> {
         let q = query.to_string();
-        let rows = self.conn.query(&q).await?;
-        Ok(QueryResult::MySqlSelect { data: rows })
+        let mut result = self.conn.query_iter(&q).await?;
+        let columns = result.columns();
+        let rows = result.collect().await?;
+        Ok(QueryResult::MySqlSelect {
+            data: rows,
+            columns,
+        })
     }
 
     /// Executes the given query on the mysql backend.
