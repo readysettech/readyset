@@ -15,7 +15,6 @@ use tokio::sync::mpsc;
 use tracing::Level;
 
 use msql_srv::{Column, ColumnFlags, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter};
-use mysql_connector::MySqlConnector;
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
@@ -23,7 +22,6 @@ use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::{internal, unsupported, DataType, ReadySetError};
 use noria_client_metrics::recorded::SqlQueryType;
-use noria_connector::NoriaConnector;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::backend::error::Error;
@@ -33,11 +31,14 @@ use crate::{rewrite, UpstreamDatabase};
 
 use self::mysql_connector::WriteResult;
 
+pub mod error;
 pub mod mysql_connector;
 pub mod noria_connector;
 pub mod postgresql_connector;
 
-pub mod error;
+pub use mysql_connector::MySqlConnector;
+pub use noria_connector::NoriaConnector;
+pub use postgresql_connector::PostgreSqlConnector;
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,

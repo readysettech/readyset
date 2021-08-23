@@ -1,5 +1,5 @@
 use clap::{Clap, ValueHint};
-use noria_logictest::generate::DatabaseURL;
+use noria_logictest::upstream::DatabaseURL;
 use rand::distributions::{Distribution, Uniform};
 use std::env;
 use std::fs;
@@ -91,7 +91,7 @@ impl Reader {
             // Execute and time the query.
             let id = self.generate_user_id();
             let query_start = Instant::now();
-            let _ = conn.execute(query.clone(), vec![id as u64]).await.unwrap();
+            let _ = conn.execute(query.clone(), vec![id as u32]).await.unwrap();
             let query_elapsed = Instant::now() - query_start;
             reader_update.queries.push(query_elapsed.as_millis());
         }

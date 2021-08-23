@@ -6,3 +6,5 @@ mod resultset;
 mod row;
 mod schema;
 mod value;
+
+pub use backend::Backend;

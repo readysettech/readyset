@@ -5,7 +5,7 @@ use crate::spec::DatabaseGenerationSpec;
 use anyhow::{Context, Result};
 use noria::ZookeeperAuthority;
 use noria_client::backend::{mysql_connector::MySqlConnector, Backend};
-use noria_logictest::generate::DatabaseConnection;
+use noria_logictest::upstream::DatabaseConnection;
 use std::convert::TryInto;
 
 const MAX_BATCH_ROWS: usize = 10000;

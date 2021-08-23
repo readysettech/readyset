@@ -1,4 +1,5 @@
 #![warn(clippy::dbg_macro)]
+
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
@@ -12,6 +13,7 @@ use clap::Clap;
 use colored::Colorize;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
+use lazy_static::lazy_static;
 use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
@@ -24,9 +26,11 @@ pub mod ast;
 pub mod generate;
 pub mod parser;
 pub mod runner;
+pub mod upstream;
 
-use crate::generate::{DatabaseURL, Generate};
+use crate::generate::Generate;
 use crate::runner::{RunOptions, TestScript};
+use crate::upstream::{DatabaseType, DatabaseURL};
 
 #[derive(Clap)]
 struct Opts {
@@ -217,21 +221,32 @@ struct Verify {
     #[clap(flatten)]
     input_opts: InputFileOptions,
 
-    /// Connect to and run verification against a MySQL server rather than using noria
+    /// If passed, connect to and run verification against the database with the given URL, which
+    /// should start with either postgresql:// or mysql://, rather than using noria.
     #[clap(long)]
+    database_url: Option<DatabaseURL>,
+
+    /// Shorthand for `--database-url mysql://root:noria@localhost:3306/sqllogictest`
+    #[clap(long, conflicts_with = "database-url")]
     mysql: bool,
 
-    /// MySQL host to connect to. Ignored if `mysql` is not set
-    #[clap(long, default_value = "localhost")]
-    mysql_host: String,
+    /// Shorthand for `--database-url postgresql://postgres:noria@localhost:5432/sqllogictest`
+    #[clap(long, conflicts_with = "database-url")]
+    postgresql: bool,
 
-    /// MySQL port to connect to. Ignored if `mysql` is not set
-    #[clap(long, default_value = "3306")]
-    mysql_port: u16,
+    /// Enable an upstream database backend for the client, with replication to Noria.  All writes
+    /// will pass through to the given database and be replicated to Noria.
+    ///
+    /// The value should be a database URL starting with either postgresql:// or mysql://
+    #[clap(long)]
+    replication_url: Option<String>,
 
-    /// MySQL database to connect to. Ignored if `mysql` is not set
-    #[clap(long, default_value = "sqllogictest")]
-    mysql_db: String,
+    /// Type of database to use for the adapter.
+    ///
+    /// Ignored if --database-url is passed, must match the database type of --replication-url if
+    /// both are passed
+    #[clap(long, default_value="mysql", possible_values=&["mysql", "postgresql"])]
+    database_type: DatabaseType,
 
     /// Enable query graph reuse
     #[clap(long)]
@@ -240,12 +255,6 @@ struct Verify {
     /// Enable logging in both noria and noria-mysql
     #[clap(long, short)]
     verbose: bool,
-
-    /// Enable a MySQL backend for the client, with binlog replication to Noria.
-    /// All writes will pass through to MySQL and be replicated to Noria using binlog.
-    /// The parameter to this argument is a MySQL URL with no database specified.
-    #[clap(long)]
-    binlog_mysql: Option<String>,
 
     /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
     #[clap(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
@@ -320,13 +329,33 @@ impl Display for VerifyResult {
     }
 }
 
+lazy_static! {
+    static ref DEFAULT_MYSQL_URL: DatabaseURL = "mysql://root:noria@localhost:3306/sqllogictest"
+        .parse()
+        .unwrap();
+    static ref DEFAULT_POSTGRESQL_URL: DatabaseURL =
+        "postgresql://postgres:noria@localhost:5432/sqllogictest"
+            .parse()
+            .unwrap();
+}
+
 impl Verify {
+    fn database_url(&self) -> Option<&DatabaseURL> {
+        if self.mysql {
+            Some(&*DEFAULT_MYSQL_URL)
+        } else if self.postgresql {
+            Some(&*DEFAULT_POSTGRESQL_URL)
+        } else {
+            self.database_url.as_ref()
+        }
+    }
+
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
         let result = Arc::new(Mutex::new(VerifyResult::default()));
         let mut tasks = FuturesUnordered::new();
 
-        let max_tasks = if self.binlog_mysql.is_some() {
+        let max_tasks = if self.replication_url.is_some() {
             // Can not parallelize tests when binlog is enabled, because each test reuses the same db
             1
         } else {
@@ -416,14 +445,12 @@ impl Verify {
 impl From<&Verify> for RunOptions {
     fn from(verify: &Verify) -> Self {
         Self {
-            use_mysql: verify.mysql,
-            mysql_host: verify.mysql_host.clone(),
-            mysql_port: verify.mysql_port,
-            mysql_db: verify.mysql_db.clone(),
+            database_type: verify.database_type,
             verbose: verify.verbose,
             enable_reuse: verify.enable_reuse,
-            binlog_url: verify.binlog_mysql.clone(),
-            ..Self::default()
+            upstream_database_url: verify.database_url().cloned(),
+            replication_url: verify.replication_url.clone(),
+            ..Default::default()
         }
     }
 }

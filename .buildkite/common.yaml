@@ -215,12 +215,12 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
 
-  - label: 'Run logictest with binlog replication'
+  - label: 'Run logictest with MySQL replication'
     key: logictest-binlog
     command:
-    - 'echo +++ Running noria-logictest with binlog replication'
-    - cargo --locked run --bin noria-logictest -- verify --binlog-mysql mysql://root:noria@mysql logictests
-    - cargo --locked run --bin noria-logictest -- verify -r --binlog-mysql mysql://root:noria@mysql logictests/framework
+    - 'echo +++ Running noria-logictest with MySQL replication'
+    - cargo --locked run --bin noria-logictest -- verify --replication-url mysql://root:noria@mysql/sqllogictest logictests
+    - cargo --locked run --bin noria-logictest -- verify -r --replication-url  mysql://root:noria@mysql/sqllogictest logictests/framework
     timeout_in_minutes: 60
     depends_on:
     - build-image

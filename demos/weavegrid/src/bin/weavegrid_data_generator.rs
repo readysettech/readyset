@@ -2,7 +2,7 @@ use clap::{Clap, ValueHint};
 use demo_utils::generate::load;
 use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use noria::DataType;
-use noria_logictest::generate::DatabaseURL;
+use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
 use std::convert::TryFrom;
 use std::env;

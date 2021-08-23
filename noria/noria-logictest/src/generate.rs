@@ -4,99 +4,24 @@ use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
 use clap::Clap;
 use colored::Colorize;
 use itertools::Itertools;
-use mysql::prelude::Queryable;
-use mysql::Params;
-use mysql_async as mysql;
+
 use nom_sql::{
     parse_query, BinaryOperator, CreateTableStatement, DeleteStatement, Dialect, Expression,
     SqlQuery, Table,
 };
 use query_generator::{GeneratorState, QuerySeed};
 
-use crate::ast::{
-    Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult, Value,
-};
+use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
 use crate::runner::TestScript;
+use crate::upstream::{DatabaseConnection, DatabaseURL};
 
 /// Default value for [`Seed::hash_threshold`]
 const DEFAULT_HASH_THRESHOLD: usize = 20;
-
-/// URL for a database to compare against. In the future we likely will want to add more of these
-#[derive(Debug, Clone)]
-pub enum DatabaseURL {
-    MySQL(mysql::Opts),
-}
-
-impl DatabaseURL {
-    pub async fn connect(&self) -> anyhow::Result<DatabaseConnection> {
-        match self {
-            DatabaseURL::MySQL(opts) => Ok(DatabaseConnection::MySQL(
-                mysql::Conn::new(opts.clone()).await?,
-            )),
-        }
-    }
-}
-
-pub enum DatabaseConnection {
-    MySQL(mysql::Conn),
-}
-
-impl DatabaseConnection {
-    pub async fn query_drop<Q>(&mut self, stmt: Q) -> anyhow::Result<()>
-    where
-        Q: AsRef<str> + Send + Sync,
-    {
-        match self {
-            DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
-        }
-    }
-
-    pub async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
-    where
-        Q: AsRef<str>,
-        P: Into<Params>,
-    {
-        match self {
-            DatabaseConnection::MySQL(conn) => {
-                let results = conn
-                    .exec_iter(stmt.as_ref(), params)
-                    .await?
-                    .map(|mut r| {
-                        (0..r.columns().len())
-                            .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .await?;
-
-                results.into_iter().collect()
-            }
-        }
-    }
-
-    async fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
-        match self {
-            DatabaseConnection::MySQL(conn) => script.run_on_mysql(conn, None).await,
-        }
-    }
-}
-
-impl FromStr for DatabaseURL {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("mysql://") {
-            Ok(Self::MySQL(mysql::Opts::from_url(s)?))
-        } else {
-            Err(anyhow!("Invalid URL format"))
-        }
-    }
-}
 
 #[derive(Debug)]
 enum Relation {

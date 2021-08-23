@@ -6,8 +6,7 @@ use noria::DataType;
 use noria::KeyComparison;
 use noria::View;
 use noria::ViewQuery;
-use noria_logictest::generate::DatabaseConnection;
-use noria_logictest::generate::DatabaseURL;
+use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use rinfluxdb::line_protocol::LineBuilder;
@@ -361,7 +360,7 @@ impl MySqlExecutor {
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
         let _ = self
             .conn
-            .execute(self.query.clone(), vec![q.key as u64])
+            .execute(self.query.clone(), vec![q.key as u32])
             .await
             .unwrap();
         Ok(vec![q])
