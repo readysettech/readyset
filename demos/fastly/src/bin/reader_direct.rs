@@ -6,13 +6,16 @@ use noria::DataType;
 use noria::KeyComparison;
 use noria::View;
 use noria::ViewQuery;
+use noria_logictest::generate::DatabaseConnection;
+use noria_logictest::generate::DatabaseURL;
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use rinfluxdb::line_protocol::LineBuilder;
 use std::convert::{TryFrom, TryInto};
-use std::mem;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::{env, fs, mem};
 use structopt::clap::{arg_enum, ArgGroup};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -33,7 +36,7 @@ arg_enum! {
 struct NoriaClientOpts {
     /// ReadySet's zookeeper connection string.
     #[structopt(long, required_if("database_type", "noria"))]
-    zookeeper_url: String,
+    zookeeper_url: Option<String>,
 
     /// The region used when requesting a view.
     #[structopt(long)]
@@ -51,10 +54,23 @@ struct NoriaClientOpts {
     batch_size: u64,
 }
 
+#[derive(StructOpt, Clone)]
+struct MySqlOpts {
+    /// MySQL database connection string.
+    /// Only one of MySQL database url and zooekeper url can be specified.
+    #[structopt(long, required_if("database_type", "mysql"))]
+    database_url: Option<DatabaseURL>,
+
+    /// The path to the parameterized query.
+    #[structopt(long, required_if("database_type", "mysql"))]
+    query: Option<PathBuf>,
+}
+
 arg_enum! {
     #[derive(StructOpt)]
     enum DatabaseType {
         Noria,
+        MySql,
     }
 }
 
@@ -133,6 +149,11 @@ struct Reader {
     /// noria client.
     #[structopt(flatten)]
     noria_opts: NoriaClientOpts,
+
+    /// The set of options to be specified by a user to connect via a
+    /// mysql client.
+    #[structopt(flatten)]
+    mysql_opts: MySqlOpts,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +226,7 @@ where
 /// subsequent queries.
 enum QueryExecutor {
     Noria(NoriaExecutor),
+    MySql(MySqlExecutor),
 }
 
 impl QueryExecutor {
@@ -214,6 +236,7 @@ impl QueryExecutor {
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
         match &mut *self {
             QueryExecutor::Noria(e) => e.on_query(q).await,
+            QueryExecutor::MySql(e) => e.on_query(q).await,
         }
     }
 }
@@ -262,7 +285,7 @@ struct NoriaExecutor {
 
 impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
-        let authority = Arc::new(ZookeeperAuthority::new(&opts.zookeeper_url).unwrap());
+        let authority = Arc::new(ZookeeperAuthority::new(&opts.zookeeper_url.unwrap()).unwrap());
         let mut handle: ControllerHandle<ZookeeperAuthority> =
             ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
@@ -314,6 +337,34 @@ impl NoriaExecutor {
 
         // The executor did not execute any queries when this query was added.
         Ok(Vec::new())
+    }
+}
+
+/// Executes queries directly to Noria through the `View` API.
+struct MySqlExecutor {
+    conn: DatabaseConnection,
+    query: String,
+}
+
+impl MySqlExecutor {
+    async fn init(opts: MySqlOpts) -> Self {
+        let fastly_query_file = opts.query.clone().unwrap_or_else(|| {
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/fastly_read_query.sql")
+        });
+        let query = fs::read_to_string(fastly_query_file).unwrap();
+        Self {
+            conn: opts.database_url.unwrap().connect().await.unwrap(),
+            query,
+        }
+    }
+
+    async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
+        let _ = self
+            .conn
+            .execute(self.query.clone(), vec![q.key as u64])
+            .await
+            .unwrap();
+        Ok(vec![q])
     }
 }
 
@@ -523,6 +574,9 @@ impl Reader {
                     let executor: QueryExecutor = match self.database_type {
                         DatabaseType::Noria => {
                             QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
+                        }
+                        DatabaseType::MySql => {
+                            QueryExecutor::MySql(MySqlExecutor::init(self.mysql_opts.clone()).await)
                         }
                     };
 
