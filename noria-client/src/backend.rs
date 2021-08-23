@@ -380,12 +380,13 @@ impl<A: 'static + Authority> Backend<A> {
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
     ) -> Result<QueryResult, Error> {
-        let mut mysql = self
+        let url = self
             .reader
             .mysql_connector
-            // TODO(grfn): Find a way to avoid this clone
-            .clone()
-            .ok_or_else(|| internal_err("race_read called without fallback configured"))?;
+            .as_ref()
+            .ok_or_else(|| internal_err("race read called without fallback configured"))?
+            .url();
+        let mut mysql = MySqlConnector::new(url.to_string()).await;
         let mut noria = self.reader.noria_connector.clone();
 
         macro_rules! grab_err {
