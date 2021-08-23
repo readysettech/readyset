@@ -5,7 +5,7 @@ output "zookeeper_private_ips" {
 
 output "server_private_ips" {
   description = "ReadySet Servers private IPs"
-  value       = module.readyset_tmp.zookeeper_private_ips
+  value       = module.readyset_tmp.server_private_ips
 }
 
 output "db_password" {
