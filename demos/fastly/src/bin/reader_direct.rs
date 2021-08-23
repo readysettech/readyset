@@ -34,6 +34,10 @@ struct Reader {
     #[structopt(long, default_value = "10")]
     user_table_rows: usize,
 
+    /// The index of the first user in the system, keys are generated in the range [user_offset..user_offset+user_table_rows).
+    #[structopt(long, default_value = "0")]
+    user_offset: u64,
+
     /// ReadySet's zookeeper connection string.
     #[structopt(long)]
     zookeeper_url: String,
@@ -113,6 +117,7 @@ struct BatchedQuery {
 /// Generates random queries using a provided `Distribution`
 struct QueryFactory<T, D> {
     distribution: D,
+    offset: u64,
     rng: rand::rngs::SmallRng,
     _t: std::marker::PhantomData<T>,
 }
@@ -127,9 +132,10 @@ where
     <T as TryInto<u64>>::Error: std::fmt::Debug,
     D: Distribution<T>,
 {
-    fn new(distribution: D) -> Self {
+    fn new(distribution: D, offset: u64) -> Self {
         QueryFactory {
             distribution,
+            offset,
             rng: rand::rngs::SmallRng::from_entropy(),
             _t: Default::default(),
         }
@@ -137,11 +143,14 @@ where
 
     fn new_query(&mut self) -> BatchedQuery {
         let QueryFactory {
-            distribution, rng, ..
+            distribution,
+            offset,
+            rng,
+            ..
         } = self;
 
         BatchedQuery {
-            key: distribution.sample(rng).try_into().unwrap(),
+            key: distribution.sample(rng).try_into().unwrap() + *offset,
             issued: Instant::now(),
         }
     }
@@ -406,12 +415,14 @@ impl Reader {
 
                 tokio::spawn(async move {
                     let factory: Box<dyn QueryGenerator + Send> = match self.distribution {
-                        Dist::Uniform => Box::new(QueryFactory::new(Uniform::new(
-                            0,
-                            self.user_table_rows as u64,
-                        ))),
+                        Dist::Uniform => Box::new(QueryFactory::new(
+                            Uniform::new(0, self.user_table_rows as u64),
+                            self.user_offset,
+                        )),
                         Dist::Zipf => Box::new(QueryFactory::new(
-                            zipf::ZipfDistribution::new(self.user_table_rows, self.alpha).unwrap(),
+                            zipf::ZipfDistribution::new(self.user_table_rows - 1, self.alpha)
+                                .unwrap(),
+                            self.user_offset,
                         )),
                     };
 
