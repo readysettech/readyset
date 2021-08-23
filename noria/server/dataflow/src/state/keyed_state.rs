@@ -415,31 +415,31 @@ impl KeyedState {
     /// the number of bytes freed. Returns `None` if map is empty.
     pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(u64, Vec<DataType>)> {
         let (rs, key) = match *self {
-            KeyedState::SingleHash(ref mut m) => {
+            KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index).map(|(k, rs)| (rs, vec![k]))
             }
-            KeyedState::DoubleHash(ref mut m) => {
+            KeyedState::DoubleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
             }
-            KeyedState::TriHash(ref mut m) => {
+            KeyedState::TriHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
             }
-            KeyedState::QuadHash(ref mut m) => {
+            KeyedState::QuadHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
             }
-            KeyedState::SexHash(ref mut m) => {
+            KeyedState::SexHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index)
                     .map(|(k, rs)| (rs, k.into_elements().collect()))
             }
-            KeyedState::MultiHash(ref mut m, _) => {
+            KeyedState::MultiHash(ref mut m, _) if !m.is_empty() => {
                 let index = seed % m.len();
                 m.swap_remove_index(index).map(|(k, rs)| (rs, k))
             }
@@ -590,6 +590,30 @@ impl From<&Index> for KeyedState {
             (6, HashMap) => KeyedState::SexHash(Default::default()),
             (x, HashMap) => KeyedState::MultiHash(Default::default(), x),
             (x, BTreeMap) => KeyedState::MultiBTree(Default::default(), x),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evict_with_seed_empty() {
+        for index_cols in &[
+            vec![0],
+            vec![0, 1],
+            vec![0, 1, 3],
+            vec![0, 1, 3, 4],
+            vec![0, 1, 3, 4, 5],
+            vec![0, 1, 3, 4, 5, 6],
+            vec![0, 1, 3, 4, 5, 6, 7],
+        ] {
+            for index_type in [IndexType::HashMap, IndexType::BTreeMap] {
+                let index = Index::new(index_type, index_cols.clone());
+                let mut state = KeyedState::from(&index);
+                assert!(state.evict_with_seed(123).is_none());
+            }
         }
     }
 }
