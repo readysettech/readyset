@@ -2,21 +2,26 @@
 //!
 //! [1]: https://www.sqlite.org/sqllogictest/doc/trunk/about.wiki
 
-use std::cmp;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::fmt::{self, Display};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
+use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use ascii_utils::Check;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use msql_srv::MysqlTime;
 use mysql::chrono::NaiveDateTime;
 use mysql_async as mysql;
 use noria::{DataType, TIMESTAMP_FORMAT};
+use pgsql::types::{accepts, to_sql_checked};
+use tokio_postgres as pgsql;
 
 /// The expected result of a statement
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -232,6 +237,52 @@ impl From<Value> for mysql::Value {
     }
 }
 
+impl pgsql::types::ToSql for Value {
+    fn to_sql(
+        &self,
+        ty: &pgsql::types::Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<pgsql::types::IsNull, Box<dyn Error + Sync + Send>> {
+        match self {
+            Value::Text(x) => x.to_sql(ty, out),
+            Value::Integer(x) => x.to_sql(ty, out),
+            Value::Real(i, f) => (*i as f64 + ((*f as f64) / 1_000_000_000.0)).to_sql(ty, out),
+            Value::Date(x) => x.to_sql(ty, out),
+            Value::Time(x) => NaiveTime::from(*x).to_sql(ty, out),
+            Value::Null => None::<i8>.to_sql(ty, out),
+        }
+    }
+
+    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
+
+    to_sql_checked!();
+}
+
+impl<'a> pgsql::types::FromSql<'a> for Value {
+    fn from_sql(
+        ty: &pgsql::types::Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        use pgsql::types::Type;
+
+        match *ty {
+            Type::BOOL => Ok(Self::Integer(bool::from_sql(ty, raw)? as _)),
+            Type::CHAR => Ok(Self::Integer(i8::from_sql(ty, raw)? as _)),
+            Type::INT2 => Ok(Self::Integer(i16::from_sql(ty, raw)? as _)),
+            Type::INT4 => Ok(Self::Integer(i32::from_sql(ty, raw)? as _)),
+            Type::INT8 => Ok(Self::Integer(i64::from_sql(ty, raw)?)),
+            Type::FLOAT4 => Ok(Self::from(f32::from_sql(ty, raw)? as f64)),
+            Type::FLOAT8 => Ok(Self::from(f64::from_sql(ty, raw)?)),
+            Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
+            Type::DATE => Ok(Self::Date(NaiveDateTime::from_sql(ty, raw)?)),
+            Type::TIME => Ok(Self::Time(NaiveTime::from_sql(ty, raw)?.into())),
+            _ => Err("Invalid type".into()),
+        }
+    }
+
+    accepts!(BOOL, CHAR, INT2, INT4, INT8, FLOAT4, FLOAT8, TEXT, DATE, TIME);
+}
+
 impl TryFrom<DataType> for Value {
     type Error = anyhow::Error;
 
@@ -341,6 +392,27 @@ impl Value {
         }
     }
 
+    pub fn convert_type<'a>(&'a self, typ: &Type) -> anyhow::Result<Cow<'a, Self>> {
+        match (self, typ) {
+            (Self::Text(_), Type::Text)
+            | (Self::Integer(_), Type::Integer)
+            | (Self::Real(_, _), Type::Real)
+            | (Self::Date(_), Type::Date)
+            | (Self::Time(_), Type::Time)
+            | (Self::Null, _) => Ok(Cow::Borrowed(self)),
+            (Self::Text(txt), Type::Integer) => Ok(Cow::Owned(Self::Integer(txt.parse()?))),
+            (Self::Text(txt), Type::Real) => Ok(Cow::Owned(Self::from(txt.parse::<f64>()?))),
+            (Self::Text(txt), Type::Date) => Ok(Cow::Owned(Self::Date(
+                NaiveDateTime::parse_from_str(txt, "%Y-%m-%d %H:%M:%S")?,
+            ))),
+            (Self::Text(txt), Type::Time) => Ok(Cow::Owned(Self::Time(txt.parse()?))),
+            _ => {
+                dbg!(self, typ);
+                todo!()
+            }
+        }
+    }
+
     pub fn hash_results(results: &[Self]) -> md5::Digest {
         let mut context = md5::Context::new();
         for result in results {
@@ -442,6 +514,54 @@ impl Display for QueryParams {
         }
 
         Ok(())
+    }
+}
+
+pub enum QueryParamsIntoIter {
+    Empty,
+    Positional(vec::IntoIter<Value>),
+    Numbered(RangeInclusive<u32>, HashMap<u32, Value>),
+}
+
+impl Iterator for QueryParamsIntoIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::Positional(vs) => vs.next(),
+            Self::Numbered(is, vals) => is.next().map(|i| vals.remove(&i).unwrap()),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = match self {
+            Self::Empty => 0,
+            Self::Positional(vs) => vs.len(),
+            Self::Numbered(_, vs) => vs.len(),
+        };
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for QueryParamsIntoIter {}
+
+impl IntoIterator for QueryParams {
+    type Item = Value;
+
+    type IntoIter = QueryParamsIntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        use QueryParamsIntoIter::*;
+
+        match self {
+            QueryParams::NumberedParams(np) if np.is_empty() => Empty,
+            QueryParams::PositionalParams(ps) => Positional(ps.into_iter()),
+            QueryParams::NumberedParams(np) => {
+                let max_val = np.keys().max().unwrap();
+                Numbered(0..=*max_val, np)
+            }
+        }
     }
 }
 

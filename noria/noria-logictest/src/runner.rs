@@ -1,38 +1,36 @@
-use anyhow::{anyhow, bail, Context};
-use colored::*;
-use itertools::Itertools;
-use mysql_async as mysql;
-use mysql_async::prelude::Queryable;
-use mysql_async::Row;
-use noria_client::backend::Reader;
-use noria_client::backend::Writer;
-use noria_client::UpstreamDatabase;
 use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::iter::FromIterator;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::time::sleep;
 
+use anyhow::{anyhow, bail, Context};
+use colored::*;
+use itertools::Itertools;
 use msql_srv::MysqlIntermediary;
+use mysql_async as mysql;
+use tokio_postgres as pgsql;
+
 use nom_sql::SelectStatement;
 use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
-use noria_client::backend::mysql_connector::MySqlConnector;
-use noria_client::backend::noria_connector::NoriaConnector;
-use noria_client::backend::BackendBuilder;
+use noria_client::backend::{
+    BackendBuilder, MySqlConnector, NoriaConnector, PostgreSqlConnector, Reader, Writer,
+};
+use noria_client::UpstreamDatabase;
 use noria_server::{Builder, ReuseConfigType};
 
 use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
 use crate::parser;
+use crate::upstream::{DatabaseConnection, DatabaseType, DatabaseURL};
 
 #[derive(Debug, Clone)]
 pub struct TestScript {
@@ -72,29 +70,23 @@ impl TestScript {
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
+    pub database_type: DatabaseType,
     pub deployment_name: String,
-    pub use_mysql: bool,
-    pub mysql_host: String,
-    pub mysql_port: u16,
-    pub mysql_user: String,
-    pub mysql_db: String,
+    pub upstream_database_url: Option<DatabaseURL>,
+    pub replication_url: Option<String>,
     pub enable_reuse: bool,
     pub verbose: bool,
-    pub binlog_url: Option<String>,
 }
 
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
             deployment_name: "sqllogictest".to_string(),
-            use_mysql: false,
-            mysql_host: "localhost".to_string(),
-            mysql_port: 3306,
-            mysql_user: "root".to_string(),
-            mysql_db: "sqllogictest".to_string(),
+            upstream_database_url: None,
             enable_reuse: false,
             verbose: false,
-            binlog_url: None,
+            replication_url: None,
+            database_type: DatabaseType::MySQL,
         }
     }
 }
@@ -108,18 +100,11 @@ impl RunOptions {
         }
     }
 
-    pub fn mysql_opts_no_db(&self) -> mysql::Opts {
-        mysql::OptsBuilder::default()
-            .ip_or_hostname(self.mysql_host.clone())
-            .tcp_port(self.mysql_port)
-            .user(Some(self.mysql_user.clone()))
-            .into()
-    }
-
-    pub fn mysql_opts(&self) -> mysql::Opts {
-        mysql::OptsBuilder::from_opts(self.mysql_opts_no_db())
-            .db_name(Some(self.mysql_db.clone()))
-            .into()
+    fn db_name(&self) -> &str {
+        self.upstream_database_url
+            .as_ref()
+            .and_then(|url| url.db_name())
+            .unwrap_or("noria")
     }
 }
 
@@ -167,17 +152,22 @@ impl TestScript {
                 .blue()
         );
 
-        if opts.use_mysql {
-            self.recreate_test_database(opts.mysql_opts().clone(), &opts.mysql_db)
-                .await?;
-            let mut conn = mysql::Conn::new(opts.mysql_opts())
-                .await
-                .with_context(|| "connecting to mysql")?;
+        let db_name = match &opts.upstream_database_url {
+            Some(db_url) => db_url.upstream_type().to_string(),
+            None => "Noria".to_owned(),
+        };
 
-            self.run_on_mysql(&mut conn, None).await?;
+        if let Some(upstream_url) = &opts.upstream_database_url {
+            self.recreate_test_database(upstream_url).await?;
+            let mut conn = upstream_url
+                .connect()
+                .await
+                .with_context(|| "connecting to upstream database")?;
+
+            self.run_on_database(&mut conn, None).await?;
         } else {
-            if let Some(binlog_url) = &opts.binlog_url {
-                self.recreate_test_database(binlog_url.try_into().unwrap(), &opts.mysql_db)
+            if let Some(replication_url) = &opts.replication_url {
+                self.recreate_test_database(&replication_url.parse()?)
                     .await?;
             }
 
@@ -189,7 +179,7 @@ impl TestScript {
             format!(
                 "==> Successfully ran {} operations against {}",
                 self.records.len(),
-                if opts.use_mysql { "MySQL" } else { "Noria" }
+                db_name
             )
             .bold()
         );
@@ -197,23 +187,28 @@ impl TestScript {
         Ok(())
     }
 
-    /// Establish a connection to MySQL and recreate the test database
-    async fn recreate_test_database<S: AsRef<str>>(
-        &self,
-        opts: mysql::Opts,
-        db_name: &S,
-    ) -> anyhow::Result<()> {
-        let mut create_db_conn = mysql::Conn::new(opts)
+    /// Establish a connection to the upstream DB server and recreate the test database
+    async fn recreate_test_database(&self, url: &DatabaseURL) -> anyhow::Result<()> {
+        let db_name = url
+            .db_name()
+            .ok_or_else(|| anyhow!("Must specify database name as part of database URL"))?;
+        let mut admin_url = url.clone();
+        admin_url.set_db_name(match url.upstream_type() {
+            DatabaseType::PostgreSQL => "postgres".to_owned(),
+            DatabaseType::MySQL => "mysql".to_owned(),
+        });
+        let mut admin_conn = admin_url
+            .connect()
             .await
-            .with_context(|| "connecting to mysql")?;
+            .with_context(|| "connecting to upstream")?;
 
-        create_db_conn
-            .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name.as_ref()))
+        admin_conn
+            .query_drop(format!("DROP DATABASE IF EXISTS {}", db_name))
             .await
             .with_context(|| "dropping database")?;
 
-        create_db_conn
-            .query_drop(format!("CREATE DATABASE {}", db_name.as_ref()))
+        admin_conn
+            .query_drop(format!("CREATE DATABASE {}", db_name))
             .await
             .with_context(|| "creating database")?;
 
@@ -225,13 +220,15 @@ impl TestScript {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
         let mut noria_handle = self.start_noria_server(opts, Arc::clone(&authority)).await;
-        let (adapter_task, conn_opts) = self.setup_mysql_adapter(opts, authority).await;
+        let (adapter_task, db_url) = self.setup_adapter(opts, authority).await;
 
-        let mut conn = mysql::Conn::new(conn_opts)
+        let mut conn = db_url
+            .connect()
             .await
-            .with_context(|| "connecting to noria-mysql")?;
+            .with_context(|| "connecting to adapter")?;
 
-        self.run_on_mysql(&mut conn, noria_handle.c.clone()).await?;
+        self.run_on_database(&mut conn, noria_handle.c.clone())
+            .await?;
 
         // After all tests are done, stop the adapter
         adapter_task.abort();
@@ -244,9 +241,9 @@ impl TestScript {
         Ok(())
     }
 
-    pub async fn run_on_mysql(
+    pub async fn run_on_database(
         &self,
-        conn: &mut mysql::Conn,
+        conn: &mut DatabaseConnection,
         mut noria: Option<ControllerHandle<LocalAuthority>>,
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
@@ -285,7 +282,11 @@ impl TestScript {
         Ok(())
     }
 
-    async fn run_statement(&self, stmt: &Statement, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+    async fn run_statement(
+        &self,
+        stmt: &Statement,
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<()> {
         let res = conn.query_drop(&stmt.command).await;
         match stmt.result {
             StatementResult::Ok => {
@@ -302,41 +303,45 @@ impl TestScript {
         Ok(())
     }
 
-    async fn run_query(&self, query: &Query, conn: &mut mysql::Conn) -> anyhow::Result<()> {
+    async fn run_query(&self, query: &Query, conn: &mut DatabaseConnection) -> anyhow::Result<()> {
         let results = if query.params.is_empty() {
             conn.query(&query.query).await?
         } else {
-            conn.exec(&query.query, &query.params).await?
+            conn.execute(&query.query, query.params.clone()).await?
         };
 
-        let mut rows = results
-            .into_iter()
-            .map(|mut row: Row| -> anyhow::Result<Vec<Value>> {
-                match &query.column_types {
-                    Some(column_types) => column_types
-                        .iter()
-                        .enumerate()
-                        .map(|(col_idx, col_type)| -> anyhow::Result<Value> {
-                            let val = row.take(col_idx).ok_or_else(|| {
-                                anyhow!(
-                                    "Row had the wrong number of columns: expected {}, but got {}",
-                                    column_types.len(),
-                                    row.len()
-                                )
-                            })?;
-                            Value::from_mysql_value_with_type(val, col_type)
-                                .with_context(|| format!("Converting value to {:?}", col_type))
-                        })
-                        .collect(),
-                    None => row
-                        .unwrap()
-                        .into_iter()
-                        .map(|val| {
-                            Value::try_from(val).with_context(|| "Converting value".to_string())
-                        })
-                        .collect(),
-                }
-            });
+        let mut rows =
+            results
+                .into_iter()
+                .map(|mut row: Vec<Value>| -> anyhow::Result<Vec<Value>> {
+                    if let Some(column_types) = &query.column_types {
+                        let row_len = row.len();
+                        let wrong_columns = || {
+                            anyhow!(
+                                "Row had the wrong number of columns: expected {}, but got {}",
+                                column_types.len(),
+                                row_len
+                            )
+                        };
+
+                        if row.len() > column_types.len() {
+                            return Err(wrong_columns());
+                        }
+
+                        let mut vals = mem::take(&mut row).into_iter();
+                        row = column_types
+                            .iter()
+                            .map(move |col_type| -> anyhow::Result<Value> {
+                                let val = vals.next().ok_or_else(wrong_columns)?;
+                                Ok(val
+                                    .convert_type(col_type)
+                                    .with_context(|| format!("Converting value to {:?}", col_type))?
+                                    .into_owned())
+                            })
+                            .collect::<Result<_, _>>()?;
+                    }
+                    Ok(row)
+                });
 
         let vals: Vec<Value> = match query.sort_mode.unwrap_or_default() {
             SortMode::NoSort => rows.fold_ok(vec![], |mut acc, row| {
@@ -407,9 +412,9 @@ impl TestScript {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))
             }
 
-            if let Some(binlog_url) = &run_opts.binlog_url {
-                // Add the data base name to the mysql url, and set as binlog source
-                builder.set_replicator_url(format!("{}/{}", binlog_url, run_opts.mysql_db));
+            if let Some(replication_url) = &run_opts.replication_url {
+                // Add the data base name to the url, and set as replication source
+                builder.set_replicator_url(format!("{}/{}", replication_url, run_opts.db_name()));
             }
 
             match builder.start(Arc::clone(&authority)).await {
@@ -426,14 +431,16 @@ impl TestScript {
         }
     }
 
-    async fn setup_mysql_adapter<A: 'static + noria::consensus::Authority>(
+    async fn setup_adapter<A: 'static + noria::consensus::Authority>(
         &self,
         run_opts: &RunOptions,
         authority: Arc<A>,
-    ) -> (tokio::task::JoinHandle<()>, mysql::Opts) {
-        let binlog_url = run_opts.binlog_url.as_ref().map(|binlog_url| {
-            // Append the database name to the binlog mysql url
-            format!("{}/{}", binlog_url, run_opts.mysql_db)
+    ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
+        let database_type = run_opts.database_type;
+
+        let replication_url = run_opts.replication_url.as_ref().map(|replication_url| {
+            // Append the database name to the replication url
+            format!("{}/{}", replication_url, run_opts.db_name())
         });
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
@@ -466,34 +473,68 @@ impl TestScript {
             )
             .await;
 
-            // cannot use .await inside map
-            #[allow(clippy::manual_map)]
-            let mysql_connector = match binlog_url.clone() {
-                Some(url) => Some(MySqlConnector::connect(url.clone()).await.unwrap()),
-                None => None,
-            };
+            macro_rules! make_backend {
+                ($connector:ty) => {{
+                    // cannot use .await inside map
+                    #[allow(clippy::manual_map)]
+                    let (upstream, writer) = match replication_url.clone() {
+                        Some(url) => (
+                            Some(
+                                <$connector as UpstreamDatabase>::connect(url.clone())
+                                    .await
+                                    .unwrap(),
+                            ),
+                            Writer::Upstream(
+                                <$connector as UpstreamDatabase>::connect(url)
+                                    .await
+                                    .unwrap(),
+                            ),
+                        ),
+                        None => (
+                            None,
+                            Writer::Noria(
+                                NoriaConnector::new(ch, auto_increments, query_cache, None).await,
+                            ),
+                        ),
+                    };
 
-            let writer = if let Some(url) = binlog_url {
-                Writer::Upstream(MySqlConnector::connect(url).await.unwrap())
-            } else {
-                Writer::Noria(NoriaConnector::new(ch, auto_increments, query_cache, None).await)
-            };
+                    let reader = Reader {
+                        upstream,
+                        noria_connector,
+                    };
 
-            let reader = Reader {
-                upstream: mysql_connector,
-                noria_connector,
-            };
+                    BackendBuilder::new()
+                        .require_authentication(false)
+                        .build::<A, _>(writer, reader)
+                }};
+            }
 
-            let backend = BackendBuilder::new()
-                .require_authentication(false)
-                .build(writer, reader);
-
-            MysqlIntermediary::run_on_tcp(backend, s).await.unwrap();
+            match database_type {
+                DatabaseType::MySQL => {
+                    MysqlIntermediary::run_on_tcp(make_backend!(MySqlConnector), s)
+                        .await
+                        .unwrap()
+                }
+                DatabaseType::PostgreSQL => {
+                    psql_srv::run_backend(
+                        noria_psql::Backend(make_backend!(PostgreSqlConnector)),
+                        s,
+                    )
+                    .await
+                }
+            }
         });
 
         (
             task,
-            mysql::OptsBuilder::default().tcp_port(addr.port()).into(),
+            match database_type {
+                DatabaseType::MySQL => mysql::OptsBuilder::default().tcp_port(addr.port()).into(),
+                DatabaseType::PostgreSQL => {
+                    let mut config = pgsql::Config::default();
+                    config.port(addr.port());
+                    config.into()
+                }
+            },
         )
     }
 
