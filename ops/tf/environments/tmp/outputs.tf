@@ -14,6 +14,11 @@ output "db_password" {
   sensitive   = true
 }
 
+output "db_endpoint" {
+  description = "Database exposed endpoint"
+  value       = module.readyset_tmp.db_endpoint
+}
+
 output "deployment" {
   description = "ReadySet deployment name"
   value       = module.readyset_tmp.deployment

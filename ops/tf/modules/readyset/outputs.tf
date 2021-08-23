@@ -18,6 +18,11 @@ output "server_private_ips" {
   value       = aws_instance.server.*.private_ip
 }
 
+output "db_endpoint" {
+  description = "Database exposed endpoint"
+  value       = aws_db_instance.db.endpoint
+}
+
 output "deployment" {
   description = "ReadySet deployment name"
   value       = var.deployment
