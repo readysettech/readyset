@@ -5,11 +5,11 @@ steps:
       - "echo --- :docker: Building noria-server image"
       - >-
         docker build -f build/Dockerfile.noria-server \
-          --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
-          -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -19,11 +19,11 @@ steps:
       - "echo --- :docker: Building noria-mysql image"
       - >-
         docker build -f build/Dockerfile.noria-mysql \
-          --cache-from 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
-          -t 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest"
     plugins:
       ecr#v2.2.0:
         login: true

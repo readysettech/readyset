@@ -32,7 +32,7 @@ function cleanup_tables() {
 
 # usage: generate_image_name "$language/$framework"
 function generate_image_name() {
-  echo "069491470376.dkr.ecr.us-east-2.amazonaws.com/frameworks/${1}:latest" | tr '[:upper:]' '[:lower:]'
+  echo "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/${1}:latest" | tr '[:upper:]' '[:lower:]'
 }
 
 # usage: pull_image "$language/$framework"

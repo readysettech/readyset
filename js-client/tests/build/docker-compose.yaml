@@ -31,12 +31,12 @@ services:
       timeout: 2s
       retries: 5
   noria-server:
-    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
     build:
       context: ../../..
       dockerfile: build/Dockerfile.noria-server
       cache_from:
-        - 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+        - 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
     expose:
       # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
       #   32768	60999

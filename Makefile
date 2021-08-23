@@ -1,4 +1,4 @@
-REGISTRY:=069491470376.dkr.ecr.us-east-2.amazonaws.com
+REGISTRY:=305232526136.dkr.ecr.us-east-2.amazonaws.com
 
 BASIC-IMAGE-NAME:=$(REGISTRY)/noria-build
 

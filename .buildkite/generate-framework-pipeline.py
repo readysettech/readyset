@@ -8,7 +8,7 @@ compose_template = """
 version: '3.8'
 services:
   test:
-    image: "069491470376.dkr.ecr.us-east-2.amazonaws.com/frameworks/${FRAMEWORK}"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/${FRAMEWORK}"
     depends_on:
       db:
         condition: service_healthy

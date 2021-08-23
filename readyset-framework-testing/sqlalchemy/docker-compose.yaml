@@ -30,7 +30,7 @@ services:
       timeout: 2s
       retries: 5
   noria-server:
-    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
     expose:
       # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
       #   32768	60999
@@ -55,7 +55,7 @@ services:
       retries: 5
       start_period: 5s
   db:
-    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
     expose:
       - 3333
     environment:
@@ -78,7 +78,7 @@ services:
       noria-server:
         condition: service_healthy
   test:
-    image: "069491470376.dkr.ecr.us-east-2.amazonaws.com/frameworks/python/sqlalchemy"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/python/sqlalchemy"
     depends_on:
       db:
         condition: service_healthy
