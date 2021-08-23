@@ -17,3 +17,8 @@ output "server_private_ips" {
   description = "ReadySet Servers private IPs"
   value       = aws_instance.server.*.private_ip
 }
+
+output "deployment" {
+  description = "ReadySet deployment name"
+  value       = var.deployment
+}
