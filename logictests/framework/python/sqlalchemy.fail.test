@@ -1,0 +1,1758 @@
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+
+
+statement ok
+SHOW TABLES
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'tree'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE tree (	id INTEGER NOT NULL AUTO_INCREMENT, 	parent_id INTEGER, 	name VARCHAR(50) NOT NULL, 	PRIMARY KEY (id), 	FOREIGN KEY(parent_id) REFERENCES tree (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (NULL, 'rootnode')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (1, 'node1')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (1, 'node3')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (1, 'node2')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (4, 'subnode1')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (4, 'subnode2')
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE tree.id = 1
+----
+3 values hashing to 9c1afb27d99bf0225352d2cd674a5ffb
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 1 = tree.parent_id
+----
+9 values hashing to aaba53bde40553bfa70eb72668636d62
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 2 = tree.parent_id
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 3 = tree.parent_id
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 4 = tree.parent_id
+----
+6 values hashing to 43dfd1bdc9fd52e9a151bb2b91c40d22
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 5 = tree.parent_id
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 6 = tree.parent_id
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (1, 'node4')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (7, 'subnode3')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (7, 'subnode4')
+
+
+statement ok
+INSERT INTO tree (parent_id, name) VALUES (8, 'subsubnode1')
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 2
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE tree.id = 1
+----
+3 values hashing to 9c1afb27d99bf0225352d2cd674a5ffb
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 1 = tree.parent_id
+----
+9 values hashing to f8b64007e92a395e0dc9ea0285c6c73f
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 3 = tree.parent_id
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 4 = tree.parent_id
+----
+6 values hashing to 43dfd1bdc9fd52e9a151bb2b91c40d22
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 5 = tree.parent_id
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 6 = tree.parent_id
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 7 = tree.parent_id
+----
+6 values hashing to 80b605bda83403b7d4ed465706b7d471
+
+
+query  rowsort
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 8 = tree.parent_id
+----
+3 values hashing to 5b0988bba96e76c3530a628a428f6132
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 10 = tree.parent_id
+
+
+statement ok
+SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE 9 = tree.parent_id
+
+
+query  rowsort
+SELECT anon_1.tree_id AS anon_1_tree_id, anon_1.tree_parent_id AS anon_1_tree_parent_id, anon_1.tree_name AS anon_1_tree_name, tree_1.id AS tree_1_id, tree_1.parent_id AS tree_1_parent_id, tree_1.name AS tree_1_name, tree_2.id AS tree_2_id, tree_2.parent_id AS tree_2_parent_id, tree_2.name AS tree_2_name, tree_3.id AS tree_3_id, tree_3.parent_id AS tree_3_parent_id, tree_3.name AS tree_3_name, tree_4.id AS tree_4_id, tree_4.parent_id AS tree_4_parent_id, tree_4.name AS tree_4_name FROM (SELECT tree.id AS tree_id, tree.parent_id AS tree_parent_id, tree.name AS tree_name FROM tree WHERE tree.name = 'rootnode'  LIMIT 1) AS anon_1 LEFT OUTER JOIN tree AS tree_4 ON anon_1.tree_id = tree_4.parent_id LEFT OUTER JOIN tree AS tree_3 ON tree_4.id = tree_3.parent_id LEFT OUTER JOIN tree AS tree_2 ON tree_3.id = tree_2.parent_id LEFT OUTER JOIN tree AS tree_1 ON tree_2.id = tree_1.parent_id
+----
+75 values hashing to bf8f983f821b0d2a08656a8ce35883d5
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 3
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 5
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 6
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 9
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 10
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 4
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 8
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 7
+
+
+statement ok
+DELETE FROM tree WHERE tree.id = 1
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+2 values hashing to e4481f18fe9280b55b4bc43b90f09c6b
+
+
+query  rowsort
+SHOW TABLES
+----
+1 values hashing to a7955749e6beaff7f05824d07b0e5ca9
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'order'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'item'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'orderitem'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE `order` (	order_id INTEGER NOT NULL AUTO_INCREMENT, 	customer_name VARCHAR(30) NOT NULL, 	order_date DATETIME NOT NULL, 	PRIMARY KEY (order_id))
+
+
+statement ok
+CREATE TABLE item (	item_id INTEGER NOT NULL AUTO_INCREMENT, 	description VARCHAR(30) NOT NULL, 	price FLOAT NOT NULL, 	PRIMARY KEY (item_id))
+
+
+statement ok
+CREATE TABLE orderitem (	order_id INTEGER NOT NULL, 	item_id INTEGER NOT NULL, 	price FLOAT NOT NULL, 	PRIMARY KEY (order_id, item_id), 	FOREIGN KEY(order_id) REFERENCES `order` (order_id), 	FOREIGN KEY(item_id) REFERENCES item (item_id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO item (description, price) VALUES ('SA T-Shirt', 10.99e0)
+
+
+statement ok
+INSERT INTO item (description, price) VALUES ('SA Mug', 6.5e0)
+
+
+statement ok
+INSERT INTO item (description, price) VALUES ('SA Hat', 8.99e0)
+
+
+statement ok
+INSERT INTO item (description, price) VALUES ('MySQL Crowbar', 16.99e0)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT item.item_id AS item_item_id, item.description AS item_description, item.price AS item_price FROM item WHERE item.item_id = 2
+----
+3 values hashing to d6bf53038f782937e6d2fb92f6ac170c
+
+
+query  rowsort
+SELECT item.item_id AS item_item_id, item.description AS item_description, item.price AS item_price FROM item WHERE item.item_id = 3
+----
+3 values hashing to 88cb7d1167caeb714d2be477ee52d795
+
+
+statement ok
+INSERT INTO `order` (customer_name, order_date) VALUES ('john smith', '2021-08-17 16:28:36.138480')
+
+
+query  rowsort
+SELECT item.item_id AS item_item_id, item.description AS item_description, item.price AS item_price FROM item WHERE item.item_id = 4
+----
+3 values hashing to 441a8acdc044fb6952909a4383c04674
+
+
+statement ok
+INSERT INTO orderitem (order_id, item_id, price) VALUES (1, 2, 6.5e0),(1, 4, 10.99e0),(1, 3, 8.99e0)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT `order`.order_id AS order_order_id, `order`.customer_name AS order_customer_name, `order`.order_date AS order_order_date FROM `order` WHERE `order`.customer_name = 'john smith'
+----
+3 values hashing to 3b52881cb8835b294abe9b4ef7ee9625
+
+
+query  rowsort
+SELECT orderitem.order_id AS orderitem_order_id, orderitem.item_id AS orderitem_item_id, orderitem.price AS orderitem_price, item_1.item_id AS item_1_item_id, item_1.description AS item_1_description, item_1.price AS item_1_price FROM orderitem LEFT OUTER JOIN item AS item_1 ON item_1.item_id = orderitem.item_id WHERE 1 = orderitem.order_id
+----
+18 values hashing to 891e6b79b2340250ffe78575bb1f06e0
+
+
+query  rowsort
+SELECT `order`.order_id AS order_order_id, `order`.customer_name AS order_customer_name, `order`.order_date AS order_order_date FROM `order` INNER JOIN orderitem ON `order`.order_id = orderitem.order_id INNER JOIN item ON item.item_id = orderitem.item_id WHERE item.description = 'MySQL Crowbar' AND item.price > orderitem.price
+----
+3 values hashing to 3b52881cb8835b294abe9b4ef7ee9625
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+6 values hashing to 87c6ca7eb4f0601b9364212469b1552a
+
+
+query  rowsort
+SHOW TABLES
+----
+4 values hashing to 6dc05448afe665f6752eadab864d475a
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'table1'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'table2'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE table1 (	id INTEGER NOT NULL AUTO_INCREMENT, 	name TEXT, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE table2 (	id INTEGER NOT NULL AUTO_INCREMENT, 	name TEXT, 	t1id INTEGER, 	PRIMARY KEY (id), 	FOREIGN KEY(t1id) REFERENCES table1 (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO table1 (name) VALUES ('a1')
+
+
+statement ok
+INSERT INTO table2 (name, t1id) VALUES ('b1', 1)
+
+
+statement ok
+INSERT INTO table2 (name, t1id) VALUES ('b2', 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT table1.id AS table1_id, table1.name AS table1_name FROM table1 WHERE table1.id = 1
+----
+2 values hashing to 08a0b72657bcc2508306e3ef9fdb392f
+
+
+query  rowsort
+SELECT table2.id AS table2_id, table2.name AS table2_name, table2.t1id AS table2_t1id FROM table2 WHERE 1 = table2.t1id
+----
+6 values hashing to 3863aeeefa8b506bdc05d305e64bc490
+
+
+statement ok
+UPDATE table2 SET t1id=NULL WHERE table2.id = 1
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT table1.id AS table1_id, table1.name AS table1_name FROM table1 WHERE table1.id = 1
+----
+2 values hashing to 08a0b72657bcc2508306e3ef9fdb392f
+
+
+query  rowsort
+SELECT table2.id AS table2_id, table2.name AS table2_name, table2.t1id AS table2_t1id FROM table2 WHERE 1 = table2.t1id
+----
+3 values hashing to 0dd25067686054b1c85ffd0e4e18b550
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+8 values hashing to 91c26860b8d4000ef8e54626aedd6ef7
+
+
+query  rowsort
+SHOW TABLES
+----
+6 values hashing to abd324e4fd4ffa72277380c5ba1803a7
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+8 values hashing to 91c26860b8d4000ef8e54626aedd6ef7
+
+
+query  rowsort
+SHOW TABLES
+----
+6 values hashing to abd324e4fd4ffa72277380c5ba1803a7
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'documents'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE documents (	document_id INTEGER NOT NULL AUTO_INCREMENT, 	filename VARCHAR(30), 	element BLOB, 	PRIMARY KEY (document_id), 	UNIQUE (filename))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+SELECT documents.document_id AS documents_document_id, documents.filename AS documents_filename, documents.element AS documents_element FROM documents WHERE documents.filename = 'test.xml'  LIMIT 1
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+8 values hashing to 91c26860b8d4000ef8e54626aedd6ef7
+
+
+query  rowsort
+SHOW TABLES
+----
+7 values hashing to 7ad2d70d0ec0c4f143f9d0fa91a9b760
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'parent'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'child'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE parent (	timestamp DATETIME NOT NULL, 	id INTEGER NOT NULL AUTO_INCREMENT, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE child (	timestamp DATETIME NOT NULL, 	id INTEGER NOT NULL AUTO_INCREMENT, 	parent_id INTEGER NOT NULL, 	PRIMARY KEY (id), 	FOREIGN KEY(parent_id) REFERENCES parent (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO parent (timestamp) VALUES ('2009-10-15 12:00:00')
+
+
+statement ok
+INSERT INTO parent (timestamp) VALUES ('2009-10-17 12:00:00')
+
+
+statement ok
+INSERT INTO child (timestamp, parent_id) VALUES ('2009-10-15 12:00:00', 1)
+
+
+statement ok
+INSERT INTO child (timestamp, parent_id) VALUES ('2009-10-17 12:00:00', 1)
+
+
+statement ok
+INSERT INTO child (timestamp, parent_id) VALUES ('2009-10-20 12:00:00', 1)
+
+
+statement ok
+INSERT INTO child (timestamp, parent_id) VALUES ('2009-10-12 12:00:00', 2)
+
+
+statement ok
+INSERT INTO child (timestamp, parent_id) VALUES ('2009-10-17 12:00:00', 2)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT parent.timestamp AS parent_timestamp, parent.id AS parent_id FROM parent WHERE parent.timestamp BETWEEN '2009-10-16 12:00:00' AND '2009-10-18 12:00:00'
+----
+2 values hashing to 9ec9a2749225ffa3644d0db6e759e38f
+
+
+query  rowsort
+SELECT child.timestamp AS child_timestamp, child.id AS child_id, child.parent_id AS child_parent_id FROM child WHERE 2 = child.parent_id AND child.timestamp BETWEEN '2009-10-16 12:00:00' AND '2009-10-18 12:00:00'
+----
+3 values hashing to bf7b260e33e1822b8097da8c24e6d2b9
+
+
+query  rowsort
+SELECT parent.timestamp AS parent_timestamp, parent.id AS parent_id FROM parent WHERE parent.timestamp BETWEEN '2009-10-16 12:00:00' AND '2009-10-18 12:00:00'
+----
+2 values hashing to 9ec9a2749225ffa3644d0db6e759e38f
+
+
+query  rowsort
+SELECT child.parent_id AS child_parent_id, child.timestamp AS child_timestamp, child.id AS child_id FROM child WHERE child.parent_id IN (2) AND child.timestamp BETWEEN '2009-10-16 12:00:00' AND '2009-10-18 12:00:00'
+----
+3 values hashing to bee349841f0019acadfc1d9d8ffbc238
+
+
+query  rowsort
+SELECT parent.timestamp, parent.id FROM parent INNER JOIN child ON parent.id = child.parent_id AND child.timestamp BETWEEN '2009-10-15 11:00:00' AND '2009-10-18 12:00:00' WHERE child.id = 2 AND parent.timestamp BETWEEN '2009-10-15 11:00:00' AND '2009-10-18 12:00:00'
+----
+2 values hashing to 9d2f76b4cc2f19ce3ac7243f75056cdf
+
+
+query  rowsort
+SELECT child.timestamp AS child_timestamp, child.id AS child_id, child.parent_id AS child_parent_id FROM child WHERE 1 = child.parent_id AND child.timestamp BETWEEN '2009-10-15 11:00:00' AND '2009-10-18 12:00:00'
+----
+6 values hashing to 9336436974111274b95232bd714498a1
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+10 values hashing to 05ea9fbe740957856cd5005d4a2a5426
+
+
+query  rowsort
+SHOW TABLES
+----
+9 values hashing to 38ddfb7e10be3b1d0b250750cb1440ef
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'node'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'edge'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE node (	node_id INTEGER NOT NULL AUTO_INCREMENT, 	PRIMARY KEY (node_id))
+
+
+statement ok
+CREATE TABLE edge (	lower_id INTEGER NOT NULL, 	higher_id INTEGER NOT NULL, 	PRIMARY KEY (lower_id, higher_id), 	FOREIGN KEY(lower_id) REFERENCES node (node_id), 	FOREIGN KEY(higher_id) REFERENCES node (node_id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO node () VALUES ()
+
+
+statement ok
+INSERT INTO edge (lower_id, higher_id) VALUES (1, 2),(2, 1),(2, 3),(2, 4),(1, 5),(5, 6)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 5
+----
+1 values hashing to 1dcca23355272056f04fe8bf20edfce0
+
+
+query  rowsort
+SELECT edge.lower_id AS edge_lower_id, edge.higher_id AS edge_higher_id FROM edge WHERE edge.lower_id = 5
+----
+2 values hashing to c3fc9da2a6676462da8451e5d08aad9f
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 6
+----
+1 values hashing to 9ae0ea9e3c9c6e1b9b6252c8395efdc1
+
+
+query  rowsort
+SELECT edge.lower_id AS edge_lower_id, edge.higher_id AS edge_higher_id FROM edge WHERE edge.higher_id = 5
+----
+2 values hashing to bff03983d6adf93605e5627d535108fe
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 1
+----
+1 values hashing to b026324c6904b2a9cb4b88d6d61c81d1
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 2
+----
+1 values hashing to 26ab0db90d72e28ad0ba1e22ee510510
+
+
+query  rowsort
+SELECT edge.lower_id AS edge_lower_id, edge.higher_id AS edge_higher_id FROM edge WHERE edge.higher_id = 2
+----
+2 values hashing to 6ddb4095eb719e2a9f0a3f95677d24e0
+
+
+query  rowsort
+SELECT edge.lower_id AS edge_lower_id, edge.higher_id AS edge_higher_id FROM edge WHERE edge.lower_id = 2
+----
+6 values hashing to aa0be36d192a98610571da046783ccd2
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 3
+----
+1 values hashing to 6d7fce9fee471194aa8b5b6e47267f03
+
+
+query  rowsort
+SELECT node.node_id AS node_node_id FROM node WHERE node.node_id = 4
+----
+1 values hashing to 48a24b70a0b376535542b996af517398
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+14 values hashing to c9bb4c0432a90581a8cfffd2ac75f251
+
+
+query  rowsort
+SHOW TABLES
+----
+11 values hashing to 9bd470447e436f0926e4925c566ac9fa
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'company'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'person'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'engineer'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'manager'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE company (	id INTEGER NOT NULL AUTO_INCREMENT, 	name VARCHAR(50), 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE person (	id INTEGER NOT NULL AUTO_INCREMENT, 	company_id INTEGER, 	name VARCHAR(50), 	PRIMARY KEY (id), 	FOREIGN KEY(company_id) REFERENCES company (id))
+
+
+statement ok
+CREATE TABLE engineer (	id INTEGER NOT NULL AUTO_INCREMENT, 	name VARCHAR(50), 	company_id INTEGER, 	`status` VARCHAR(30), 	engineer_name VARCHAR(30), 	primary_language VARCHAR(30), 	PRIMARY KEY (id), 	FOREIGN KEY(company_id) REFERENCES company (id))
+
+
+statement ok
+CREATE TABLE manager (	id INTEGER NOT NULL AUTO_INCREMENT, 	name VARCHAR(50), 	company_id INTEGER, 	`status` VARCHAR(30), 	manager_name VARCHAR(30), 	PRIMARY KEY (id), 	FOREIGN KEY(company_id) REFERENCES company (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO company (name) VALUES ('company1')
+
+
+statement ok
+INSERT INTO person (company_id, name) VALUES (1, 'joesmith')
+
+
+statement ok
+INSERT INTO engineer (name, company_id, `status`, engineer_name, primary_language) VALUES ('dilbert', 1, 'BBA', 'engineer1', 'java')
+
+
+statement ok
+INSERT INTO engineer (name, company_id, `status`, engineer_name, primary_language) VALUES ('wally', 1, 'CGG', 'engineer2', 'python')
+
+
+statement ok
+INSERT INTO manager (name, company_id, `status`, manager_name) VALUES ('pointy haired boss', 1, 'AAB', 'manager1')
+
+
+statement ok
+INSERT INTO manager (name, company_id, `status`, manager_name) VALUES ('jsmith', 1, 'ABA', 'manager2')
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT company.id AS company_id, company.name AS company_name FROM company WHERE company.id = 1
+----
+2 values hashing to ede0858ded2fc8d0724d44312477627e
+
+
+query  rowsort
+SELECT pjoin.id AS pjoin_id, pjoin.company_id AS pjoin_company_id, pjoin.name AS pjoin_name, pjoin.type AS pjoin_type, pjoin.`status` AS pjoin_status, pjoin.engineer_name AS pjoin_engineer_name, pjoin.primary_language AS pjoin_primary_language, pjoin.manager_name AS pjoin_manager_name FROM (SELECT person.id AS id, person.company_id AS company_id, person.name AS name, CAST(NULL AS CHAR(30)) AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'person' AS type FROM person UNION ALL SELECT engineer.id AS id, engineer.company_id AS company_id, engineer.name AS name, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'engineer' AS type FROM engineer UNION ALL SELECT manager.id AS id, manager.company_id AS company_id, manager.name AS name, manager.`status` AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, manager.manager_name AS manager_name, 'manager' AS type FROM manager) AS pjoin WHERE 1 = pjoin.company_id
+----
+40 values hashing to 696023ac8d5ca9291aa602c5ad3a2683
+
+
+query  rowsort
+SELECT pjoin.id AS pjoin_id, pjoin.company_id AS pjoin_company_id, pjoin.name AS pjoin_name, pjoin.type AS pjoin_type, pjoin.`status` AS pjoin_status, pjoin.engineer_name AS pjoin_engineer_name, pjoin.primary_language AS pjoin_primary_language, pjoin.manager_name AS pjoin_manager_name FROM (SELECT person.id AS id, person.company_id AS company_id, person.name AS name, CAST(NULL AS CHAR(30)) AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'person' AS type FROM person UNION ALL SELECT engineer.id AS id, engineer.company_id AS company_id, engineer.name AS name, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'engineer' AS type FROM engineer UNION ALL SELECT manager.id AS id, manager.company_id AS company_id, manager.name AS name, manager.`status` AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, manager.manager_name AS manager_name, 'manager' AS type FROM manager) AS pjoin WHERE pjoin.name = 'dilbert'
+----
+8 values hashing to 40c06b684fce91844bd1a2a6b84e1e5d
+
+
+query  rowsort
+SELECT pjoin.id AS pjoin_id, pjoin.name AS pjoin_name, pjoin.company_id AS pjoin_company_id, pjoin.`status` AS pjoin_status, pjoin.engineer_name AS pjoin_engineer_name, pjoin.primary_language AS pjoin_primary_language, pjoin.type AS pjoin_type FROM (SELECT engineer.id AS id, engineer.name AS name, engineer.company_id AS company_id, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, 'engineer' AS type FROM engineer) AS pjoin WHERE pjoin.name = 'dilbert'
+----
+7 values hashing to 209d757cd0cfd9771b3a240902793e17
+
+
+statement ok
+UPDATE engineer SET engineer_name='hes dilbert!' WHERE engineer.id = 1
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT company.id AS company_id, company.name AS company_name FROM company WHERE company.id = 1
+----
+2 values hashing to ede0858ded2fc8d0724d44312477627e
+
+
+query  rowsort
+SELECT pjoin.id AS pjoin_id, pjoin.company_id AS pjoin_company_id, pjoin.name AS pjoin_name, pjoin.type AS pjoin_type, pjoin.`status` AS pjoin_status, pjoin.engineer_name AS pjoin_engineer_name, pjoin.primary_language AS pjoin_primary_language, pjoin.manager_name AS pjoin_manager_name FROM (SELECT person.id AS id, person.company_id AS company_id, person.name AS name, CAST(NULL AS CHAR(30)) AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'person' AS type FROM person UNION ALL SELECT engineer.id AS id, engineer.company_id AS company_id, engineer.name AS name, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'engineer' AS type FROM engineer UNION ALL SELECT manager.id AS id, manager.company_id AS company_id, manager.name AS name, manager.`status` AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, manager.manager_name AS manager_name, 'manager' AS type FROM manager) AS pjoin WHERE 1 = pjoin.company_id
+----
+40 values hashing to 8d057b99f2ffc71c6db7de293c0df902
+
+
+query  rowsort
+SELECT person.id AS person_id, person.company_id AS person_company_id, person.name AS person_name, pjoin.type AS pjoin_type, pjoin.id AS pjoin_id, pjoin.name AS pjoin_name, pjoin.company_id AS pjoin_company_id, pjoin.`status` AS pjoin_status, pjoin.engineer_name AS pjoin_engineer_name, pjoin.primary_language AS pjoin_primary_language, pjoin.manager_name AS pjoin_manager_name FROM person, (SELECT person.id AS id, person.company_id AS company_id, person.name AS name, CAST(NULL AS CHAR(30)) AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'person' AS type FROM person UNION ALL SELECT engineer.id AS id, engineer.company_id AS company_id, engineer.name AS name, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'engineer' AS type FROM engineer UNION ALL SELECT manager.id AS id, manager.company_id AS company_id, manager.name AS name, manager.`status` AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, manager.manager_name AS manager_name, 'manager' AS type FROM manager) AS pjoin WHERE pjoin.engineer_name = 'engineer1' OR pjoin.manager_name = 'manager2'
+----
+11 values hashing to fb8288bd10f23474d1ef110913f8055d
+
+
+query  rowsort
+SELECT company.id AS company_id, company.name AS company_name FROM company INNER JOIN (SELECT person.id AS id, person.company_id AS company_id, person.name AS name, CAST(NULL AS CHAR(30)) AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'person' AS type FROM person UNION ALL SELECT engineer.id AS id, engineer.company_id AS company_id, engineer.name AS name, engineer.`status` AS `status`, engineer.engineer_name AS engineer_name, engineer.primary_language AS primary_language, CAST(NULL AS CHAR(30)) AS manager_name, 'engineer' AS type FROM engineer UNION ALL SELECT manager.id AS id, manager.company_id AS company_id, manager.name AS name, manager.`status` AS `status`, CAST(NULL AS CHAR(30)) AS engineer_name, CAST(NULL AS CHAR(30)) AS primary_language, manager.manager_name AS manager_name, 'manager' AS type FROM manager) AS pjoin ON company.id = pjoin.company_id WHERE pjoin.engineer_name = 'engineer1' OR pjoin.manager_name = 'manager2'
+----
+2 values hashing to ede0858ded2fc8d0724d44312477627e
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+20 values hashing to 3f69b9a887cc809f008489210346beb9
+
+
+query  rowsort
+SHOW TABLES
+----
+15 values hashing to 79c80f1714fcbbbee573dd5a361b5c66
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SHOW VARIABLES LIKE 'sql_mode'
+
+
+statement ok
+SHOW VARIABLES LIKE 'lower_case_table_names'
+
+
+statement ok
+SELECT VERSION()
+
+
+statement ok
+SELECT DATABASE()
+
+
+statement ok
+SELECT @@transaction_isolation
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'ids'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_locations'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_reports'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE ids (	nextid INTEGER NOT NULL)
+
+
+statement ok
+CREATE TABLE north_america_weather_locations (	id INTEGER NOT NULL, 	continent VARCHAR(30) NOT NULL, 	city VARCHAR(50) NOT NULL, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE north_america_weather_reports (	id INTEGER NOT NULL AUTO_INCREMENT, 	location_id INTEGER, 	temperature FLOAT, 	report_time DATETIME, 	PRIMARY KEY (id), 	FOREIGN KEY(location_id) REFERENCES north_america_weather_locations (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'ids'
+----
+1 values hashing to b026324c6904b2a9cb4b88d6d61c81d1
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_locations'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_reports'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE asia_weather_locations (	id INTEGER NOT NULL, 	continent VARCHAR(30) NOT NULL, 	city VARCHAR(50) NOT NULL, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE asia_weather_reports (	id INTEGER NOT NULL AUTO_INCREMENT, 	location_id INTEGER, 	temperature FLOAT, 	report_time DATETIME, 	PRIMARY KEY (id), 	FOREIGN KEY(location_id) REFERENCES asia_weather_locations (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'ids'
+----
+1 values hashing to b026324c6904b2a9cb4b88d6d61c81d1
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_locations'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_reports'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE europe_weather_locations (	id INTEGER NOT NULL, 	continent VARCHAR(30) NOT NULL, 	city VARCHAR(50) NOT NULL, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE europe_weather_reports (	id INTEGER NOT NULL AUTO_INCREMENT, 	location_id INTEGER, 	temperature FLOAT, 	report_time DATETIME, 	PRIMARY KEY (id), 	FOREIGN KEY(location_id) REFERENCES europe_weather_locations (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = 'ids'
+----
+1 values hashing to b026324c6904b2a9cb4b88d6d61c81d1
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_locations'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+query  rowsort
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test' AND table_name = '_prefix__weather_reports'
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+
+statement ok
+CREATE TABLE south_america_weather_locations (	id INTEGER NOT NULL, 	continent VARCHAR(30) NOT NULL, 	city VARCHAR(50) NOT NULL, 	PRIMARY KEY (id))
+
+
+statement ok
+CREATE TABLE south_america_weather_reports (	id INTEGER NOT NULL AUTO_INCREMENT, 	location_id INTEGER, 	temperature FLOAT, 	report_time DATETIME, 	PRIMARY KEY (id), 	FOREIGN KEY(location_id) REFERENCES south_america_weather_locations (id))
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO ids (nextid) VALUES (1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+statement ok
+SET autocommit=0
+
+
+statement ok
+SET NAMES latin1
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to b026324c6904b2a9cb4b88d6d61c81d1
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO asia_weather_locations (id, continent, city) VALUES (1, 'Asia', 'Tokyo')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 26ab0db90d72e28ad0ba1e22ee510510
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO north_america_weather_locations (id, continent, city) VALUES (2, 'North America', 'New York')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 6d7fce9fee471194aa8b5b6e47267f03
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO north_america_weather_locations (id, continent, city) VALUES (3, 'North America', 'Toronto')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 48a24b70a0b376535542b996af517398
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO europe_weather_locations (id, continent, city) VALUES (4, 'Europe', 'London')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 1dcca23355272056f04fe8bf20edfce0
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO europe_weather_locations (id, continent, city) VALUES (5, 'Europe', 'Dublin')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 9ae0ea9e3c9c6e1b9b6252c8395efdc1
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO south_america_weather_locations (id, continent, city) VALUES (6, 'South America', 'Brasila')
+
+
+query  rowsort
+SELECT ids.nextid FROM ids FOR UPDATE
+----
+1 values hashing to 84bc3da1b3e33a18e8d5e1bdd7a18d7a
+
+
+statement ok
+UPDATE ids SET nextid=(ids.nextid + 1)
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+INSERT INTO south_america_weather_locations (id, continent, city) VALUES (7, 'South America', 'Quito')
+
+
+statement ok
+INSERT INTO asia_weather_reports (location_id, temperature, report_time) VALUES (1, 80.0e0, '2021-08-17 16:28:40.126267')
+
+
+statement ok
+INSERT INTO north_america_weather_reports (location_id, temperature, report_time) VALUES (2, 75, '2021-08-17 16:28:40.128299')
+
+
+statement ok
+INSERT INTO south_america_weather_reports (location_id, temperature, report_time) VALUES (7, 85, '2021-08-17 16:28:40.130202')
+
+
+statement ok
+COMMIT
+
+
+statement ok
+COMMIT
+
+
+statement ok
+COMMIT
+
+
+statement ok
+COMMIT
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT asia_weather_locations.id AS asia_weather_locations_id, asia_weather_locations.continent AS asia_weather_locations_continent, asia_weather_locations.city AS asia_weather_locations_city FROM asia_weather_locations WHERE asia_weather_locations.id = 1
+----
+3 values hashing to 2c36a0211a741a1603c1faaef6e73481
+
+
+statement ok
+SELECT north_america_weather_reports.id AS north_america_weather_reports_id, north_america_weather_reports.location_id AS north_america_weather_reports_location_id, north_america_weather_reports.temperature AS north_america_weather_reports_temperature, north_america_weather_reports.report_time AS north_america_weather_reports_report_time FROM north_america_weather_reports WHERE 1 = north_america_weather_reports.location_id
+
+
+query  rowsort
+SELECT asia_weather_reports.id AS asia_weather_reports_id, asia_weather_reports.location_id AS asia_weather_reports_location_id, asia_weather_reports.temperature AS asia_weather_reports_temperature, asia_weather_reports.report_time AS asia_weather_reports_report_time FROM asia_weather_reports WHERE 1 = asia_weather_reports.location_id
+----
+4 values hashing to ca75b96bc1a20783468e37e0f74bf71d
+
+
+statement ok
+SELECT europe_weather_reports.id AS europe_weather_reports_id, europe_weather_reports.location_id AS europe_weather_reports_location_id, europe_weather_reports.temperature AS europe_weather_reports_temperature, europe_weather_reports.report_time AS europe_weather_reports_report_time FROM europe_weather_reports WHERE 1 = europe_weather_reports.location_id
+
+
+statement ok
+SELECT south_america_weather_reports.id AS south_america_weather_reports_id, south_america_weather_reports.location_id AS south_america_weather_reports_location_id, south_america_weather_reports.temperature AS south_america_weather_reports_temperature, south_america_weather_reports.report_time AS south_america_weather_reports_report_time FROM south_america_weather_reports WHERE 1 = south_america_weather_reports.location_id
+
+
+query  rowsort
+SELECT north_america_weather_locations.id, north_america_weather_locations.continent, north_america_weather_locations.city FROM north_america_weather_locations WHERE north_america_weather_locations.continent = 'North America'
+----
+6 values hashing to 9ec8ab2ababbb1480bc1df0d1a4c4d55
+
+
+statement ok
+SELECT asia_weather_locations.id, asia_weather_locations.continent, asia_weather_locations.city FROM asia_weather_locations WHERE asia_weather_locations.continent = 'North America'
+
+
+statement ok
+SELECT europe_weather_locations.id, europe_weather_locations.continent, europe_weather_locations.city FROM europe_weather_locations WHERE europe_weather_locations.continent = 'North America'
+
+
+statement ok
+SELECT south_america_weather_locations.id, south_america_weather_locations.continent, south_america_weather_locations.city FROM south_america_weather_locations WHERE south_america_weather_locations.continent = 'North America'
+
+
+statement ok
+SELECT north_america_weather_locations.id, north_america_weather_locations.continent, north_america_weather_locations.city FROM north_america_weather_locations WHERE north_america_weather_locations.continent IN ('Europe', 'Asia')
+
+
+query  rowsort
+SELECT asia_weather_locations.id, asia_weather_locations.continent, asia_weather_locations.city FROM asia_weather_locations WHERE asia_weather_locations.continent IN ('Europe', 'Asia')
+----
+3 values hashing to 2c36a0211a741a1603c1faaef6e73481
+
+
+query  rowsort
+SELECT europe_weather_locations.id, europe_weather_locations.continent, europe_weather_locations.city FROM europe_weather_locations WHERE europe_weather_locations.continent IN ('Europe', 'Asia')
+----
+6 values hashing to 48de371d11f7e80ae958f8728d4069cc
+
+
+statement ok
+SELECT south_america_weather_locations.id, south_america_weather_locations.continent, south_america_weather_locations.city FROM south_america_weather_locations WHERE south_america_weather_locations.continent IN ('Europe', 'Asia')
+
+
+query  rowsort
+SELECT north_america_weather_reports.id AS north_america_weather_reports_id, north_america_weather_reports.location_id AS north_america_weather_reports_location_id, north_america_weather_reports.temperature AS north_america_weather_reports_temperature, north_america_weather_reports.report_time AS north_america_weather_reports_report_time FROM north_america_weather_reports WHERE 2 = north_america_weather_reports.location_id
+----
+4 values hashing to 02cf95af1eba5bd936b2c5be9f26e9e7
+
+
+statement ok
+SELECT asia_weather_reports.id AS asia_weather_reports_id, asia_weather_reports.location_id AS asia_weather_reports_location_id, asia_weather_reports.temperature AS asia_weather_reports_temperature, asia_weather_reports.report_time AS asia_weather_reports_report_time FROM asia_weather_reports WHERE 2 = asia_weather_reports.location_id
+
+
+statement ok
+SELECT europe_weather_reports.id AS europe_weather_reports_id, europe_weather_reports.location_id AS europe_weather_reports_location_id, europe_weather_reports.temperature AS europe_weather_reports_temperature, europe_weather_reports.report_time AS europe_weather_reports_report_time FROM europe_weather_reports WHERE 2 = europe_weather_reports.location_id
+
+
+statement ok
+SELECT south_america_weather_reports.id AS south_america_weather_reports_id, south_america_weather_reports.location_id AS south_america_weather_reports_location_id, south_america_weather_reports.temperature AS south_america_weather_reports_temperature, south_america_weather_reports.report_time AS south_america_weather_reports_report_time FROM south_america_weather_reports WHERE 2 = south_america_weather_reports.location_id
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+statement ok
+ROLLBACK
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+28 values hashing to 20d25bf31b85538397db41ffb9708b90
+
+
+query  rowsort
+SHOW TABLES
+----
+24 values hashing to cc3b968769086f7c7b7a6b1390201a95
+
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+28 values hashing to 20d25bf31b85538397db41ffb9708b90
+
+
+statement ok
+ALTER TABLE `asia_weather_reports` DROP FOREIGN KEY `asia_weather_reports_ibfk_1`
+
+
+statement ok
+ALTER TABLE `child` DROP FOREIGN KEY `child_ibfk_1`
+
+
+statement ok
+ALTER TABLE `edge` DROP FOREIGN KEY `edge_ibfk_1`
+
+
+statement ok
+ALTER TABLE `edge` DROP FOREIGN KEY `edge_ibfk_2`
+
+
+statement ok
+ALTER TABLE `engineer` DROP FOREIGN KEY `engineer_ibfk_1`
+
+
+statement ok
+ALTER TABLE `europe_weather_reports` DROP FOREIGN KEY `europe_weather_reports_ibfk_1`
+
+
+statement ok
+ALTER TABLE `manager` DROP FOREIGN KEY `manager_ibfk_1`
+
+
+statement ok
+ALTER TABLE `north_america_weather_reports` DROP FOREIGN KEY `north_america_weather_reports_ibfk_1`
+
+
+statement ok
+ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_1`
+
+
+statement ok
+ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_2`
+
+
+statement ok
+ALTER TABLE `person` DROP FOREIGN KEY `person_ibfk_1`
+
+
+statement ok
+ALTER TABLE `south_america_weather_reports` DROP FOREIGN KEY `south_america_weather_reports_ibfk_1`
+
+
+statement ok
+ALTER TABLE `table2` DROP FOREIGN KEY `table2_ibfk_1`
+
+
+statement ok
+ALTER TABLE `tree` DROP FOREIGN KEY `tree_ibfk_1`
+
+
+query  rowsort
+SHOW TABLES
+----
+24 values hashing to cc3b968769086f7c7b7a6b1390201a95
+
+
+statement ok
+DROP TABLE `asia_weather_locations`,`asia_weather_reports`,`child`,`company`,`documents`,`edge`,`engineer`,`europe_weather_locations`,`europe_weather_reports`,`ids`,`item`,`manager`,`node`,`north_america_weather_locations`,`north_america_weather_reports`,`order`,`orderitem`,`parent`,`person`,`south_america_weather_locations`,`south_america_weather_reports`,`table1`,`table2`,`tree`
+

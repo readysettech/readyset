@@ -220,6 +220,7 @@ steps:
     command:
     - 'echo +++ Running noria-logictest with binlog replication'
     - cargo --locked run --bin noria-logictest -- verify --binlog-mysql mysql://root:noria@mysql logictests
+    - cargo --locked run --bin noria-logictest -- verify -r --binlog-mysql mysql://root:noria@mysql logictests/framework
     timeout_in_minutes: 60
     depends_on:
     - build-image
