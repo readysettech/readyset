@@ -12,6 +12,11 @@ variable "name" {
   type = string
 }
 
+variable "progname" {
+  default = ""
+  type    = string
+}
+
 variable "role_arn" {
   type = string
 }

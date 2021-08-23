@@ -84,51 +84,6 @@ resource "aws_nat_gateway" "build-default-us-east-2c" {
   }
 }
 
-resource "aws_ram_resource_share" "build-default-us-east-2" {
-  allow_external_principals = false
-  name                      = "build-default-us-east-2"
-  tags = {
-    Environment = "build"
-    Name        = "build-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_resource_association" "build-default-private-us-east-2a" {
-  resource_arn       = aws_subnet.build-default-private-us-east-2a.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_resource_association" "build-default-private-us-east-2b" {
-  resource_arn       = aws_subnet.build-default-private-us-east-2b.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_resource_association" "build-default-private-us-east-2c" {
-  resource_arn       = aws_subnet.build-default-private-us-east-2c.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-us-east-2a" {
-  resource_arn       = aws_subnet.build-default-public-us-east-2a.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-us-east-2b" {
-  resource_arn       = aws_subnet.build-default-public-us-east-2b.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-us-east-2c" {
-  resource_arn       = aws_subnet.build-default-public-us-east-2c.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
-resource "aws_ram_principal_association" "build-default-us-east-2" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.build-default-us-east-2.arn
-}
-
 resource "aws_route" "build-default-private-us-east-2a-private-internet-ipv6" {
   destination_ipv6_cidr_block = "::/0"
   egress_only_gateway_id      = aws_egress_only_internet_gateway.build-default-us-east-2.id

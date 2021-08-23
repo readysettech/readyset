@@ -84,51 +84,6 @@ resource "aws_nat_gateway" "sandbox-default-sa-east-1c" {
   }
 }
 
-resource "aws_ram_resource_share" "sandbox-default-sa-east-1" {
-  allow_external_principals = false
-  name                      = "sandbox-default-sa-east-1"
-  tags = {
-    Environment = "sandbox"
-    Name        = "sandbox-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-sa-east-1a" {
-  resource_arn       = aws_subnet.sandbox-default-private-sa-east-1a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-sa-east-1b" {
-  resource_arn       = aws_subnet.sandbox-default-private-sa-east-1b.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-sa-east-1c" {
-  resource_arn       = aws_subnet.sandbox-default-private-sa-east-1c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-sa-east-1a" {
-  resource_arn       = aws_subnet.sandbox-default-public-sa-east-1a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-sa-east-1b" {
-  resource_arn       = aws_subnet.sandbox-default-public-sa-east-1b.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-sa-east-1c" {
-  resource_arn       = aws_subnet.sandbox-default-public-sa-east-1c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
-resource "aws_ram_principal_association" "sandbox-default-sa-east-1" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-sa-east-1.arn
-}
-
 resource "aws_route" "sandbox-default-private-sa-east-1a-private-internet-ipv6" {
   destination_ipv6_cidr_block = "::/0"
   egress_only_gateway_id      = aws_egress_only_internet_gateway.sandbox-default-sa-east-1.id

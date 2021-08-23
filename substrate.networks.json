@@ -64,5 +64,5 @@
 		}
 	],
 	"RFC1918": "10.0.0.0/8",
-	"SubstrateVersion": "2021.07"
+	"SubstrateVersion": "2021.08"
 }

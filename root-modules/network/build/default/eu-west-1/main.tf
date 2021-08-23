@@ -84,51 +84,6 @@ resource "aws_nat_gateway" "build-default-eu-west-1c" {
   }
 }
 
-resource "aws_ram_resource_share" "build-default-eu-west-1" {
-  allow_external_principals = false
-  name                      = "build-default-eu-west-1"
-  tags = {
-    Environment = "build"
-    Name        = "build-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_principal_association" "build-default-eu-west-1" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-private-eu-west-1a" {
-  resource_arn       = aws_subnet.build-default-private-eu-west-1a.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-private-eu-west-1b" {
-  resource_arn       = aws_subnet.build-default-private-eu-west-1b.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-private-eu-west-1c" {
-  resource_arn       = aws_subnet.build-default-private-eu-west-1c.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-eu-west-1a" {
-  resource_arn       = aws_subnet.build-default-public-eu-west-1a.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-eu-west-1b" {
-  resource_arn       = aws_subnet.build-default-public-eu-west-1b.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
-resource "aws_ram_resource_association" "build-default-public-eu-west-1c" {
-  resource_arn       = aws_subnet.build-default-public-eu-west-1c.arn
-  resource_share_arn = aws_ram_resource_share.build-default-eu-west-1.arn
-}
-
 resource "aws_route" "build-default-eu-west-1a" {
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.build-default-eu-west-1a.id

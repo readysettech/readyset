@@ -84,51 +84,6 @@ resource "aws_nat_gateway" "sandbox-default-us-west-2d" {
   }
 }
 
-resource "aws_ram_resource_share" "sandbox-default-us-west-2" {
-  allow_external_principals = false
-  name                      = "sandbox-default-us-west-2"
-  tags = {
-    Environment = "sandbox"
-    Name        = "sandbox-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-us-west-2a" {
-  resource_arn       = aws_subnet.sandbox-default-private-us-west-2a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-us-west-2c" {
-  resource_arn       = aws_subnet.sandbox-default-private-us-west-2c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-us-west-2d" {
-  resource_arn       = aws_subnet.sandbox-default-private-us-west-2d.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-us-west-2a" {
-  resource_arn       = aws_subnet.sandbox-default-public-us-west-2a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-us-west-2c" {
-  resource_arn       = aws_subnet.sandbox-default-public-us-west-2c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-us-west-2d" {
-  resource_arn       = aws_subnet.sandbox-default-public-us-west-2d.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
-resource "aws_ram_principal_association" "sandbox-default-us-west-2" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-us-west-2.arn
-}
-
 resource "aws_route" "sandbox-default-private-us-west-2a-private-internet-ipv6" {
   destination_ipv6_cidr_block = "::/0"
   egress_only_gateway_id      = aws_egress_only_internet_gateway.sandbox-default-us-west-2.id

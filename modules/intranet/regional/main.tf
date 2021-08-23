@@ -10,14 +10,6 @@ data "aws_iam_role" "substrate-apigateway-authorizer" {
   name = "substrate-apigateway-authorizer"
 }
 
-data "aws_iam_role" "substrate-credential-factory" {
-  name = "substrate-credential-factory"
-}
-
-data "aws_iam_role" "substrate-instance-factory" {
-  name = "substrate-instance-factory"
-}
-
 data "aws_iam_role" "substrate-intranet" {
   name = "substrate-intranet"
 }
@@ -41,25 +33,10 @@ locals {
 
 module "substrate-apigateway-authorizer" {
   apigateway_execution_arn = "arn:aws:execute-api:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:${aws_api_gateway_rest_api.intranet.id}/*"
-  filename                 = "${path.module}/substrate-apigateway-authorizer.zip"
+  filename                 = "${path.module}/substrate-intranet.zip"
   name                     = "substrate-apigateway-authorizer"
+  progname                 = "substrate-intranet"
   role_arn                 = data.aws_iam_role.substrate-apigateway-authorizer.arn
-  source                   = "../../lambda-function/regional"
-}
-
-module "substrate-credential-factory" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-credential-factory.zip"
-  name                     = "substrate-credential-factory"
-  role_arn                 = data.aws_iam_role.substrate-credential-factory.arn
-  source                   = "../../lambda-function/regional"
-}
-
-module "substrate-instance-factory" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-instance-factory.zip"
-  name                     = "substrate-instance-factory"
-  role_arn                 = data.aws_iam_role.substrate-instance-factory.arn
   source                   = "../../lambda-function/regional"
 }
 
@@ -67,28 +44,6 @@ module "substrate-intranet" {
   apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
   filename                 = "${path.module}/substrate-intranet.zip"
   name                     = "substrate-intranet"
-  role_arn                 = data.aws_iam_role.substrate-intranet.arn
-  source                   = "../../lambda-function/regional"
-}
-
-# Dead resources that must hang around a little longer to break a dependency
-# cycle. To allow us to still move on by deleting cmd/... for these programs,
-# they're now using the new cmd/substrate-intranet code, which doesn't matter
-# because nothing's invoking them.
-#
-# Remove these one release after every Intranet endpoint transitions to
-# cmd/substrate-intranet.
-module "substrate-apigateway-authenticator" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-apigateway-authenticator.zip"
-  name                     = "substrate-apigateway-authenticator"
-  role_arn                 = data.aws_iam_role.substrate-intranet.arn
-  source                   = "../../lambda-function/regional"
-}
-module "substrate-apigateway-index" {
-  apigateway_execution_arn = "${aws_api_gateway_deployment.intranet.execution_arn}/*"
-  filename                 = "${path.module}/substrate-apigateway-index.zip"
-  name                     = "substrate-apigateway-index"
   role_arn                 = data.aws_iam_role.substrate-intranet.arn
   source                   = "../../lambda-function/regional"
 }
@@ -218,7 +173,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory" {
   resource_id             = aws_api_gateway_resource.credential-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-credential-factory.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-credential-factory-authorize" {
@@ -229,7 +184,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory-authorize" {
   resource_id             = aws_api_gateway_resource.credential-factory-authorize.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-credential-factory.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-credential-factory-fetch" {
@@ -240,7 +195,7 @@ resource "aws_api_gateway_integration" "GET-credential-factory-fetch" {
   resource_id             = aws_api_gateway_resource.credential-factory-fetch.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-credential-factory.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-index" {
@@ -262,7 +217,7 @@ resource "aws_api_gateway_integration" "GET-instance-factory" {
   resource_id             = aws_api_gateway_resource.instance-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-instance-factory.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "GET-login" {
@@ -284,7 +239,7 @@ resource "aws_api_gateway_integration" "POST-instance-factory" {
   resource_id             = aws_api_gateway_resource.instance-factory.id
   rest_api_id             = aws_api_gateway_rest_api.intranet.id
   type                    = "AWS_PROXY"
-  uri                     = module.substrate-instance-factory.invoke_arn
+  uri                     = module.substrate-intranet.invoke_arn
 }
 
 resource "aws_api_gateway_integration" "POST-login" {
@@ -461,7 +416,7 @@ resource "aws_security_group" "substrate-instance-factory" {
   vpc_id      = module.substrate.vpc_id
   tags = {
     Environment = module.substrate.tags.environment
-    Name        = "substrate-instance-factory"
+    Name        = "InstanceFactory"
     Quality     = module.substrate.tags.quality
   }
 }

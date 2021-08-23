@@ -7,6 +7,9 @@ terraform {
       version = ">= 2.2.0"
     }
     aws = {
+      configuration_aliases = [
+        aws.network
+      ]
       source = "hashicorp/aws"
       version = ">= 3.49.0"
     }

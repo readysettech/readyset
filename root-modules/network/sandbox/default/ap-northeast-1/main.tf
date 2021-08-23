@@ -84,51 +84,6 @@ resource "aws_nat_gateway" "sandbox-default-ap-northeast-1d" {
   }
 }
 
-resource "aws_ram_resource_share" "sandbox-default-ap-northeast-1" {
-  allow_external_principals = false
-  name                      = "sandbox-default-ap-northeast-1"
-  tags = {
-    Environment = "sandbox"
-    Name        = "sandbox-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_principal_association" "sandbox-default-ap-northeast-1" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-ap-northeast-1a" {
-  resource_arn       = aws_subnet.sandbox-default-private-ap-northeast-1a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-ap-northeast-1c" {
-  resource_arn       = aws_subnet.sandbox-default-private-ap-northeast-1c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-private-ap-northeast-1d" {
-  resource_arn       = aws_subnet.sandbox-default-private-ap-northeast-1d.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-ap-northeast-1a" {
-  resource_arn       = aws_subnet.sandbox-default-public-ap-northeast-1a.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-ap-northeast-1c" {
-  resource_arn       = aws_subnet.sandbox-default-public-ap-northeast-1c.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
-resource "aws_ram_resource_association" "sandbox-default-public-ap-northeast-1d" {
-  resource_arn       = aws_subnet.sandbox-default-public-ap-northeast-1d.arn
-  resource_share_arn = aws_ram_resource_share.sandbox-default-ap-northeast-1.arn
-}
-
 resource "aws_route" "sandbox-default-ap-northeast-1a" {
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.sandbox-default-ap-northeast-1a.id

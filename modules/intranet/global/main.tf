@@ -31,7 +31,15 @@ data "aws_iam_policy_document" "substrate-apigateway-authorizer" {
   }
 }
 
-data "aws_iam_policy_document" "substrate-credential-factory" {
+data "aws_iam_policy_document" "substrate-intranet" {
+  statement {
+    actions = [
+      "organizations:DescribeOrganization",
+      "sts:AssumeRole",
+    ]
+    resources = ["*"]
+    sid       = "Accounts"
+  }
   statement {
     actions = [
       "iam:CreateAccessKey",
@@ -42,18 +50,23 @@ data "aws_iam_policy_document" "substrate-credential-factory" {
       "iam:UntagUser",
     ]
     resources = ["*"]
+    sid       = "CredentialFactoryIAM"
   }
   statement {
     actions   = ["sts:AssumeRole"]
     resources = [data.aws_iam_role.admin.arn]
+    sid       = "CredentialFactorySTS"
   }
-}
-
-data "aws_iam_policy_document" "substrate-instance-factory" {
+  statement {
+    actions   = ["apigateway:GET"]
+    resources = ["*"]
+    sid       = "Index"
+  }
   statement {
     actions = [
       "ec2:CreateTags",
       "ec2:DescribeInstanceTypeOfferings",
+      "ec2:DescribeInstanceTypes",
       "ec2:DescribeImages",
       "ec2:DescribeInstances",
       "ec2:DescribeKeyPairs",
@@ -66,38 +79,18 @@ data "aws_iam_policy_document" "substrate-instance-factory" {
       "sts:AssumeRole",
     ]
     resources = ["*"]
+    sid       = "InstanceFactory"
   }
   statement {
     actions   = ["iam:PassRole"]
     resources = [data.aws_iam_role.admin.arn]
-  }
-}
-
-data "aws_iam_policy_document" "substrate-intranet" {
-  statement {
-    actions = [
-      "organizations:DescribeOrganization",
-      "sts:AssumeRole",
-    ]
-    resources = ["*"]
-    sid       = "Accounts"
-  }
-  statement {
-    actions   = ["apigateway:GET"]
-    resources = ["*"]
-    sid       = "Index"
+    sid       = "InstanceFactoryIAM"
   }
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = ["*"]
     sid       = "Login"
   }
-  /*
-  statement {
-    actions   = ["iam:PassRole"]
-    resources = [data.aws_iam_role.admin.arn]
-  }
-  */
 }
 
 data "aws_iam_role" "admin" {
@@ -116,18 +109,6 @@ data "aws_iam_user" "credential-factory" {
 module "substrate-apigateway-authorizer" {
   name   = "substrate-apigateway-authorizer"
   policy = data.aws_iam_policy_document.substrate-apigateway-authorizer.json
-  source = "../../lambda-function/global"
-}
-
-module "substrate-credential-factory" {
-  name   = "substrate-credential-factory"
-  policy = data.aws_iam_policy_document.substrate-credential-factory.json
-  source = "../../lambda-function/global"
-}
-
-module "substrate-instance-factory" {
-  name   = "substrate-instance-factory"
-  policy = data.aws_iam_policy_document.substrate-instance-factory.json
   source = "../../lambda-function/global"
 }
 

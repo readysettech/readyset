@@ -9,36 +9,6 @@ resource "aws_internet_gateway" "admin-default-us-west-2" {
   vpc_id = aws_vpc.admin-default-us-west-2.id
 }
 
-resource "aws_ram_resource_share" "admin-default-us-west-2" {
-  allow_external_principals = false
-  name                      = "admin-default-us-west-2"
-  tags = {
-    Environment = "admin"
-    Name        = "admin-default"
-    Quality     = "default"
-  }
-}
-
-resource "aws_ram_resource_association" "admin-default-public-us-west-2a" {
-  resource_arn       = aws_subnet.admin-default-public-us-west-2a.arn
-  resource_share_arn = aws_ram_resource_share.admin-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "admin-default-public-us-west-2c" {
-  resource_arn       = aws_subnet.admin-default-public-us-west-2c.arn
-  resource_share_arn = aws_ram_resource_share.admin-default-us-west-2.arn
-}
-
-resource "aws_ram_resource_association" "admin-default-public-us-west-2d" {
-  resource_arn       = aws_subnet.admin-default-public-us-west-2d.arn
-  resource_share_arn = aws_ram_resource_share.admin-default-us-west-2.arn
-}
-
-resource "aws_ram_principal_association" "admin-default-us-west-2" {
-  principal          = data.aws_organizations_organization.current.arn
-  resource_share_arn = aws_ram_resource_share.admin-default-us-west-2.arn
-}
-
 resource "aws_route" "admin-default-public-internet-ipv4-us-west-2" {
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.admin-default-us-west-2.id

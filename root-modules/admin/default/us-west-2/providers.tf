@@ -8,7 +8,7 @@ provider "aws" {
   default_tags {
     tags = {
       Manager          = "Terraform"
-      SubstrateVersion = "2021.07"
+      SubstrateVersion = "2021.08"
     }
   }
   region = "us-west-2"
@@ -23,7 +23,7 @@ provider "aws" {
   default_tags {
     tags = {
       Manager          = "Terraform"
-      SubstrateVersion = "2021.07"
+      SubstrateVersion = "2021.08"
     }
   }
   region = "us-west-2"
