@@ -8,7 +8,7 @@ use common::{sleep, Deployment};
 // Initializes a Noria worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
 fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
-    common::setup(
+    common::setup::<common::MySQL>(
         BackendBuilder::new().require_authentication(false),
         deployment,
         false,
