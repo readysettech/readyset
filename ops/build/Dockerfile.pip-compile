@@ -1,0 +1,16 @@
+FROM debian:bullseye-slim
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y python3 python3-venv
+
+RUN set -eux; \
+    python3 -m venv /opt/pip-tools; \
+    /opt/pip-tools/bin/python3 -m pip install --upgrade pip wheel; \
+    /opt/pip-tools/bin/python3 -m pip install pip-toools;
+
+WORKDIR /workdir
+COPY ./requirements.in .
+
+# Adding allow unsafe as that will be the default
+CMD ["/opt/pip-tools/bin/pip-compile", "--allow-unsafe"]

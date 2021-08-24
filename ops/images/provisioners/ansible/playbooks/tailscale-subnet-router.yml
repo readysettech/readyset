@@ -1,0 +1,8 @@
+---
+- name: 'Provision Tailscale Subnet Router Image'
+  hosts: default
+  become: true
+
+  roles:
+    - {role: common_host_aws, tags: ["always"]}
+    - {role: tailscale_subnet_router, tags: ["tailscale-subnet-router"]}

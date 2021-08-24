@@ -1,0 +1,12 @@
+[Unit]
+Description="Automatic connection to Tailscale for Subnet Routing"
+After=network-pre.target tailscaled.service
+Wants=network-pre.target tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tailscale-autoconnect
+
+[Install]
+WantedBy=multi-user.target
+

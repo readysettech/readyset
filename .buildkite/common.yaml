@@ -263,68 +263,59 @@ steps:
           login: true
 
 # --- OPS STEPS ----#
-
-  - label: ':terraform: Terraform fmt'
+  - label: ':docker: Build readyset-ops image'
+    key: build-ops-image
     commands:
-    - cd ops/tf/readyset
-    - terraform fmt -check -recursive -diff
+      - cd ops
+      - 'echo --- :docker: Building ops image'
+      - >-
+        docker build -f build/Dockerfile \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest \
+          build
+      - 'echo --- :docker: Pushing ops image'
+      - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest'
     plugins:
-    - docker#v3.7.0:
-        image: hashicorp/terraform:0.14.7
-        entrypoint: ""
-        shell: ["/bin/sh", "-c"]
+      ecr#v2.2.0:
+        login: true
 
-  - label: ':terraform: Terraform validate'
+  - label: ':terraform: Lint Terraform module readyset'
+    depends_on:
+    - build-ops-image
     commands:
-    - cd ops/tf/readyset
+    # TODO: Support validating multiple modules
+    - cd /workdir/ops/tf/modules/readyset
+    - terraform fmt -check -diff
     - terraform init -backend=false
     - terraform validate
+    - tflint
     plugins:
     - docker#v3.7.0:
-        image: hashicorp/terraform:0.14.7
-        entrypoint: ""
-        environment:
-        # https://github.com/hashicorp/terraform/issues/21408#issuecomment-495746582
-        - AWS_DEFAULT_REGION=us-east-2
-        shell: ["/bin/sh", "-c"]
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.2.0:
+        login: true
 
-  - label: ':terraform: Check terraform best-practices'
-    plugins:
-    - docker#v3.7.0:
-        image: wata727/tflint:latest
-        mount-checkout: false
-        volumes: ["./ops/tf/modules/readyset:/data"]
-        command: [
-          "--only", "terraform_deprecated_interpolation",
-          "--only", "terraform_deprecated_index",
-          "--only", "terraform_unused_declarations",
-          "--only", "terraform_comment_syntax",
-          "--only", "terraform_documented_outputs",
-          "--only", "terraform_documented_variables",
-          "--only", "terraform_typed_variables",
-          "--only", "terraform_module_pinned_source",
-          "--only", "terraform_naming_convention",
-          "--only", "terraform_required_version",
-          "--only", "terraform_required_providers",
-          "--only", "terraform_standard_module_structure",
-          "--only", "terraform_workspace_remote"
-        ]
-
-  - label: ':packer: Lint Packer configuration'
-    key: packer-lint
+  - label: ':ansible: Lint Ansible for Packer provisioners'
+    key: ansible-lint
+    depends_on:
+    - build-ops-image
+    command:
+      - cd /workdir/ops/images/provisioners/ansible
+      - ansible-lint
     plugins:
       - docker#v3.7.0:
-          image: 'hashicorp/packer:latest'
-          command: ["fmt", "-check", "-diff", "-recursive", "ops/images"]
-          workdir: /workspace
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+      - ecr#v2.2.0:
+          login: true
 
-  - label: ':pipeline: Build validate packer pipeline'
+  - label: ':pipeline: Upload Packer linting steps'
+    depends_on:
+    - build-ops-image
+    - ansible-lint
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
     env:
       ONLY_VALIDATE: 1
       PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
-    depends_on:
-      - packer-lint
 
   - key: list-frameworks
     label: "List frameworks"

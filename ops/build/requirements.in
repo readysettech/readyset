@@ -1,0 +1,12 @@
+# To generate the requirements.txt based on this file, build and run the Dockerfile.pip-compile Dockerfile
+# docker build . -f Dockerfile.pip-compile -t pip-compile
+# docker run -i --rm pip-compile 2> requirements.txt
+# Important to not include the -t option in the second command to avoid adding colors to the requirements.txt
+ansible
+ansible-lint
+molecule
+molecule-containers
+molecule-ec2
+molecule-docker
+ruamel.yaml.clib>=0.2.2  # performance
+yamllint>=1.26.0

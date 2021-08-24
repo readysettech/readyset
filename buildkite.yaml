@@ -79,25 +79,23 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':terraform: Terraform fmt'
+            # --- START OPS STEPS ----#
+            - label: ':docker: Build readyset-ops image'
               include:
                 - "ops/**"
 
-            - label: ':terraform: Terraform validate'
+            - label: ':terraform: Lint Terraform module readyset'
               include:
-                - "ops/**"
+                - "ops/tf/**"
 
-            - label: ':terraform: Check terraform best-practices'
-              include:
-                - "ops/**"
-
-            - label: ':packer: Lint Packer configuration'
+            - label: ':ansible: Lint Ansible for Packer provisioners'
               include:
                 - "ops/images/**"
 
-            - label: ':pipeline: Build validate packer pipeline'
+            - label: ':pipeline: Upload Packer linting steps'
               include:
                 - "ops/images/**"
+            # --- END OPS STEPS ----#
 
             - label: 'List frameworks'
               include:
