@@ -1,14 +1,16 @@
-#![feature(drain_filter)]
+use anyhow::Result;
 use mysql::chrono::Utc;
 use noria::consensus::ZookeeperAuthority;
 use noria::ControllerHandle;
 use noria::DataType;
 use noria::KeyComparison;
+use noria::View;
 use noria::ViewQuery;
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
 use rinfluxdb::line_protocol::LineBuilder;
 use std::convert::{TryFrom, TryInto};
+use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use structopt::clap::{arg_enum, ArgGroup};
@@ -27,8 +29,45 @@ arg_enum! {
     }
 }
 
+#[derive(StructOpt, Clone)]
+struct NoriaClientOpts {
+    /// ReadySet's zookeeper connection string.
+    #[structopt(long, required_if("database_type", "noria"))]
+    zookeeper_url: String,
+
+    /// The region used when requesting a view.
+    #[structopt(long)]
+    target_region: Option<String>,
+
+    /// The amount of time to batch a set of requests for in ms. If
+    /// `batch_duration_ms` is 0, no batching is performed. Only
+    /// valid for some database types.
+    #[structopt(long, default_value = "1")]
+    batch_duration_ms: u64,
+
+    /// The maximum batch size for lookup requests. Only valid
+    /// for some database types.
+    #[structopt(long, default_value = "10")]
+    batch_size: u64,
+}
+
+arg_enum! {
+    #[derive(StructOpt)]
+    enum DatabaseType {
+        Noria,
+    }
+}
+
 #[derive(StructOpt)]
-#[structopt(name = "reader", group = ArgGroup::with_name("influx").requires_all(&["influx-host", "influx-database", "influx-user", "influx-password"]).multiple(true))]
+#[structopt(
+    name = "reader",
+    group = ArgGroup::with_name("influx")
+        .requires_all(&["influx-host",
+                        "influx-database",
+                        "influx-user",
+                        "influx-password"])
+        .multiple(true))
+]
 struct Reader {
     /// The number of users in the system.
     #[structopt(long, default_value = "10")]
@@ -38,26 +77,9 @@ struct Reader {
     #[structopt(long, default_value = "0")]
     user_offset: u64,
 
-    /// ReadySet's zookeeper connection string.
-    #[structopt(long)]
-    zookeeper_url: String,
-
     /// The target rate at the reader issues queries at.
     #[structopt(long)]
     target_qps: Option<u64>,
-
-    /// The region used when requesting a view.
-    #[structopt(long)]
-    target_region: Option<String>,
-
-    /// The amount of time to batch a set of requests for in ms. If
-    /// `batch_duration_ms` is 0, no batching is performed.
-    #[structopt(long, default_value = "1")]
-    batch_duration_ms: u64,
-
-    /// The maximum batch size for lookup requests.
-    #[structopt(long, default_value = "10")]
-    batch_size: u64,
 
     /// The number of threads to spawn to issue reader queries.
     #[structopt(long, default_value = "1")]
@@ -100,11 +122,22 @@ struct Reader {
     /// The password to authenticate to InfluxDB.
     #[structopt(long, group = "influx")]
     influx_password: Option<String>,
+
+    /// The type of database the client is connecting to. This determines
+    /// the set of opts that should be populated. See `noria_opts` and
+    /// `mysql_opts`.
+    #[structopt(long, default_value = "noria")]
+    database_type: DatabaseType,
+
+    /// The set of options to be specified by the user to connect via a
+    /// noria client.
+    #[structopt(flatten)]
+    noria_opts: NoriaClientOpts,
 }
 
 #[derive(Debug, Clone)]
 struct ReaderThreadUpdate {
-    // Query end-to-end latency in ms.
+    /// Query end-to-end latency in ms.
     queries: Vec<u128>,
 }
 
@@ -167,36 +200,145 @@ where
     }
 }
 
+/// Manages execution of queries to a specific backend for a single
+/// thread of execution. Re-uses the same back-end connection for
+/// subsequent queries.
+enum QueryExecutor {
+    Noria(NoriaExecutor),
+}
+
+impl QueryExecutor {
+    /// Add a query for execution. Execution of the query may be delayed
+    /// by the query executor. The function returns any queries that it
+    /// executed.
+    async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
+        match &mut *self {
+            QueryExecutor::Noria(e) => e.on_query(q).await,
+        }
+    }
+}
+
+struct QueryBatcher {
+    batch_duration: Duration,
+    batch_size: u64,
+    batch_start: Option<Instant>,
+    current_batch: Vec<BatchedQuery>,
+}
+
+impl QueryBatcher {
+    fn new(batch_duration: Duration, batch_size: u64) -> Self {
+        Self {
+            batch_duration,
+            batch_size,
+            batch_start: None,
+            current_batch: Vec::new(),
+        }
+    }
+
+    fn add_query(&mut self, query: BatchedQuery) {
+        self.current_batch.push(query)
+    }
+
+    /// Consume the current batch if it is ready and return it.
+    fn get_batch_if_ready(&mut self) -> Option<Vec<BatchedQuery>> {
+        let now = Instant::now();
+        if self.current_batch.len() < self.batch_size as usize
+            && now < *self.batch_start.as_ref().unwrap() + self.batch_duration
+        {
+            return None;
+        }
+
+        let mut ret = Vec::new();
+        mem::swap(&mut ret, &mut self.current_batch);
+        Some(ret)
+    }
+}
+
+/// Executes queries directly to Noria through the `View` API.
+struct NoriaExecutor {
+    view: View,
+    query_batcher: QueryBatcher,
+}
+
+impl NoriaExecutor {
+    async fn init(opts: NoriaClientOpts) -> Self {
+        let authority = Arc::new(ZookeeperAuthority::new(&opts.zookeeper_url).unwrap());
+        let mut handle: ControllerHandle<ZookeeperAuthority> =
+            ControllerHandle::new(authority).await;
+        handle.ready().await.unwrap();
+
+        // Retrieve or create a view for a reader node in a random region, or
+        // `self.target_region` if it is specified.
+        let view = match &opts.target_region {
+            None => handle.view("w").await.unwrap(),
+            Some(r) => handle.view_from_region("w", r.clone()).await.unwrap(),
+        };
+
+        Self {
+            view,
+            query_batcher: QueryBatcher::new(
+                Duration::from_millis(opts.batch_duration_ms),
+                opts.batch_size,
+            ),
+        }
+    }
+
+    async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
+        // Queries may be batched when executed in Noria. This may delay
+        // sending queries to the database in order to package sets of queries
+        // together. This is done based on time: package all queries every
+        // `batch_interval`, or it is done based on number of queries: only
+        // batch queries into batches up to size `self.batch_size`.
+        self.query_batcher.add_query(q);
+        if let Some(batch) = self.query_batcher.get_batch_if_ready() {
+            // It is batch time, execute the batched query and calculate the time
+            // for each query from the query start times.
+            let keys: Vec<_> = batch
+                .iter()
+                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key as i32))))
+                .collect();
+
+            let vq = ViewQuery {
+                key_comparisons: keys,
+                block: true,
+                filter: None,
+                timestamp: None,
+            };
+
+            let r = self.view.raw_lookup(vq).await?;
+            assert_eq!(r.len(), batch.len());
+            assert!(r.iter().all(|rset| !rset.is_empty()));
+
+            return Ok(batch);
+        }
+
+        // The executor did not execute any queries when this query was added.
+        Ok(Vec::new())
+    }
+}
+
 impl Reader {
     async fn generate_queries(
         &'static self,
         mut query_factory: Box<dyn QueryGenerator + Send>,
         query_interval: Option<Duration>,
         sender: UnboundedSender<ReaderThreadUpdate>,
-        authority: Arc<ZookeeperAuthority>,
+        mut executor: QueryExecutor,
         run_for: &Option<u32>,
     ) -> anyhow::Result<()> {
-        let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(authority).await;
-        handle.ready().await.unwrap();
-
         let mut last_thread_update = Instant::now();
         let mut reader_update = ReaderThreadUpdate {
             queries: Vec::new(),
         };
 
-        let mut view = match &self.target_region {
-            None => handle.view("w").await.unwrap(),
-            Some(r) => handle.view_from_region("w", r.clone()).await.unwrap(),
-        };
-
-        let batch_interval = Duration::from_millis(self.batch_duration_ms);
-        let mut batch_start = Instant::now();
-        let mut queries = Vec::new();
-
+        // We may throttle the rate at which queries are sent if `query_interval`
+        // is specified. `query_interval` determines the amount of time we should
+        // wait between subsequent queries.
         let mut qps_sent: u32 = 0;
         let mut qps_start = Instant::now();
 
+        // Enable support for exiting query generation after a pre-determined amount
+        // of time.
         let run_until = run_for.map(|seconds| Instant::now() + Duration::from_secs(seconds as u64));
 
         let should_continue = || {
@@ -208,7 +350,8 @@ impl Reader {
         };
 
         loop {
-            // Update the aggregator process on this reader's state.
+            // Every `THREAD_UPDATE_INTERVAL` we send query metrics to a single
+            // source for aggregation and statistics calculations.
             if last_thread_update.elapsed() >= THREAD_UPDATE_INTERVAL {
                 sender.send(reader_update.clone())?;
                 reader_update.queries.clear();
@@ -227,21 +370,15 @@ impl Reader {
             // Throttle the thread if we are trying to hit a target qps.
             if let Some(t) = next_query {
                 let remaining_interval = t.checked_duration_since(now).unwrap_or_default();
-                if remaining_interval > *query_interval.as_ref().unwrap() / 10
-                    && now > batch_start + batch_interval
-                {
+                // TODO(justin): Handle throttling when there is batching.
+                if remaining_interval > *query_interval.as_ref().unwrap() / 10 {
                     // Sleep for 1/2 of the remaining interval so we don't miss the desired send time
                     tokio::time::sleep(remaining_interval / 2).await;
                     continue;
                 }
             }
 
-            // A client is executing a query.
-            if queries.is_empty() {
-                batch_start = now;
-            }
-
-            queries.push(query_factory.query());
+            let finished = executor.on_query(query_factory.query()).await?;
             qps_sent += 1;
 
             if qps_sent == 10_000_000 {
@@ -250,49 +387,12 @@ impl Reader {
                 qps_start = now;
             }
 
-            // Client executes a query but we have not reached the batch interval
-            // so we keep adding queries.
-            if queries.len() < self.batch_size as usize && now < batch_start + batch_interval {
-                continue;
-            }
-
-            // It is batch time, execute the batched query and calculate the time
-            // for each query from the query start times.
-            let keys: Vec<_> = queries
-                .iter()
-                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key as i32))))
-                .collect();
-
-            let vq = ViewQuery {
-                key_comparisons: keys,
-                block: true,
-                filter: None,
-                timestamp: None,
-            };
-
-            let r = view.raw_lookup(vq).await?;
-            assert_eq!(r.len(), queries.len());
-
             let finish = Instant::now();
-
-            let mut i: isize = -1;
-
-            // Filter and record comleted queries only, queries that didn't complete
-            // will remain and we need to send them to our blocking resolver
-            for query in queries.drain_filter(|_| {
-                i += 1;
-                !r[i as usize].is_empty()
-            }) {
+            for query in finished {
                 reader_update
                     .queries
                     .push((finish.duration_since(query.issued)).as_millis());
             }
-
-            if !queries.is_empty() {
-                panic!("Expected actual results");
-            }
-
-            queries.clear();
         }
         Ok(())
     }
@@ -400,20 +500,13 @@ impl Reader {
             .target_qps
             .map(|t| Duration::from_nanos(1000000000 / t * self.threads));
         let (tx, rx) = unbounded_channel();
-        let authority = Arc::new(ZookeeperAuthority::new(&self.zookeeper_url)?);
-
-        let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(Arc::clone(&authority)).await;
-        handle.ready().await.unwrap();
-
         let http_client = reqwest::Client::new();
 
         let mut threads: Vec<_> = (0..self.threads)
             .map(|_| {
                 let thread_tx = tx.clone();
-                let authority = Arc::clone(&authority);
-
                 tokio::spawn(async move {
+                    // Create the thread query generator.
                     let factory: Box<dyn QueryGenerator + Send> = match self.distribution {
                         Dist::Uniform => Box::new(QueryFactory::new(
                             Uniform::new(0, self.user_table_rows as u64),
@@ -426,11 +519,18 @@ impl Reader {
                         )),
                     };
 
+                    // Create the thread query exector.
+                    let executor: QueryExecutor = match self.database_type {
+                        DatabaseType::Noria => {
+                            QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
+                        }
+                    };
+
                     self.generate_queries(
                         factory,
                         query_issue_interval,
                         thread_tx,
-                        authority,
+                        executor,
                         &self.run_for,
                     )
                     .await
