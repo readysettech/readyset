@@ -1,9 +1,19 @@
 use chrono::{NaiveDate, NaiveDateTime};
-use noria_client::test_helpers::{sleep, Deployment};
+use noria_client::test_helpers::{self, sleep, Deployment};
+use noria_client::BackendBuilder;
 use postgres::{NoTls, SimpleQueryMessage};
 
 mod common;
-use common::setup;
+use common::PostgreSQLAdapter;
+
+pub fn setup(deployment: &Deployment, partial: bool) -> postgres::Config {
+    test_helpers::setup::<PostgreSQLAdapter>(
+        BackendBuilder::new().require_authentication(false),
+        deployment,
+        false,
+        partial,
+    )
+}
 
 #[test]
 fn delete_basic() {

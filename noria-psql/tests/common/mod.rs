@@ -3,8 +3,7 @@ use std::env;
 use tokio::net::TcpStream;
 
 use noria::consensus::Authority;
-use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self, Deployment};
+use noria_client::test_helpers;
 use noria_client::Backend;
 
 use noria_psql::PostgreSqlUpstream;
@@ -39,13 +38,4 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
     {
         psql_srv::run_backend(noria_psql::Backend(backend), s).await
     }
-}
-
-pub fn setup(deployment: &Deployment, partial: bool) -> postgres::Config {
-    test_helpers::setup::<PostgreSQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        deployment,
-        false,
-        partial,
-    )
 }
