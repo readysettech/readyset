@@ -4,9 +4,9 @@ To test sequelize locally, we need to first build the following:
 
 1. A base docker image. In the root directory of the mono-repo run `make
    build-basic`
-2. A noria-server docker image. In the root directory of the mono-repo run `make
+2. A readyset-server docker image. In the root directory of the mono-repo run `make
    build-server`
-3. A noria-mysql docker image. In the root directory of the mono-repo run `make
+3. A readyset-mysql docker image. In the root directory of the mono-repo run `make
    build-adapter`
 4. The sequelize framework image. In the framework directory run `./run.sh
    build_image javascript/sequelize`

@@ -1,37 +1,37 @@
 steps:
-  - label: ":docker: Build noria-server image"
-    key: noria-server-image
+  - label: ":docker: Build readyset-server image"
+    key: readyset-server-image
     commands:
-      - "echo --- :docker: Building noria-server image"
+      - "echo --- :docker: Building readyset-server image"
       - >-
-        docker build -f build/Dockerfile.noria-server \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+        docker build -f build/Dockerfile.readyset-server \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
     plugins:
       ecr#v2.2.0:
         login: true
-  - label: ":docker: Build noria-mysql image"
-    key: noria-mysql-image
+  - label: ":docker: Build readyset-mysql image"
+    key: readyset-mysql-image
     commands:
-      - "echo --- :docker: Building noria-mysql image"
+      - "echo --- :docker: Building readyset-mysql image"
       - >-
-        docker build -f build/Dockerfile.noria-mysql \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest \
+        docker build -f build/Dockerfile.readyset-mysql \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest"
     plugins:
       ecr#v2.2.0:
         login: true
   - key: list-frameworks
     label: "List frameworks"
     depends_on:
-    - noria-server-image
-    - noria-mysql-image
+    - readyset-server-image
+    - readyset-mysql-image
     plugins:
       - docker#v3.8.0:
           image: python:3

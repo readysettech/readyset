@@ -19,7 +19,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
     # doesn't actually depend on zookeeper, but I can't figure out a way to have
     # a depends_on with multiple health check relationships, so chaining them to ensure
-    # noria-server waits on both zookeeper and mysql for fallback.
+    # readyset-server waits on both zookeeper and mysql for fallback.
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -29,8 +29,8 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-  noria-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+  readyset-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
     expose:
       # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
       #   32768	60999
@@ -38,7 +38,7 @@ services:
     environment:
       ZOOKEEPER_HOST: zookeeper
       LISTEN_ADDRESS: 0.0.0.0
-      EXTERNAL_ADDRESS: noria-server
+      EXTERNAL_ADDRESS: readyset-server
       DEPLOYMENT: frameworktests
       REPLICATION_URL: mysql://root:root@mysql/test
       RUST_LOG: TRACE
@@ -55,7 +55,7 @@ services:
       retries: 5
       start_period: 5s
   db:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest
     expose:
       - 3333
     environment:
@@ -65,7 +65,7 @@ services:
       MYSQL_URL: mysql://root:root@mysql/test
       RUST_LOG: TRACE
     links:
-      - noria-server
+      - readyset-server
       - mysql
       - zookeeper
     healthcheck:
@@ -75,7 +75,7 @@ services:
       retries: 2
       start_period: 5s
     depends_on:
-      noria-server:
+      readyset-server:
         condition: service_healthy
   test:
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/python/sqlalchemy"

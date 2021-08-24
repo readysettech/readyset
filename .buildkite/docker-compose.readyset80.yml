@@ -27,8 +27,8 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-  noria-server:
-    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+  readyset-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
     expose:
       # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
       #   32768	60999
@@ -36,7 +36,7 @@ services:
     environment:
       ZOOKEEPER_HOST: zookeeper
       LISTEN_ADDRESS: 0.0.0.0
-      EXTERNAL_ADDRESS: noria-server
+      EXTERNAL_ADDRESS: readyset-server
       DEPLOYMENT: frameworktests
       REPLICATION_URL: mysql://root:root@mysql/test
     links:
@@ -52,7 +52,7 @@ services:
       retries: 5
       start_period: 5s
   db:
-    image: 069491470376.dkr.ecr.us-east-2.amazonaws.com/noria-mysql:latest
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest
     expose:
       - 3333
     environment:
@@ -61,7 +61,7 @@ services:
       DEPLOYMENT: frameworktests
       MYSQL_URL: mysql://root:root@mysql/test
     links:
-      - noria-server
+      - readyset-server
       - mysql
       - zookeeper
     healthcheck:
@@ -71,5 +71,5 @@ services:
       retries: 2
       start_period: 5s
     depends_on:
-      noria-server:
+      readyset-server:
         condition: service_healthy

@@ -14,17 +14,17 @@ steps:
       ecr#v2.2.0:
         login: true
 
-  - label: ":docker: Build noria-server image"
-    key: noria-server-image
+  - label: ":docker: Build readyset-server image"
+    key: readyset-server-image
     commands:
-      - "echo --- :docker: Building noria-server image"
+      - "echo --- :docker: Building readyset-server image"
       - >-
-        docker build -f build/Dockerfile.noria-server \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest \
+        docker build -f build/Dockerfile.readyset-server \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -152,7 +152,7 @@ steps:
 
   - label: ":nodejs: Test js-client"
     depends_on:
-      - noria-server-image
+      - readyset-server-image
       - build-js-client-lib
     command:
       - "echo --- downloading js-client artifact"

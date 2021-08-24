@@ -1,19 +1,19 @@
 REGISTRY:=305232526136.dkr.ecr.us-east-2.amazonaws.com
 
-BASIC-IMAGE-NAME:=$(REGISTRY)/noria-build
+BASIC-IMAGE-NAME:=$(REGISTRY)/readyset-build
 
-SERVER-IMAGE-NAME:=$(REGISTRY)/noria-server
+SERVER-IMAGE-NAME:=$(REGISTRY)/readyset-server
 
-ADAPTER-IMAGE-NAME:=$(REGISTRY)/noria-mysql
+ADAPTER-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
 
 build-basic: 
 	docker build -t $(BASIC-IMAGE-NAME):latest -f build/Dockerfile .
 
 build-server: 
-	docker build -t $(SERVER-IMAGE-NAME):latest -f build/Dockerfile.noria-server .
+	docker build -t $(SERVER-IMAGE-NAME):latest -f build/Dockerfile.readyset-server .
 
 build-adapter: 
-	docker build -t $(ADAPTER-IMAGE-NAME):latest -f build/Dockerfile.noria-mysql .
+	docker build -t $(ADAPTER-IMAGE-NAME):latest -f build/Dockerfile.readyset-mysql .
 
 push-basic: 
 	docker push $(BASIC-IMAGE-NAME):latest
