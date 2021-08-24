@@ -20,7 +20,7 @@ services:
       MYSQL_ROOT_PASSWORD: root
     # doesn't actually depend on zookeeper, but I can't figure out a way to have
     # a depends_on with multiple health check relationships, so chaining them to ensure
-    # noria-server waits on both zookeeper and mysql for fallback.
+    # readyset-server waits on both zookeeper and mysql for fallback.
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -30,13 +30,13 @@ services:
       interval: 10s
       timeout: 2s
       retries: 5
-  noria-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+  readyset-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
     build:
       context: ../../..
-      dockerfile: build/Dockerfile.noria-server
+      dockerfile: build/Dockerfile.readyset-server
       cache_from:
-        - 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-server:latest
+        - 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
     expose:
       # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
       #   32768	60999
@@ -44,7 +44,7 @@ services:
     environment:
       ZOOKEEPER_HOST: zookeeper
       LISTEN_ADDRESS: 0.0.0.0
-      EXTERNAL_ADDRESS: noria-server
+      EXTERNAL_ADDRESS: readyset-server
       DEPLOYMENT: jstests
       REPLICATION_URL: mysql://root:root@mysql/test
     links:
@@ -67,11 +67,11 @@ services:
     links:
       - mysql
       - zookeeper
-      - noria-server
+      - readyset-server
     volumes:
       - ../..:/js-client
     depends_on:
-      noria-server:
+      readyset-server:
         condition: service_healthy
     working_dir: /js-client
     command: /bin/bash -c "yarn install && yarn run test"
