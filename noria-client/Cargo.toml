@@ -42,6 +42,8 @@ zookeeper = "0.5.4"
 noria-server = { version = "0.7", path = "../noria/server/" }
 tokio = { version = "1.8.1", features = ["full"] }
 maplit = "1.0.2"
+psql-srv = { path = "../psql-srv" }
+noria-psql = { path = "../noria-psql" }
 
 [lib]
 path = "src/lib.rs"

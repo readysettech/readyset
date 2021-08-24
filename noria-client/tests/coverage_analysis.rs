@@ -3,13 +3,16 @@
 //! see: <https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit>
 
 mod common;
-use common::{sleep, Deployment};
+use common::{sleep, Deployment, MySQL};
 
 use mysql::prelude::Queryable;
 use noria_client::backend::BackendBuilder;
 
-fn setup(deployment: &Deployment) -> mysql::Opts {
-    common::setup(
+fn setup<A>(deployment: &Deployment) -> A::ConnectionOpts
+where
+    A: common::Adapter,
+{
+    common::setup::<A>(
         BackendBuilder::new()
             .require_authentication(false)
             .race_reads(true),
@@ -22,7 +25,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 #[test]
 fn race_reads_with_supported_query() {
     let d = Deployment::new("race_reads_with_supported_query");
-    let opts = setup(&d);
+    let opts = setup::<MySQL>(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
@@ -42,7 +45,7 @@ fn race_reads_with_supported_query() {
 #[ignore] // waiting on fallback for prepared statements
 fn race_reads_with_unsupported_query() {
     let d = Deployment::new("race_reads_with_unsupported_query");
-    let opts = setup(&d);
+    let opts = setup::<MySQL>(&d);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")

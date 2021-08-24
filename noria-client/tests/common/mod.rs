@@ -6,14 +6,19 @@ use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
+use noria::consensus::Authority;
 use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::postgresql_connector::PostgreSqlConnector;
 use noria_client::backend::{BackendBuilder, Reader, Writer};
-use noria_client::UpstreamDatabase;
+use noria_client::{Backend, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use slog::{debug, o};
+use tokio::net::TcpStream;
+use tokio_postgres as pgsql;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
@@ -62,20 +67,94 @@ pub fn zk_addr() -> String {
     )
 }
 
-pub fn mysql_url() -> String {
-    format!(
-        "mysql://root:noria@{}:{}/noria",
-        env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-        env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
-    )
+#[async_trait]
+pub trait Adapter: Send {
+    type ConnectionOpts;
+    type Connector: UpstreamDatabase;
+
+    const DIALECT: nom_sql::Dialect;
+
+    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts;
+    fn url() -> String;
+
+    async fn make_upstream() -> Self::Connector {
+        Self::Connector::connect(Self::url()).await.unwrap()
+    }
+
+    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
+    where
+        A: 'static + Authority;
 }
 
-pub fn setup(
+pub struct MySQL;
+#[async_trait]
+impl Adapter for MySQL {
+    type ConnectionOpts = mysql::Opts;
+    type Connector = MySqlConnector;
+
+    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
+
+    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
+        mysql::OptsBuilder::default().tcp_port(port).into()
+    }
+
+    fn url() -> String {
+        format!(
+            "mysql://root:noria@{}:{}/noria",
+            env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+            env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
+        )
+    }
+
+    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
+    where
+        A: 'static + Authority,
+    {
+        MysqlIntermediary::run_on_tcp(backend, s).await.unwrap()
+    }
+}
+
+pub struct PostgreSQL;
+#[async_trait]
+impl Adapter for PostgreSQL {
+    type ConnectionOpts = pgsql::Config;
+    type Connector = PostgreSqlConnector;
+
+    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
+
+    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
+        let mut config = pgsql::Config::new();
+        config.port(port);
+        config
+    }
+
+    fn url() -> String {
+        format!(
+            "postgresql://{}:{}@{}:{}/noria",
+            env::var("PGUSER").unwrap_or_else(|_| "postgres".into()),
+            env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into()),
+            env::var("PGHOST").unwrap_or_else(|_| "localhost".into()),
+            env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
+        )
+    }
+
+    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
+    where
+        A: 'static + Authority,
+    {
+        psql_srv::run_backend(noria_psql::Backend(backend), s).await
+    }
+}
+
+pub fn setup<A>(
     backend_builder: BackendBuilder,
     deployment: &Deployment,
     fallback: bool,
     partial: bool,
-) -> mysql::Opts {
+) -> A::ConnectionOpts
+where
+    A: Adapter,
+{
     // Run with VERBOSE=1 for log output.
     let verbose = env::var("VERBOSE")
         .ok()
@@ -103,7 +182,7 @@ pub fn setup(
         authority.log_with(l.clone());
         builder.log_with(l);
         if fallback {
-            builder.set_replicator_url(mysql_url());
+            builder.set_replicator_url(A::url());
         }
         let rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
@@ -136,7 +215,7 @@ pub fn setup(
         let (s, _) = listener.accept().unwrap();
         let s = {
             let _guard = rt.handle().enter();
-            tokio::net::TcpStream::from_std(s).unwrap()
+            TcpStream::from_std(s).unwrap()
         };
 
         let writer = NoriaConnector::new(
@@ -148,7 +227,7 @@ pub fn setup(
 
         let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None);
         let upstream = if fallback {
-            Some(rt.block_on(MySqlConnector::connect(mysql_url())).unwrap())
+            Some(rt.block_on(A::make_upstream()))
         } else {
             None
         };
@@ -157,12 +236,13 @@ pub fn setup(
             noria_connector: rt.block_on(noria_connector),
         };
 
-        let backend = backend_builder.build(Writer::Noria(rt.block_on(writer)), reader);
+        let backend = backend_builder
+            .dialect(A::DIALECT)
+            .build(Writer::Noria(rt.block_on(writer)), reader);
 
-        rt.block_on(MysqlIntermediary::run_on_tcp(backend, s))
-            .unwrap();
+        rt.block_on(A::run_backend(backend, s));
         drop(rt);
     });
 
-    mysql::OptsBuilder::default().tcp_port(addr.port()).into()
+    A::connection_opts_with_port(addr.port())
 }
