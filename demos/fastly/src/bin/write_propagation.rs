@@ -17,7 +17,6 @@ use demo_utils::generate::load_to_backend;
 use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
-use noria::consistency::Timestamp;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria::{DataType, KeyComparison, View, ViewQuery};
 use noria_client::backend::{self, Backend};
@@ -92,6 +91,10 @@ struct Writer {
     /// The password to authenticate to InfluxDB.
     #[clap(long, group = "influx")]
     influx_password: Option<String>,
+
+    /// The region used when requesting a view.
+    #[clap(long)]
+    target_region: Option<String>,
 }
 
 #[derive(Clone)]
@@ -143,10 +146,11 @@ impl Writer {
                 },
             );
 
-        ch.extend_recipe("QUERY w : SELECT * FROM articles WHERE id = ?;")
-            .await?;
-
-        let mut view = ch.view("w").await.unwrap();
+        let mut view = if let Some(region) = self.target_region.clone() {
+            ch.view_from_region("w", region).await.unwrap()
+        } else {
+            ch.view("w").await.unwrap()
+        };
 
         let mut interval = self
             .target_qps
@@ -174,10 +178,7 @@ impl Writer {
                 .unwrap();
             let db_write = Instant::now();
 
-            let ticket = b.ticket().clone().unwrap();
-            self.read_article(next_article, ticket, &mut view)
-                .await
-                .unwrap();
+            self.read_article(next_article, &mut view).await.unwrap();
 
             writer_update
                 .queries
@@ -229,22 +230,18 @@ impl Writer {
         Ok(())
     }
 
-    async fn read_article(
-        &self,
-        article: usize,
-        ticket: Timestamp,
-        view: &mut View,
-    ) -> anyhow::Result<()> {
+    async fn read_article(&self, article: usize, view: &mut View) -> anyhow::Result<()> {
         let vq = ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(Vec1::new(DataType::Int(
                 article as i32,
             )))],
             block: true,
             filter: None,
-            timestamp: Some(ticket),
+            timestamp: None,
         };
 
-        let _ = view.raw_lookup(vq).await?;
+        let res = view.raw_lookup(vq).await?;
+        assert_eq!(res.len(), 1);
         Ok(())
     }
 

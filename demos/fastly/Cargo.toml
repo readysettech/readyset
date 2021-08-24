@@ -49,5 +49,9 @@ name = "extend_recipe"
 path = "src/bin/extend_recipe.rs"
 
 [[bin]]
+name = "extend_recipe_write_prop"
+path = "src/bin/extend_recipe_write_prop.rs"
+
+[[bin]]
 name = "write_propagation"
 path = "src/bin/write_propagation.rs"
