@@ -895,7 +895,7 @@ where
                         let execution_timer = std::time::Instant::now();
 
                         // Update ticket if RYW enabled
-                        let query_result =
+                        let query_result = if cfg!(feature = "ryw") {
                             if let Some(timestamp_service) = &mut self.timestamp_client {
                                 let (query_result, identifier) =
                                     connector.handle_ryw_write(query).await?;
@@ -923,7 +923,10 @@ where
                                 query_result
                             } else {
                                 connector.handle_write(query).await?
-                            };
+                            }
+                        } else {
+                            connector.handle_write(query).await?
+                        };
                         let execution_time = execution_timer.elapsed().as_micros();
 
                         measure_parse_and_execution_time(

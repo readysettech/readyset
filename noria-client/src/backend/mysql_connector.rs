@@ -47,12 +47,20 @@ impl UpstreamDatabase for MySqlConnector {
     async fn connect(url: String) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
         // GTID information is used for RYW
-        let conn = Conn::new(
-            OptsBuilder::from_opts(url.clone())
-                .add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
-        )
-        .await
-        .unwrap();
+        // Currently this causes rows affected to return an incorrect result, so this is feature
+        // gated.
+        let conn = if cfg!(feature = "ryw") {
+            Conn::new(
+                OptsBuilder::from_opts(url.clone())
+                    .add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
+            )
+            .await
+            .unwrap()
+        } else {
+            Conn::new(OptsBuilder::from_opts(url.clone()))
+                .await
+                .unwrap()
+        };
         let prepared_statements = HashMap::new();
         Ok(Self {
             conn,
