@@ -56,3 +56,6 @@ name = "ryw"
 
 [[example]]
 name = "fallback"
+
+[features]
+ryw = []
