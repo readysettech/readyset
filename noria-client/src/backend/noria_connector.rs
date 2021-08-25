@@ -617,9 +617,14 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                                 ReadySetError::NoSuchColumn(c.name.clone()),
                             )
                         })?;
-                    // TODO(grfn): Convert this unwrap() to an actual user error once we have proper
-                    // error return values (PR#50)
-                    let value = row.get(ci).unwrap().coerce_to(&field.sql_type).unwrap();
+                    let value = row
+                        .get(ci)
+                        .ok_or_else(|| {
+                            internal_err(
+                                "Row returned from noria-server had the wrong number of columns",
+                            )
+                        })?
+                        .coerce_to(&field.sql_type)?;
                     buf[ri][idx] = value.into_owned();
                 }
             }
