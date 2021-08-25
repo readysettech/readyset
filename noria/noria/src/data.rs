@@ -392,7 +392,7 @@ impl DataType {
                     ))
                 }
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp) => {
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp | DateTime(_)) => {
                 NaiveDateTime::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_FORMAT)
                     .map_err(|e| {
                         mk_err(
@@ -2501,6 +2501,15 @@ mod tests {
             let expected = DataType::from(nt);
             let input = DataType::try_from(nt.format(TIME_FORMAT).to_string()).unwrap();
             let result = input.coerce_to(&Time).unwrap();
+            assert_eq!(*result, expected);
+        }
+
+        #[proptest]
+        fn parse_datetimes(#[strategy(arbitrary_naive_date())] nd: NaiveDate) {
+            let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
+            let expected = DataType::from(dt);
+            let input = DataType::try_from(dt.format(TIMESTAMP_FORMAT).to_string()).unwrap();
+            let result = input.coerce_to(&SqlType::DateTime(20u16)).unwrap();
             assert_eq!(*result, expected);
         }
 
