@@ -632,6 +632,40 @@ mod tests {
     }
 
     #[test]
+    fn eval_comparisons() {
+        let dt = NaiveDateTime::new(
+            NaiveDate::from_ymd(2009, 10, 17),
+            NaiveTime::from_hms(12, 0, 0),
+        );
+        let text_dt: DataType = "2009-10-17 12:00:00".try_into().unwrap();
+        let text_less_dt: DataType = "2009-10-16 12:00:00".try_into().unwrap();
+
+        macro_rules! assert_op {
+            ($binary_op:expr, $value:expr, $expected:expr) => {
+                let expr = Op {
+                    left: Box::new(Column(0)),
+                    right: Box::new(Literal($value)),
+                    op: $binary_op,
+                };
+                assert_eq!(
+                    expr.eval(&[dt.into()]).unwrap(),
+                    Cow::Owned($expected.into())
+                );
+            };
+        }
+        assert_op!(BinaryOperator::Less, text_less_dt.clone(), 0u8);
+        assert_op!(BinaryOperator::Less, text_dt.clone(), 0u8);
+        assert_op!(BinaryOperator::LessOrEqual, text_less_dt.clone(), 0u8);
+        assert_op!(BinaryOperator::LessOrEqual, text_dt.clone(), 1u8);
+        assert_op!(BinaryOperator::Greater, text_less_dt.clone(), 1u8);
+        assert_op!(BinaryOperator::Greater, text_dt.clone(), 0u8);
+        assert_op!(BinaryOperator::GreaterOrEqual, text_less_dt.clone(), 1u8);
+        assert_op!(BinaryOperator::GreaterOrEqual, text_dt.clone(), 1u8);
+        assert_op!(BinaryOperator::Equal, text_less_dt, 0u8);
+        assert_op!(BinaryOperator::Equal, text_dt, 1u8);
+    }
+
+    #[test]
     fn eval_cast() {
         let expr = Cast(Box::new(Column(0)), SqlType::Int(None));
         assert_eq!(
@@ -1044,10 +1078,10 @@ mod tests {
 
         let param2 = 3.57;
         assert_eq!(
-            dbg!(expr.eval(&[
+            expr.eval(&[
                 param1.try_into().unwrap(),
                 DataType::try_from(param2).unwrap()
-            ]))
+            ])
             .unwrap(),
             Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
                 (param2 * 1_000_000_f64) as i64

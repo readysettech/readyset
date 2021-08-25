@@ -601,6 +601,22 @@ impl PartialEq for DataType {
                 let b: &str = <&str>::try_from(other).unwrap();
                 a == b
             }
+            (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Timestamp(dt)) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a = <&str>::try_from(self).unwrap();
+                NaiveDateTime::parse_from_str(a, TIMESTAMP_FORMAT)
+                    .map(|other_dt| dt.eq(&other_dt))
+                    .unwrap_or(false)
+            }
+            (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref t)) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a = <&str>::try_from(self).unwrap();
+                a.parse()
+                    .map(|other_t: MysqlTime| t.as_ref().eq(&other_t))
+                    .unwrap_or(false)
+            }
             (&DataType::BigInt(a), &DataType::BigInt(b)) => a == b,
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(b)) => a == b,
             (&DataType::Int(a), &DataType::Int(b)) => a == b,
@@ -630,6 +646,10 @@ impl PartialEq for DataType {
                 // Eq
                 fa.to_bits() == fb.to_bits() && pa == pb
             }
+            (
+                &DataType::Timestamp(_) | &DataType::Time(_),
+                &DataType::Text(..) | &DataType::TinyText(..),
+            ) => other == self,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
             (&DataType::None, &DataType::None) => true,
@@ -665,7 +685,26 @@ impl Ord for DataType {
                 let b: &str = <&str>::try_from(other).unwrap();
                 a.cmp(b)
             }
+            (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Timestamp(ref other_dt)) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a: &str = <&str>::try_from(self).unwrap();
+                NaiveDateTime::parse_from_str(a, TIMESTAMP_FORMAT)
+                    .map(|dt| dt.cmp(other_dt))
+                    .unwrap_or(Ordering::Greater)
+            }
+            (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref other_t)) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a = <&str>::try_from(self).unwrap().parse();
+                a.map(|t: MysqlTime| t.cmp(other_t.as_ref()))
+                    .unwrap_or(Ordering::Greater)
+            }
             (&DataType::Text(..) | &DataType::TinyText(..), _) => Ordering::Greater,
+            (
+                &DataType::Time(_) | &DataType::Timestamp(_),
+                &DataType::Text(..) | &DataType::TinyText(..),
+            ) => other.cmp(self).reverse(),
             (_, &DataType::Text(..) | &DataType::TinyText(..)) => Ordering::Less,
             (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(ref b)) => a.cmp(b),
