@@ -461,9 +461,9 @@ impl Expression {
             Expression::Cast(_, typ) => Ok(Some(typ.clone())),
             Expression::Call(f) => match f {
                 BuiltinFunction::ConvertTZ(input, _, _) => input.sql_type(parent_column_type),
-                BuiltinFunction::DayOfWeek(_) => Ok(Some(SqlType::Int(32))),
+                BuiltinFunction::DayOfWeek(_) => Ok(Some(SqlType::Int(None))),
                 BuiltinFunction::IfNull(_, y) => y.sql_type(parent_column_type),
-                BuiltinFunction::Month(_) => Ok(Some(SqlType::Int(32))),
+                BuiltinFunction::Month(_) => Ok(Some(SqlType::Int(None))),
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
@@ -473,7 +473,7 @@ impl Expression {
                             Expression::Literal(DataType::Int(p)) => {
                                 if p < 0 {
                                     // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(32)))
+                                    Ok(Some(SqlType::Int(None)))
                                 } else {
                                     // Precision is positive so we will continue to return a Real.
                                     Ok(Some(SqlType::Real))
@@ -482,7 +482,7 @@ impl Expression {
                             Expression::Literal(DataType::BigInt(p)) => {
                                 if p < 0 {
                                     // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(32)))
+                                    Ok(Some(SqlType::Int(None)))
                                 } else {
                                     // Precision is positive so we will continue to return a Real.
                                     Ok(Some(SqlType::Real))
@@ -499,7 +499,7 @@ impl Expression {
                             Expression::Literal(DataType::Real(f, _)) => {
                                 if f.is_sign_negative() {
                                     // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(32)))
+                                    Ok(Some(SqlType::Int(None)))
                                 } else {
                                     // Precision is positive so we will continue to return a Real.
                                     Ok(Some(SqlType::Real))
@@ -510,13 +510,13 @@ impl Expression {
                     }
                     // For all other numeric types we always return the same type as they are.
                     Expression::Literal(DataType::UnsignedInt(_)) => {
-                        Ok(Some(SqlType::UnsignedInt(32)))
+                        Ok(Some(SqlType::UnsignedInt(None)))
                     }
                     Expression::Literal(DataType::UnsignedBigInt(_)) => {
-                        Ok(Some(SqlType::UnsignedBigint(32)))
+                        Ok(Some(SqlType::UnsignedBigint(None)))
                     }
-                    Expression::Literal(DataType::BigInt(_)) => Ok(Some(SqlType::Bigint(32))),
-                    Expression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(32))),
+                    Expression::Literal(DataType::BigInt(_)) => Ok(Some(SqlType::Bigint(None))),
+                    Expression::Literal(DataType::Int(_)) => Ok(Some(SqlType::Int(None))),
                     _ => e1.sql_type(parent_column_type),
                 },
             },
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn eval_cast() {
-        let expr = Cast(Box::new(Column(0)), SqlType::Int(32));
+        let expr = Cast(Box::new(Column(0)), SqlType::Int(None));
         assert_eq!(
             expr.eval(&["1".try_into().unwrap(), "2".try_into().unwrap()])
                 .unwrap(),

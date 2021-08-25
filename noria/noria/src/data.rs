@@ -258,10 +258,10 @@ impl DataType {
         use SqlType::*;
         match self {
             Self::None => None,
-            Self::Int(_) => Some(Int(32)),
-            Self::UnsignedInt(_) => Some(UnsignedInt(32)),
-            Self::BigInt(_) => Some(Bigint(64)),
-            Self::UnsignedBigInt(_) => Some(UnsignedBigint(64)),
+            Self::Int(_) => Some(Int(None)),
+            Self::UnsignedInt(_) => Some(UnsignedInt(None)),
+            Self::BigInt(_) => Some(Bigint(None)),
+            Self::UnsignedBigInt(_) => Some(UnsignedBigint(None)),
             Self::Real(_, _) => Some(Real),
             Self::Text(_) => Some(Text),
             Self::TinyText(_) => Some(Tinytext),
@@ -292,7 +292,7 @@ impl DataType {
     /// use nom_sql::SqlType;
     ///
     /// let real = DataType::Real(123.0, 0);
-    /// let int = real.coerce_to(&SqlType::Int(32)).unwrap();
+    /// let int = real.coerce_to(&SqlType::Int(None)).unwrap();
     /// assert_eq!(int.into_owned(), DataType::Int(123));
     /// ```
     ///
@@ -379,7 +379,7 @@ impl DataType {
                     ))
                 }
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(len)) => {
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(Some(len))) => {
                 let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= usize::from(*len) {
                     Ok(Cow::Borrowed(self))
@@ -392,6 +392,9 @@ impl DataType {
                         None,
                     ))
                 }
+            }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(None)) => {
+                Ok(Cow::Borrowed(self))
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp | DateTime(_)) => {
                 NaiveDateTime::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_FORMAT)
@@ -2723,7 +2726,7 @@ mod tests {
             let dt = NaiveDateTime::new(nd, NaiveTime::from_hms(12, 0, 0));
             let expected = DataType::from(dt);
             let input = DataType::try_from(dt.format(TIMESTAMP_FORMAT).to_string()).unwrap();
-            let result = input.coerce_to(&SqlType::DateTime(20u16)).unwrap();
+            let result = input.coerce_to(&SqlType::DateTime(None)).unwrap();
             assert_eq!(*result, expected);
         }
 
@@ -2762,19 +2765,24 @@ mod tests {
             };
         }
 
-        int_conversion!(int_to_tinyint, i32, i8, Tinyint(8));
-        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyint(8));
-        int_conversion!(int_to_smallint, i32, i16, Smallint(16));
-        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallint(16));
-        int_conversion!(bigint_to_tinyint, i64, i8, Tinyint(8));
-        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyint(8));
-        int_conversion!(bigint_to_smallint, i64, i16, Smallint(16));
-        int_conversion!(bigint_to_unsigned_smallint, i64, u16, UnsignedSmallint(16));
-        int_conversion!(bigint_to_int, i64, i32, Int(32));
+        int_conversion!(int_to_tinyint, i32, i8, Tinyint(None));
+        int_conversion!(int_to_unsigned_tinyint, i32, u8, UnsignedTinyint(None));
+        int_conversion!(int_to_smallint, i32, i16, Smallint(None));
+        int_conversion!(int_to_unsigned_smallint, i32, u16, UnsignedSmallint(None));
+        int_conversion!(bigint_to_tinyint, i64, i8, Tinyint(None));
+        int_conversion!(bigint_to_unsigned_tinyint, i64, u8, UnsignedTinyint(None));
+        int_conversion!(bigint_to_smallint, i64, i16, Smallint(None));
+        int_conversion!(
+            bigint_to_unsigned_smallint,
+            i64,
+            u16,
+            UnsignedSmallint(None)
+        );
+        int_conversion!(bigint_to_int, i64, i32, Int(None));
 
         fn int_type() -> impl Strategy<Value = SqlType> {
             use SqlType::*;
-            select(vec![Tinyint(8), Smallint(16), Int(32), Bigint(64)])
+            select(vec![Tinyint(None), Smallint(None), Int(None), Bigint(None)])
         }
 
         #[proptest]
@@ -2787,10 +2795,10 @@ mod tests {
         fn unsigned_type() -> impl Strategy<Value = SqlType> {
             use SqlType::*;
             select(vec![
-                UnsignedTinyint(8),
-                UnsignedSmallint(16),
-                UnsignedInt(32),
-                UnsignedBigint(64),
+                UnsignedTinyint(None),
+                UnsignedSmallint(None),
+                UnsignedInt(None),
+                UnsignedBigint(None),
             ])
         }
 
@@ -2805,7 +2813,7 @@ mod tests {
         fn char_equal_length(#[strategy("a{1,30}")] text: String) {
             use SqlType::*;
             let input = DataType::try_from(text.as_str()).unwrap();
-            let intermediate = Char(u16::try_from(text.len()).unwrap());
+            let intermediate = Char(Some(u16::try_from(text.len()).unwrap()));
             let result = input.coerce_to(&intermediate).unwrap();
             assert_eq!(
                 String::try_from(&result.into_owned()).unwrap().as_str(),

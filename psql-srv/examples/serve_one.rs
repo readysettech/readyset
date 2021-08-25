@@ -30,7 +30,7 @@ impl Backend for ServeOneBackend {
 
     async fn on_query(&mut self, _query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
         Ok(QueryResponse::Select {
-            schema: vec![("bar".to_string(), ColType::Int(32))],
+            schema: vec![("bar".to_string(), ColType::Int(None))],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })
     }
@@ -39,7 +39,7 @@ impl Backend for ServeOneBackend {
         Ok(PrepareResponse {
             prepared_statement_id: 42,
             param_schema: vec![],
-            row_schema: vec![("bar".to_string(), ColType::Int(32))],
+            row_schema: vec![("bar".to_string(), ColType::Int(None))],
         })
     }
 
@@ -49,7 +49,7 @@ impl Backend for ServeOneBackend {
         _params: &[psql_srv::Value],
     ) -> Result<QueryResponse<Self::Resultset>, Error> {
         Ok(QueryResponse::Select {
-            schema: vec![("bar".to_string(), ColType::Int(32))],
+            schema: vec![("bar".to_string(), ColType::Int(None))],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })
     }

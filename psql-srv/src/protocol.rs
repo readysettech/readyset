@@ -403,7 +403,7 @@ fn make_field_description(
     let data_type = to_type(col_type)?;
     let (data_type_size, type_modifier) = match *col_type {
         ColType::Bool => (TYPLEN_1, ATTTYPMOD_NONE),
-        ColType::Char(v) => (TYPLEN_1, i32::from(v)),
+        ColType::Char(Some(v)) => (TYPLEN_1, i32::from(v)),
         ColType::Varchar(v) => (TYPLEN_VARLENA, i32::from(v)),
         ColType::UnsignedInt(_) => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Int(_) => (TYPLEN_4, ATTTYPMOD_NONE),
@@ -423,7 +423,7 @@ fn make_field_description(
         ColType::Tinytext => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Mediumtext => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Longtext => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Text => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
+        ColType::Text | ColType::Char(None) => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
         ColType::Date => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::DateTime(_) => return Err(Error::UnsupportedType(col_type.clone())),
         ColType::Time => return Err(Error::UnsupportedType(col_type.clone())),
@@ -563,7 +563,7 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        ("col1".to_string(), ColType::Int(4)),
+                        ("col1".to_string(), ColType::Int(None)),
                         ("col2".to_string(), ColType::Double),
                     ],
                     resultset: vec![
@@ -585,10 +585,10 @@ mod tests {
                     prepared_statement_id: 1,
                     param_schema: vec![
                         ("x".to_string(), ColType::Double),
-                        ("y".to_string(), ColType::Int(4)),
+                        ("y".to_string(), ColType::Int(None)),
                     ],
                     row_schema: vec![
-                        ("col1".to_string(), ColType::Int(4)),
+                        ("col1".to_string(), ColType::Int(None)),
                         ("col2".to_string(), ColType::Double),
                     ],
                 })
@@ -607,7 +607,7 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        ("col1".to_string(), ColType::Int(4)),
+                        ("col1".to_string(), ColType::Int(None)),
                         ("col2".to_string(), ColType::Double),
                     ],
                     resultset: vec![
@@ -921,10 +921,10 @@ mod tests {
                 prepared_statement_id: 1,
                 param_schema: vec![
                     ("x".to_string(), ColType::Double),
-                    ("y".to_string(), ColType::Int(4))
+                    ("y".to_string(), ColType::Int(None))
                 ],
                 row_schema: vec![
-                    ("col1".to_string(), ColType::Int(4)),
+                    ("col1".to_string(), ColType::Int(None)),
                     ("col2".to_string(), ColType::Double),
                 ],
             }
