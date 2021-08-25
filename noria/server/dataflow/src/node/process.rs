@@ -156,11 +156,9 @@ impl Node {
                                     ref for_keys,
                                     requesting_shard,
                                     unishard,
-                                    ignore,
                                 },
                             ..
                         } => {
-                            invariant!(!ignore);
                             invariant!(keyed_by.is_some());
                             (
                                 data,
