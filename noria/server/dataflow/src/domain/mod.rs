@@ -2379,7 +2379,6 @@ impl Domain {
                     context: ReplayPieceContext::Partial {
                         for_keys: found_keys,
                         unishard: single_shard, // if we are the only source, only one path
-                        ignore: false,
                         requesting_shard,
                     },
                     data: records.into(),
@@ -3142,11 +3141,9 @@ impl Domain {
                         }
                         ReplayPieceContext::Partial {
                             for_keys,
-                            ignore,
                             unishard: _,
                             requesting_shard: _,
                         } => {
-                            assert!(!ignore);
                             if dst_is_reader {
                                 if self
                                     .nodes

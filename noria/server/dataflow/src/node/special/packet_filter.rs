@@ -554,7 +554,6 @@ mod test {
                     for_keys: k,
                     requesting_shard: 0,
                     unishard: false,
-                    ignore: false,
                 }
             } else {
                 ReplayPieceContext::Regular { last: false }

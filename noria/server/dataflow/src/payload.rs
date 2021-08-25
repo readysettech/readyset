@@ -68,7 +68,6 @@ pub enum ReplayPieceContext {
         for_keys: HashSet<KeyComparison>,
         requesting_shard: usize,
         unishard: bool,
-        ignore: bool,
     },
     Regular {
         last: bool,
