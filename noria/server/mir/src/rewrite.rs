@@ -104,7 +104,7 @@ mod tests {
                         (
                             ColumnSpecification {
                                 column: nom_sql::Column::from("a"),
-                                sql_type: SqlType::Int(0),
+                                sql_type: SqlType::Int(None),
                                 constraints: vec![],
                                 comment: None,
                             },
@@ -113,7 +113,7 @@ mod tests {
                         (
                             ColumnSpecification {
                                 column: nom_sql::Column::from("b"),
-                                sql_type: SqlType::Int(0),
+                                sql_type: SqlType::Int(None),
                                 constraints: vec![],
                                 comment: None,
                             },
@@ -122,7 +122,7 @@ mod tests {
                         (
                             ColumnSpecification {
                                 column: nom_sql::Column::from("c"),
-                                sql_type: SqlType::Int(0),
+                                sql_type: SqlType::Int(None),
                                 constraints: vec![],
                                 comment: None,
                             },

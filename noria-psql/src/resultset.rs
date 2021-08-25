@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(resultset.project_fields, Arc::new(vec![0]));
         assert_eq!(
             resultset.project_field_types,
-            Arc::new(vec![ps::ColType::Bigint(8)])
+            Arc::new(vec![ps::ColType::Bigint(None)])
         );
     }
 
@@ -229,7 +229,7 @@ mod tests {
         assert_eq!(resultset.project_fields, Arc::new(vec![0, 2]));
         assert_eq!(
             resultset.project_field_types,
-            Arc::new(vec![ps::ColType::Bigint(8), ps::ColType::Text])
+            Arc::new(vec![ps::ColType::Bigint(None), ps::ColType::Text])
         );
     }
 

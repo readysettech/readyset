@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn tiny_text_char() {
         let val = Value {
-            col_type: ps::ColType::Char(15),
+            col_type: ps::ColType::Char(Some(15)),
             value: DataType::TinyText([b'a'; 15]),
         };
         assert_eq!(

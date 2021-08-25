@@ -2,9 +2,6 @@ use noria_client::backend as cl;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
-const TYPE_LEN_2: u16 = 2;
-const TYPE_LEN_4: u16 = 4;
-const TYPE_LEN_8: u16 = 8;
 const TYPE_LEN_PLACEHOLDER: u16 = 0;
 
 /// A simple wrapper around `noria_client`'s `SelectSchema` facilitating conversion to
@@ -52,9 +49,9 @@ impl TryFrom<MysqlType> for ps::ColType {
             // FIXME: The value TYPE_LEN_PLACEHOLDER is incorrect but unlikely to cause problems.
             // This entire Mysql conversion is undesirable, see TODO above.
             MYSQL_TYPE_VAR_STRING => Ok(ps::ColType::Varchar(TYPE_LEN_PLACEHOLDER)),
-            MYSQL_TYPE_LONG => Ok(ps::ColType::Int(TYPE_LEN_4)),
-            MYSQL_TYPE_LONGLONG => Ok(ps::ColType::Bigint(TYPE_LEN_8)),
-            MYSQL_TYPE_SHORT => Ok(ps::ColType::Smallint(TYPE_LEN_2)),
+            MYSQL_TYPE_LONG => Ok(ps::ColType::Int(None)),
+            MYSQL_TYPE_LONGLONG => Ok(ps::ColType::Bigint(None)),
+            MYSQL_TYPE_SHORT => Ok(ps::ColType::Smallint(None)),
             MYSQL_TYPE_DOUBLE => Ok(ps::ColType::Double),
             MYSQL_TYPE_STRING => Ok(ps::ColType::Text),
             MYSQL_TYPE_TIMESTAMP => Ok(ps::ColType::Timestamp),

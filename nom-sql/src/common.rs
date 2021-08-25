@@ -32,16 +32,16 @@ use crate::{Expression, FunctionExpression};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
     Bool,
-    Char(#[strategy(1..255u16)] u16),
+    Char(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     Varchar(#[strategy(1..255u16)] u16),
-    Int(#[strategy(1..255u16)] u16),
-    UnsignedInt(#[strategy(1..255u16)] u16),
-    Bigint(#[strategy(1..255u16)] u16),
-    UnsignedBigint(#[strategy(1..255u16)] u16),
-    Tinyint(#[strategy(1..255u16)] u16),
-    UnsignedTinyint(#[strategy(1..255u16)] u16),
-    Smallint(#[strategy(1..255u16)] u16),
-    UnsignedSmallint(#[strategy(1..255u16)] u16),
+    Int(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    Bigint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedBigint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    Tinyint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedTinyint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    Smallint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
+    UnsignedSmallint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     #[weight(0)]
     Blob,
     #[weight(0)]
@@ -58,11 +58,11 @@ pub enum SqlType {
     Longtext,
     Text,
     Date,
-    DateTime(#[strategy(1..=6u16)] u16),
+    DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
     Time,
     Timestamp,
     #[weight(0)]
-    Binary(u16),
+    Binary(Option<u16>),
     #[weight(0)]
     Varbinary(u16),
     #[weight(0)]
@@ -78,14 +78,14 @@ impl SqlType {
         use SqlType::*;
 
         prop_oneof![
-            prop::Just(Int(32)),
-            prop::Just(UnsignedInt(32)),
-            prop::Just(Bigint(64)),
-            prop::Just(UnsignedBigint(64)),
-            prop::Just(Tinyint(8)),
-            prop::Just(UnsignedTinyint(8)),
-            prop::Just(Smallint(16)),
-            prop::Just(UnsignedSmallint(16)),
+            prop::Just(Int(None)),
+            prop::Just(UnsignedInt(None)),
+            prop::Just(Bigint(None)),
+            prop::Just(UnsignedBigint(None)),
+            prop::Just(Tinyint(None)),
+            prop::Just(UnsignedTinyint(None)),
+            prop::Just(Smallint(None)),
+            prop::Just(UnsignedSmallint(None)),
             prop::Just(Double),
             prop::Just(Float),
             prop::Just(Real),
@@ -95,18 +95,39 @@ impl SqlType {
 
 impl fmt::Display for SqlType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let write_with_len = |f: &mut fmt::Formatter, name, len| {
+            write!(f, "{}", name)?;
+
+            if let Some(len) = len {
+                write!(f, "({})", len)?;
+            }
+            Ok(())
+        };
+
         match *self {
             SqlType::Bool => write!(f, "BOOL"),
-            SqlType::Char(len) => write!(f, "CHAR({})", len),
+            SqlType::Char(len) => write_with_len(f, "CHAR", len),
             SqlType::Varchar(len) => write!(f, "VARCHAR({})", len),
-            SqlType::Int(len) => write!(f, "INT({})", len),
-            SqlType::UnsignedInt(len) => write!(f, "INT({}) UNSIGNED", len),
-            SqlType::Bigint(len) => write!(f, "BIGINT({})", len),
-            SqlType::UnsignedBigint(len) => write!(f, "BIGINT({}) UNSIGNED", len),
-            SqlType::Tinyint(len) => write!(f, "TINYINT({})", len),
-            SqlType::UnsignedTinyint(len) => write!(f, "TINYINT({}) UNSIGNED", len),
-            SqlType::Smallint(len) => write!(f, "SMALLINT({})", len),
-            SqlType::UnsignedSmallint(len) => write!(f, "SMALLINT({}) UNSIGNED", len),
+            SqlType::Int(len) => write_with_len(f, "INT", len),
+            SqlType::UnsignedInt(len) => {
+                write_with_len(f, "INT", len)?;
+                write!(f, " UNSIGNED")
+            }
+            SqlType::Bigint(len) => write_with_len(f, "BIGINT", len),
+            SqlType::UnsignedBigint(len) => {
+                write_with_len(f, "BIGINT", len)?;
+                write!(f, " UNSIGNED")
+            }
+            SqlType::Tinyint(len) => write_with_len(f, "TINYINT", len),
+            SqlType::UnsignedTinyint(len) => {
+                write_with_len(f, "TINYINT", len)?;
+                write!(f, " UNSIGNED")
+            }
+            SqlType::Smallint(len) => write_with_len(f, "SMALLINT", len),
+            SqlType::UnsignedSmallint(len) => {
+                write_with_len(f, "SMALLINT", len)?;
+                write!(f, " UNSIGNED")
+            }
             SqlType::Blob => write!(f, "BLOB"),
             SqlType::Longblob => write!(f, "LONGBLOB"),
             SqlType::Mediumblob => write!(f, "MEDIUMBLOB"),
@@ -119,10 +140,10 @@ impl fmt::Display for SqlType {
             SqlType::Longtext => write!(f, "LONGTEXT"),
             SqlType::Text => write!(f, "TEXT"),
             SqlType::Date => write!(f, "DATE"),
-            SqlType::DateTime(len) => write!(f, "DATETIME({})", len),
+            SqlType::DateTime(len) => write_with_len(f, "DATETIME", len),
             SqlType::Time => write!(f, "TIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
-            SqlType::Binary(len) => write!(f, "BINARY({})", len),
+            SqlType::Binary(len) => write_with_len(f, "BINARY", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
             SqlType::Enum(_) => write!(f, "ENUM(...)"),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
@@ -553,17 +574,14 @@ fn int_type<'a, F, G>(
     tag: &str,
     mk_unsigned: F,
     mk_signed: G,
-    default_len: u16,
     i: &'a [u8],
 ) -> IResult<&'a [u8], SqlType>
 where
-    F: Fn(u16) -> SqlType + 'static,
-    G: Fn(u16) -> SqlType + 'static,
+    F: Fn(Option<u16>) -> SqlType + 'static,
+    G: Fn(Option<u16>) -> SqlType + 'static,
 {
     let (remaining_input, (_, len, _, signed)) =
         tuple((tag_no_case(tag), opt(delim_u16), multispace0, opt_signed))(i)?;
-
-    let len = len.unwrap_or(default_len);
 
     if let Some(Sign::Unsigned) = signed {
         Ok((remaining_input, mk_unsigned(len)))
@@ -592,31 +610,14 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
-            |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, 8, i),
-            |i| {
-                int_type(
-                    "smallint",
-                    SqlType::UnsignedSmallint,
-                    SqlType::Smallint,
-                    16,
-                    i,
-                )
-            },
-            |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, 32, i),
-            |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, 32, i),
-            |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, 64, i),
+            |i| int_type("tinyint", SqlType::UnsignedTinyint, SqlType::Tinyint, i),
+            |i| int_type("smallint", SqlType::UnsignedSmallint, SqlType::Smallint, i),
+            |i| int_type("integer", SqlType::UnsignedInt, SqlType::Int, i),
+            |i| int_type("int", SqlType::UnsignedInt, SqlType::Int, i),
+            |i| int_type("bigint", SqlType::UnsignedBigint, SqlType::Bigint, i),
             map(tag_no_case("bool"), |_| SqlType::Bool),
-            map(
-                tuple((
-                    tag_no_case("char"),
-                    delim_u16,
-                    multispace0,
-                    opt(tag_no_case("binary")),
-                )),
-                |t| SqlType::Char(t.1),
-            ),
             map(preceded(tag_no_case("datetime"), opt(delim_u16)), |fsp| {
-                SqlType::DateTime(fsp.unwrap_or(0_u16))
+                SqlType::DateTime(fsp)
             }),
             map(tag_no_case("date"), |_| SqlType::Date),
             map(
@@ -669,6 +670,15 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 )),
                 |t| SqlType::Varchar(t.1),
             ),
+            map(
+                tuple((
+                    tag_no_case("char"),
+                    opt(delim_u16),
+                    multispace0,
+                    opt(tag_no_case("binary")),
+                )),
+                |t| SqlType::Char(t.1),
+            ),
             map(tag_no_case("time"), |_| SqlType::Time),
         ))(i)
     }
@@ -678,7 +688,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
         decimal_or_numeric,
         map(
-            tuple((tag_no_case("binary"), delim_u16, multispace0)),
+            tuple((tag_no_case("binary"), opt(delim_u16), multispace0)),
             |t| SqlType::Binary(t.1),
         ),
         map(tag_no_case("blob"), |_| SqlType::Blob),
@@ -1159,7 +1169,11 @@ mod tests {
 
         assert_eq!(
             res_ok,
-            vec![SqlType::Bool, SqlType::Int(16), SqlType::DateTime(16)]
+            vec![
+                SqlType::Bool,
+                SqlType::Int(Some(16)),
+                SqlType::DateTime(Some(16))
+            ]
         );
 
         assert!(not_ok
@@ -1210,7 +1224,7 @@ mod tests {
             res,
             FunctionExpression::Max(Box::new(Expression::Call(FunctionExpression::Cast(
                 Box::new(Expression::Column("foo".into())),
-                SqlType::Int(32)
+                SqlType::Int(None)
             ))))
         )
     }

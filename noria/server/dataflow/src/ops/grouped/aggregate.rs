@@ -254,7 +254,7 @@ impl GroupedOperation for Aggregator {
 
     fn output_col_type(&self) -> Option<nom_sql::SqlType> {
         match self.op {
-            Aggregation::Count { .. } => Some(SqlType::Bigint(64)),
+            Aggregation::Count { .. } => Some(SqlType::Bigint(None)),
             // (atsakiris) not sure if this is the right type? float?
             Aggregation::Avg => Some(SqlType::Decimal(64, 64)),
             _ => None, // Sum can be either an int or float.

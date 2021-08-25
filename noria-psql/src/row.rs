@@ -82,7 +82,7 @@ mod tests {
         let row = Row {
             values: vec![DataType::Int(43)],
             project_fields: Arc::new(vec![0]),
-            project_field_types: Arc::new(vec![ps::ColType::Int(4)]),
+            project_field_types: Arc::new(vec![ps::ColType::Int(None)]),
         };
         assert_eq!(collect_row_values(row), vec![ps::Value::Int(43)]);
     }
@@ -97,7 +97,7 @@ mod tests {
             ],
             project_fields: Arc::new(vec![0, 1, 2]),
             project_field_types: Arc::new(vec![
-                ps::ColType::Int(4),
+                ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
             ]),
@@ -124,7 +124,7 @@ mod tests {
             // Only the first three fields are specified for projection.
             project_fields: Arc::new(vec![0, 1, 2]),
             project_field_types: Arc::new(vec![
-                ps::ColType::Int(4),
+                ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
             ]),
@@ -154,7 +154,7 @@ mod tests {
             // Only some of the fields are specified for projection.
             project_fields: Arc::new(vec![1, 2, 5]),
             project_field_types: Arc::new(vec![
-                ps::ColType::Int(4),
+                ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
             ]),

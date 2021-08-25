@@ -529,15 +529,15 @@ mod tests {
         let type3 = "bigint(20) signed";
 
         let res = type_identifier(Dialect::MySQL)(type0.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Bigint(20));
+        assert_eq!(res.unwrap().1, SqlType::Bigint(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type1.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Varchar(255));
         let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type3.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Bigint(20));
+        assert_eq!(res.unwrap().1, SqlType::Bigint(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(20));
+        assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(Some(20)));
     }
 
     #[test]
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             vec![
-                ColumnSpecification::new(Column::from("id"), SqlType::Bigint(20)),
+                ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
                 ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
             ]
         );
@@ -566,7 +566,7 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
@@ -586,7 +586,7 @@ mod tests {
                 table: Table::from("t"),
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
-                    SqlType::Int(32)
+                    SqlType::Int(None)
                 ),],
                 ..Default::default()
             }
@@ -603,7 +603,7 @@ mod tests {
                 table: Table::from(("db1", "t")),
                 fields: vec![ColumnSpecification::new(
                     Column::from("t.x"),
-                    SqlType::Int(32)
+                    SqlType::Int(None)
                 ),],
                 ..Default::default()
             }
@@ -622,7 +622,7 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
@@ -641,7 +641,7 @@ mod tests {
             CreateTableStatement {
                 table: Table::from("users"),
                 fields: vec![
-                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(20)),
+                    ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
@@ -714,8 +714,8 @@ mod tests {
             CreateTableStatement {
                 table: "users".into(),
                 fields: vec![
-                    ColumnSpecification::new(col("id"), SqlType::Int(32),),
-                    ColumnSpecification::new(col("group_id"), SqlType::Int(32),),
+                    ColumnSpecification::new(col("id"), SqlType::Int(None),),
+                    ColumnSpecification::new(col("group_id"), SqlType::Int(None),),
                 ],
                 keys: Some(vec![
                     TableKey::PrimaryKey(vec![col("id")]),
@@ -765,14 +765,14 @@ mod tests {
                 fields: vec![
                     ColumnSpecification::with_constraints(
                         col("id"),
-                        SqlType::Int(32),
+                        SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::AutoIncrement,
                             ColumnConstraint::PrimaryKey,
                         ]
                     ),
-                    non_null_col("customer_id", SqlType::Int(32)),
+                    non_null_col("customer_id", SqlType::Int(None)),
                     non_null_col("street", SqlType::Varchar(255)),
                     non_null_col("city", SqlType::Varchar(255)),
                     non_null_col("state", SqlType::Varchar(255)),
@@ -826,7 +826,7 @@ mod tests {
                 fields: vec![
                     ColumnSpecification::with_constraints(
                         col("order_number"),
-                        SqlType::Int(32),
+                        SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::AutoIncrement,
@@ -835,12 +835,12 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("purchaser"),
-                        SqlType::Int(32),
+                        SqlType::Int(None),
                         vec![ColumnConstraint::NotNull]
                     ),
                     ColumnSpecification::with_constraints(
                         col("product_id"),
-                        SqlType::Int(32),
+                        SqlType::Int(None),
                         vec![ColumnConstraint::NotNull]
                     ),
                 ],
@@ -890,7 +890,7 @@ mod tests {
                 fields: vec![
                     ColumnSpecification::with_constraints(
                         col("id"),
-                        SqlType::Int(32),
+                        SqlType::Int(None),
                         vec![
                             ColumnConstraint::NotNull,
                             ColumnConstraint::AutoIncrement,
@@ -945,7 +945,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::NotNull,
@@ -954,17 +954,17 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.action_time"),
-                            SqlType::DateTime(0),
+                            SqlType::DateTime(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.user_id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::new(
                             Column::from("django_admin_log.content_type_id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                         ),
                         ColumnSpecification::new(
                             Column::from("django_admin_log.object_id"),
@@ -977,7 +977,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.action_flag"),
-                            SqlType::UnsignedSmallint(16),
+                            SqlType::UnsignedSmallint(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1006,7 +1006,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("auth_group.id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::NotNull,
@@ -1036,7 +1036,7 @@ mod tests {
                        `name` varchar(80) NOT NULL UNIQUE)";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE auth_group (\
-                        id INT(32) AUTO_INCREMENT NOT NULL, \
+                        id INT AUTO_INCREMENT NOT NULL, \
                         name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
             let res = creation(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
@@ -1097,14 +1097,17 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("comments.id"),
-                            SqlType::UnsignedInt(32),
+                            SqlType::UnsignedInt(None),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::PrimaryKey,
                             ],
                         ),
-                        ColumnSpecification::new(Column::from("comments.hat_id"), SqlType::Int(32),),
+                        ColumnSpecification::new(
+                            Column::from("comments.hat_id"),
+                            SqlType::Int(None),
+                        ),
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey(
@@ -1155,7 +1158,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("user_newtalk.user_id"),
-                            SqlType::Int(5),
+                            SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),
@@ -1194,7 +1197,9 @@ mod tests {
                         user_editcount int,
                         user_password_expires varbinary(14) DEFAULT NULL
                        ) ENGINE=, DEFAULT CHARSET=utf8";
-            creation(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+            if let Err(nom::Err::Error((s, _))) = creation(Dialect::MySQL)(qstring.as_bytes()) {
+                panic!("{}", std::str::from_utf8(s).unwrap());
+            }
         }
 
         #[test]
@@ -1281,7 +1286,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::NotNull,
@@ -1290,17 +1295,17 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.action_time"),
-                            SqlType::DateTime(0),
+                            SqlType::DateTime(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.user_id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::new(
                             Column::from("django_admin_log.content_type_id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                         ),
                         ColumnSpecification::new(
                             Column::from("django_admin_log.object_id"),
@@ -1313,7 +1318,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.action_flag"),
-                            SqlType::UnsignedSmallint(16),
+                            SqlType::UnsignedSmallint(None),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1342,7 +1347,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("auth_group.id"),
-                            SqlType::Int(32),
+                            SqlType::Int(None),
                             vec![
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::NotNull,
@@ -1372,7 +1377,7 @@ mod tests {
                        \"name\" varchar(80) NOT NULL UNIQUE)";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE auth_group (\
-                        id INT(32) AUTO_INCREMENT NOT NULL, \
+                        id INT AUTO_INCREMENT NOT NULL, \
                         name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
             let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
@@ -1433,14 +1438,17 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("comments.id"),
-                            SqlType::UnsignedInt(32),
+                            SqlType::UnsignedInt(None),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::AutoIncrement,
                                 ColumnConstraint::PrimaryKey,
                             ],
                         ),
-                        ColumnSpecification::new(Column::from("comments.hat_id"), SqlType::Int(32),),
+                        ColumnSpecification::new(
+                            Column::from("comments.hat_id"),
+                            SqlType::Int(None),
+                        ),
                     ],
                     keys: Some(vec![
                         TableKey::FulltextKey(
@@ -1491,7 +1499,7 @@ mod tests {
                     fields: vec![
                         ColumnSpecification::with_constraints(
                             Column::from("user_newtalk.user_id"),
-                            SqlType::Int(5),
+                            SqlType::Int(Some(5)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from("0"))),

@@ -149,7 +149,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
 fn random_value_of_type(typ: &SqlType) -> DataType {
     let mut rng = rand::thread_rng();
     match typ {
-        SqlType::Char(x) | SqlType::Varchar(x) => {
+        SqlType::Char(Some(x)) | SqlType::Varchar(x) => {
             let length: usize = rng.gen_range(1..*x).into();
             // It is safe to transform an String of consecutive a's into a DataType.
             #[allow(clippy::unwrap_used)]
@@ -162,7 +162,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Blob | SqlType::Text => {
+        SqlType::Blob | SqlType::Text | SqlType::Char(None) | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
             // It is safe to transform an String of consecutive a's into a DataType.
@@ -185,7 +185,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Binary(x) | SqlType::Varbinary(x) => {
+        SqlType::Binary(Some(x)) | SqlType::Varbinary(x) => {
             // Convert to bytes and generate string data to match.
             let length: usize = rng.gen_range(1..*x / 8).into();
             // It is safe to transform an String of consecutive a's into a DataType.
@@ -677,7 +677,7 @@ impl TableSpec {
 
     /// Generate a new, unique column in this table (of an unspecified type) and return its name
     pub fn fresh_column(&mut self) -> ColumnName {
-        self.fresh_column_with_type(SqlType::Int(32))
+        self.fresh_column_with_type(SqlType::Int(None))
     }
 
     /// Generate a new, unique column in this table with the specified type and return its name.
@@ -822,7 +822,7 @@ impl TableSpec {
     /// Ensure this table has a primary key column, and return its name
     pub fn primary_key(&mut self) -> &ColumnName {
         if self.primary_key.is_none() {
-            let col = self.fresh_column_with_type(SqlType::Int(32));
+            let col = self.fresh_column_with_type(SqlType::Int(None));
             self.set_primary_key_column(&col);
             self.primary_key = Some(col)
         }
@@ -1159,7 +1159,7 @@ pub struct FilterRhsArgs {
 impl Default for FilterRhsArgs {
     fn default() -> Self {
         Self {
-            column_type: SqlType::Int(32),
+            column_type: SqlType::Int(None),
         }
     }
 }
@@ -1266,7 +1266,7 @@ impl Filter {
             .map(move |(rhs, extend_where_with)| Self {
                 operation: FilterOp::Comparison { op: operator, rhs },
                 extend_where_with,
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
             })
     }
 }
@@ -1381,37 +1381,37 @@ const ALL_TOPK: &[QueryOperation] = &[
 
 const ALL_AGGREGATE_TYPES: &[AggregateType] = &[
     AggregateType::Count {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: true,
         count_nulls: false,
     },
     AggregateType::Count {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: false,
         count_nulls: false,
     },
     AggregateType::Sum {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: true,
     },
     AggregateType::Sum {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: false,
     },
     AggregateType::Avg {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: true,
     },
     AggregateType::Avg {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
         distinct: false,
     },
     AggregateType::GroupConcat,
     AggregateType::Max {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
     },
     AggregateType::Min {
-        column_type: SqlType::Int(32),
+        column_type: SqlType::Int(None),
     },
 ];
 
@@ -1452,7 +1452,7 @@ lazy_static! {
             .map(|(operation, extend_where_with)| Filter {
                 extend_where_with,
                 operation,
-                column_type: SqlType::Int(32)
+                column_type: SqlType::Int(None)
             })
             .collect()
     };
@@ -1661,7 +1661,7 @@ impl QueryOperation {
             QueryOperation::Join(operator) => {
                 let left_table = state.some_table_in_query_mut(query);
                 let left_table_name = left_table.name.clone();
-                let left_join_key = left_table.some_column_with_type(SqlType::Int(32));
+                let left_join_key = left_table.some_column_with_type(SqlType::Int(None));
                 let left_projected = left_table.fresh_column();
 
                 if query.tables.is_empty() {
@@ -1670,7 +1670,7 @@ impl QueryOperation {
 
                 let right_table = state.fresh_table_mut();
                 let right_table_name = right_table.name.clone();
-                let right_join_key = right_table.some_column_with_type(SqlType::Int(32));
+                let right_join_key = right_table.some_column_with_type(SqlType::Int(None));
                 let right_projected = right_table.fresh_column();
 
                 query.join.push(JoinClause {
@@ -1887,44 +1887,44 @@ impl FromStr for Operations {
                 .map(ColumnAggregate)
                 .collect()),
             "count" => Ok(vec![ColumnAggregate(AggregateType::Count {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: false,
                 count_nulls: false,
             })]
             .into()),
             "count_distinct" => Ok(vec![ColumnAggregate(AggregateType::Count {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: true,
                 count_nulls: false,
             })]
             .into()),
             "sum" => Ok(vec![ColumnAggregate(AggregateType::Sum {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: false,
             })]
             .into()),
             "sum_distinct" => Ok(vec![ColumnAggregate(AggregateType::Sum {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: true,
             })]
             .into()),
             "avg" => Ok(vec![ColumnAggregate(AggregateType::Avg {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: false,
             })]
             .into()),
             "avg_distinct" => Ok(vec![ColumnAggregate(AggregateType::Avg {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
                 distinct: true,
             })]
             .into()),
             "group_concat" => Ok(vec![ColumnAggregate(AggregateType::GroupConcat)].into()),
             "max" => Ok(vec![ColumnAggregate(AggregateType::Max {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
             })]
             .into()),
             "min" => Ok(vec![ColumnAggregate(AggregateType::Min {
-                column_type: SqlType::Int(32),
+                column_type: SqlType::Int(None),
             })]
             .into()),
             "filters" => Ok(ALL_FILTERS.iter().cloned().map(Filter).collect()),
@@ -1959,7 +1959,7 @@ impl FromStr for Operations {
                     extend_where_with,
                     operation,
 
-                    column_type: SqlType::Int(32),
+                    column_type: SqlType::Int(None),
                 })
                 .map(Filter)
                 .collect()),
@@ -1971,7 +1971,7 @@ impl FromStr for Operations {
                 .map(|(extend_where_with, operation)| crate::Filter {
                     extend_where_with,
                     operation,
-                    column_type: SqlType::Int(32),
+                    column_type: SqlType::Int(None),
                 })
                 .map(Filter)
                 .collect()),
@@ -2389,37 +2389,37 @@ mod tests {
             vec![
                 Operations(vec![
                     QueryOperation::ColumnAggregate(AggregateType::Count {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: true,
                         count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Count {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: false,
                         count_nulls: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Sum {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: true,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Sum {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Avg {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: true,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Avg {
-                        column_type: SqlType::Int(32),
+                        column_type: SqlType::Int(None),
                         distinct: false,
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::GroupConcat),
                     QueryOperation::ColumnAggregate(AggregateType::Max {
-                        column_type: SqlType::Int(32)
+                        column_type: SqlType::Int(None)
                     }),
                     QueryOperation::ColumnAggregate(AggregateType::Min {
-                        column_type: SqlType::Int(32)
+                        column_type: SqlType::Int(None)
                     }),
                 ]),
                 Operations(vec![
