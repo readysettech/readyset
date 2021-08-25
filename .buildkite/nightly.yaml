@@ -15,11 +15,11 @@ steps:
       ecr#v2.2.0:
         login: true
 
-  - label: 'Run generated logictests'
-    key: logictest-generated
+  - label: 'Run MySQL generated logictests'
+    key: logictest-generated-mysql
     command:
     - 'echo +++ Running noria-logictest'
-    - cargo run --bin noria-logictest --release -- verify logictests/generated -t 1
+    - cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 1 --database-type mysql
     depends_on:
     - build-image
     plugins:
