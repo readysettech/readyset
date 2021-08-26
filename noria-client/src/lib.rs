@@ -6,8 +6,6 @@
 #![feature(async_closure)]
 
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate tracing;
 
 pub mod backend;

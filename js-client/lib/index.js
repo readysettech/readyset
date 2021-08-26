@@ -24,7 +24,6 @@ class Client {
    *  zookeeperAddress: string,
    *  mySQLAddress: string,
    *  sanitize: boolean,
-   *  staticResponses: boolean,
    *  slowLog: boolean,
    *  readYourWrite: boolean
    * }} config Connection configuration options.
@@ -34,7 +33,6 @@ class Client {
    * @prop {string} config.zookeeperAddress defaults to "127.0.0.1:2181"
    * @prop {string} config.mySQLAddress defaults to ""
    * @prop {boolean} config.sanitize defaults to true
-   * @prop {boolean} config.staticResponses defaults to true
    * @prop {boolean} config.slowLog defaults to false
    * @prop {boolean} config.readYourWrite defaults to false
    */
