@@ -87,8 +87,18 @@ pub trait Backend {
     async fn on_close(&mut self, statement_id: u32) -> Result<(), Error>;
 }
 
+/// A description of a column, either in the parameters to a query or in a resultset
+#[derive(Debug, PartialEq, Eq)]
+pub struct Column {
+    /// The name of the column
+    pub name: String,
+
+    /// The type of the column
+    pub col_type: ColType,
+}
+
 /// A description of a sequence of fields, consisting of the name and type of each field.
-pub type Schema = Vec<(String, ColType)>;
+pub type Schema = Vec<Column>;
 
 /// A response produced by `Backend::on_prepare`, containing metadata about a newly created
 /// prepared statement.

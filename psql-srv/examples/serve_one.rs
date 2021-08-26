@@ -1,7 +1,7 @@
 extern crate psql_srv;
 
 use async_trait::async_trait;
-use psql_srv::{run_backend, Backend, ColType, Error, PrepareResponse, QueryResponse};
+use psql_srv::{run_backend, Backend, ColType, Column, Error, PrepareResponse, QueryResponse};
 use std::convert::TryFrom;
 use std::io;
 use tokio::net::TcpListener;
@@ -30,7 +30,10 @@ impl Backend for ServeOneBackend {
 
     async fn on_query(&mut self, _query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
         Ok(QueryResponse::Select {
-            schema: vec![("bar".to_string(), ColType::Int(None))],
+            schema: vec![Column {
+                name: "bar".to_string(),
+                col_type: ColType::Int(None),
+            }],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })
     }
@@ -39,7 +42,10 @@ impl Backend for ServeOneBackend {
         Ok(PrepareResponse {
             prepared_statement_id: 42,
             param_schema: vec![],
-            row_schema: vec![("bar".to_string(), ColType::Int(None))],
+            row_schema: vec![Column {
+                name: "bar".to_string(),
+                col_type: ColType::Int(None),
+            }],
         })
     }
 
@@ -49,7 +55,10 @@ impl Backend for ServeOneBackend {
         _params: &[psql_srv::Value],
     ) -> Result<QueryResponse<Self::Resultset>, Error> {
         Ok(QueryResponse::Select {
-            schema: vec![("bar".to_string(), ColType::Int(None))],
+            schema: vec![Column {
+                name: "bar".to_string(),
+                col_type: ColType::Int(None),
+            }],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })
     }

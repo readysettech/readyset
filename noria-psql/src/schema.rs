@@ -14,8 +14,11 @@ impl TryFrom<SelectSchema> for ps::Schema {
     fn try_from(s: SelectSchema) -> Result<Self, Self::Error> {
         s.0.schema
             .into_iter()
-            .map(|c| -> Result<(String, ps::ColType), Self::Error> {
-                Ok((c.column, MysqlType(c.coltype).try_into()?))
+            .map(|c| -> Result<ps::Column, Self::Error> {
+                Ok(ps::Column {
+                    name: c.column,
+                    col_type: MysqlType(c.coltype).try_into()?,
+                })
             })
             .collect()
     }
@@ -29,8 +32,11 @@ impl TryFrom<MysqlSchema> for ps::Schema {
 
     fn try_from(s: MysqlSchema) -> Result<Self, Self::Error> {
         s.0.into_iter()
-            .map(|c| -> Result<(String, ps::ColType), Self::Error> {
-                Ok((c.column, MysqlType(c.coltype).try_into()?))
+            .map(|c| -> Result<ps::Column, Self::Error> {
+                Ok(ps::Column {
+                    name: c.column,
+                    col_type: MysqlType(c.coltype).try_into()?,
+                })
             })
             .collect()
     }
