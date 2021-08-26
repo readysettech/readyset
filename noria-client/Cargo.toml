@@ -32,30 +32,14 @@ launchpad = { path = "../launchpad" }
 metrics = "0.14.2"
 noria-client-metrics = { version = "0.1.0", path = "metrics" }
 futures = "0.3.16"
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
-postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
-native-tls = "0.2.7"
-
-[dev-dependencies]
 slog = "2.4.0"
 zookeeper = "0.5.4"
 noria-server = { version = "0.7", path = "../noria/server/" }
-tokio = { version = "1.8.1", features = ["full"] }
 maplit = "1.0.2"
-psql-srv = { path = "../psql-srv" }
-noria-psql = { path = "../noria-psql" }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 
 [lib]
 path = "src/lib.rs"
-
-[[example]]
-name = "basic_demo"
-
-[[example]]
-name = "ryw"
-
-[[example]]
-name = "fallback"
 
 [features]
 ryw = []

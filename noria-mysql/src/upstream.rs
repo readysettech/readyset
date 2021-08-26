@@ -2,14 +2,14 @@ use async_trait::async_trait;
 use mysql_async::consts::CapabilityFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, OptsBuilder, Row, TxOpts};
-use noria::ReadySetError;
-
-use crate::upstream_database::UpstreamPrepare;
-use crate::{Error, UpstreamDatabase};
-use noria::{errors::internal_err, DataType};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
+use tracing::{debug, error};
+
+use noria::errors::internal_err;
+use noria::{DataType, ReadySetError};
+use noria_client::{Error, UpstreamDatabase, UpstreamPrepare};
 
 type StatementID = u32;
 
@@ -26,21 +26,18 @@ pub struct WriteResult {
 #[derive(Debug)]
 pub struct ReadResult {
     pub data: Vec<Row>,
-    // columns optionally provides a list of columns if applicable. This is necessary for
-    // writing back an empty result set from fallback, where we need to capture what the
-    // columns were so we can write an empty header row.
     pub columns: Option<Arc<[Column]>>,
 }
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
-pub struct MySqlConnector {
+pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     url: String,
 }
 
 #[async_trait]
-impl UpstreamDatabase for MySqlConnector {
+impl UpstreamDatabase for MySqlUpstream {
     type ReadResult = ReadResult;
     type WriteResult = WriteResult;
 

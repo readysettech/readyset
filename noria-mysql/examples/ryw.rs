@@ -8,12 +8,12 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
-        mysql_connector::MySqlConnector,
         noria_connector::{self, NoriaConnector},
         BackendBuilder, QueryResult, Reader, Writer,
     },
     UpstreamDatabase,
 };
+use noria_mysql::MySqlUpstream;
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
 /// Run `ryw-setup.sh` once noria is running to configure all of the
@@ -35,9 +35,9 @@ async fn main() {
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);
-    let writer = Writer::Upstream(MySqlConnector::connect(mysql_url.clone()).await.unwrap());
+    let writer = Writer::Upstream(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
 
-    let mysql_connector = Some(MySqlConnector::connect(mysql_url).await.unwrap());
+    let upstream = Some(MySqlUpstream::connect(mysql_url).await.unwrap());
     let noria_connector = NoriaConnector::new(
         ch.clone(),
         auto_increments.clone(),
@@ -52,7 +52,7 @@ async fn main() {
         .build(
             writer,
             Reader {
-                upstream: mysql_connector,
+                upstream,
                 noria_connector,
             },
         );

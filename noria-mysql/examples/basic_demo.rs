@@ -2,9 +2,9 @@ use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
-use noria_client::backend::mysql_connector::MySqlConnector;
 use noria_client::backend::noria_connector::{self, NoriaConnector};
 use noria_client::backend::{BackendBuilder, QueryResult, Reader, Writer};
+use noria_mysql::MySqlUpstream;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-    let writer = {
+    let writer: Writer<_, MySqlUpstream> = {
         Writer::Noria(
             NoriaConnector::new(
                 ch.clone(),
@@ -31,10 +31,9 @@ async fn main() -> Result<()> {
             .await,
         )
     };
-    let mysql_connector: Option<MySqlConnector> = None;
     let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
     let reader = Reader {
-        upstream: mysql_connector,
+        upstream: None,
         noria_connector,
     };
     let slowlog = false;

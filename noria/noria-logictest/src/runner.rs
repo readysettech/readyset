@@ -22,10 +22,10 @@ use tokio_postgres as pgsql;
 use nom_sql::SelectStatement;
 use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
-use noria_client::backend::{
-    BackendBuilder, MySqlConnector, NoriaConnector, PostgreSqlConnector, Reader, Writer,
-};
+use noria_client::backend::{BackendBuilder, NoriaConnector, Reader, Writer};
 use noria_client::UpstreamDatabase;
+use noria_mysql::MySqlUpstream;
+use noria_psql::PostgreSqlUpstream;
 use noria_server::{Builder, ReuseConfigType};
 
 use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
@@ -474,20 +474,18 @@ impl TestScript {
             .await;
 
             macro_rules! make_backend {
-                ($connector:ty) => {{
+                ($upstream:ty) => {{
                     // cannot use .await inside map
                     #[allow(clippy::manual_map)]
                     let (upstream, writer) = match replication_url.clone() {
                         Some(url) => (
                             Some(
-                                <$connector as UpstreamDatabase>::connect(url.clone())
+                                <$upstream as UpstreamDatabase>::connect(url.clone())
                                     .await
                                     .unwrap(),
                             ),
                             Writer::Upstream(
-                                <$connector as UpstreamDatabase>::connect(url)
-                                    .await
-                                    .unwrap(),
+                                <$upstream as UpstreamDatabase>::connect(url).await.unwrap(),
                             ),
                         ),
                         None => (
@@ -510,17 +508,15 @@ impl TestScript {
             }
 
             match database_type {
-                DatabaseType::MySQL => {
-                    MysqlIntermediary::run_on_tcp(make_backend!(MySqlConnector), s)
-                        .await
-                        .unwrap()
-                }
+                DatabaseType::MySQL => MysqlIntermediary::run_on_tcp(
+                    noria_mysql::Backend(make_backend!(MySqlUpstream)),
+                    s,
+                )
+                .await
+                .unwrap(),
                 DatabaseType::PostgreSQL => {
-                    psql_srv::run_backend(
-                        noria_psql::Backend(make_backend!(PostgreSqlConnector)),
-                        s,
-                    )
-                    .await
+                    psql_srv::run_backend(noria_psql::Backend(make_backend!(PostgreSqlUpstream)), s)
+                        .await
                 }
             }
         });

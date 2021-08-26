@@ -1,31 +1,17 @@
-//! Tests for query coverage analysis and testing support in the adapter binaries
+//! Tests for query coverage analysis and testing support in noria-mysql
 //!
 //! see: <https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit>
 
-mod common;
-use common::{sleep, Deployment, MySQL};
-
 use mysql::prelude::Queryable;
-use noria_client::backend::BackendBuilder;
+use noria_client::test_helpers::{sleep, Deployment};
 
-fn setup<A>(deployment: &Deployment) -> A::ConnectionOpts
-where
-    A: common::Adapter,
-{
-    common::setup::<A>(
-        BackendBuilder::new()
-            .require_authentication(false)
-            .race_reads(true),
-        deployment,
-        true,
-        true,
-    )
-}
+mod common;
+use common::setup;
 
 #[test]
 fn race_reads_with_supported_query() {
     let d = Deployment::new("race_reads_with_supported_query");
-    let opts = setup::<MySQL>(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
@@ -45,7 +31,7 @@ fn race_reads_with_supported_query() {
 #[ignore] // waiting on fallback for prepared statements
 fn race_reads_with_unsupported_query() {
     let d = Deployment::new("race_reads_with_unsupported_query");
-    let opts = setup::<MySQL>(&d);
+    let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")

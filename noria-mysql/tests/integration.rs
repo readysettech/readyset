@@ -1,20 +1,9 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql::prelude::*;
-use noria_client::backend::BackendBuilder;
+use noria_client::test_helpers::{sleep, Deployment};
 
 mod common;
-use common::{sleep, Deployment};
-
-// Initializes a Noria worker and starts processing MySQL queries against it.
-// If `partial` is `false`, disables partial queries.
-fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
-    common::setup::<common::MySQL>(
-        BackendBuilder::new().require_authentication(false),
-        deployment,
-        false,
-        partial,
-    )
-}
+use common::setup;
 
 #[test]
 fn delete_basic() {

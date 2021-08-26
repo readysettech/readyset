@@ -26,6 +26,7 @@ noria = { version = "0.7", path = "../noria/" }
 nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
 msql-srv = { path = "../../msql-srv" }
 psql-srv = { path = "../../psql-srv" }
+noria-mysql = { path = "../../noria-mysql" }
 noria-psql = { path = "../../noria-psql" }
 maths = { version =  "0.0.1", path = "../../maths" }
 query_generator = { path = "../../query_generator" }

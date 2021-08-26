@@ -12,10 +12,11 @@ pub mod backend;
 mod convert;
 mod rewrite;
 mod schema;
+pub mod test_helpers;
 mod upstream_database;
 mod utils;
 
 pub use crate::backend::error::Error;
 pub use crate::backend::{Backend, BackendBuilder};
 pub use crate::schema::Schema;
-pub use crate::upstream_database::UpstreamDatabase;
+pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};

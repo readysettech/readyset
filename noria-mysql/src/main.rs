@@ -1,32 +1,36 @@
 #![warn(clippy::dbg_macro)]
-#[macro_use]
-extern crate tracing;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;
 use clap::Clap;
 use tokio::net;
+use tracing::error;
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::Dialect;
-use noria_client::backend::mysql_connector::MySqlConnector;
-use noria_client::Backend;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
+
+mod backend;
+mod upstream;
+mod value;
+
+use backend::Backend;
+use upstream::MySqlUpstream;
 
 #[derive(Clone, Copy)]
 struct MysqlHandler;
 
 #[async_trait]
 impl ConnectionHandler for MysqlHandler {
-    type UpstreamDatabase = MySqlConnector;
+    type UpstreamDatabase = MySqlUpstream;
 
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: Backend<noria::ZookeeperAuthority, MySqlConnector>,
+        backend: noria_client::Backend<noria::ZookeeperAuthority, MySqlUpstream>,
     ) {
-        if let Err(e) = MysqlIntermediary::run_on_tcp(backend, stream).await {
+        if let Err(e) = MysqlIntermediary::run_on_tcp(Backend(backend), stream).await {
             match e {
                 noria_client::Error::Io(e) => {
                     error!(err = ?e, "connection lost");

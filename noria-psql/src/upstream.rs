@@ -7,11 +7,10 @@ use noria::{unsupported, DataType, ReadySetError};
 use pgsql::{Config, Row};
 use tokio_postgres as pgsql;
 
-use crate::upstream_database::UpstreamPrepare;
-use crate::{Error, UpstreamDatabase};
+use noria_client::{Error, UpstreamDatabase, UpstreamPrepare};
 
 /// A connector to an underlying PostgreSQL database
-pub struct PostgreSqlConnector {
+pub struct PostgreSqlUpstream {
     /// This is the underlying (regular) PostgreSQL client
     client: pgsql::Client,
     /// A tokio task that handles the connection, required by `tokio_postgres` to operate
@@ -25,7 +24,7 @@ pub struct PostgreSqlConnector {
 }
 
 #[async_trait]
-impl UpstreamDatabase for PostgreSqlConnector {
+impl UpstreamDatabase for PostgreSqlUpstream {
     type ReadResult = Vec<Row>;
     type WriteResult = u64;
 

@@ -1,20 +1,16 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
-use std::io;
 use std::time;
 
-use async_trait::async_trait;
 use futures::FutureExt;
 use metrics::histogram;
 use nom_sql::Dialect;
-use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use msql_srv::{Column, ColumnFlags, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter};
+use msql_srv::Column;
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
@@ -25,97 +21,13 @@ use noria_client_metrics::recorded::SqlQueryType;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::backend::error::Error;
-use crate::convert::ToDataType;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, UpstreamDatabase};
 
-use self::mysql_connector::WriteResult;
-
 pub mod error;
-pub mod mysql_connector;
 pub mod noria_connector;
-pub mod postgresql_connector;
 
-pub use mysql_connector::MySqlConnector;
-pub use noria_connector::NoriaConnector;
-pub use postgresql_connector::PostgreSqlConnector;
-
-async fn write_column<W: AsyncWrite + Unpin>(
-    rw: &mut RowWriter<'_, W>,
-    c: &DataType,
-    cs: &msql_srv::Column,
-) -> Result<(), Error> {
-    let written = match *c {
-        DataType::None => rw.write_col(None::<i32>).await,
-        // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
-        // this out into a helper since i has a different time depending on the DataType
-        // variant.
-        DataType::Int(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
-            } else {
-                rw.write_col(i as isize).await
-            }
-        }
-        DataType::BigInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
-            } else {
-                rw.write_col(i as isize).await
-            }
-        }
-        DataType::UnsignedInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
-            } else {
-                rw.write_col(i as isize).await
-            }
-        }
-        DataType::UnsignedBigInt(i) => {
-            if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
-            } else {
-                rw.write_col(i as isize).await
-            }
-        }
-        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()).await,
-        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(<&str>::try_from(dt)?).await,
-        ref dt @ DataType::Real(_, _) => match cs.coltype {
-            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
-                let f = dt.to_string();
-                rw.write_col(f).await
-            }
-            msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
-                let f: f64 = <f64>::try_from(dt)?;
-                rw.write_col(f).await
-            }
-            msql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
-                let f: f32 = <f64>::try_from(dt)? as f32;
-                rw.write_col(f).await
-            }
-            _ => {
-                internal!()
-            }
-        },
-        DataType::Timestamp(ts) => rw.write_col(ts).await,
-        DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
-    };
-    Ok(written?)
-}
-
-async fn write_query_results<W: AsyncWrite + Unpin>(
-    r: Result<(u64, u64), Error>,
-    results: QueryResultWriter<'_, W>,
-) -> io::Result<()> {
-    match r {
-        Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
-        Err(e) => {
-            results
-                .error(e.error_kind(), e.to_string().as_bytes())
-                .await
-        }
-    }
-}
+pub use self::noria_connector::NoriaConnector;
 
 pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
     let took = start.elapsed();
@@ -299,8 +211,8 @@ pub struct Backend<A: 'static + Authority, DB> {
     /// simultaneously in Noria and MySQL, with the first successful result being returned.
     race_reads: bool,
     /// Map from username to password for all users allowed to connect to the db
-    users: HashMap<String, String>,
-    require_authentication: bool,
+    pub users: HashMap<String, String>,
+    pub require_authentication: bool,
     /// Current RYW ticket. `None` if RYW is not enabled. This `ticket` will
     /// be updated as the client makes writes so as to be an accurate low watermark timestamp
     /// required to make RYW-consistent reads. On reads, the client will pass in this ticket to be
@@ -369,6 +281,10 @@ where
     A: 'static + Authority,
     DB: 'static + UpstreamDatabase,
 {
+    pub fn prepared_count(&self) -> u32 {
+        self.prepared_count
+    }
+
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, Error> {
@@ -1015,281 +931,4 @@ fn measure_parse_and_execution_time(
         execution_time as f64,
         "query_type" => sql_query_type
     );
-}
-
-#[async_trait]
-impl<W, A> MysqlShim<W> for Backend<A, MySqlConnector>
-where
-    W: AsyncWrite + Unpin + Send + 'static,
-    A: 'static + Authority,
-{
-    type Error = Error;
-
-    async fn on_prepare(
-        &mut self,
-        query: &str,
-        info: StatementMetaWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
-        use noria_connector::PrepareResult::*;
-
-        trace!("delegate");
-        let res = match self.prepare(query).await {
-            Ok(PrepareResult::Noria(Select {
-                statement_id,
-                params,
-                schema,
-            })) => {
-                info.reply(statement_id, params.as_slice(), schema.as_slice())
-                    .await
-            }
-            Ok(PrepareResult::Noria(Insert {
-                statement_id,
-                params,
-                schema,
-            })) => {
-                info.reply(statement_id, params.as_slice(), schema.as_slice())
-                    .await
-            }
-            Ok(PrepareResult::Noria(Update { params, .. })) => {
-                info.reply(self.prepared_count, &params[..], &[]).await
-            }
-            Ok(PrepareResult::Upstream(UpstreamPrepare { params, schema, .. })) => {
-                info.reply(self.prepared_count, params.as_slice(), schema.as_slice())
-                    .await
-            }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
-                code,
-                message,
-                ..
-            })))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
-                code,
-                message,
-                ..
-            }))) => info.error(code.into(), message.as_bytes()).await,
-            Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
-        };
-
-        Ok(res?)
-    }
-
-    async fn on_execute(
-        &mut self,
-        id: u32,
-        params: msql_srv::ParamParser<'_>,
-        results: QueryResultWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
-        let mut datatype_params = Vec::new();
-        // TODO(DAN): Param conversions are unecessary for fallback execution. Params should be
-        // derived directly from ParamParser.
-        for p in params {
-            datatype_params.push(p?.value.into_datatype()?);
-        }
-
-        let res = match self.execute(id, datatype_params).await {
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
-                data,
-                select_schema,
-            } )) => {
-                let mut rw = results.start(&select_schema.schema).await?;
-                for resultsets in data {
-                    for r in resultsets {
-                        for c in &select_schema.schema {
-                            let coli = select_schema
-                                .columns
-                                .iter()
-                                .position(|f| f == &c.column)
-                                .ok_or_else(|| {
-                                    internal_err(format!(
-                                        "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, select_schema.columns
-                                    ))
-                                })?;
-                            write_column(&mut rw, &r[coli], c).await?;
-                        }
-                        rw.end_row().await?;
-                    }
-                }
-                rw.finish().await
-            }
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
-                num_rows_inserted,
-                first_inserted_id,
-            } )) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
-                num_rows_updated,
-                last_inserted_id
-            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
-            Ok(QueryResult::UpstreamWrite(mysql_connector::WriteResult {
-                num_rows_affected,
-                last_inserted_id,
-            })) => {
-                write_query_results(
-                    Ok((num_rows_affected, last_inserted_id)),
-                    results,
-                )
-                .await
-            }
-            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, columns })) => {
-                let mut data = data.iter().peekable();
-                if let Some(cols) = data.peek() {
-                    let cols = cols.columns_ref();
-                    let formatted_cols = cols
-                        .iter()
-                        .map(|c| c.into())
-                        .collect::<Vec<Column>>();
-                    let mut rw = results.start(&formatted_cols).await?;
-                    for r in data {
-                        for (coli, _) in formatted_cols.iter().enumerate() {
-                            rw.write_col(&r[coli]).await?;
-                        }
-                        rw.end_row().await?
-                    }
-                    rw.finish().await
-                } else {
-                    let formatted_cols = if let Some(c) = columns {
-                        c.iter()
-                            .map(|c| c.into())
-                            .collect::<Vec<Column>>()
-                    } else {
-                        vec![]
-                    };
-                    let rw = results.start(&formatted_cols).await?;
-                    rw.finish().await
-                }
-            }
-            Err(e @ Error::ReadySet(ReadySetError::PreparedStatementMissing { .. })) => {
-                return results
-                    .error(
-                        e.error_kind(),
-                        "non-existent statement".as_bytes(),
-                    )
-                    .await
-                    .map_err(Error::from)
-            }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError{code, message,
-                ..})))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError{code,
-                message, ..}))) => {
-                results.error(code.into(), message.as_bytes()).await
-            }
-            Err(e) => results.error(e.error_kind(), e.to_string().as_bytes()).await,
-            _ => internal!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
-        };
-
-        Ok(res?)
-    }
-
-    async fn on_close(&mut self, _: u32) {}
-
-    async fn on_query(
-        &mut self,
-        query: &str,
-        results: QueryResultWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
-        let res = match self.query(query).await {
-            Ok(QueryResult::Noria(
-                noria_connector::QueryResult::CreateTable
-                | noria_connector::QueryResult::CreateView,
-            )) => results.completed(0, 0).await,
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
-                num_rows_inserted,
-                first_inserted_id,
-            })) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
-                data,
-                select_schema,
-            })) => {
-                let mut rw = results.start(&select_schema.schema).await?;
-                for resultsets in data {
-                    for r in resultsets {
-                        for c in &select_schema.schema {
-                            let coli = select_schema
-                                .columns
-                                .iter()
-                                .position(|f| f == &c.column)
-                                .ok_or_else(|| {
-                                    internal_err(format!(
-                                        "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, select_schema.columns
-                                    ))
-                                })?;
-                            write_column(&mut rw, &r[coli], c).await?;
-                        }
-                        rw.end_row().await?;
-                    }
-                }
-                rw.finish().await
-            }
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
-                num_rows_updated,
-                last_inserted_id,
-            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
-            Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
-                results.completed(num_rows_deleted, 0).await
-            }
-            Ok(QueryResult::UpstreamWrite(WriteResult {
-                num_rows_affected,
-                last_inserted_id,
-            })) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
-            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, columns })) => {
-                if let Some(cols) = data.get(0).cloned() {
-                    let cols = cols.columns_ref();
-                    let formatted_cols = cols.iter().map(|c| c.into()).collect::<Vec<Column>>();
-                    let mut rw = results.start(&formatted_cols).await?;
-                    for r in data {
-                        for (coli, _) in formatted_cols.iter().enumerate() {
-                            rw.write_col(&r[coli]).await?;
-                        }
-                        rw.end_row().await?
-                    }
-                    rw.finish().await
-                } else {
-                    let formatted_cols = if let Some(c) = columns {
-                        c.iter()
-                            .map(|c| Column {
-                                table: c.table_str().to_string(),
-                                column: c.name_str().to_string(),
-                                coltype: c.column_type(),
-                                colflags: c.flags(),
-                            })
-                            .collect::<Vec<Column>>()
-                    } else {
-                        vec![]
-                    };
-                    let rw = results.start(&formatted_cols).await?;
-                    rw.finish().await
-                }
-            }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
-                code,
-                message,
-                ..
-            })))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
-                code,
-                message,
-                ..
-            }))) => results.error(code.into(), message.as_bytes()).await,
-            Err(e) => {
-                results
-                    .error(e.error_kind(), e.to_string().as_bytes())
-                    .await
-            }
-        };
-
-        Ok(res?)
-    }
-
-    fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
-        String::from_utf8(username.to_vec())
-            .ok()
-            .and_then(|un| self.users.get(&un))
-            .cloned()
-            .map(String::into_bytes)
-    }
-
-    fn require_authentication(&self) -> bool {
-        self.require_authentication
-    }
 }

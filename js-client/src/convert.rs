@@ -3,11 +3,9 @@ use chrono::NaiveDateTime;
 use msql_srv::Column;
 use neon::{prelude::*, types::JsDate};
 use noria::{results::Results, DataType};
-use noria_client::backend::{
-    error::Error,
-    mysql_connector::{MySqlConnector, WriteResult},
-    PrepareResult, QueryResult, SelectSchema, UpstreamPrepare,
-};
+use noria_client::backend::{PrepareResult, QueryResult, SelectSchema, UpstreamPrepare};
+use noria_client::Error;
+use noria_mysql::MySqlUpstream;
 use std::convert::TryFrom;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
@@ -151,7 +149,7 @@ where
 
 pub(crate) fn convert_query_result<'a, C>(
     cx: &mut C,
-    raw_query_result: QueryResult<MySqlConnector>,
+    raw_query_result: QueryResult<MySqlUpstream>,
 ) -> NeonResult<Handle<'a, JsObject>>
 where
     C: Context<'a>,
@@ -211,7 +209,7 @@ where
                 num_rows_deleted as f64,
             )?;
         }
-        QueryResult::UpstreamWrite(WriteResult {
+        QueryResult::UpstreamWrite(noria_mysql::WriteResult {
             num_rows_affected,
             last_inserted_id,
         }) => {

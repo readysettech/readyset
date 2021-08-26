@@ -276,9 +276,9 @@ checksum = "e91831deabf0d6d7ec49552e489aed63b7456a7a3c46cff62adad428110b0af0"
 
 [[package]]
 name = "async-trait"
-version = "0.1.50"
+version = "0.1.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b98e84bbb4cbcdd97da190ba0c58a1bb0de2c1fdf67d159e192ed766aeca722"
+checksum = "44318e776df68115a881de9a8fd1b9e53368d7a4a5ce4cc48517da3393233a5e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1215,6 +1215,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-logictest",
+ "noria-mysql",
  "query_generator",
  "tokio 1.8.1",
 ]
@@ -1232,13 +1233,14 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "0.99.14"
+version = "0.99.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc7b9cef1e351660e5443924e4f43ab25fbbed3e9a5f052df3677deb4d6b320"
+checksum = "40eebddd2156ce1bb37b20bbe5151340a31828b1f2d22ba4141f3531710e38df"
 dependencies = [
  "convert_case",
  "proc-macro2",
  "quote",
+ "rustc_version 0.3.3",
  "syn",
 ]
 
@@ -1426,6 +1428,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-logictest",
+ "noria-mysql",
  "query_generator",
  "rand 0.8.4",
  "reqwest",
@@ -2190,7 +2193,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-client",
- "noria-server",
+ "noria-mysql",
  "serde_json",
  "slog",
  "tokio 1.8.1",
@@ -3287,15 +3290,11 @@ dependencies = [
  "msql-srv",
  "mysql 20.1.0",
  "mysql_async 0.27.0",
- "native-tls",
  "nom",
  "nom-sql",
  "noria",
  "noria-client-metrics",
- "noria-psql",
  "noria-server",
- "postgres-native-tls",
- "psql-srv",
  "regex",
  "slog",
  "thiserror",
@@ -3426,6 +3425,7 @@ dependencies = [
  "nom-trace",
  "noria",
  "noria-client",
+ "noria-mysql",
  "noria-psql",
  "noria-server",
  "postgres-native-tls",
@@ -3460,8 +3460,13 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap 3.0.0-beta.2",
+ "derive_more",
+ "maplit",
  "msql-srv",
+ "mysql 20.1.0",
+ "mysql_async 0.27.0",
  "nom-sql",
  "noria",
  "noria-client",
@@ -3479,16 +3484,20 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap 3.0.0-beta.2",
+ "futures 0.3.16",
  "msql-srv",
+ "native-tls",
  "nom-sql",
  "noria",
  "noria-client",
  "noria-client-adapter",
  "noria-server",
- "postgres 0.19.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "postgres 0.19.1 (git+https://github.com/readysettech/rust-postgres.git)",
+ "postgres-native-tls",
  "psql-srv",
  "slog",
  "tokio 1.8.1",
+ "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "zookeeper",
 ]
 
@@ -4102,7 +4111,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "430f4131e1b7657b0cd9a2b0c3408d77c9a43a042d300b8c77f981dffcc43a2f"
 dependencies = [
  "bytes 1.0.1",
- "chrono",
  "fallible-iterator",
  "postgres-protocol 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
