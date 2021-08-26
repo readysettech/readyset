@@ -54,6 +54,7 @@ enum Subcommand {
     },
     // BuildkiteTerraformServiceApply,
     BuildkiteTerraformUploadValidateAllPipeline,
+    BuildkiteTerraformUploadPlanAllPipeline,
 }
 
 #[derive(Clap, Debug)]
@@ -104,6 +105,9 @@ fn main() -> Result<()> {
         } => commands::buildkite::terraform_plan(&admin_module_locator),
         Subcommand::BuildkiteTerraformUploadValidateAllPipeline => {
             commands::buildkite::terraform_upload_validate_all_pipeline()
+        }
+        Subcommand::BuildkiteTerraformUploadPlanAllPipeline => {
+            commands::buildkite::terraform_upload_plan_all_pipeline()
         }
     }
 }

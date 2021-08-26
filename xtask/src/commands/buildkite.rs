@@ -21,6 +21,7 @@ struct ModuleTemplateData {
     module_descriptor: String,
     module_locator_args: Vec<String>,
     buildkite_validate_command: String,
+    buildkite_plan_command: String,
 }
 
 #[derive(Serialize)]
@@ -28,10 +29,16 @@ struct TerraformValidateAllPipelineTemplateData {
     modules: Vec<ModuleTemplateData>,
     plan_only: bool,
 }
+#[derive(Serialize)]
+struct TerraformPlanAllPipelineTemplateData {
+    modules: Vec<ModuleTemplateData>,
+}
 
 // TODO: Replace templating with YAML serialization with serde.
 static TERRAFORM_VALIDATE_ALL_PIPELINE_TEMPLATE: &str =
     include_str!("../templates/terraform_validate_all_pipeline.yml.hbs");
+static TERRAFORM_PLAN_ALL_PIPELINE_TEMPLATE: &str =
+    include_str!("../templates/terraform_plan_all_pipeline.yml.hbs");
 
 fn upload_plan_artifact(terraform_path: &Path) -> Result<()> {
     let plan_path = terraform_path.join(".terraform").join("terraform.tfplan");
@@ -54,29 +61,51 @@ fn upload_plan_artifact(terraform_path: &Path) -> Result<()> {
     }
 }
 
-fn generate_validate_all_pipeline() -> Result<String> {
+fn template_registry() -> Result<Handlebars<'static>> {
+    let mut handlebars = Handlebars::new();
+    handlebars.set_strict_mode(true);
+    handlebars.register_escape_fn(handlebars::no_escape);
+    handlebars
+        .register_template_string("validate_all", TERRAFORM_VALIDATE_ALL_PIPELINE_TEMPLATE)?;
+    handlebars.register_template_string("plan_all", TERRAFORM_PLAN_ALL_PIPELINE_TEMPLATE)?;
+    Ok(handlebars)
+}
+
+fn module_template_data_for_all() -> Result<Vec<ModuleTemplateData>> {
     let all_admin_module_locators = find_all_admin_module_locators()?;
-    let all_module_template_data: Vec<ModuleTemplateData> = all_admin_module_locators
+    Ok(all_admin_module_locators
         .iter()
         .map(|locator| ModuleTemplateData {
             module_descriptor: locator.to_description(),
             module_locator_args: locator.to_args(),
             buildkite_validate_command: String::from("buildkite-terraform-admin-validate"),
+            buildkite_plan_command: String::from("buildkite-terraform-admin-plan"),
         })
-        .collect();
+        .collect())
+}
+
+fn generate_plan_all_pipeline() -> Result<String> {
+    let modules: Vec<ModuleTemplateData> = module_template_data_for_all()?;
+
+    let template_data = TerraformPlanAllPipelineTemplateData { modules };
+
+    let handlebars = template_registry()?;
+    let pipeline_defintion = handlebars.render("plan_all", &template_data)?;
+
+    Ok(pipeline_defintion)
+}
+
+fn generate_validate_all_pipeline() -> Result<String> {
+    let modules: Vec<ModuleTemplateData> = module_template_data_for_all()?;
 
     let template_data = TerraformValidateAllPipelineTemplateData {
-        modules: all_module_template_data,
+        modules,
         plan_only: true,
     };
 
-    // TODO: Extract out the handlebars registry into a single function to grab the whole thing
-    // loaded and configured correctly.
-    let mut handlebars = Handlebars::new();
-    handlebars.set_strict_mode(true);
-    handlebars.register_escape_fn(handlebars::no_escape);
-    let pipeline_defintion =
-        handlebars.render_template(TERRAFORM_VALIDATE_ALL_PIPELINE_TEMPLATE, &template_data)?;
+    let handlebars = template_registry()?;
+    let pipeline_defintion = handlebars.render("validate_all", &template_data)?;
+
     Ok(pipeline_defintion)
 }
 
@@ -104,9 +133,7 @@ pub(crate) fn terraform_plan<T: ModuleLocator>(module_locator: &T) -> Result<()>
     }
 }
 
-pub(crate) fn terraform_upload_validate_all_pipeline() -> Result<()> {
-    let pipeline_definition = generate_validate_all_pipeline()?;
-
+fn buildkite_pipeline_upload(pipeline_definition: String) -> Result<()> {
     let mut upload_command_child = match Command::new("buildkite-agent")
         .arg("pipeline")
         .arg("upload")
@@ -150,4 +177,14 @@ pub(crate) fn terraform_upload_validate_all_pipeline() -> Result<()> {
             exit_status
         )
     }
+}
+
+pub(crate) fn terraform_upload_validate_all_pipeline() -> Result<()> {
+    let pipeline_definition = generate_validate_all_pipeline()?;
+    buildkite_pipeline_upload(pipeline_definition)
+}
+
+pub(crate) fn terraform_upload_plan_all_pipeline() -> Result<()> {
+    let pipeline_definition = generate_plan_all_pipeline()?;
+    buildkite_pipeline_upload(pipeline_definition)
 }

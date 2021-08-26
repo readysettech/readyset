@@ -1,15 +1,16 @@
 steps:
-  - label: ":docker: Build Substrate Rust Checks Image"
+  - label: ":docker: Build Substrate Rust Checker Image"
     key: build-rust-checks-image
     commands:
-      - "echo --- :docker: Building image"
+      - "echo --- :docker: Building checker image"
       - >-
-        docker build -f Dockerfile.rust-checks \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest \
+        docker build \
+          --target checker \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker \
           .
-      - "echo --- :docker: Pushing image"
-      - "docker image push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks"
+      - "echo --- :docker: Pushing checker image"
+      - "docker image push 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -22,7 +23,7 @@ steps:
       - build-rust-checks-image
     plugins:
       - docker#v3.7.0:
-          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
       - ecr#v2.2.0:
           login: true
 
@@ -34,7 +35,7 @@ steps:
       - build-rust-checks-image
     plugins:
       - docker#v3.7.0:
-          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-checks:latest"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
       - ecr#v2.2.0:
           login: true
 
