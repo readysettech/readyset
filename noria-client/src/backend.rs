@@ -322,27 +322,10 @@ pub struct SelectSchema {
     pub columns: Vec<String>,
 }
 
-/// The type returned when a query is prepared by `Backend`
-/// through the `prepare` function.
-/// Variants prefixed with `Noria` come from a `NoriaConnector` writer or reader.
-/// Variants prefixed with `MySQL` come from a `MySqlConnector` writer
+/// The type returned when a query is prepared by `Backend` through the `prepare` function.
 #[derive(Debug)]
 pub enum PrepareResult {
-    NoriaPrepareSelect {
-        statement_id: u32,
-        params: Vec<msql_srv::Column>,
-        schema: Vec<Column>,
-    },
-    NoriaPrepareInsert {
-        statement_id: u32,
-        params: Vec<msql_srv::Column>,
-        schema: Vec<Column>,
-    },
-    //TODO(DAN): Can id be changed to u32?
-    NoriaPrepareUpdate {
-        statement_id: u64,
-        params: Vec<Column>,
-    },
+    Noria(noria_connector::PrepareResult),
     Upstream(UpstreamPrepare),
 }
 
@@ -410,20 +393,16 @@ where
 
     /// Prepares query on the mysql_backend, if present, when it cannot be parsed or prepared by
     /// noria.
-    pub async fn prepare_fallback(&mut self, query: &str) -> Result<PrepareResult, Error> {
+    pub async fn prepare_fallback(&mut self, query: &str) -> Result<UpstreamPrepare, Error> {
         let q = query.to_string().trim_start().to_lowercase();
         if is_read(&q) {
             match self.reader.upstream {
-                Some(ref mut connector) => {
-                    connector.prepare(query).await.map(PrepareResult::Upstream)
-                }
+                Some(ref mut connector) => connector.prepare(query).await,
                 None => Err(ReadySetError::FallbackNoConnector.into()),
             }
         } else {
             match self.writer {
-                Writer::Upstream(ref mut connector) => {
-                    connector.prepare(query).await.map(PrepareResult::Upstream)
-                }
+                Writer::Upstream(ref mut connector) => connector.prepare(query).await,
                 _ => Err(ReadySetError::FallbackNoConnector.into()),
             }
         }
@@ -431,15 +410,17 @@ where
 
     /// Stores the prepared query id in a table
     fn store_prep_statement(&mut self, prepare: &PrepareResult) {
+        use noria_connector::PrepareResult::*;
+
         match prepare {
-            PrepareResult::NoriaPrepareSelect { statement_id, .. }
-            | PrepareResult::NoriaPrepareInsert { statement_id, .. } => {
+            PrepareResult::Noria(Select { statement_id, .. })
+            | PrepareResult::Noria(Insert { statement_id, .. }) => {
                 self.prepared_statements.insert(
                     self.prepared_count,
                     PreparedStatement::NoriaPrepStatement(*statement_id),
                 );
             }
-            PrepareResult::NoriaPrepareUpdate { statement_id, .. } => {
+            PrepareResult::Noria(Update { statement_id, .. }) => {
                 self.prepared_statements.insert(
                     self.prepared_count,
                     PreparedStatement::NoriaPrepStatement(*statement_id as u32),
@@ -568,9 +549,12 @@ where
             .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
             .await
         {
-            Ok(res) => Ok(res),
+            Ok(res) => Ok(PrepareResult::Noria(res)),
             Err(e) => match self.reader.upstream {
-                Some(_) => self.prepare_fallback(query).await,
+                Some(_) => self
+                    .prepare_fallback(query)
+                    .await
+                    .map(PrepareResult::Upstream),
                 None => Err(e),
             },
         }
@@ -592,7 +576,10 @@ where
             Err(e) => {
                 if self.reader.upstream.is_some() {
                     // Fallback prepare will always go to the reader connector
-                    let res = self.prepare_fallback(query).await;
+                    let res = self
+                        .prepare_fallback(query)
+                        .await
+                        .map(PrepareResult::Upstream);
                     if let Ok(ref result) = res {
                         self.store_prep_statement(result);
                     }
@@ -606,21 +593,19 @@ where
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => self.cascade_prepare(stmt.clone(), query).await,
             nom_sql::SqlQuery::Insert(_) => match &mut self.writer {
-                Writer::Noria(connector) => {
-                    connector
-                        .prepare_insert(parsed_query.clone(), self.prepared_count)
-                        .await
-                }
+                Writer::Noria(connector) => connector
+                    .prepare_insert(parsed_query.clone(), self.prepared_count)
+                    .await
+                    .map(PrepareResult::Noria),
                 Writer::Upstream(connector) => {
                     return connector.prepare(query).await.map(PrepareResult::Upstream);
                 }
             },
             nom_sql::SqlQuery::Update(_) => match &mut self.writer {
-                Writer::Noria(connector) => {
-                    connector
-                        .prepare_update(parsed_query.clone(), self.prepared_count)
-                        .await
-                }
+                Writer::Noria(connector) => connector
+                    .prepare_update(parsed_query.clone(), self.prepared_count)
+                    .await
+                    .map(PrepareResult::Noria),
                 Writer::Upstream(connector) => {
                     return connector.prepare(query).await.map(PrepareResult::Upstream);
                 }
@@ -1041,25 +1026,27 @@ where
         query: &str,
         info: StatementMetaWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
+        use noria_connector::PrepareResult::*;
+
         trace!("delegate");
         let res = match self.prepare(query).await {
-            Ok(PrepareResult::NoriaPrepareSelect {
+            Ok(PrepareResult::Noria(Select {
                 statement_id,
                 params,
                 schema,
-            }) => {
+            })) => {
                 info.reply(statement_id, params.as_slice(), schema.as_slice())
                     .await
             }
-            Ok(PrepareResult::NoriaPrepareInsert {
+            Ok(PrepareResult::Noria(Insert {
                 statement_id,
                 params,
                 schema,
-            }) => {
+            })) => {
                 info.reply(statement_id, params.as_slice(), schema.as_slice())
                     .await
             }
-            Ok(PrepareResult::NoriaPrepareUpdate { params, .. }) => {
+            Ok(PrepareResult::Noria(Update { params, .. })) => {
                 info.reply(self.prepared_count, &params[..], &[]).await
             }
             Ok(PrepareResult::Upstream(UpstreamPrepare { params, schema, .. })) => {

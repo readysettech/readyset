@@ -15,29 +15,31 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
 
     fn try_from(r: PrepareResponse) -> Result<Self, Self::Error> {
         use cl::PrepareResult::*;
+        use noria_client::backend::noria_connector::PrepareResult::*;
+
         match r.0 {
-            NoriaPrepareSelect {
+            Noria(Select {
                 statement_id,
                 params,
                 schema,
-            } => Ok(ps::PrepareResponse {
+            }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
                 param_schema: MysqlSchema(params).try_into()?,
                 row_schema: MysqlSchema(schema).try_into()?,
             }),
-            NoriaPrepareInsert {
+            Noria(Insert {
                 statement_id,
                 params,
                 schema,
-            } => Ok(ps::PrepareResponse {
+            }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
                 param_schema: MysqlSchema(params).try_into()?,
                 row_schema: MysqlSchema(schema).try_into()?,
             }),
-            NoriaPrepareUpdate {
+            Noria(Update {
                 statement_id,
                 params,
-            } => Ok(ps::PrepareResponse {
+            }) => Ok(ps::PrepareResponse {
                 // NOTE u32::try_from is used because NoriaPrepareUpdate's statement_id has a
                 // non-standard u64 data type.
                 prepared_statement_id: u32::try_from(statement_id)?,
