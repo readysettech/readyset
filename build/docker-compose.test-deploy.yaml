@@ -1,0 +1,10 @@
+version: "3.8"
+services:
+  test-deploy:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    links:
+      - db
+    command: ["bash", "-c", "exit 0"]

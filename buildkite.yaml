@@ -105,6 +105,14 @@ steps:
               include:
                 - "readyset-framework-testing/frameworks/**"
 
+            - label: ':docker: Build readyset-mysql image'
+              exclude:
+                - "ops/**"
+
+            - label: 'Test readyset deployment'
+              exclude:
+                - "ops/**"
+
   - wait: ~
     continue_on_failure: true
   - command: ".buildkite/set_gerrit_status.sh"

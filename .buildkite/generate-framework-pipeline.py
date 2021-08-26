@@ -51,6 +51,7 @@ test_template = """
             - RS_PORT=3333
             - RS_NUM_SHARDS=${NUM_SHARDS}
             - RS_DIALECT=mysql${DIALECT_SHORT}
+            - BUILDKITE_COMMIT
         ecr#v2.2.0:
           login: true
 """

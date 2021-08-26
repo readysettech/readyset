@@ -20,11 +20,26 @@ steps:
       - "echo --- :docker: Building readyset-server image"
       - >-
         docker build -f build/Dockerfile.readyset-server \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
           .
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT}"
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
+  - label: ":docker: Build readyset-mysql image"
+    key: readyset-mysql-image
+    commands:
+      - "echo --- :docker: Building readyset-mysql image"
+      - >-
+        docker build -f build/Dockerfile.readyset-mysql \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
+          .
+      - "echo --- :docker: Pushing image"
+      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT}"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -166,6 +181,8 @@ steps:
       - docker-compose#v3.7.0:
           run: node
           config: js-client/tests/build/docker-compose.yaml
+          env:
+            - BUILDKITE_COMMIT
           mount-buildkite-agent: true
       - ecr#v2.2.0:
           login: true
@@ -339,3 +356,22 @@ steps:
           - MYSQL_ONLY=true
     artifact_paths:
       - ".buildkite/gen/*"
+
+  - label: "Test readyset deployment"
+    depends_on:
+      - readyset-server-image
+      - readyset-mysql-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: test-deploy
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+          - BUILDKITE_COMMIT
+          mount-buildkite-agent: true
+          config:
+            - .buildkite/docker-compose.readyset80.yml
+            - build/docker-compose.test-deploy.yaml
+      - ecr#v2.2.0:
+          login: true

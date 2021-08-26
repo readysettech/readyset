@@ -31,7 +31,7 @@ services:
       timeout: 2s
       retries: 5
   readyset-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT}"
     build:
       context: ../../..
       dockerfile: build/Dockerfile.readyset-server
