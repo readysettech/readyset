@@ -25,7 +25,6 @@ use crate::schema::{self, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
-use crate::backend::PrepareResult;
 use crate::backend::SelectSchema;
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
@@ -146,6 +145,25 @@ impl<A: 'static + Authority> NoriaBackendInner<A> {
         }
         Ok(self.outputs.get_mut(view).unwrap())
     }
+}
+
+#[derive(Debug)]
+pub enum PrepareResult {
+    Select {
+        statement_id: u32,
+        params: Vec<msql_srv::Column>,
+        schema: Vec<msql_srv::Column>,
+    },
+    Insert {
+        statement_id: u32,
+        params: Vec<msql_srv::Column>,
+        schema: Vec<msql_srv::Column>,
+    },
+    //TODO(DAN): Can id be changed to u32?
+    Update {
+        statement_id: u64,
+        params: Vec<msql_srv::Column>,
+    },
 }
 
 #[derive(Debug)]
@@ -307,7 +325,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(id = statement_id, "insert::registered");
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Insert(q));
-        Ok(PrepareResult::NoriaPrepareInsert {
+        Ok(PrepareResult::Insert {
             statement_id,
             params,
             schema,
@@ -437,7 +455,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(id = statement_id, "update::registered");
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Update(q));
-        Ok(PrepareResult::NoriaPrepareUpdate {
+        Ok(PrepareResult::Update {
             statement_id: statement_id as u64,
             params,
         })
@@ -931,7 +949,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
-        Ok(PrepareResult::NoriaPrepareSelect {
+        Ok(PrepareResult::Select {
             statement_id,
             params,
             schema: getter_schema.to_cols(SchemaType::ReturnedSchema),

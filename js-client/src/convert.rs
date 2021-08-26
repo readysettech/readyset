@@ -39,18 +39,20 @@ pub(crate) fn convert_prepare_result<'a, C>(
 where
     C: Context<'a>,
 {
+    use noria_client::backend::noria_connector::PrepareResult::*;
+
     let js_prepare_result = cx.empty_object();
     match raw_prepare_result {
-        PrepareResult::NoriaPrepareSelect {
+        PrepareResult::Noria(Select {
             statement_id,
             params,
             schema,
-        }
-        | PrepareResult::NoriaPrepareInsert {
+        })
+        | PrepareResult::Noria(Insert {
             statement_id,
             params,
             schema,
-        } => {
+        }) => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
             let js_params = convert_cols(cx, params)?;
             utils::set_jsval_field(
@@ -67,10 +69,10 @@ where
                 js_schema.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::NoriaPrepareUpdate {
+        PrepareResult::Noria(Update {
             statement_id,
             params,
-        } => {
+        }) => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
             let js_params = convert_cols(cx, params)?;
             utils::set_jsval_field(
