@@ -86,10 +86,6 @@ pub struct Options {
     #[clap(long)]
     time: bool,
 
-    /// Disable checking for queries requiring static responses. Improves latency.
-    #[clap(long)]
-    no_static_responses: bool,
-
     /// Don't require authentication for any client connections
     #[clap(long)]
     no_require_authentication: bool,
@@ -212,7 +208,6 @@ where
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
-                .static_responses(!options.no_static_responses)
                 .slowlog(options.log_slow)
                 .race_reads(options.race_reads)
                 .users(users.clone())

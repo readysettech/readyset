@@ -14,9 +14,7 @@ use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use msql_srv::{
-    Column, ColumnFlags, ColumnType, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
-};
+use msql_srv::{Column, ColumnFlags, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter};
 use mysql_connector::MySqlConnector;
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;
@@ -31,7 +29,7 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use crate::backend::error::Error;
 use crate::convert::ToDataType;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::{rewrite, utils, UpstreamDatabase};
+use crate::{rewrite, UpstreamDatabase};
 
 use self::mysql_connector::WriteResult;
 
@@ -195,7 +193,6 @@ pub enum PreparedStatement {
 /// Builder for a [`Backend`]
 #[derive(Clone)]
 pub struct BackendBuilder {
-    static_responses: bool,
     slowlog: bool,
     dialect: Dialect,
     race_reads: bool,
@@ -208,7 +205,6 @@ pub struct BackendBuilder {
 impl Default for BackendBuilder {
     fn default() -> Self {
         BackendBuilder {
-            static_responses: true,
             slowlog: false,
             dialect: Dialect::MySQL,
             race_reads: false,
@@ -237,7 +233,6 @@ impl BackendBuilder {
             parsed_query_cache,
             prepared_queries,
             prepared_count,
-            static_responses: self.static_responses,
             writer,
             reader,
             slowlog: self.slowlog,
@@ -249,11 +244,6 @@ impl BackendBuilder {
             timestamp_client: self.timestamp_client,
             prepared_statements: Default::default(),
         }
-    }
-
-    pub fn static_responses(mut self, static_responses: bool) -> Self {
-        self.static_responses = static_responses;
-        self
     }
 
     pub fn slowlog(mut self, slowlog: bool) -> Self {
@@ -299,7 +289,6 @@ pub struct Backend<A: 'static + Authority, DB> {
     // all queries previously prepared, mapped by their ID
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
-    static_responses: bool,
     writer: Writer<A, DB>,
     reader: Reader<A, DB>,
     slowlog: bool,
@@ -1207,28 +1196,6 @@ where
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> std::result::Result<(), Error> {
-        if self.static_responses {
-            for &(ref pattern, ref columns) in &*utils::HARD_CODED_REPLIES {
-                if pattern.is_match(query) {
-                    trace!("sending static response");
-                    let cols: Vec<_> = columns
-                        .iter()
-                        .map(|c| Column {
-                            table: String::from(""),
-                            column: String::from(c.0),
-                            coltype: ColumnType::MYSQL_TYPE_STRING,
-                            colflags: ColumnFlags::empty(),
-                        })
-                        .collect();
-                    let mut writer = results.start(&cols[..]).await?;
-                    for &(_, r) in columns {
-                        writer.write_col(String::from(r)).await?;
-                    }
-                    return Ok(writer.end_row().await?);
-                }
-            }
-        }
-
         let res = match self.query(query).await {
             Ok(QueryResult::Noria(
                 noria_connector::QueryResult::CreateTable
