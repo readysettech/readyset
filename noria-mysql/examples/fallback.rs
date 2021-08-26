@@ -8,12 +8,12 @@ use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
         error::Error,
-        mysql_connector::{self, MySqlConnector},
         noria_connector::{self, NoriaConnector},
         BackendBuilder, QueryResult, Reader, Writer,
     },
     UpstreamDatabase,
 };
+use noria_mysql::MySqlUpstream;
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
 /// Run `ryw-setup.sh` once noria is running to configure all of the
@@ -43,11 +43,11 @@ async fn main() {
 
     let reader = Reader {
         noria_connector: noria_conn,
-        upstream: Some(MySqlConnector::connect(mysql_url.clone()).await.unwrap()),
+        upstream: Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap()),
     };
 
     // Construct the Writer (to an underlying DB)
-    let writer = Writer::Upstream(MySqlConnector::connect(mysql_url).await.unwrap());
+    let writer = Writer::Upstream(MySqlUpstream::connect(mysql_url).await.unwrap());
 
     let mut b = BackendBuilder::new()
         .require_authentication(false)
@@ -57,7 +57,7 @@ async fn main() {
     let noria_res = b.query("select * from customers;").await;
     let mysql_res = b.query("show tables;").await;
 
-    fn print_res(res: Result<QueryResult<MySqlConnector>, Error>) {
+    fn print_res(res: Result<QueryResult<MySqlUpstream>, Error>) {
         match res {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
@@ -66,7 +66,7 @@ async fn main() {
                 println!("Noria Result:");
                 println!("{:#?}", data);
             }
-            Ok(QueryResult::UpstreamRead(mysql_connector::ReadResult { data, .. })) => {
+            Ok(QueryResult::UpstreamRead(noria_mysql::ReadResult { data, .. })) => {
                 println!("MySQL Result:");
                 println!("{:#?}", data);
             }

@@ -1,3 +1,5 @@
+//! Helpers for writing integration tests against adapters that use noria-client
+
 use std::collections::HashMap;
 use std::env;
 use std::net::TcpListener;
@@ -7,19 +9,16 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use msql_srv::MysqlIntermediary;
 use nom_sql::SelectStatement;
 use noria::consensus::Authority;
-use noria_client::backend::mysql_connector::MySqlConnector;
-use noria_client::backend::noria_connector::NoriaConnector;
-use noria_client::backend::postgresql_connector::PostgreSqlConnector;
-use noria_client::backend::{BackendBuilder, Reader, Writer};
-use noria_client::{Backend, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
 use slog::{debug, o};
 use tokio::net::TcpStream;
-use tokio_postgres as pgsql;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
+
+use crate::backend::noria_connector::NoriaConnector;
+use crate::backend::{BackendBuilder, Reader, Writer};
+use crate::{Backend, UpstreamDatabase};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 pub struct Deployment {
@@ -70,80 +69,20 @@ pub fn zk_addr() -> String {
 #[async_trait]
 pub trait Adapter: Send {
     type ConnectionOpts;
-    type Connector: UpstreamDatabase;
+    type Upstream: UpstreamDatabase;
 
     const DIALECT: nom_sql::Dialect;
 
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts;
     fn url() -> String;
 
-    async fn make_upstream() -> Self::Connector {
-        Self::Connector::connect(Self::url()).await.unwrap()
+    async fn make_upstream() -> Self::Upstream {
+        Self::Upstream::connect(Self::url()).await.unwrap()
     }
 
-    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
+    async fn run_backend<A>(backend: Backend<A, Self::Upstream>, s: TcpStream)
     where
         A: 'static + Authority;
-}
-
-pub struct MySQL;
-#[async_trait]
-impl Adapter for MySQL {
-    type ConnectionOpts = mysql::Opts;
-    type Connector = MySqlConnector;
-
-    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
-
-    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
-        mysql::OptsBuilder::default().tcp_port(port).into()
-    }
-
-    fn url() -> String {
-        format!(
-            "mysql://root:noria@{}:{}/noria",
-            env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-            env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
-        )
-    }
-
-    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
-    where
-        A: 'static + Authority,
-    {
-        MysqlIntermediary::run_on_tcp(backend, s).await.unwrap()
-    }
-}
-
-pub struct PostgreSQL;
-#[async_trait]
-impl Adapter for PostgreSQL {
-    type ConnectionOpts = pgsql::Config;
-    type Connector = PostgreSqlConnector;
-
-    const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
-
-    fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
-        let mut config = pgsql::Config::new();
-        config.port(port);
-        config
-    }
-
-    fn url() -> String {
-        format!(
-            "postgresql://{}:{}@{}:{}/noria",
-            env::var("PGUSER").unwrap_or_else(|_| "postgres".into()),
-            env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into()),
-            env::var("PGHOST").unwrap_or_else(|_| "localhost".into()),
-            env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
-        )
-    }
-
-    async fn run_backend<A>(backend: Backend<A, Self::Connector>, s: TcpStream)
-    where
-        A: 'static + Authority,
-    {
-        psql_srv::run_backend(noria_psql::Backend(backend), s).await
-    }
 }
 
 pub fn setup<A>(

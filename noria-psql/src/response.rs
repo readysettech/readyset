@@ -1,10 +1,11 @@
 use crate::resultset::Resultset;
 use crate::schema::{MysqlSchema, SelectSchema};
 use noria_client::backend::noria_connector;
-use noria_client::backend::postgresql_connector::PostgreSqlConnector;
 use noria_client::backend::{self as cl, UpstreamPrepare};
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
+
+use crate::PostgreSqlUpstream;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.
@@ -58,7 +59,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
 
 /// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
 /// `psql_srv::QueryResponse`.
-pub struct QueryResponse(pub cl::QueryResult<PostgreSqlConnector>);
+pub struct QueryResponse(pub cl::QueryResult<PostgreSqlUpstream>);
 
 impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
     type Error = ps::Error;

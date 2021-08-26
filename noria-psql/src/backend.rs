@@ -1,21 +1,22 @@
+use async_trait::async_trait;
+use noria::consensus::Authority;
+use noria::DataType;
+use noria_client::backend as cl;
+use psql_srv as ps;
+use std::convert::{TryFrom, TryInto};
+
 use crate::error::Error;
 use crate::response::{PrepareResponse, QueryResponse};
 use crate::resultset::Resultset;
 use crate::row::Row;
 use crate::value::Value;
-use async_trait::async_trait;
-use noria::consensus::Authority;
-use noria::DataType;
-use noria_client::backend as cl;
-use noria_client::backend::postgresql_connector::PostgreSqlConnector;
-use psql_srv as ps;
-use std::convert::{TryFrom, TryInto};
+use crate::PostgreSqlUpstream;
 
 /// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
-pub struct Backend<A: 'static + Authority>(pub cl::Backend<A, PostgreSqlConnector>);
+pub struct Backend<A: 'static + Authority>(pub cl::Backend<A, PostgreSqlUpstream>);
 
 impl<A> Backend<A>
 where
