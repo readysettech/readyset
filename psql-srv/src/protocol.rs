@@ -11,7 +11,7 @@ use crate::message::{
 use crate::r#type::{ColType, Type};
 use crate::response::Response;
 use crate::value::Value;
-use crate::{Backend, PrepareResponse, QueryResponse::*, Schema};
+use crate::{Backend, Column, PrepareResponse, QueryResponse::*, Schema};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -233,7 +233,7 @@ impl Protocol {
                         ParameterDescription {
                             parameter_data_types: param_schema
                                 .iter()
-                                .map(|(_, t)| to_type(t))
+                                .map(|col| to_type(&col.col_type))
                                 .collect::<Result<Vec<Type>, Error>>()?,
                         },
                         RowDescription {
@@ -326,7 +326,7 @@ impl Protocol {
                     prepared_statement_name.borrow() as &str,
                     param_schema
                         .iter()
-                        .map(|(_, t)| to_type(t))
+                        .map(|col| to_type(&col.col_type))
                         .collect::<Result<Vec<Type>, Error>>()?,
                 );
                 self.prepared_statements.insert(
@@ -397,44 +397,44 @@ fn make_error_response<R>(error: Error) -> BackendMessage<R> {
 }
 
 fn make_field_description(
-    (name, col_type): &(String, ColType),
+    col: &Column,
     transfer_format: TransferFormat,
 ) -> Result<FieldDescription, Error> {
-    let data_type = to_type(col_type)?;
-    let (data_type_size, type_modifier) = match *col_type {
+    let data_type = to_type(&col.col_type)?;
+    let (data_type_size, type_modifier) = match col.col_type {
         ColType::Bool => (TYPLEN_1, ATTTYPMOD_NONE),
         ColType::Char(Some(v)) => (TYPLEN_1, i32::from(v)),
         ColType::Varchar(v) => (TYPLEN_VARLENA, i32::from(v)),
-        ColType::UnsignedInt(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::UnsignedInt(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Int(_) => (TYPLEN_4, ATTTYPMOD_NONE),
         ColType::Bigint(_) => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::UnsignedBigint(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Tinyint(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::UnsignedTinyint(_) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::UnsignedBigint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Tinyint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::UnsignedTinyint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Smallint(_) => (TYPLEN_2, ATTTYPMOD_NONE),
-        ColType::UnsignedSmallint(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Blob => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Longblob => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Mediumblob => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Tinyblob => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::UnsignedSmallint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Blob => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Longblob => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Mediumblob => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Tinyblob => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Double => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Float => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Float => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Real => (TYPLEN_4, ATTTYPMOD_NONE),
-        ColType::Tinytext => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Mediumtext => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Longtext => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Tinytext => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Mediumtext => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Longtext => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Text | ColType::Char(None) => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
-        ColType::Date => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::DateTime(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Time => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Date => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::DateTime(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Time => return Err(Error::UnsupportedType(col.col_type.clone())),
         ColType::Timestamp => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Binary(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Varbinary(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Enum(_) => return Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Decimal(_, _) => return Err(Error::UnsupportedType(col_type.clone())),
+        ColType::Binary(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Varbinary(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Enum(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
+        ColType::Decimal(_, _) => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
     Ok(FieldDescription {
-        field_name: name.clone(),
+        field_name: col.name.clone(),
         table_id: UNKNOWN_TABLE,
         col_id: UNKNOWN_COLUMN,
         data_type,
@@ -563,8 +563,14 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        ("col1".to_string(), ColType::Int(None)),
-                        ("col2".to_string(), ColType::Double),
+                        Column {
+                            name: "col1".to_string(),
+                            col_type: ColType::Int(None),
+                        },
+                        Column {
+                            name: "col2".to_string(),
+                            col_type: ColType::Double,
+                        },
                     ],
                     resultset: vec![
                         vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
@@ -584,12 +590,24 @@ mod tests {
                 Ok(PrepareResponse {
                     prepared_statement_id: 1,
                     param_schema: vec![
-                        ("x".to_string(), ColType::Double),
-                        ("y".to_string(), ColType::Int(None)),
+                        Column {
+                            name: "x".to_string(),
+                            col_type: ColType::Double,
+                        },
+                        Column {
+                            name: "y".to_string(),
+                            col_type: ColType::Int(None),
+                        },
                     ],
                     row_schema: vec![
-                        ("col1".to_string(), ColType::Int(None)),
-                        ("col2".to_string(), ColType::Double),
+                        Column {
+                            name: "col1".to_string(),
+                            col_type: ColType::Int(None),
+                        },
+                        Column {
+                            name: "col2".to_string(),
+                            col_type: ColType::Double,
+                        },
                     ],
                 })
             }
@@ -607,8 +625,14 @@ mod tests {
             } else if self.is_query_read {
                 Ok(QueryResponse::Select {
                     schema: vec![
-                        ("col1".to_string(), ColType::Int(None)),
-                        ("col2".to_string(), ColType::Double),
+                        Column {
+                            name: "col1".to_string(),
+                            col_type: ColType::Int(None),
+                        },
+                        Column {
+                            name: "col2".to_string(),
+                            col_type: ColType::Double,
+                        },
                     ],
                     resultset: vec![
                         vec![Value(DataValue::Int(88)), Value(DataValue::Double(0.123))],
@@ -920,12 +944,24 @@ mod tests {
             PreparedStatementData {
                 prepared_statement_id: 1,
                 param_schema: vec![
-                    ("x".to_string(), ColType::Double),
-                    ("y".to_string(), ColType::Int(None))
+                    Column {
+                        name: "x".to_string(),
+                        col_type: ColType::Double
+                    },
+                    Column {
+                        name: "y".to_string(),
+                        col_type: ColType::Int(None)
+                    }
                 ],
                 row_schema: vec![
-                    ("col1".to_string(), ColType::Int(None)),
-                    ("col2".to_string(), ColType::Double),
+                    Column {
+                        name: "col1".to_string(),
+                        col_type: ColType::Int(None)
+                    },
+                    Column {
+                        name: "col2".to_string(),
+                        col_type: ColType::Double
+                    },
                 ],
             }
         );
