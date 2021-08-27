@@ -40,6 +40,7 @@ pub struct MySqlUpstream {
 impl UpstreamDatabase for MySqlUpstream {
     type ReadResult = ReadResult;
     type WriteResult = WriteResult;
+    type Column = Column;
 
     async fn connect(url: String) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
@@ -72,7 +73,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare, Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -87,8 +88,8 @@ impl UpstreamDatabase for MySqlUpstream {
             .insert(statement.id(), statement.clone());
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
-            params: statement.params().iter().map(|c| c.into()).collect(),
-            schema: statement.columns().iter().map(|c| c.into()).collect(),
+            params: statement.params().to_owned(),
+            schema: statement.columns().to_owned(),
             is_read,
         })
     }

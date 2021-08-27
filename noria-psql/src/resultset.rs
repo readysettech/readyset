@@ -1,8 +1,7 @@
 use crate::row::Row;
-use crate::schema::{MysqlType, SelectSchema};
+use crate::schema::SelectSchema;
 use noria::results::Results;
 use psql_srv as ps;
-use std::convert::TryInto;
 use std::iter;
 use std::sync::Arc;
 
@@ -42,7 +41,7 @@ impl Resultset {
                         .0
                         .columns
                         .iter()
-                        .position(|name| name == &col.column)
+                        .position(|name| name == &col.spec.column.name)
                         .ok_or_else(|| ps::Error::InternalError("inconsistent schema".to_string()))
                 })
                 .collect::<Result<Vec<usize>, ps::Error>>()?,
@@ -53,8 +52,8 @@ impl Resultset {
                 .0
                 .schema
                 .iter()
-                .map(|c| MysqlType(c.coltype).try_into())
-                .collect::<Result<Vec<ps::ColType>, ps::Error>>()?,
+                .map(|c| c.spec.sql_type.clone())
+                .collect::<Vec<ps::ColType>>(),
         );
         Ok(Resultset {
             results,
@@ -99,11 +98,12 @@ impl IntoIterator for Resultset {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use arccstr::ArcCStr;
-    use noria::DataType;
+    use nom_sql::ColumnSpecification;
+    use noria::{ColumnSchema, DataType};
     use noria_client::backend as cl;
+    use ps::ColType;
     use std::convert::TryFrom;
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
@@ -122,11 +122,14 @@ mod tests {
         let results = vec![];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![msql_srv::Column {
-                table: "tab1".to_string(),
-                column: "col1".to_string(),
-                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                colflags: msql_srv::ColumnFlags::empty(),
+            schema: vec![ColumnSchema {
+                spec: ColumnSpecification {
+                    column: "tab1.col1".into(),
+                    sql_type: ColType::Bigint(None),
+                    comment: None,
+                    constraints: vec![],
+                },
+                base: None,
             }],
             columns: vec!["col1".to_string()],
         });
@@ -147,11 +150,14 @@ mod tests {
         )];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![msql_srv::Column {
-                table: "tab1".to_string(),
-                column: "col1".to_string(),
-                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                colflags: msql_srv::ColumnFlags::empty(),
+            schema: vec![ColumnSchema {
+                spec: ColumnSpecification {
+                    column: "tab1.col1".into(),
+                    sql_type: ColType::Bigint(None),
+                    comment: None,
+                    constraints: vec![],
+                },
+                base: None,
             }],
             columns: vec!["col1".to_string()],
         });
@@ -177,11 +183,14 @@ mod tests {
         ];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![msql_srv::Column {
-                table: "tab1".to_string(),
-                column: "col1".to_string(),
-                coltype: msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                colflags: msql_srv::ColumnFlags::empty(),
+            schema: vec![ColumnSchema {
+                spec: ColumnSpecification {
+                    column: "tab1.col1".into(),
+                    sql_type: ColType::Bigint(None),
+                    comment: None,
+                    constraints: vec![],
+                },
+                base: None,
             }],
             columns: vec!["col1".to_string()],
         });
@@ -202,17 +211,23 @@ mod tests {
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: true,
             schema: vec![
-                msql_srv::Column {
-                    table: "tab1".to_string(),
-                    column: "col1".to_string(),
-                    coltype: msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                    colflags: msql_srv::ColumnFlags::empty(),
+                ColumnSchema {
+                    spec: ColumnSpecification {
+                        column: "tab1.col1".into(),
+                        sql_type: ColType::Bigint(None),
+                        comment: None,
+                        constraints: vec![],
+                    },
+                    base: None,
                 },
-                msql_srv::Column {
-                    table: "tab1".to_string(),
-                    column: "col2".to_string(),
-                    coltype: msql_srv::ColumnType::MYSQL_TYPE_STRING,
-                    colflags: msql_srv::ColumnFlags::empty(),
+                ColumnSchema {
+                    spec: ColumnSpecification {
+                        column: "tab1.col2".into(),
+                        sql_type: ColType::Text,
+                        comment: None,
+                        constraints: vec![],
+                    },
+                    base: None,
                 },
             ],
             columns: vec![
@@ -260,17 +275,23 @@ mod tests {
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: true,
             schema: vec![
-                msql_srv::Column {
-                    table: "tab1".to_string(),
-                    column: "col1".to_string(),
-                    coltype: msql_srv::ColumnType::MYSQL_TYPE_LONGLONG,
-                    colflags: msql_srv::ColumnFlags::empty(),
+                ColumnSchema {
+                    spec: ColumnSpecification {
+                        column: "tab1.col1".into(),
+                        sql_type: ColType::Bigint(None),
+                        comment: None,
+                        constraints: vec![],
+                    },
+                    base: None,
                 },
-                msql_srv::Column {
-                    table: "tab1".to_string(),
-                    column: "col2".to_string(),
-                    coltype: msql_srv::ColumnType::MYSQL_TYPE_STRING,
-                    colflags: msql_srv::ColumnFlags::empty(),
+                ColumnSchema {
+                    spec: ColumnSpecification {
+                        column: "tab1.col2".into(),
+                        sql_type: ColType::Text,
+                        comment: None,
+                        constraints: vec![],
+                    },
+                    base: None,
                 },
             ],
             columns: vec![

@@ -10,13 +10,12 @@ use nom_sql::Dialect;
 use tokio::sync::mpsc;
 use tracing::Level;
 
-use msql_srv::Column;
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria::{internal, unsupported, DataType, ReadySetError};
+use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError};
 use noria_client_metrics::recorded::SqlQueryType;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
@@ -231,15 +230,15 @@ pub struct Backend<A: 'static + Authority, DB> {
 #[derive(Debug)]
 pub struct SelectSchema {
     pub use_bogo: bool,
-    pub schema: Vec<Column>,
+    pub schema: Vec<ColumnSchema>,
     pub columns: Vec<String>,
 }
 
 /// The type returned when a query is prepared by `Backend` through the `prepare` function.
 #[derive(Debug)]
-pub enum PrepareResult {
+pub enum PrepareResult<Col> {
     Noria(noria_connector::PrepareResult),
-    Upstream(UpstreamPrepare),
+    Upstream(UpstreamPrepare<Col>),
 }
 
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
@@ -310,7 +309,10 @@ where
 
     /// Prepares query on the mysql_backend, if present, when it cannot be parsed or prepared by
     /// noria.
-    pub async fn prepare_fallback(&mut self, query: &str) -> Result<UpstreamPrepare, Error> {
+    pub async fn prepare_fallback(
+        &mut self,
+        query: &str,
+    ) -> Result<UpstreamPrepare<DB::Column>, Error> {
         let q = query.to_string().trim_start().to_lowercase();
         if is_read(&q) {
             match self.reader.upstream {
@@ -326,7 +328,7 @@ where
     }
 
     /// Stores the prepared query id in a table
-    fn store_prep_statement(&mut self, prepare: &PrepareResult) {
+    fn store_prep_statement(&mut self, prepare: &PrepareResult<DB::Column>) {
         use noria_connector::PrepareResult::*;
 
         match prepare {
@@ -459,7 +461,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
-    ) -> Result<PrepareResult, Error> {
+    ) -> Result<PrepareResult<DB::Column>, Error> {
         match self
             .reader
             .noria_connector
@@ -480,7 +482,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult, Error> {
+    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB::Column>, Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 

@@ -6,11 +6,10 @@ use noria::DataType;
 use crate::Error;
 
 #[derive(Debug)]
-pub struct UpstreamPrepare {
+pub struct UpstreamPrepare<Col> {
     pub statement_id: u32,
-    // TODO(grfn): Make Column an associated type on UpstreamDatabase
-    pub params: Vec<msql_srv::Column>,
-    pub schema: Vec<msql_srv::Column>,
+    pub params: Vec<Col>,
+    pub schema: Vec<Col>,
     pub is_read: bool,
 }
 
@@ -38,6 +37,12 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`QueryResult::UpstreamWrite`]: crate::backend::QueryResult::UpstreamWrite
     type WriteResult: Debug + Send + 'static;
 
+    /// A type representing metadata about a column in the schema.
+    ///
+    /// Column is used in [`UpstreamPrepare`], to communicate the schema for the query parameters of
+    /// a prepared statement in addition to the schema for the actual returned rows.
+    type Column: Debug + Send + 'static;
+
     /// Create a new connection to this upstream database
     async fn connect(url: String) -> Result<Self, Error>;
 
@@ -52,7 +57,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// associated with statement IDs, as long as after calling `on_prepare` on one instance of an
     /// UpstreamDatabase a later call of [`on_execute`] on the same UpstreamDatabase with the same
     /// statement ID executes that statement.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare, Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 

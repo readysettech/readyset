@@ -1,4 +1,5 @@
 mod backend;
+mod schema;
 mod upstream;
 mod value;
 
