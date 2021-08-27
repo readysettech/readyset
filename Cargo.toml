@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "msql-srv",
+    "mysql-time",
     "nom-sql",
     "noria-client",
     "noria-mysql",

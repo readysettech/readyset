@@ -264,7 +264,7 @@ impl<'a> TryFrom<Value<'a>> for NaiveDateTime {
     }
 }
 
-use crate::MysqlTime;
+use mysql_time::MysqlTime;
 
 impl<'a> TryFrom<Value<'a>> for MysqlTime {
     type Error = MsqlSrvError;
@@ -283,23 +283,6 @@ impl<'a> TryFrom<Value<'a>> for MysqlTime {
                 src_type: format!("{:?}", val),
             })
         }
-    }
-}
-
-impl TryFrom<MysqlTime> for myc::value::Value {
-    type Error = std::convert::Infallible;
-    fn try_from(mysql_time: MysqlTime) -> Result<Self, Self::Error> {
-        let total_hours = mysql_time.hour();
-        let days = (total_hours / 24) as u32;
-        let hours = (total_hours % 24) as u8;
-        Ok(myc::value::Value::Time(
-            !mysql_time.is_positive(),
-            days,
-            hours,
-            mysql_time.minutes(),
-            mysql_time.seconds(),
-            mysql_time.microseconds(),
-        ))
     }
 }
 
@@ -347,11 +330,11 @@ impl<'a> TryFrom<Value<'a>> for Duration {
 #[allow(unused_imports)]
 mod tests {
     use super::Value;
-    use crate::datatype::MysqlTime;
     use crate::myc;
     use crate::myc::io::WriteMysqlExt;
     use crate::{Column, ColumnFlags, ColumnType};
     use chrono::{self, TimeZone};
+    use mysql_time::MysqlTime;
     use std::convert::TryFrom;
     use std::convert::TryInto;
     use std::time;

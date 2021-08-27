@@ -51,6 +51,10 @@ backoff = "0.3.0"
 url = { version = "2.2", features = ["serde"] }
 mysql_async = { git = "https://github.com/readysettech/mysql_async" }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
+metrics = "0.14.2"
+metrics-util = "0.6.2"
+itertools = "0.10.0"
+bytes = "1.0.1"
 
 # consensus/
 slog = "2.4.0"
@@ -70,11 +74,8 @@ reqwest = { version = "0.11.3", features = ["json"] }
 
 # Local dependencies
 launchpad = { path = "../../launchpad" }
-msql-srv = { path = "../../msql-srv" }
-metrics = "0.14.2"
-metrics-util = "0.6.2"
-itertools = "0.10.0"
-bytes = "1.0.1"
+msql-srv = { path = "../../msql-srv" } # TODO(grfn): remove this
+mysql-time = { path = "../../mysql-time" }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

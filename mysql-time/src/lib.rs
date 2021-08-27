@@ -1,5 +1,7 @@
 use chrono::{Duration, NaiveDateTime, NaiveTime, Timelike};
 use launchpad::arbitrary::arbitrary_duration;
+use mysql_common::value::convert::{ConvIr, FromValue, FromValueError};
+use mysql_common::value::Value;
 use proptest::arbitrary::Arbitrary;
 use proptest::strategy::Strategy;
 use serde::de;
@@ -19,18 +21,6 @@ const MICROSECS_IN_SECOND: i64 = 1_000_000;
 
 const MAX_MYSQL_TIME_SECONDS: i64 = 3020399; // 3020399 secs = 838:59:59
 
-/// MySQL's TIME type implementation.
-/// Internally, this uses a [`chrono::Duration`], which allows for negative durations.
-/// This struct ensures that the inner [`chrono::Duration`] is at all times within
-/// the MySQL's TIME range, which is `-838:59:59` to `838:59:59`.
-/// Following the MySQL's TIME behavior, this struct also allows to be constructed with
-/// an invalid [`chrono::Duration`] (for example, one that surpasses or falls below the
-/// allowed range), in which case it is "truncated" to the closest range limit.
-#[derive(Clone, Copy)]
-pub struct MysqlTime {
-    duration: Duration,
-}
-
 /// Errors that can occur when converting various types into a [`MysqlTime`]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConvertError {
@@ -47,6 +37,18 @@ pub enum ConvertError {
     OutOfBounds(String),
 }
 
+/// MySQL's TIME type implementation.
+/// Internally, this uses a [`chrono::Duration`], which allows for negative durations.
+/// This struct ensures that the inner [`chrono::Duration`] is at all times within
+/// the MySQL's TIME range, which is `-838:59:59` to `838:59:59`.
+/// Following the MySQL's TIME behavior, this struct also allows to be constructed with
+/// an invalid [`chrono::Duration`] (for example, one that surpasses or falls below the
+/// allowed range), in which case it is "truncated" to the closest range limit.
+#[derive(Clone, Copy)]
+pub struct MysqlTime {
+    duration: Duration,
+}
+
 impl MysqlTime {
     /// Creates a new [`MysqlTime`] with the given [`chrono::Duration`].
     /// Note that if the [`chrono::Duration`] surpasses the MySQL's TIME max value, then
@@ -56,7 +58,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     /// use chrono::Duration;
     ///
     /// let duration: Duration = Duration::hours(838); // Within range
@@ -96,7 +98,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time_from_hmsus: MysqlTime = MysqlTime::from_hmsus(false, 3, 5, 37, 300000); // -03:05:37.300000
     /// let mysql_time_from_hmsus_invalid_range: MysqlTime = MysqlTime::from_hmsus(false, 900, 5, 37, 300000); // -838:59:59
@@ -122,7 +124,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time_from_ms: MysqlTime = MysqlTime::from_microseconds(3020399000000); // 838:59:59
     /// let mysql_time_from_ms_invalid_range: MysqlTime = MysqlTime::from_microseconds(3020399000001); // 838:59:59
@@ -136,7 +138,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::{MysqlTime, datatype::ConvertError};
+    /// use mysql_time::{MysqlTime, ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -192,7 +194,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time_max: MysqlTime = MysqlTime::max_value(); // 838:59:59
     /// ```
@@ -205,7 +207,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time_min: MysqlTime = MysqlTime::min_value(); // -838:59:59
     /// ```
@@ -218,7 +220,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let neg_mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(neg_mysql_time.is_positive(), false);
@@ -235,7 +237,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.hour(), 2);
@@ -253,7 +255,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.minutes(), 23);
@@ -270,7 +272,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.seconds(), 58);
@@ -287,7 +289,7 @@ impl MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::MysqlTime;
+    /// use mysql_time::MysqlTime;
     ///
     /// let mysql_time = MysqlTime::from_hmsus(false, 2, 23, 58, 829313); // -02:23:58.829313
     /// assert_eq!(mysql_time.microseconds(), 829313);
@@ -490,7 +492,7 @@ impl FromStr for MysqlTime {
     /// # Example
     ///
     /// ```rust
-    /// use msql_srv::{MysqlTime, datatype::ConvertError};
+    /// use mysql_time::{MysqlTime, ConvertError};
     ///
     /// macro_rules! assert_time {
     ///     ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
@@ -541,6 +543,69 @@ impl From<MysqlTime> for NaiveTime {
             t.microseconds(),
         )
     }
+}
+
+impl TryFrom<MysqlTime> for Value {
+    type Error = std::convert::Infallible;
+    fn try_from(mysql_time: MysqlTime) -> Result<Self, Self::Error> {
+        let total_hours = mysql_time.hour();
+        let days = (total_hours / 24) as u32;
+        let hours = (total_hours % 24) as u8;
+        Ok(Value::Time(
+            !mysql_time.is_positive(),
+            days,
+            hours,
+            mysql_time.minutes(),
+            mysql_time.seconds(),
+            mysql_time.microseconds(),
+        ))
+    }
+}
+
+#[derive(Debug)]
+pub struct ParseIr<T> {
+    value: Value,
+    output: T,
+}
+
+impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
+    fn new(v: Value) -> Result<ParseIr<MysqlTime>, FromValueError> {
+        match v {
+            Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
+                let hours = (days * 24) as u16 + hours as u16;
+                Ok(ParseIr {
+                    output: MysqlTime::from_hmsus(
+                        !is_neg,
+                        hours,
+                        minutes,
+                        seconds,
+                        microseconds as u64,
+                    ),
+                    value: v,
+                })
+            }
+            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&*val_bytes) {
+                Ok(time) => Ok(ParseIr {
+                    output: time,
+                    value: Value::Bytes(val_bytes),
+                }),
+                Err(_) => Err(FromValueError(Value::Bytes(val_bytes))),
+            },
+            v => Err(FromValueError(v)),
+        }
+    }
+
+    fn commit(self) -> MysqlTime {
+        self.output
+    }
+
+    fn rollback(self) -> Value {
+        self.value
+    }
+}
+
+impl FromValue for MysqlTime {
+    type Intermediate = ParseIr<MysqlTime>;
 }
 
 macro_rules! impl_try_from_num {

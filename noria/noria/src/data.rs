@@ -422,7 +422,7 @@ impl DataType {
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Time) => {
                 match <&str>::try_from(self)?.parse() {
                     Ok(t) => Ok(Cow::Owned(Self::Time(Arc::new(t)))),
-                    Err(msql_srv::datatype::ConvertError::ParseError) => {
+                    Err(mysql_time::ConvertError::ParseError) => {
                         Ok(Cow::Owned(Self::Time(Arc::new(Default::default()))))
                     }
                     Err(e) => Err(mk_err(
@@ -660,7 +660,7 @@ impl PartialEq for DataType {
 }
 
 use crate::errors::internal_err;
-use msql_srv::MysqlTime;
+use mysql_time::MysqlTime;
 use std::cmp::Ordering;
 use std::sync::Arc;
 

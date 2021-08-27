@@ -9,7 +9,7 @@ use std::sync::Arc;
 use chrono::{Datelike, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use maths::int::integer_rnd;
-use msql_srv::MysqlTime;
+use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use noria::util::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use noria::{DataType, ReadySetError, ReadySetResult};

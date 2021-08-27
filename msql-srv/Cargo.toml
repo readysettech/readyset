@@ -32,14 +32,9 @@ time = "0.2.27"
 getrandom = "0.2.2"
 async-trait = "0.1"
 tokio = { version = "1.8.1", features = ["io-util", "net", "macros", "rt-multi-thread"] }
-regex = "1.4.3"
-serde = { version = "1.0.8", features = ["rc"] }
-serde_test = "1.0.117"
-launchpad = { path = "../launchpad" }
-test-strategy = "0.1.1"
 thiserror = "1.0.26"
 sha-1 = "0.9.6"
-proptest = "1.0.0"
+mysql-time = { path = "../mysql-time" }
 
 [dev-dependencies]
 postgres = "0.19.1"
