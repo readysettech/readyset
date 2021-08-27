@@ -1351,6 +1351,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-display-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f16ef37b2a9b242295d61a154ee91ae884afff6b8b933b486b12481cc58310ca"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3410,6 +3421,7 @@ dependencies = [
  "clap 3.0.0-beta.2",
  "colored",
  "derive_more",
+ "enum-display-derive",
  "futures 0.3.16",
  "hex",
  "itertools 0.10.1",
