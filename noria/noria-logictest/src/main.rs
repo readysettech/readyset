@@ -23,11 +23,13 @@ use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
 pub mod ast;
+pub mod from_query_log;
 pub mod generate;
 pub mod parser;
 pub mod runner;
 pub mod upstream;
 
+use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
 use crate::runner::{RunOptions, TestScript};
 use crate::upstream::{DatabaseType, DatabaseURL};
@@ -43,6 +45,7 @@ enum Command {
     Parse(Parse),
     Verify(Verify),
     Generate(Generate),
+    FromQueryLog(FromQueryLog),
     Fuzz(Fuzz),
 }
 
@@ -52,6 +55,7 @@ impl Command {
             Self::Parse(parse) => parse.run(),
             Self::Verify(verify) => verify.run(),
             Self::Generate(generate) => generate.run(),
+            Self::FromQueryLog(convert) => convert.run(),
             Self::Fuzz(fuzz) => {
                 // This will live as long as the program anyway, and we need to be able to reference
                 // it from multiple different async tasks, so we can just leak a reference, which is
