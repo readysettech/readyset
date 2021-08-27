@@ -9,4 +9,4 @@ COPY --from=0 /readyset/target/release/noria-mysql /noria-mysql
 RUN apt-get update
 # We install mariadb-client so we have access to mysqladmin for healthchecks
 RUN apt-get install -y libssl-dev mariadb-client
-CMD ./noria-mysql --deployment $DEPLOYMENT --address $ADDRESS -z $ZOOKEEPER_HOST:2181 --no-require-authentication --mysql-url $MYSQL_URL
+CMD ./noria-mysql --deployment $DEPLOYMENT --address $ADDRESS -z $ZOOKEEPER_HOST:2181 --no-require-authentication --upstream-db-url $MYSQL_URL

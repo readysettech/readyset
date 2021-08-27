@@ -15,4 +15,4 @@ mysql -h 127.0.0.1 --port 3306 -u "root" "-pdebezium" < "ryw-init.sql"
 
 echo "Starting noria deployment=ryw"
 cd ../../noria
-cargo run --bin noria-server -- --deployment ryw --no-reuse --address 127.0.0.1 --shards 0 --mysql-url mysql://root:debezium@localhost/inventory
+cargo run --bin noria-server -- --deployment ryw --no-reuse --address 127.0.0.1 --shards 0 --upstream-db-url mysql://root:debezium@localhost/inventory
