@@ -4,6 +4,7 @@ use crate::myc::constants::{ColumnFlags, ColumnType};
 use crate::myc::io::WriteMysqlExt;
 use crate::Column;
 use byteorder::{LittleEndian, WriteBytesExt};
+use mysql_time::MysqlTime;
 use std::io::{self, Write};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
@@ -502,54 +503,6 @@ impl ToMysqlValue for MysqlTime {
     }
 }
 
-use mysql_common::value::convert::{FromValue, FromValueError};
-
-#[derive(Debug)]
-pub struct ParseIr<T> {
-    value: Value,
-    output: T,
-}
-
-impl ConvIr<MysqlTime> for ParseIr<MysqlTime> {
-    fn new(v: Value) -> Result<ParseIr<MysqlTime>, FromValueError> {
-        match v {
-            Value::Time(is_neg, days, hours, minutes, seconds, microseconds) => {
-                let hours = (days * 24) as u16 + hours as u16;
-                Ok(ParseIr {
-                    output: MysqlTime::from_hmsus(
-                        !is_neg,
-                        hours,
-                        minutes,
-                        seconds,
-                        microseconds as u64,
-                    ),
-                    value: v,
-                })
-            }
-            Value::Bytes(val_bytes) => match MysqlTime::from_bytes(&*val_bytes) {
-                Ok(time) => Ok(ParseIr {
-                    output: time,
-                    value: Value::Bytes(val_bytes),
-                }),
-                Err(_) => Err(FromValueError(Value::Bytes(val_bytes))),
-            },
-            v => Err(FromValueError(v)),
-        }
-    }
-
-    fn commit(self) -> MysqlTime {
-        self.output
-    }
-
-    fn rollback(self) -> Value {
-        self.value
-    }
-}
-
-impl FromValue for MysqlTime {
-    type Intermediate = ParseIr<MysqlTime>;
-}
-
 impl ToMysqlValue for NaiveDateTime {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let us = self.nanosecond() / 1_000;
@@ -618,11 +571,6 @@ impl ToMysqlValue for NaiveDateTime {
     }
 }
 
-use crate::datatype::MysqlTime;
-
-use myc::value::convert::ConvIr;
-use myc::value::Value;
-use std::prelude::v1::Result::{Err, Ok};
 use std::time::Duration;
 
 impl ToMysqlValue for Duration {
@@ -802,7 +750,7 @@ mod tests {
 
     mod roundtrip_text {
         use super::*;
-        use crate::MysqlTime;
+        use mysql_time::MysqlTime;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr) => {
@@ -859,7 +807,7 @@ mod tests {
 
     mod roundtrip_bin {
         use super::*;
-        use crate::MysqlTime;
+        use mysql_time::MysqlTime;
 
         macro_rules! rt {
             ($name:ident, $t:ty, $v:expr, $ct:expr) => {

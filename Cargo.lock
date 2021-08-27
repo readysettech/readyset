@@ -1194,7 +1194,7 @@ dependencies = [
  "chrono-tz",
  "launchpad",
  "maths",
- "msql-srv",
+ "mysql-time",
  "nom-sql",
  "noria",
  "pretty_assertions",
@@ -2696,19 +2696,14 @@ dependencies = [
  "chrono",
  "futures 0.1.31",
  "getrandom 0.2.3",
- "launchpad",
  "mysql 17.0.0",
+ "mysql-time",
  "mysql_async 0.27.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mysql_common 0.26.0",
  "nom",
  "postgres 0.19.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "proptest",
- "regex",
- "serde",
- "serde_test",
  "sha-1",
  "slab",
- "test-strategy",
  "thiserror",
  "time 0.2.27",
  "tokio 1.8.1",
@@ -2781,6 +2776,22 @@ dependencies = [
  "socket2 0.3.19",
  "twox-hash",
  "url",
+]
+
+[[package]]
+name = "mysql-time"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "launchpad",
+ "mysql_common 0.26.0",
+ "nom",
+ "proptest",
+ "regex",
+ "serde",
+ "serde_test",
+ "test-strategy",
+ "thiserror",
 ]
 
 [[package]]
@@ -3214,6 +3225,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "msql-srv",
+ "mysql-time",
  "mysql_async 0.27.1 (git+https://github.com/readysettech/mysql_async)",
  "mysql_common 0.27.4",
  "net2",
@@ -3382,7 +3394,6 @@ dependencies = [
  "lazy_static",
  "maplit",
  "metrics",
- "msql-srv",
  "nom-sql",
  "noria",
  "noria-common",
@@ -3430,6 +3441,7 @@ dependencies = [
  "maths",
  "md5 0.7.0",
  "msql-srv",
+ "mysql-time",
  "mysql_async 0.27.1 (git+https://github.com/readysettech/mysql_async)",
  "native-tls",
  "nom",

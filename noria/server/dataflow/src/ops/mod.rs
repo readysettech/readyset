@@ -20,7 +20,6 @@ pub mod union;
 
 use crate::ops::grouped::concat::GroupConcat;
 use crate::processing::{ColumnMiss, ColumnSource, LookupMode, SuggestedIndex};
-pub use msql_srv::MysqlTime;
 
 /// Enum for distinguishing between the two parents of a union or join
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Serialize, Deserialize)]

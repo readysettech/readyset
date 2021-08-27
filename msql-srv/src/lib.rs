@@ -122,7 +122,6 @@ pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 mod authentication;
 mod commands;
 mod constants;
-pub mod datatype;
 pub mod error;
 mod errorcodes;
 mod packet;
@@ -162,7 +161,6 @@ impl From<&mysql_async::Column> for Column {
     }
 }
 
-pub use crate::datatype::MysqlTime;
 pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};

@@ -1,6 +1,6 @@
 use crate::data::DataType;
 use chrono::NaiveDateTime;
-use msql_srv::MysqlTime;
+use mysql_time::MysqlTime;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use std::borrow::{Borrow, Cow};

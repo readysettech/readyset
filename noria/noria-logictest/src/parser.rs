@@ -11,7 +11,7 @@ use std::io;
 use std::str::FromStr;
 
 use crate::ast::*;
-use msql_srv::MysqlTime;
+use mysql_time::MysqlTime;
 use noria::TIMESTAMP_FORMAT;
 
 use anyhow::{anyhow, bail, Context};

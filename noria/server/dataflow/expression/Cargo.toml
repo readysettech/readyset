@@ -10,11 +10,11 @@ edition = "2018"
 chrono = { version = "0.4.0", features = ["serde"] }
 chrono-tz = { version = "0.5", features = ["serde"] }
 maths = { version = "0.0.1", path = "../../../../maths" }
-msql-srv = { path = "../../../../msql-srv" }
 nom-sql = { path = "../../../../nom-sql" }
 noria = { path = "../../../noria" }
 serde = { version = "1.0.8", features = ["derive"] }
 launchpad = { path = "../../../../launchpad" }
+mysql-time = { path = "../../../../mysql-time" }
 
 [dev-dependencies]
 test-strategy = "0.1.1"
