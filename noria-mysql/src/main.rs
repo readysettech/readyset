@@ -12,6 +12,7 @@ use nom_sql::Dialect;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 
 mod backend;
+mod schema;
 mod upstream;
 mod value;
 

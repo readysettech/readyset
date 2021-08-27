@@ -6,7 +6,6 @@ use noria::{
     ViewQueryOperator,
 };
 
-use msql_srv;
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
     UpdateStatement,
@@ -21,7 +20,6 @@ use std::sync::{Arc, RwLock};
 
 use crate::convert::ToDataType;
 use crate::rewrite;
-use crate::schema::{self, convert_column, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
@@ -29,7 +27,7 @@ use crate::backend::SelectSchema;
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
-use noria::{internal, invariant_eq, unsupported};
+use noria::{internal, invariant_eq, unsupported, ColumnSchema};
 use std::fmt;
 
 type StatementID = u32;
@@ -151,18 +149,18 @@ impl<A: 'static + Authority> NoriaBackendInner<A> {
 pub enum PrepareResult {
     Select {
         statement_id: u32,
-        params: Vec<msql_srv::Column>,
-        schema: Vec<msql_srv::Column>,
+        params: Vec<ColumnSchema>,
+        schema: Vec<ColumnSchema>,
     },
     Insert {
         statement_id: u32,
-        params: Vec<msql_srv::Column>,
-        schema: Vec<msql_srv::Column>,
+        params: Vec<ColumnSchema>,
+        schema: Vec<ColumnSchema>,
     },
     //TODO(DAN): Can id be changed to u32?
     Update {
         statement_id: u64,
-        params: Vec<msql_srv::Column>,
+        params: Vec<ColumnSchema>,
     },
 }
 
@@ -271,7 +269,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<PrepareResult, Error> {
+    ) -> Result<PrepareResult, Error> {
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
@@ -281,7 +279,15 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(table = %q.table.name, "insert::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name).await?;
         trace!("insert::extract schema");
-        let schema = schema::convert_schema(&Schema::Table(mutator.schema().unwrap().clone()));
+        let schema = mutator
+            .schema()
+            .ok_or_else(|| {
+                internal_err(format!("Could not find schema for table {}", q.table.name))
+            })?
+            .fields
+            .iter()
+            .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.name.clone()))
+            .collect::<Vec<_>>();
 
         if let nom_sql::SqlQuery::Insert(ref mut q) = sql_q {
             if q.fields.is_none() {
@@ -307,7 +313,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                     schema
                         .iter()
                         .cloned()
-                        .find(|mc| c.name == mc.column)
+                        .find(|mc| c.name == mc.spec.column.name)
                         .ok_or_else(|| {
                             internal_err(format!("column '{}' missing in mutator schema", c))
                         })
@@ -435,15 +441,25 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name).await?;
         trace!("update::extract schema");
-        let schema = Schema::Table(mutator.schema().unwrap().clone());
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err(format!("Could not find schema for table {}", q.table.name))
+        })?;
 
         // extract parameter columns
-        let params: Vec<msql_srv::Column> = {
-            utils::get_parameter_columns(&sql_q)
-                .into_iter()
-                .map(|c| schema_for_column(&schema, c))
-                .collect()
-        };
+        let params = utils::get_parameter_columns(&sql_q)
+            .into_iter()
+            .map(|c| {
+                table_schema
+                    .fields
+                    .iter()
+                    // We know that only one table is mentioned, so no need to match on both table
+                    // and name - just check name here
+                    .find(|f| f.column.name == c.name)
+                    .cloned()
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
+                    .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // must have an update query
         let q = if let nom_sql::SqlQuery::Update(q) = sql_q {
@@ -731,11 +747,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
         let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
-        let returned_schema = getter_schema
-            .schema(SchemaType::ReturnedSchema)
-            .iter()
-            .map(|cs| convert_column(&cs.spec))
-            .collect();
+        let returned_schema = getter_schema.schema(SchemaType::ReturnedSchema).to_vec();
         let mut key_types =
             getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
         trace!("select::lookup");
@@ -939,14 +951,15 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
         let key_column_indices =
             getter_schema.indices_for_cols(param_columns.iter(), SchemaType::ProjectedSchema)?;
-        // now convert params to msql_srv types; we have to do this here because we don't have
-        // access to the schema yet when we extract them above.
-        let mut params = getter_schema
+        let params = getter_schema
             .to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?
             .into_iter()
-            .map(convert_column)
-            .collect::<Vec<_>>();
-        params.iter_mut().for_each(|mut c| c.table = qname.clone());
+            .map(|cs| {
+                let mut cs = cs.clone();
+                cs.spec.column.table = Some(qname.clone());
+                cs
+            })
+            .collect();
 
         trace!(id = statement_id, "select::registered");
         let ps = PreparedStatement::Select {
@@ -959,11 +972,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         Ok(PrepareResult::Select {
             statement_id,
             params,
-            schema: getter_schema
-                .schema(SchemaType::ReturnedSchema)
-                .iter()
-                .map(|c| convert_column(&c.spec))
-                .collect(),
+            schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
         })
     }
 

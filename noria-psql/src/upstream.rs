@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
 use pgsql::{Config, Row};
+use psql_srv::Column;
 use tokio_postgres as pgsql;
 
 use noria_client::{Error, UpstreamDatabase, UpstreamPrepare};
@@ -27,6 +28,7 @@ pub struct PostgreSqlUpstream {
 impl UpstreamDatabase for PostgreSqlUpstream {
     type ReadResult = Vec<Row>;
     type WriteResult = u64;
+    type Column = Column;
 
     async fn connect(url: String) -> Result<Self, Error> {
         let config = Config::from_str(&url)?;
@@ -48,7 +50,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &self.url
     }
 
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare, Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {

@@ -13,6 +13,7 @@ use noria_client::backend::noria_connector;
 use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
 use noria_client::Error;
 
+use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream, WriteResult};
 use crate::value::mysql_value_to_datatype;
 
@@ -108,34 +109,46 @@ where
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
+    ) -> Result<(), Error> {
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
         let res = match self.prepare(query).await {
-            Ok(PrepareResult::Noria(Select {
-                statement_id,
-                params,
-                schema,
-            })) => {
-                info.reply(statement_id, params.as_slice(), schema.as_slice())
-                    .await
-            }
-            Ok(PrepareResult::Noria(Insert {
-                statement_id,
-                params,
-                schema,
-            })) => {
-                info.reply(statement_id, params.as_slice(), schema.as_slice())
-                    .await
+            Ok(PrepareResult::Noria(
+                Select {
+                    statement_id,
+                    params,
+                    schema,
+                }
+                | Insert {
+                    statement_id,
+                    params,
+                    schema,
+                },
+            )) => {
+                let params = params
+                    .into_iter()
+                    .map(|c| convert_column(&c.spec))
+                    .collect::<Vec<_>>();
+                let schema = schema
+                    .into_iter()
+                    .map(|c| convert_column(&c.spec))
+                    .collect::<Vec<_>>();
+                info.reply(statement_id, &params, &schema).await
             }
             Ok(PrepareResult::Noria(Update { params, .. })) => {
-                info.reply(self.prepared_count(), &params[..], &[]).await
+                let params = params
+                    .into_iter()
+                    .map(|c| convert_column(&c.spec))
+                    .collect::<Vec<_>>();
+                info.reply(self.prepared_count(), &params, &[]).await
             }
             Ok(PrepareResult::Upstream(UpstreamPrepare { params, schema, .. })) => {
+                let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
+                let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
+
                 // TODO(grfn): make statement ID part of prepareresult
-                info.reply(self.prepared_count(), params.as_slice(), schema.as_slice())
-                    .await
+                info.reply(self.prepared_count(), &params, &schema).await
             }
             Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
                 code,
@@ -158,7 +171,7 @@ where
         id: u32,
         params: msql_srv::ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
+    ) -> Result<(), Error> {
         let mut datatype_params = Vec::new();
         // TODO(DAN): Param conversions are unecessary for fallback execution. Params should be
         // derived directly from ParamParser.
@@ -171,10 +184,11 @@ where
                 data,
                 select_schema,
             } )) => {
-                let mut rw = results.start(&select_schema.schema).await?;
+                let schema = select_schema.schema.iter().map(|cs| convert_column(&cs.spec)).collect::<Vec<_>>();
+                let mut rw = results.start(&schema).await?;
                 for resultsets in data {
                     for r in resultsets {
-                        for c in &select_schema.schema {
+                        for c in &schema {
                             let coli = select_schema
                                 .columns
                                 .iter()
@@ -266,7 +280,7 @@ where
         &mut self,
         query: &str,
         results: QueryResultWriter<'_, W>,
-    ) -> std::result::Result<(), Error> {
+    ) -> Result<(), Error> {
         let res = match self.query(query).await {
             Ok(QueryResult::Noria(
                 noria_connector::QueryResult::CreateTable
@@ -280,10 +294,15 @@ where
                 data,
                 select_schema,
             })) => {
-                let mut rw = results.start(&select_schema.schema).await?;
+                let schema = select_schema
+                    .schema
+                    .iter()
+                    .map(|cs| convert_column(&cs.spec))
+                    .collect::<Vec<_>>();
+                let mut rw = results.start(&schema).await?;
                 for resultsets in data {
                     for r in resultsets {
-                        for c in &select_schema.schema {
+                        for c in &schema {
                             let coli = select_schema
                                 .columns
                                 .iter()

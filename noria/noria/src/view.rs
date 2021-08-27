@@ -56,6 +56,20 @@ pub struct ColumnSchema {
     pub base: Option<ColumnBase>,
 }
 
+impl ColumnSchema {
+    /// Create a new ColumnSchema from a ColumnSpecification representing a column directly in a
+    /// base table with the given name.
+    pub fn from_base(spec: ColumnSpecification, table: String) -> Self {
+        Self {
+            base: Some(ColumnBase {
+                column: spec.column.name.clone(),
+                table,
+            }),
+            spec,
+        }
+    }
+}
+
 /// A `ViewSchema` is used to desribe the columns of a stored Noria
 /// view as a vector of columns. The ViewSchema contains a vector with all
 /// projected columns and a vector with columns returned to the client.
@@ -143,12 +157,12 @@ impl ViewSchema {
         &'a self,
         indices: &[usize],
         schema_type: SchemaType,
-    ) -> ReadySetResult<Vec<&'a ColumnSpecification>> {
+    ) -> ReadySetResult<Vec<&'a ColumnSchema>> {
         let schema = self.schema(schema_type);
 
         indices
             .iter()
-            .map(|i| schema.get(*i).map(|c| &c.spec))
+            .map(|i| schema.get(*i))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }

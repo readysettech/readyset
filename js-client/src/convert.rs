@@ -1,7 +1,8 @@
 use crate::utils;
 use chrono::NaiveDateTime;
-use msql_srv::Column;
+use mysql_async::Column;
 use neon::{prelude::*, types::JsDate};
+use noria::ColumnSchema;
 use noria::{results::Results, DataType};
 use noria_client::backend::{PrepareResult, QueryResult, SelectSchema, UpstreamPrepare};
 use noria_client::Error;
@@ -15,15 +16,18 @@ where
     cx.error(e.to_string())
 }
 
-fn convert_cols<'a, C>(cx: &mut C, cols: Vec<Column>) -> NeonResult<Handle<'a, JsArray>>
+fn convert_cols<'a, C>(cx: &mut C, cols: Vec<ColumnSchema>) -> NeonResult<Handle<'a, JsArray>>
 where
     C: Context<'a>,
 {
     let js_cols = cx.empty_array();
     for (i, col) in cols.iter().enumerate() {
         let js_col = cx.empty_object();
-        utils::set_str_field(cx, &js_col, "tableName", &col.table)?; // TODO: this table name is NOT always the expected user-friendly name....
-        utils::set_str_field(cx, &js_col, "columnName", &col.column)?;
+        if let Some(table) = &col.spec.column.table {
+            // TODO: this table name is NOT always the expected user-friendly name....
+            utils::set_str_field(cx, &js_col, "tableName", table)?;
+        }
+        utils::set_str_field(cx, &js_col, "columnName", &col.spec.column.name)?;
         // TODO: deal with colType and flags?
         js_cols.set(cx, i as u32, js_col)?;
     }
@@ -32,7 +36,7 @@ where
 
 pub(crate) fn convert_prepare_result<'a, C>(
     cx: &mut C,
-    raw_prepare_result: PrepareResult,
+    raw_prepare_result: PrepareResult<Column>,
 ) -> NeonResult<Handle<'a, JsObject>>
 where
     C: Context<'a>,

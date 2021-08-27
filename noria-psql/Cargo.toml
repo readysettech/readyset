@@ -10,7 +10,6 @@ jemallocator = "0.3"
 clap = "3.0.0-beta.2"
 arccstr = { version = "1.3.0", features = ["serde"] }
 async-trait = "0.1"
-msql-srv = { version = "0.8.7", path = "../msql-srv" }
 noria = { version = "0.7", path = "../noria/noria/" }
 noria-client = { version = "0.1.0", path = "../noria-client" }
 noria-client-adapter = { version = "0.1.0", path = "../noria-client/adapter" }

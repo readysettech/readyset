@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 msql-srv = { version = "0.8.8", path = "../msql-srv" }
+mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"}
 noria-client = { version = "0.1.0", path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }
 noria = { version = "0.7", path = "../noria/noria/" }
