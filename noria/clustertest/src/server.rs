@@ -124,7 +124,7 @@ impl NoriaMySQLRunner {
     }
 
     pub fn set_mysql(&mut self, addr: &str) {
-        self.args.push("--mysql-url".to_string());
+        self.args.push("--upstream-db-url".to_string());
         self.args.push(addr.to_string());
     }
 }

@@ -92,7 +92,7 @@ pub struct Options {
 
     /// Make all reads run as two parallel threads, one against Noria and one against MySQL,
     /// returning the first successful result
-    #[clap(long, requires("mysql-url"))]
+    #[clap(long, requires("upstream-db-url"))]
     race_reads: bool,
 
     /// Allow database connections authenticated as this user. Ignored if
@@ -383,5 +383,30 @@ impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
             DatabaseType::Mysql => noria_client_metrics::recorded::DatabaseType::Mysql,
             DatabaseType::Psql => noria_client_metrics::recorded::DatabaseType::Psql,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arg_parsing() {
+        // Certain clap things, like `requires`, only ever throw an error at runtime, not at
+        // compile-time - this tests that none of those happen
+        let opts = Options::parse_from(vec![
+            "noria-mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "-z",
+            "zookeeper:2181",
+            "--no-require-authentication",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ]);
+
+        assert_eq!(opts.deployment, "test");
     }
 }
