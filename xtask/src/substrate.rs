@@ -1,5 +1,5 @@
 /// Defintions of things specific to how Substrate organizes Terraform modules.
-use std::{fs, path::PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use clap::Clap;
@@ -116,11 +116,16 @@ impl ModuleLocator for AdminModuleLocator {
     }
 }
 
+fn root_modules_path() -> PathBuf {
+    Path::new("root-modules").to_path_buf()
+}
+
 // TODO: In one scan over the directory, generate all the different module locators. As such, this
 // should eventually return Result<Vec<dyn ModuleLocator>>
 pub(crate) fn find_all_admin_module_locators() -> Result<Vec<AdminModuleLocator>> {
     let mut admin_module_locators: Vec<AdminModuleLocator> = vec![];
-    for entry in fs::read_dir("root-modules/admin")? {
+    let admin_path = root_modules_path().join("admin");
+    for entry in admin_path.read_dir()? {
         let entry = entry?;
         let path = entry.path();
 
@@ -153,4 +158,48 @@ pub(crate) fn find_all_admin_module_locators() -> Result<Vec<AdminModuleLocator>
         }
     }
     Ok(admin_module_locators)
+}
+
+pub(crate) fn find_all_service_module_locators() -> Result<Vec<ServiceModuleLocator>> {
+    let mut service_module_locators: Vec<ServiceModuleLocator> = vec![];
+    // TODO: Supporting only the readyset/build domain/environment to get this started.
+    // Fetch the list of domains/environments from `substrate-account -format json`
+    let domain = String::from("readyset");
+    let environment = String::from("build");
+    let service_path = root_modules_path().join(&domain).join(&environment);
+    for entry in service_path.read_dir()? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // If it is a directory, assume it is a quality.
+            let quality = path
+                .file_name()
+                .map(std::ffi::OsStr::to_string_lossy)
+                .unwrap()
+                .to_string();
+            for entry in path.read_dir()? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    // If it is a directory, assume it is a region.
+                    let region = path
+                        .file_name()
+                        .map(std::ffi::OsStr::to_string_lossy)
+                        .unwrap()
+                        .to_string();
+                    // If there is a main.tf, this is valid and we should add this to the list.
+                    if path.join("main.tf").exists() {
+                        service_module_locators.push(ServiceModuleLocator {
+                            domain: String::from(&domain),
+                            environment: String::from(&environment),
+                            quality: String::from(&quality),
+                            region: String::from(&region),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(service_module_locators)
 }
