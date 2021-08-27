@@ -22,10 +22,6 @@
 #![deny(unused_extern_crates)]
 #![allow(clippy::redundant_closure)]
 
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]

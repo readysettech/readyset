@@ -18,6 +18,10 @@ use noria_server::{
     Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId, ZookeeperAuthority,
 };
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 const PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
 
 /// Obtain the private ipv4 address of the AWS instance that the current program is running on using
