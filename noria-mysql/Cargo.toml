@@ -4,6 +4,9 @@ version = "0.4.0"
 authors = ["Malte Schwarzkopf <malte@csail.mit.edu>"]
 edition = "2018"
 
+[target.'cfg(not(target_env="msvc"))'.dependencies]
+jemallocator = "0.3"
+
 [dependencies]
 clap = "3.0.0-beta.2"
 async-trait = "0.1.51"

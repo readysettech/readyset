@@ -12,6 +12,10 @@ use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 use noria_psql::{Backend, PostgreSqlUpstream};
 use psql_srv::run_backend;
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
 #[derive(Clone, Copy)]
 struct PsqlHandler;
 
