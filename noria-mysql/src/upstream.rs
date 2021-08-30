@@ -9,7 +9,9 @@ use tracing::{debug, error};
 
 use noria::errors::internal_err;
 use noria::{DataType, ReadySetError};
-use noria_client::{Error, UpstreamDatabase, UpstreamPrepare};
+use noria_client::{UpstreamDatabase, UpstreamPrepare};
+
+use crate::Error;
 
 type StatementID = u32;
 
@@ -40,6 +42,7 @@ pub struct MySqlUpstream {
 impl UpstreamDatabase for MySqlUpstream {
     type Column = Column;
     type QueryResult = QueryResult;
+    type Error = Error;
 
     async fn connect(url: String) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits

@@ -1,9 +1,8 @@
+use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use noria::DataType;
-
-use crate::Error;
+use noria::{DataType, ReadySetError};
 
 #[derive(Debug)]
 pub struct UpstreamPrepare<Col> {
@@ -37,8 +36,15 @@ pub trait UpstreamDatabase: Sized + Send {
     /// a prepared statement in addition to the schema for the actual returned rows.
     type Column: Debug + Send + 'static;
 
+    /// Errors that can be returned from operations on this database
+    ///
+    /// This type, which must have at least one enum variant that includes a
+    /// [`noria::ReadySetError`], is used as the error type for all return values in the
+    /// noria_client backend.
+    type Error: From<ReadySetError> + Error + Send + Sync + 'static;
+
     /// Create a new connection to this upstream database
-    async fn connect(url: String) -> Result<Self, Error>;
+    async fn connect(url: String) -> Result<Self, Self::Error>;
 
     /// Return a reference to the URL used when originally constructing this database via
     /// [`connect`]
@@ -51,7 +57,10 @@ pub trait UpstreamDatabase: Sized + Send {
     /// associated with statement IDs, as long as after calling `on_prepare` on one instance of an
     /// UpstreamDatabase a later call of [`on_execute`] on the same UpstreamDatabase with the same
     /// statement ID executes that statement.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
+    async fn prepare<'a, S>(
+        &'a mut self,
+        query: S,
+    ) -> Result<UpstreamPrepare<Self::Column>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
@@ -65,7 +74,7 @@ pub trait UpstreamDatabase: Sized + Send {
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::QueryResult, Error>;
+    ) -> Result<Self::QueryResult, Self::Error>;
 
     /// Execute a write statement that was prepared earlier with [`on_prepare`], with the given
     /// `params`
@@ -77,15 +86,15 @@ pub trait UpstreamDatabase: Sized + Send {
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::QueryResult, Error>;
+    ) -> Result<Self::QueryResult, Self::Error>;
 
     /// Execute a raw, un-prepared read query
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
     /// Execute a raw, un-prepared write query
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
@@ -95,7 +104,7 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         query: S,
-    ) -> Result<(Self::QueryResult, String), Error>
+    ) -> Result<(Self::QueryResult, String), Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 }

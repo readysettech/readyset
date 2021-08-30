@@ -22,7 +22,6 @@ use crate::convert::ToDataType;
 use crate::rewrite;
 use crate::utils;
 
-use crate::backend::error::Error;
 use crate::backend::SelectSchema;
 use itertools::Itertools;
 use noria::errors::ReadySetError::PreparedStatementMissing;
@@ -229,14 +228,14 @@ impl<A: 'static + Authority> NoriaConnector<A> {
 
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
-    pub async fn node_index_of(&mut self, table_name: &str) -> Result<LocalNodeIndex, Error> {
+    pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
         let table_handle = self.inner.noria.table(table_name).await?;
         Ok(table_handle.node)
     }
     pub async fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -269,7 +268,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> Result<PrepareResult, Error> {
+    ) -> ReadySetResult<PrepareResult> {
         let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
             q
         } else {
@@ -342,7 +341,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         q_id: u32,
         params: Vec<DataType>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
@@ -375,7 +374,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
     pub(crate) async fn handle_delete(
         &mut self,
         q: nom_sql::DeleteStatement,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let cond = q
             .where_clause
             .ok_or_else(|| unsupported_err("only supports DELETEs with WHERE-clauses"))?;
@@ -408,7 +407,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 for key in flattened {
                     if let Err(e) = mutator.delete(key).await {
                         error!(error = %e, "failed");
-                        return Err(e.into());
+                        return Err(e);
                     };
                 }
                 trace!("delete::done");
@@ -422,7 +421,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
     pub(crate) async fn handle_update(
         &mut self,
         q: nom_sql::UpdateStatement,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         self.do_update(Cow::Owned(q), None).await
     }
 
@@ -430,7 +429,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<PrepareResult, Error> {
+    ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
         let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
             q
@@ -481,7 +480,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         q_id: u32,
         params: Vec<DataType>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
@@ -500,7 +499,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
     pub(crate) async fn handle_create_table(
         &mut self,
         q: nom_sql::CreateTableStatement,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
         info!(table = %q.table.name, "table::create");
@@ -518,7 +517,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         q: &nom_sql::SelectStatement,
         prepared: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> ReadySetResult<String> {
         let qname = match self.tl_cached.get(q) {
             None => {
                 // check global cache
@@ -545,7 +544,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                         ) {
                             error!(error = %e, "add query failed");
-                            return Err(e.into());
+                            return Err(e);
                         }
 
                         let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());
@@ -567,7 +566,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         q: &InsertStatement,
         data: Vec<Vec<DataType>>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -599,7 +598,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             .collect();
         if auto_increment_columns.len() > 1 {
             // can only have zero or one AUTO_INCREMENT columns
-            return Err(table_err(table, ReadySetError::MultipleAutoIncrement).into());
+            return Err(table_err(table, ReadySetError::MultipleAutoIncrement));
         }
 
         let ai = &mut self.auto_increments;
@@ -737,7 +736,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         mut keys: Vec<Vec<DataType>>,
         key_column_indices: &[usize],
         ticket: Option<Timestamp>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
@@ -853,7 +852,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         q: Cow<'_, UpdateStatement>,
         params: Option<Vec<DataType>>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name).await?;
 
@@ -886,7 +885,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         q: nom_sql::SelectStatement,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         trace!("query::select::access view");
         let qname = self.get_or_create_view(&q, false).await?;
 
@@ -918,7 +917,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         &mut self,
         mut sql_q: nom_sql::SqlQuery,
         statement_id: u32,
-    ) -> std::result::Result<PrepareResult, Error> {
+    ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
@@ -981,11 +980,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         q_id: u32,
         params: Vec<DataType>,
         ticket: Option<Timestamp>,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
                 Some(e) => e.clone(),
-                None => return Err(PreparedStatementMissing { statement_id: q_id }.into()),
+                None => return Err(PreparedStatementMissing { statement_id: q_id }),
             }
         };
 
@@ -1006,7 +1005,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                         // so we need to turn that into the keys:
                         // [[a, b, d], [a, c, d]]
                         if params.is_empty() {
-                            return Err(ReadySetError::EmptyKey.into());
+                            return Err(ReadySetError::EmptyKey);
                         }
                         (0..*nrewritten)
                             .map(|poffset| {
@@ -1042,7 +1041,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
     pub(crate) async fn handle_create_view(
         &mut self,
         q: nom_sql::CreateViewStatement,
-    ) -> std::result::Result<QueryResult, Error> {
+    ) -> ReadySetResult<QueryResult> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 

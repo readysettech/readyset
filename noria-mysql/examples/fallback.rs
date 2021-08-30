@@ -7,13 +7,12 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
-        error::Error,
         noria_connector::{self, NoriaConnector},
         BackendBuilder, QueryResult, Reader, Writer,
     },
     UpstreamDatabase,
 };
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{Error, MySqlUpstream};
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
 /// Run `ryw-setup.sh` once noria is running to configure all of the

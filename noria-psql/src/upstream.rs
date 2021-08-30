@@ -4,11 +4,12 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
+use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use pgsql::{Config, Row};
 use psql_srv::Column;
 use tokio_postgres as pgsql;
 
-use noria_client::{Error, UpstreamDatabase, UpstreamPrepare};
+use crate::Error;
 
 /// A connector to an underlying PostgreSQL database
 pub struct PostgreSqlUpstream {
@@ -34,6 +35,7 @@ pub enum QueryResult {
 impl UpstreamDatabase for PostgreSqlUpstream {
     type Column = Column;
     type QueryResult = QueryResult;
+    type Error = Error;
 
     async fn connect(url: String) -> Result<Self, Error> {
         let config = Config::from_str(&url)?;

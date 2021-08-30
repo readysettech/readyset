@@ -21,6 +21,7 @@ tokio = "1.8.1"
 tracing = "0.1.3"
 anyhow = "1.0.42"
 derive_more = "0.99.16"
+thiserror = "1.0.26"
 
 [dev-dependencies]
 chrono = "0.4.19"
