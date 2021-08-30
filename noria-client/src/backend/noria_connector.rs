@@ -21,7 +21,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::convert::ToDataType;
 use crate::rewrite;
-use crate::schema::{self, schema_for_column, Schema};
+use crate::schema::{self, convert_column, schema_for_column, Schema};
 use crate::utils;
 
 use crate::backend::error::Error;
@@ -730,8 +730,12 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
-        let projected_schema = getter_schema.to_cols(SchemaType::ProjectedSchema);
-        let returned_schema = getter_schema.to_cols(SchemaType::ReturnedSchema);
+        let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
+        let returned_schema = getter_schema
+            .schema(SchemaType::ReturnedSchema)
+            .iter()
+            .map(|cs| convert_column(&cs.spec))
+            .collect();
         let mut key_types =
             getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
         trace!("select::lookup");
@@ -757,7 +761,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
                 }
                 let column = projected_schema
                     .iter()
-                    .position(|x| x.column == col.name)
+                    .position(|x| x.spec.column.name == col.name)
                     .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
                 let value = String::try_from(
                     &key.remove(idx)
@@ -937,8 +941,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
             getter_schema.indices_for_cols(param_columns.iter(), SchemaType::ProjectedSchema)?;
         // now convert params to msql_srv types; we have to do this here because we don't have
         // access to the schema yet when we extract them above.
-        let mut params =
-            getter_schema.to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?;
+        let mut params = getter_schema
+            .to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?
+            .into_iter()
+            .map(convert_column)
+            .collect::<Vec<_>>();
         params.iter_mut().for_each(|mut c| c.table = qname.clone());
 
         trace!(id = statement_id, "select::registered");
@@ -952,7 +959,11 @@ impl<A: 'static + Authority> NoriaConnector<A> {
         Ok(PrepareResult::Select {
             statement_id,
             params,
-            schema: getter_schema.to_cols(SchemaType::ReturnedSchema),
+            schema: getter_schema
+                .schema(SchemaType::ReturnedSchema)
+                .iter()
+                .map(|c| convert_column(&c.spec))
+                .collect(),
         })
     }
 

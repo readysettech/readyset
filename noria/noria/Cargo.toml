@@ -74,7 +74,6 @@ reqwest = { version = "0.11.3", features = ["json"] }
 
 # Local dependencies
 launchpad = { path = "../../launchpad" }
-msql-srv = { path = "../../msql-srv" } # TODO(grfn): remove this
 mysql-time = { path = "../../mysql-time" }
 
 [dev-dependencies]
