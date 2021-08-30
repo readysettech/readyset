@@ -27,8 +27,14 @@ impl serde::ser::Serialize for DataType {
             DataType::UnsignedBigInt(v) => {
                 serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
             }
-            DataType::Real(f, prec) => {
-                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Real", 2)?;
+            DataType::Float(f, prec) => {
+                let mut tv = serializer.serialize_tuple_variant("DataType", 7, "Float", 2)?;
+                tv.serialize_field(f)?;
+                tv.serialize_field(prec)?;
+                tv.end()
+            }
+            DataType::Double(f, prec) => {
+                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Double", 2)?;
                 tv.serialize_field(f)?;
                 tv.serialize_field(prec)?;
                 tv.end()
@@ -62,11 +68,12 @@ impl<'de> serde::Deserialize<'de> for DataType {
         enum Field {
             None,
             Int,
-            Real,
+            Double,
             Text,
             Timestamp,
             Time,
             TinyText,
+            Float,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -81,14 +88,15 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 match val {
                     0u64 => Ok(Field::None),
                     1u64 => Ok(Field::Int),
-                    2u64 => Ok(Field::Real),
+                    2u64 => Ok(Field::Double),
                     3u64 => Ok(Field::Text),
                     4u64 => Ok(Field::Timestamp),
                     5u64 => Ok(Field::Time),
                     6u64 => Ok(Field::TinyText),
+                    7u64 => Ok(Field::Float),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 5",
+                        &"variant index 0 <= i < 8",
                     )),
                 }
             }
@@ -99,7 +107,8 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 match val {
                     "None" => Ok(Field::None),
                     "Int" => Ok(Field::Int),
-                    "Real" => Ok(Field::Real),
+                    "Float" => Ok(Field::Float),
+                    "Double" => Ok(Field::Double),
                     "Text" => Ok(Field::Text),
                     "Timestamp" => Ok(Field::Timestamp),
                     "Time" => Ok(Field::Time),
@@ -114,7 +123,8 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 match val {
                     b"None" => Ok(Field::None),
                     b"Int" => Ok(Field::Int),
-                    b"Real" => Ok(Field::Real),
+                    b"Float" => Ok(Field::Float),
+                    b"Double" => Ok(Field::Double),
                     b"Text" => Ok(Field::Text),
                     b"Timestamp" => Ok(Field::Timestamp),
                     b"Time" => Ok(Field::Time),
@@ -166,12 +176,15 @@ impl<'de> serde::Deserialize<'de> for DataType {
                                 )
                             })
                         }),
-                    (Field::Real, variant) => {
+                    (Field::Float, variant) => {
                         struct Visitor;
                         impl<'de> serde::de::Visitor<'de> for Visitor {
                             type Value = DataType;
                             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                fmt::Formatter::write_str(formatter, "tuple variant DataType::Real")
+                                fmt::Formatter::write_str(
+                                    formatter,
+                                    "tuple variant DataType::Float",
+                                )
                             }
                             #[inline]
                             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -181,16 +194,48 @@ impl<'de> serde::Deserialize<'de> for DataType {
                                 let f = seq.next_element()?.ok_or_else(|| {
                                     serde::de::Error::invalid_length(
                                         0usize,
-                                        &"tuple variant DataType::Real with 2 elements",
+                                        &"tuple variant DataType::Float with 2 elements",
                                     )
                                 })?;
                                 let prec = seq.next_element()?.ok_or_else(|| {
                                     serde::de::Error::invalid_length(
                                         0usize,
-                                        &"tuple variant DataType::Real with 2 elements",
+                                        &"tuple variant DataType::Float with 2 elements",
                                     )
                                 })?;
-                                Ok(DataType::Real(f, prec))
+                                Ok(DataType::Float(f, prec))
+                            }
+                        }
+                        VariantAccess::tuple_variant(variant, 4usize, Visitor)
+                    }
+                    (Field::Double, variant) => {
+                        struct Visitor;
+                        impl<'de> serde::de::Visitor<'de> for Visitor {
+                            type Value = DataType;
+                            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                                fmt::Formatter::write_str(
+                                    formatter,
+                                    "tuple variant DataType::Double",
+                                )
+                            }
+                            #[inline]
+                            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+                            where
+                                A: serde::de::SeqAccess<'de>,
+                            {
+                                let f = seq.next_element()?.ok_or_else(|| {
+                                    serde::de::Error::invalid_length(
+                                        0usize,
+                                        &"tuple variant DataType::Double with 2 elements",
+                                    )
+                                })?;
+                                let prec = seq.next_element()?.ok_or_else(|| {
+                                    serde::de::Error::invalid_length(
+                                        0usize,
+                                        &"tuple variant DataType::Double with 2 elements",
+                                    )
+                                })?;
+                                Ok(DataType::Double(f, prec))
                             }
                         }
                         VariantAccess::tuple_variant(variant, 4usize, Visitor)
@@ -220,11 +265,12 @@ impl<'de> serde::Deserialize<'de> for DataType {
         const VARIANTS: &[&str] = &[
             "None",
             "Int",
-            "Real",
+            "Double",
             "Text",
             "Timestamp",
             "Time",
             "TinyText",
+            "Float",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }
