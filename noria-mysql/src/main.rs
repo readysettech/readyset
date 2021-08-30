@@ -12,11 +12,13 @@ use nom_sql::Dialect;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
 
 mod backend;
+mod error;
 mod schema;
 mod upstream;
 mod value;
 
 use backend::Backend;
+pub use error::Error;
 use upstream::MySqlUpstream;
 
 #[cfg(not(target_env = "msvc"))]
@@ -37,7 +39,7 @@ impl ConnectionHandler for MysqlHandler {
     ) {
         if let Err(e) = MysqlIntermediary::run_on_tcp(Backend(backend), stream).await {
             match e {
-                noria_client::Error::Io(e) => {
+                Error::Io(e) => {
                     error!(err = ?e, "connection lost");
                 }
                 _ => {

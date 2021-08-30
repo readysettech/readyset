@@ -10,4 +10,5 @@ mod upstream;
 mod value;
 
 pub use crate::backend::Backend;
+pub use crate::error::Error;
 pub use crate::upstream::PostgreSqlUpstream;

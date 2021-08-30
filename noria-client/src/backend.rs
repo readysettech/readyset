@@ -15,15 +15,13 @@ use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError};
+use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError, ReadySetResult};
 use noria_client_metrics::recorded::SqlQueryType;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
-use crate::backend::error::Error;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, UpstreamDatabase};
 
-pub mod error;
 pub mod noria_connector;
 
 pub use self::noria_connector::NoriaConnector;
@@ -283,13 +281,13 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
-    pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, Error> {
+    pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
         let is_read = is_read(query);
         let upstream = self
             .reader
             .upstream
             .as_mut()
-            .ok_or(Error::ReadySet(ReadySetError::FallbackNoConnector))?;
+            .ok_or(ReadySetError::FallbackNoConnector)?;
 
         if is_read {
             upstream.handle_read(query).await.map(QueryResult::Upstream)
@@ -306,7 +304,7 @@ where
     pub async fn prepare_fallback(
         &mut self,
         query: &str,
-    ) -> Result<UpstreamPrepare<DB::Column>, Error> {
+    ) -> Result<UpstreamPrepare<DB::Column>, DB::Error> {
         let q = query.to_string().trim_start().to_lowercase();
         if is_read(&q) {
             match self.reader.upstream {
@@ -366,7 +364,7 @@ where
         query_str: String,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
-    ) -> Result<QueryResult<DB>, Error> {
+    ) -> Result<QueryResult<DB>, DB::Error> {
         let url = self
             .reader
             .upstream
@@ -426,7 +424,7 @@ where
         query_str: &str,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
-    ) -> Result<QueryResult<DB>, Error> {
+    ) -> Result<QueryResult<DB>, DB::Error> {
         match self
             .reader
             .noria_connector
@@ -442,7 +440,7 @@ where
                         .handle_read(query_str)
                         .await
                         .map(QueryResult::Upstream),
-                    None => Err(e),
+                    None => Err(e.into()),
                 }
             }
         }
@@ -455,7 +453,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
-    ) -> Result<PrepareResult<DB::Column>, Error> {
+    ) -> Result<PrepareResult<DB::Column>, DB::Error> {
         match self
             .reader
             .noria_connector
@@ -468,7 +466,7 @@ where
                     .prepare_fallback(query)
                     .await
                     .map(PrepareResult::Upstream),
-                None => Err(e),
+                None => Err(e.into()),
             },
         }
     }
@@ -476,7 +474,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB::Column>, Error> {
+    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB::Column>, DB::Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
@@ -498,7 +496,7 @@ where
                     }
                     return res;
                 } else {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         };
@@ -506,19 +504,21 @@ where
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => self.cascade_prepare(stmt.clone(), query).await,
             nom_sql::SqlQuery::Insert(_) => match &mut self.writer {
-                Writer::Noria(connector) => connector
-                    .prepare_insert(parsed_query.clone(), self.prepared_count)
-                    .await
-                    .map(PrepareResult::Noria),
+                Writer::Noria(connector) => Ok(PrepareResult::Noria(
+                    connector
+                        .prepare_insert(parsed_query.clone(), self.prepared_count)
+                        .await?,
+                )),
                 Writer::Upstream(connector) => {
                     connector.prepare(query).await.map(PrepareResult::Upstream)
                 }
             },
             nom_sql::SqlQuery::Update(_) => match &mut self.writer {
-                Writer::Noria(connector) => connector
-                    .prepare_update(parsed_query.clone(), self.prepared_count)
-                    .await
-                    .map(PrepareResult::Noria),
+                Writer::Noria(connector) => Ok(PrepareResult::Noria(
+                    connector
+                        .prepare_update(parsed_query.clone(), self.prepared_count)
+                        .await?,
+                )),
                 Writer::Upstream(connector) => {
                     connector.prepare(query).await.map(PrepareResult::Upstream)
                 }
@@ -547,7 +547,7 @@ where
         &mut self,
         id: u32,
         params: Vec<DataType>,
-    ) -> Result<QueryResult<DB>, Error> {
+    ) -> Result<QueryResult<DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
@@ -565,7 +565,7 @@ where
                     .reader
                     .upstream
                     .as_mut()
-                    .ok_or(Error::ReadySet(ReadySetError::FallbackNoConnector))?;
+                    .ok_or(ReadySetError::FallbackNoConnector)?;
                 return connector
                     .execute_read(id, params)
                     .await
@@ -612,25 +612,27 @@ where
                                         .await
                                         .map(QueryResult::Upstream)
                                 }
-                                None => Err(e),
+                                None => Err(e.into()),
                             },
                         }
                     }
                     SqlQuery::Insert(ref _q) => match &mut self.writer {
-                        Writer::Noria(connector) => connector
-                            .execute_prepared_insert(statement_id, params)
-                            .await
-                            .map(QueryResult::Noria),
+                        Writer::Noria(connector) => Ok(QueryResult::Noria(
+                            connector
+                                .execute_prepared_insert(statement_id, params)
+                                .await?,
+                        )),
                         Writer::Upstream(connector) => connector
                             .execute_write(statement_id, params)
                             .await
                             .map(QueryResult::Upstream),
                     },
                     SqlQuery::Update(ref _q) => match &mut self.writer {
-                        Writer::Noria(connector) => connector
-                            .execute_prepared_update(statement_id, params)
-                            .await
-                            .map(QueryResult::Noria),
+                        Writer::Noria(connector) => Ok(QueryResult::Noria(
+                            connector
+                                .execute_prepared_update(statement_id, params)
+                                .await?,
+                        )),
                         Writer::Upstream(connector) => connector
                             .execute_write(statement_id, params)
                             .await
@@ -661,7 +663,7 @@ where
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, Error> {
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
 
@@ -675,11 +677,8 @@ where
             Ok(parsed_tuple) => parsed_tuple,
             Err(e) => {
                 // Do not fall back if the set is not allowed
-                if matches!(
-                    e,
-                    Error::ReadySet(ReadySetError::SetDisallowed { statement: _ })
-                ) {
-                    return Err(e);
+                if matches!(e, ReadySetError::SetDisallowed { statement: _ }) {
+                    return Err(e.into());
                 }
                 // TODO(Dan): Implement RYW for query_fallback
                 match self.reader.upstream {
@@ -691,7 +690,7 @@ where
                         return Ok(res);
                     }
                     None => {
-                        return Err(e);
+                        return Err(e.into());
                     }
                 }
             }
@@ -718,7 +717,7 @@ where
             // database. Otherwise, if our single writer is noria, we assume that there's only a
             // single reader setup - noria.
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-            Writer::Noria(connector) => match parsed_query {
+            Writer::Noria(connector) => Ok(QueryResult::Noria(match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = std::time::Instant::now();
                     let res = self
@@ -733,13 +732,13 @@ where
                         execution_time,
                         SqlQueryType::Read,
                     );
-                    res
+                    res?
                 }
                 nom_sql::SqlQuery::CreateView(q) => {
-                    self.reader.noria_connector.handle_create_view(q).await
+                    self.reader.noria_connector.handle_create_view(q).await?
                 }
 
-                nom_sql::SqlQuery::CreateTable(q) => connector.handle_create_table(q).await,
+                nom_sql::SqlQuery::CreateTable(q) => connector.handle_create_table(q).await?,
                 nom_sql::SqlQuery::Insert(q) => {
                     let execution_timer = std::time::Instant::now();
                     let res = connector.handle_insert(q).await;
@@ -750,7 +749,7 @@ where
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    res
+                    res?
                 }
                 nom_sql::SqlQuery::Update(q) => {
                     let execution_timer = std::time::Instant::now();
@@ -762,7 +761,7 @@ where
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    res
+                    res?
                 }
                 nom_sql::SqlQuery::Delete(q) => {
                     let execution_timer = std::time::Instant::now();
@@ -774,14 +773,13 @@ where
                         execution_time,
                         SqlQueryType::Write,
                     );
-                    res
+                    res?
                 }
                 _ => {
                     error!("unsupported query");
                     unsupported!("query type unsupported");
                 }
-            }
-            .map(QueryResult::Noria),
+            })),
             Writer::Upstream(connector) => {
                 match parsed_query {
                     nom_sql::SqlQuery::Select(q) => {
@@ -881,7 +879,7 @@ where
         &mut self,
         query: &str,
         collapse_where_ins: bool,
-    ) -> Result<(SqlQuery, Vec<Literal>), Error> {
+    ) -> ReadySetResult<(SqlQuery, Vec<Literal>)> {
         match self.parsed_query_cache.entry(query.to_owned()) {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
@@ -904,8 +902,7 @@ where
                         error!(%query, "query can't be parsed: \"{}\"", query);
                         Err(ReadySetError::UnparseableQuery {
                             query: query.to_string(),
-                        }
-                        .into())
+                        })
                     }
                 }
             }

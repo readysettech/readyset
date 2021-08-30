@@ -5,8 +5,7 @@ use neon::{prelude::*, types::JsDate};
 use noria::ColumnSchema;
 use noria::{results::Results, DataType};
 use noria_client::backend::{PrepareResult, QueryResult, SelectSchema, UpstreamPrepare};
-use noria_client::Error;
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{Error, MySqlUpstream};
 use std::convert::TryFrom;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>

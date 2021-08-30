@@ -1,22 +1,24 @@
 use noria::ReadySetError;
-use noria_client::backend as cl;
 use psql_srv as ps;
+use std::io;
+use thiserror::Error;
 
-/// A simple wrapper around `noria_client`'s `Error`, facilitating conversion to `psql_srv::Error`.
-pub struct Error(cl::error::Error);
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    ReadySet(#[from] ReadySetError),
 
-impl From<cl::error::Error> for Error {
-    fn from(e: cl::error::Error) -> Self {
-        Error(e)
-    }
+    #[error(transparent)]
+    PostgreSql(#[from] tokio_postgres::Error),
+
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 impl From<Error> for ps::Error {
     fn from(e: Error) -> Self {
-        use cl::error::Error::*;
-        match e.0 {
-            MySql(e) => ps::Error::Unknown(e.to_string()),
-            MySqlAsync(e) => ps::Error::Unknown(e.to_string()),
+        use Error::*;
+        match e {
             Io(e) => ps::Error::IoError(e),
             ReadySet(ReadySetError::UnparseableQuery { query }) => ps::Error::ParseError(query),
             ReadySet(ReadySetError::PreparedStatementMissing { statement_id }) => {
@@ -24,7 +26,6 @@ impl From<Error> for ps::Error {
             }
             ReadySet(ReadySetError::Unsupported(s)) => ps::Error::Unsupported(s),
             ReadySet(e) => ps::Error::Unknown(e.to_string()),
-            MsqlSrv(e) => ps::Error::Unknown(e.to_string()),
             PostgreSql(e) => e.into(),
         }
     }

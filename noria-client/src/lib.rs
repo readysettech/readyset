@@ -15,6 +15,5 @@ pub mod test_helpers;
 mod upstream_database;
 mod utils;
 
-pub use crate::backend::error::Error;
 pub use crate::backend::{Backend, BackendBuilder};
 pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};

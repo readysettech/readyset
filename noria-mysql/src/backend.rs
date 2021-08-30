@@ -11,11 +11,11 @@ use noria::errors::internal_err;
 use noria::{internal, DataType, ReadySetError};
 use noria_client::backend::noria_connector;
 use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
-use noria_client::Error;
 
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
+use crate::Error;
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -150,12 +150,7 @@ where
                 // TODO(grfn): make statement ID part of prepareresult
                 info.reply(self.prepared_count(), &params, &schema).await
             }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
-                code,
-                message,
-                ..
-            })))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
+            Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
                 code,
                 message,
                 ..
@@ -261,9 +256,7 @@ where
                     .await
                     .map_err(Error::from)
             }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError{code, message,
-                ..})))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError{code,
+            Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError{code,
                 message, ..}))) => {
                 results.error(code.into(), message.as_bytes()).await
             }
@@ -353,12 +346,7 @@ where
                     rw.finish().await
                 }
             }
-            Err(Error::MySql(mysql::Error::MySqlError(mysql::error::MySqlError {
-                code,
-                message,
-                ..
-            })))
-            | Err(Error::MySqlAsync(mysql_async::Error::Server(mysql_async::ServerError {
+            Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
                 code,
                 message,
                 ..
