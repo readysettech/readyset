@@ -109,6 +109,10 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':docker: Build readyset-psql image'
+              exclude:
+                - "ops/**"
+
             - label: 'Test readyset deployment'
               exclude:
                 - "ops/**"

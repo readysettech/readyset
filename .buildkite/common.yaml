@@ -46,6 +46,25 @@ steps:
       ecr#v2.2.0:
         login: true
 
+  - label: ":docker: Build readyset-psql image"
+    key: readyset-psql-image
+    commands:
+      - "echo --- :docker: Building readyset-psql image"
+      - >-
+        docker build -f build/Dockerfile.readyset-psql \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
+          .
+      - >-
+        docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
+        305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:latest
+      - "echo --- :docker: Pushing image"
+      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql
+    branches: refs/heads/main
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
   - label: ':docker: Build prettier image'
     key: prettier-image
     commands:
