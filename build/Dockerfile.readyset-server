@@ -1,11 +1,37 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest
-COPY . /readyset
-WORKDIR /readyset
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly as chef
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+RUN apt-get update
+RUN apt-get install -y \
+    clang \
+    cmake \
+    libclang-dev \
+    libssl-dev \
+    liblz4-dev \
+    librdkafka-dev \
+    build-essential \
+    llvm
+
+FROM chef as planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef as builder
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+COPY --from=planner /workdir/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
 RUN cargo build --release --bin noria-server
 RUN strip target/release/noria-server
 
-FROM debian:10
-COPY --from=0 /readyset/target/release/noria-server /noria-server
+FROM debian:10 as runtime
+WORKDIR app
 RUN apt-get update
 RUN apt-get install -y libssl-dev curl
-CMD ./noria-server --deployment $DEPLOYMENT --address $LISTEN_ADDRESS --external-address $EXTERNAL_ADDRESS -z $ZOOKEEPER_HOST:2181 --prometheus-metrics --shards 0 --replication-url $REPLICATION_URL -v
+COPY --from=builder /workdir/target/release/noria-server /bin/noria-server
+CMD noria-server --deployment $DEPLOYMENT --address $LISTEN_ADDRESS --external-address $EXTERNAL_ADDRESS -z $ZOOKEEPER_HOST:2181 --prometheus-metrics --shards 0 --replication-url $REPLICATION_URL -v

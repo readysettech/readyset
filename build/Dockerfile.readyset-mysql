@@ -1,12 +1,37 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest
-COPY . /readyset
-WORKDIR /readyset
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly as chef
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+RUN apt-get update
+RUN apt-get install -y \
+    clang \
+    cmake \
+    libclang-dev \
+    libssl-dev \
+    liblz4-dev \
+    librdkafka-dev \
+    build-essential \
+    llvm
+
+FROM chef as planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef as builder
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+COPY --from=planner /workdir/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
 RUN cargo build --release --bin noria-mysql
 RUN strip target/release/noria-mysql
 
 FROM debian:10
-COPY --from=0 /readyset/target/release/noria-mysql /noria-mysql
 RUN apt-get update
 # We install mariadb-client so we have access to mysqladmin for healthchecks
 RUN apt-get install -y libssl-dev mariadb-client
-CMD ./noria-mysql --deployment $DEPLOYMENT --address $ADDRESS -z $ZOOKEEPER_HOST:2181 --no-require-authentication --upstream-db-url $MYSQL_URL
+COPY --from=builder /workdir/target/release/noria-mysql /bin/noria-mysql
+CMD noria-mysql --deployment $DEPLOYMENT --address $ADDRESS -z $ZOOKEEPER_HOST:2181 --no-require-authentication --upstream-db-url $MYSQL_URL
