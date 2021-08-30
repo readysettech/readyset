@@ -23,8 +23,9 @@ steps:
           --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
           -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
           .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT}"
+      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server
     plugins:
       ecr#v2.2.0:
         login: true
@@ -38,8 +39,9 @@ steps:
           --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
           -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
           .
+      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest"
       - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT}"
+      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql
     plugins:
       ecr#v2.2.0:
         login: true
