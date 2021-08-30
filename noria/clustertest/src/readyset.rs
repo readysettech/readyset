@@ -151,3 +151,62 @@ async fn controller_in_primary_test() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn query_failure_recovery_with_volume_id() {
+    let cluster_name = "ct_failure_recovery_with_volume_id";
+    let mut deployment = DeploymentParams::new(
+        cluster_name,
+        NoriaBinarySource::Build(BuildParams {
+            root_project_path: get_project_root(),
+            target_dir: get_project_root().join("test_target"),
+            release: true,
+            rebuild: false,
+        }),
+    );
+    deployment.set_sharding(1);
+    deployment.add_server(ServerParams::default().with_volume("v1"));
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    deployment
+        .handle
+        .install_recipe(
+            "
+      CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
+      QUERY q:
+        SELECT *
+        FROM t1;",
+        )
+        .await
+        .unwrap();
+
+    // Insert row (1, 2, 2) into t1.
+    let mut t1 = deployment.handle.table("t1").await.unwrap();
+    t1.insert(vec![
+        DataType::from(1i32),
+        DataType::from(2i32),
+        DataType::from(2i32),
+    ])
+    .await
+    .unwrap();
+
+    // Create a second server now that the entire dataflow graph is
+    // on the first server.
+    let r1_addr = deployment.server_addrs()[0].clone();
+    deployment
+        .start_server(ServerParams::default().with_volume("v2"))
+        .await
+        .unwrap();
+
+    // Kill the first server to trigger failure recovery. We should
+    // not replicate base tables on to r2, as there are volume
+    // id restrictions.
+    deployment.kill_server(&r1_addr).await.unwrap();
+
+    // Query the view.
+    let res = deployment.handle.view("q").await;
+    assert!(res.is_err());
+
+    deployment.teardown().await.unwrap();
+}

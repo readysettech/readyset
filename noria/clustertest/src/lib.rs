@@ -66,15 +66,25 @@ pub struct BuildParams {
 pub struct ServerParams {
     /// A server's region string, passed in via --region.
     region: Option<String>,
+    /// THe volume id of the server, passed in via --volume-id.
+    volume_id: Option<String>,
 }
 
 impl ServerParams {
     pub fn default() -> Self {
-        Self { region: None }
+        Self {
+            region: None,
+            volume_id: None,
+        }
     }
 
     pub fn with_region(mut self, region: &str) -> Self {
         self.region = Some(region.to_string());
+        self
+    }
+
+    pub fn with_volume(mut self, volume: &str) -> Self {
+        self.volume_id = Some(volume.to_string());
         self
     }
 }
@@ -227,7 +237,7 @@ impl DeploymentHandle {
         // the interval where a worker's liveliness status changes.
         wait_until_worker_count(
             &mut self.handle,
-            Duration::from_secs(15),
+            Duration::from_secs(30),
             self.noria_server_handles.len(),
         )
         .await?;
@@ -338,6 +348,9 @@ fn start_server(
     }
     if let Some(region) = primary_region.as_ref() {
         runner.set_primary_region(region);
+    }
+    if let Some(volume) = server_params.volume_id.as_ref() {
+        runner.set_volume_id(volume);
     }
     if let Some(mysql) = mysql {
         runner.set_mysql(mysql);

@@ -51,6 +51,11 @@ impl NoriaServerRunner {
         self.args.push(primary_region.to_string());
     }
 
+    pub fn set_volume_id(&mut self, id: &str) {
+        self.args.push("--volume-id".to_string());
+        self.args.push(id.to_string());
+    }
+
     pub fn set_zookeeper(&mut self, zookeeper_addr: &str) {
         self.args.push("-z".to_string());
         self.args.push(zookeeper_addr.to_string());
