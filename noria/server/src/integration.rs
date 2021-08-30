@@ -3740,16 +3740,18 @@ async fn correct_nested_view_schema() {
     let q = g.view("swvc").await.unwrap();
 
     let expected_schema = vec![
-        ColumnSpecification::new("swvc.id".try_into().unwrap(), SqlType::Int(None))
-            .convert_column(),
-        ColumnSpecification::new("swvc.content".try_into().unwrap(), SqlType::Text)
-            .convert_column(),
-        ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::Bigint(None))
-            .convert_column(),
+        ColumnSpecification::new("swvc.id".try_into().unwrap(), SqlType::Int(None)),
+        ColumnSpecification::new("swvc.content".try_into().unwrap(), SqlType::Text),
+        ColumnSpecification::new("swvc.vc".try_into().unwrap(), SqlType::Bigint(None)),
     ];
     assert_eq!(
-        q.schema().unwrap().to_cols(SchemaType::ProjectedSchema),
-        &expected_schema[..]
+        q.schema()
+            .unwrap()
+            .schema(SchemaType::ProjectedSchema)
+            .iter()
+            .map(|cs| cs.spec.clone())
+            .collect::<Vec<_>>(),
+        expected_schema
     );
 }
 

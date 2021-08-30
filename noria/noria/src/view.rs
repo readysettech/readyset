@@ -9,8 +9,8 @@ use futures_util::{
     stream::StreamExt, stream::TryStreamExt,
 };
 use launchpad::intervals::BoundPair;
-use nom_sql::SqlType;
 use nom_sql::{BinaryOperator, ColumnSpecification};
+use nom_sql::{Column, SqlType};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use std::collections::HashMap;
@@ -108,13 +108,6 @@ impl Service<()> for Endpoint {
 }
 
 impl ViewSchema {
-    /// Get the schema specified by the schema type
-    fn get_schema(&self, schema_type: SchemaType) -> &Vec<ColumnSchema> {
-        match schema_type {
-            SchemaType::ReturnedSchema => &self.returned_cols,
-            SchemaType::ProjectedSchema => &self.projected_cols,
-        }
-    }
     /// Create a ViewSchema from returned and projected column schema vectors
     pub fn new(returned_cols: Vec<ColumnSchema>, projected_cols: Vec<ColumnSchema>) -> ViewSchema {
         ViewSchema {
@@ -122,14 +115,22 @@ impl ViewSchema {
             projected_cols,
         }
     }
-    /// Return a vector specifiying the types of the columns for the
-    /// requested indices
+
+    /// Get the schema specified by the schema type
+    pub fn schema(&self, schema_type: SchemaType) -> &[ColumnSchema] {
+        match schema_type {
+            SchemaType::ReturnedSchema => &self.returned_cols,
+            SchemaType::ProjectedSchema => &self.projected_cols,
+        }
+    }
+
+    /// Return a vector specifiying the types of the columns for the requested indices
     pub fn col_types(
         &self,
         indices: &[usize],
         schema_type: SchemaType,
     ) -> ReadySetResult<Vec<&SqlType>> {
-        let schema = self.get_schema(schema_type);
+        let schema = self.schema(schema_type);
         indices
             .iter()
             .map(|i| schema.get(*i).map(|c| &c.spec.sql_type))
@@ -137,24 +138,17 @@ impl ViewSchema {
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
 
-    /// Convert the schema to a `Vec` of [`msql_srv::Column`]
-    pub fn to_cols(&self, schema_type: SchemaType) -> Vec<msql_srv::Column> {
-        let schema = self.get_schema(schema_type);
-
-        schema.iter().map(|c| c.spec.convert_column()).collect()
-    }
-
     /// Convert the schema to a `Vec` of [`msql_srv::Column`], for the speicified indices
-    pub fn to_cols_with_indices(
-        &self,
+    pub fn to_cols_with_indices<'a>(
+        &'a self,
         indices: &[usize],
         schema_type: SchemaType,
-    ) -> ReadySetResult<Vec<msql_srv::Column>> {
-        let schema = self.get_schema(schema_type);
+    ) -> ReadySetResult<Vec<&'a ColumnSpecification>> {
+        let schema = self.schema(schema_type);
 
         indices
             .iter()
-            .map(|i| schema.get(*i).map(|c| c.spec.convert_column()))
+            .map(|i| schema.get(*i).map(|c| &c.spec))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
@@ -168,9 +162,9 @@ impl ViewSchema {
         schema_type: SchemaType,
     ) -> ReadySetResult<Vec<usize>>
     where
-        T: Iterator<Item = &'a nom_sql::Column>,
+        T: Iterator<Item = &'a Column>,
     {
-        let schema = self.get_schema(schema_type);
+        let schema = self.schema(schema_type);
 
         cols.map(|c| {
             schema.iter().position(|e| {
@@ -185,7 +179,7 @@ impl ViewSchema {
 
 impl ColumnSchema {
     /// Consume the schema, returning the type for the column
-    pub fn take_type(self) -> nom_sql::SqlType {
+    pub fn take_type(self) -> SqlType {
         self.spec.sql_type
     }
 }
