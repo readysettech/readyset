@@ -93,13 +93,15 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
-                DataType::Real(10.000000222, 9),
+                DataType::Double(10.000000222, 9),
+                DataType::Float(8.99, 2),
             ],
-            project_fields: Arc::new(vec![0, 1, 2]),
+            project_fields: Arc::new(vec![0, 1, 2, 3]),
             project_field_types: Arc::new(vec![
                 ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
+                ps::ColType::Float,
             ]),
         };
         assert_eq!(
@@ -107,7 +109,8 @@ mod tests {
             vec![
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
-                ps::Value::Double(10.000000222)
+                ps::Value::Double(10.000000222),
+                ps::Value::Real(8.99)
             ]
         );
     }
@@ -118,15 +121,17 @@ mod tests {
             values: vec![
                 DataType::Int(43),
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
-                DataType::Real(10.000000222, 9),
+                DataType::Double(10.000000222, 9),
+                DataType::Float(8.99, 2),
                 DataType::Int(0),
             ],
             // Only the first three fields are specified for projection.
-            project_fields: Arc::new(vec![0, 1, 2]),
+            project_fields: Arc::new(vec![0, 1, 2, 3]),
             project_field_types: Arc::new(vec![
                 ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
+                ps::ColType::Float,
             ]),
         };
         assert_eq!(
@@ -134,7 +139,8 @@ mod tests {
             vec![
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
-                ps::Value::Double(10.000000222)
+                ps::Value::Double(10.000000222),
+                ps::Value::Real(8.99)
             ]
         );
     }
@@ -148,15 +154,17 @@ mod tests {
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
                 DataType::Int(0),
                 DataType::Int(0),
-                DataType::Real(10.000000222, 9),
+                DataType::Double(10.000000222, 9),
+                DataType::Float(8.99, 2),
                 DataType::Int(0),
             ],
             // Only some of the fields are specified for projection.
-            project_fields: Arc::new(vec![1, 2, 5]),
+            project_fields: Arc::new(vec![1, 2, 5, 6]),
             project_field_types: Arc::new(vec![
                 ps::ColType::Int(None),
                 ps::ColType::Text,
                 ps::ColType::Double,
+                ps::ColType::Float,
             ]),
         };
         assert_eq!(
@@ -164,7 +172,8 @@ mod tests {
             vec![
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
-                ps::Value::Double(10.000000222)
+                ps::Value::Double(10.000000222),
+                ps::Value::Real(8.99)
             ]
         );
     }
