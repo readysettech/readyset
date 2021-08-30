@@ -47,13 +47,19 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 #[clap(name = "noria-server")]
 struct Opts {
     /// IP address to listen on
-    #[clap(long, short = 'a', default_value="127.0.0.1", parse(try_from_str = resolve_addr))]
+    #[clap(
+        long,
+        short = 'a',
+        env = "LISTEN_ADDRESS",
+        default_value = "127.0.0.1",
+        parse(try_from_str = resolve_addr)
+    )]
     address: IpAddr,
 
-    /// IP address to advertise to otheer noria instances running in the same deployment.
+    /// IP address to advertise to other noria instances running in the same deployment.
     ///
     /// If not specified, defaults to the value of `address`
-    #[clap(long, parse(try_from_str=resolve_addr))]
+    #[clap(long, env = "EXTERNAL_ADDRESS", parse(try_from_str=resolve_addr))]
     external_address: Option<IpAddr>,
 
     /// Port to advertise to other Noria instances running in the same deployment.
@@ -90,7 +96,7 @@ struct Opts {
     #[clap(
         long,
         short = 'z',
-        env = "ZOOKEEPER_URL",
+        env = "ZOOKEEPER_ADDRESS",
         default_value = "127.0.0.1:2181"
     )]
     zookeeper: String,
