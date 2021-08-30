@@ -62,7 +62,7 @@ pub struct NoriaAdapter<H> {
 #[derive(Clap)]
 pub struct Options {
     /// IP:PORT to listen on
-    #[clap(long, short = 'a', parse(try_from_str))]
+    #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]
     address: Option<SocketAddr>,
 
     /// ReadySet deployment ID to attach to

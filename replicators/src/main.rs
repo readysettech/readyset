@@ -18,7 +18,7 @@ struct Opts {
     #[clap(short, long, env("NORIA_DEPLOYMENT"))]
     deployment: String,
     /// IP:PORT for Zookeeper.
-    #[clap(short, long, env("ZOOKEEPER_URL"), default_value("127.0.0.1:2181"))]
+    #[clap(short, long, env("ZOOKEEPER_ADDRESS"), default_value("127.0.0.1:2181"))]
     zookeeper_address: std::net::SocketAddr,
     #[clap(subcommand)]
     subcmd: DbOpts,

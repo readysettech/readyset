@@ -3,7 +3,7 @@
 cat > /etc/default/readyset-mysql-adapter <<EOF
 MYSQL_URL=${MYSQL_URL}
 NORIA_DEPLOYMENT=${DEPLOYMENT}
-ZOOKEEPER_URL=${ZOOKEEPER_URL}
+ZOOKEEPER_ADDRESS=${ZOOKEEPER_ADDRESS}
 EOF
 chmod 600 /etc/default/readyset-mysql-adapter
 

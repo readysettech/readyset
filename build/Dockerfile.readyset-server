@@ -34,4 +34,4 @@ WORKDIR app
 RUN apt-get update
 RUN apt-get install -y libssl-dev curl
 COPY --from=builder /workdir/target/release/noria-server /bin/noria-server
-CMD noria-server --deployment $DEPLOYMENT --address $LISTEN_ADDRESS --external-address $EXTERNAL_ADDRESS -z $ZOOKEEPER_HOST:2181 --prometheus-metrics --shards 0 --replication-url $REPLICATION_URL -v
+CMD noria-server --prometheus-metrics -v

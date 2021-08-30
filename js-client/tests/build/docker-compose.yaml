@@ -42,10 +42,10 @@ services:
       #   32768	60999
       - "32768-60999"
     environment:
-      ZOOKEEPER_HOST: zookeeper
+      ZOOKEEPER_ADDRESS: zookeeper:2181
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
-      DEPLOYMENT: jstests
+      NORIA_DEPLOYMENT: jstests
       REPLICATION_URL: mysql://root:root@mysql/test
     links:
       - mysql
@@ -62,8 +62,8 @@ services:
   node:
     image: node:15.12.0
     environment:
-      ZOOKEEPER_HOST: zookeeper
-      DEPLOYMENT: jstests
+      ZOOKEEPER_ADDRESS: zookeeper:2181
+      NORIA_DEPLOYMENT: jstests
     links:
       - mysql
       - zookeeper

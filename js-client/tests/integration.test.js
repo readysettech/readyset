@@ -2,8 +2,8 @@ const { Client } = require("../lib/index");
 const process = require("process");
 
 const CONFIG = {
-  deployment: process.env.DEPLOYMENT,
-  zookeeperAddress: process.env.ZOOKEEPER_HOST + ":2181",
+  deployment: process.env.NORIA_DEPLOYMENT,
+  zookeeperAddress: process.env.ZOOKEEPER_ADDRESS,
 };
 
 const EMPLOYEES = [
