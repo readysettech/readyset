@@ -100,6 +100,7 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
             Upstream(upstream::QueryResult::WriteResult { num_rows_affected }) => {
                 Ok(Insert(num_rows_affected))
             }
+            Upstream(upstream::QueryResult::None) => Ok(Command),
         }
     }
 }

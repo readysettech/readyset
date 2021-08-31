@@ -22,12 +22,15 @@ pub struct PostgreSqlUpstream {
     statement_id_counter: u32,
     /// The original URL used to create the connection
     url: String,
+    /// Indicates whether we are currently in a transaction.
+    in_transaction: bool,
 }
 
 #[derive(Debug)]
 pub enum QueryResult {
     ReadResult { data: Vec<Row> },
     WriteResult { num_rows_affected: u64 },
+    None,
 }
 
 #[async_trait]
@@ -49,6 +52,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             prepared_statements: Default::default(),
             statement_id_counter: 0,
             url,
+            in_transaction: false,
         })
     }
 
@@ -130,5 +134,31 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(QueryResult::WriteResult {
             num_rows_affected: self.client.execute_raw(statement, params).await?,
         })
+    }
+
+    /// Handle starting a transaction with the upstream database.
+    async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
+        self.client.query("START TRANSACTION", &[]).await?;
+        self.in_transaction = true;
+        Ok(QueryResult::None)
+    }
+
+    /// Return whether we are currently in a transaction or not.
+    fn is_in_tx(&self) -> bool {
+        self.in_transaction
+    }
+
+    /// Handle committing a transaction to the upstream database.
+    async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
+        self.client.query("COMMIT", &[]).await?;
+        self.in_transaction = false;
+        Ok(QueryResult::None)
+    }
+
+    /// Handle rolling back the ongoing transaction for this connection to the upstream db.
+    async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
+        self.client.query("ROLLBACK", &[]).await?;
+        self.in_transaction = false;
+        Ok(QueryResult::None)
     }
 }
