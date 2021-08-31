@@ -193,7 +193,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         inner: None,
         authority: authority.clone(),
         worker_tx,
-        campaign_rx: authority_rx,
+        authority_rx,
         http_rx: controller_rx,
         handle_rx,
         our_descriptor: our_descriptor.clone(),

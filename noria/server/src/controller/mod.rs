@@ -105,16 +105,16 @@ impl Worker {
 /// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
 type WorkerIdentifier = Url;
 
-/// An update on the controller's ongoing election campaign.
-pub(crate) enum CampaignUpdate {
+/// An update on the leader election and failure detection.
+pub(crate) enum AuthorityUpdate {
     /// The current leader has changed.
     ///
     /// The King is dead; long live the King!
     LeaderChange(ControllerState, ControllerDescriptor),
     /// We are now the new leader.
     WonLeaderElection(ControllerState),
-    /// An error occurred in the leadership election process, which won't be restarted.
-    CampaignError(anyhow::Error),
+    /// An error occurred in the authority thread, which won't be restarted.
+    AuthorityError(anyhow::Error),
 }
 
 /// An HTTP request made to a controller.
@@ -165,8 +165,8 @@ pub struct ControllerOuter<A> {
     ///
     /// This is used to convey changes in leadership state.
     pub(crate) worker_tx: Sender<WorkerRequest>,
-    /// Receives updates from the election campaign thread.
-    pub(crate) campaign_rx: Receiver<CampaignUpdate>,
+    /// Receives updates from the authority thread.
+    pub(crate) authority_rx: Receiver<AuthorityUpdate>,
     /// Receives external HTTP requests.
     pub(crate) http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
@@ -316,16 +316,16 @@ where
         }));
     }
 
-    async fn handle_campaign_update(&mut self, msg: CampaignUpdate) -> ReadySetResult<()> {
+    async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
-            CampaignUpdate::LeaderChange(state, descr) => {
+            AuthorityUpdate::LeaderChange(state, descr) => {
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: descr.controller_uri,
                     heartbeat_every: state.config.heartbeat_every,
                 })
                 .await?;
             }
-            CampaignUpdate::WonLeaderElection(state) => {
+            AuthorityUpdate::WonLeaderElection(state) => {
                 info!(self.log, "won leader election, creating ControllerInner");
 
                 self.inner = Some(ControllerInner::new(
@@ -343,9 +343,9 @@ where
                 // the binlog, it should stop doing it if it stops being a leader
                 self.start_replication_task();
             }
-            CampaignUpdate::CampaignError(e) => {
-                // the campaign can't be restarted, so the controller should hard-exit
-                internal!("controller's leadership campaign failed: {}", e);
+            AuthorityUpdate::AuthorityError(e) => {
+                // the authority won't be restarted, so the controller should hard-exit
+                internal!("controller's authority thread failed: {}", e);
             }
         }
         Ok(())
@@ -380,9 +380,9 @@ where
                 }
                 // note: the campaign sender gets closed when we become the leader, so don't
                 // try to receive from it any more
-                req = self.campaign_rx.recv(), if self.inner.is_none() => {
+                req = self.authority_rx.recv(), if self.inner.is_none() => {
                     match req {
-                        Some(req) => self.handle_campaign_update(req).await?,
+                        Some(req) => self.handle_authority_update(req).await?,
                         None if self.inner.is_some() => info!(self.log, "leadership campaign terminated normally"),
                         // this shouldn't ever happen: if the leadership campaign thread fails,
                         // it should send a `CampaignError` that we handle above first before
@@ -410,7 +410,7 @@ where
 }
 
 pub(crate) fn authority_runner<A: Authority + 'static>(
-    event_tx: Sender<CampaignUpdate>,
+    event_tx: Sender<AuthorityUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
     config: Config,
@@ -418,13 +418,13 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
     region: Option<String>,
 ) -> JoinHandle<()> {
     let handle = rt_handle.clone();
-    let authority_inner = move |event_tx: Sender<CampaignUpdate>| -> Result<(), anyhow::Error> {
+    let authority_inner = move |event_tx: Sender<AuthorityUpdate>| -> Result<(), anyhow::Error> {
         let payload_to_event =
-            |descriptor: ControllerDescriptor| -> Result<CampaignUpdate, anyhow::Error> {
+            |descriptor: ControllerDescriptor| -> Result<AuthorityUpdate, anyhow::Error> {
                 let state: ControllerState = authority
                     .try_read(STATE_KEY)?
                     .ok_or_else(|| anyhow!("Key does not yet exist"))?;
-                Ok(CampaignUpdate::LeaderChange(state, descriptor))
+                Ok(AuthorityUpdate::LeaderChange(state, descriptor))
             };
 
         let mut retries = 5;
@@ -532,11 +532,11 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
             // it.
             rt_handle.block_on(async move {
                 event_tx
-                    .send(CampaignUpdate::WonLeaderElection(state.clone().unwrap()))
+                    .send(AuthorityUpdate::WonLeaderElection(state.clone().unwrap()))
                     .await
                     .map_err(|_| format_err!("failed to announce who won leader election"))?;
                 event_tx
-                    .send(CampaignUpdate::LeaderChange(
+                    .send(AuthorityUpdate::LeaderChange(
                         state.unwrap(),
                         descriptor.clone(),
                     ))
@@ -552,7 +552,7 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
         .name("srv-authority".to_owned())
         .spawn(move || {
             if let Err(e) = authority_inner(event_tx.clone()) {
-                let _ = handle.block_on(event_tx.send(CampaignUpdate::CampaignError(e)));
+                let _ = handle.block_on(event_tx.send(AuthorityUpdate::AuthorityError(e)));
             }
         })
         .unwrap()
