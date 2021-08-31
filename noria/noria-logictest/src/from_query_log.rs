@@ -1,8 +1,10 @@
+use std::convert::TryFrom;
 use std::path::PathBuf;
 
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 
+use anyhow::anyhow;
 use clap::Clap;
 use itertools::Itertools;
 
@@ -10,11 +12,11 @@ use nom_sql::{
     parse_query, Dialect, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery,
 };
 
-use crate::ast::{Query, QueryParams, QueryResults, Record, SortMode, Statement, StatementResult};
-use crate::upstream::DatabaseURL;
+use crate::ast::{Record, Statement, StatementResult, Value};
+use crate::upstream::{DatabaseConnection, DatabaseURL};
 
 mod querylog;
-use querylog::{Command, Stream};
+use querylog::{Command, Entry, Session, Stream};
 
 /// Convert a MySQL query log to a set of test scripts.
 #[derive(Clap)]
@@ -82,13 +84,53 @@ fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool
     true
 }
 
+async fn process_query(entry: &Entry, conn: &mut DatabaseConnection) -> anyhow::Result<Record> {
+    let parsed = parse_query(Dialect::MySQL, &entry.arguments).ok();
+    let record = match conn.query(&entry.arguments).await {
+        Ok(rows) => {
+            if !should_validate_results(&entry.arguments, &parsed) {
+                Record::Statement(Statement {
+                    result: StatementResult::Ok,
+                    command: entry.arguments.clone(),
+                    conditionals: vec![],
+                })
+            } else {
+                Record::query(entry.arguments.clone(), parsed.as_ref(), vec![], rows)
+            }
+        }
+        Err(_) => Record::Statement(Statement {
+            result: StatementResult::Error,
+            command: entry.arguments.clone(),
+            conditionals: vec![],
+        }),
+    };
+    Ok(record)
+}
+
+async fn process_execute(
+    session: &Session,
+    entry: &Entry,
+    conn: &mut DatabaseConnection,
+) -> anyhow::Result<Record> {
+    let parsed = parse_query(Dialect::MySQL, &entry.arguments).map_err(|e| anyhow!(e))?;
+    let (stmt, values) = session
+        .find_prepared_statement(&parsed)
+        .ok_or_else(|| anyhow!("Prepared statement not found"))?;
+    let params = values
+        .into_iter()
+        .map(Value::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+    let rows = conn.execute(stmt.to_string(), &params).await?;
+    Ok(Record::query(stmt.to_string(), Some(stmt), params, rows))
+}
+
 impl FromQueryLog {
     #[tokio::main]
     pub async fn run(self) -> anyhow::Result<()> {
         let input = File::open(&self.input).await.unwrap();
         let mut input = Stream::new(BufReader::new(input), self.split_sessions);
 
-        while let Some((session_number, session)) = input.next().await {
+        while let Some((session_number, mut session)) = input.next().await {
             // It is intentional to spin up a new connection for each session, so that we match the
             // logged behavior as closely as possible.
             let mut conn = self.database.connect().await.unwrap();
@@ -101,58 +143,33 @@ impl FromQueryLog {
                 .open(self.output.join(session_number.to_string() + ".test"))
                 .await
                 .unwrap();
-            for entry in session.entries {
-                match entry.command {
-                    Command::Connect => (),
-                    Command::Query => {
-                        let parsed = parse_query(Dialect::MySQL, &entry.arguments).ok();
-                        let record = match conn.query(&entry.arguments).await {
-                            Ok(mut rows) => {
-                                if !should_validate_results(&entry.arguments, &parsed) {
-                                    Record::Statement(Statement {
-                                        result: StatementResult::Ok,
-                                        command: entry.arguments,
-                                        conditionals: vec![],
-                                    })
-                                } else {
-                                    Record::Query(Query {
-                                        label: None,
-                                        column_types: None,
-                                        sort_mode: Some(match parsed {
-                                            Some(SqlQuery::Select(ref select))
-                                                if select.order.is_some() =>
-                                            {
-                                                SortMode::NoSort
-                                            }
-                                            _ => {
-                                                rows.sort();
-                                                SortMode::RowSort
-                                            }
-                                        }),
-                                        conditionals: vec![],
-                                        query: entry.arguments,
-                                        results: QueryResults::hash(
-                                            &rows.into_iter().flatten().collect::<Vec<_>>(),
-                                        ),
-                                        params: QueryParams::PositionalParams(vec![]),
-                                    })
-                                }
+            for entry in &session.entries {
+                let record = match entry.command {
+                    Command::Connect => None,
+                    Command::Query => process_query(entry, &mut conn).await.ok(),
+                    Command::Prepare => {
+                        let parsed = match parse_query(Dialect::MySQL, &entry.arguments) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!(
+                                    "!!! (prepare) Failed to parse {}:\n{:?}",
+                                    &entry.arguments, e
+                                );
+                                continue;
                             }
-                            Err(_) => Record::Statement(Statement {
-                                result: StatementResult::Error,
-                                command: entry.arguments,
-                                conditionals: vec![],
-                            }),
                         };
-                        output
-                            .write(format!("{}\n", record).as_bytes())
-                            .await
-                            .unwrap();
+                        session.prepared_statements.insert(parsed);
+                        None
                     }
-                    Command::Prepare => todo!(),
-                    Command::Execute => todo!(),
-                    Command::CloseStmt => todo!(),
-                    Command::Quit => (),
+                    Command::Execute => process_execute(&session, entry, &mut conn).await.ok(),
+                    Command::CloseStmt => None,
+                    Command::Quit => None,
+                };
+                if let Some(record) = record {
+                    output
+                        .write(format!("{}\n", record).as_bytes())
+                        .await
+                        .unwrap();
                 }
             }
             output.flush().await.unwrap();

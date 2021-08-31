@@ -13,12 +13,13 @@ use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use ascii_utils::Check;
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{NaiveDate, NaiveTime, Utc};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql::chrono::NaiveDateTime;
 use mysql_async as mysql;
 use mysql_time::MysqlTime;
+use nom_sql::{Literal, SqlQuery};
 use noria::{DataType, TIMESTAMP_FORMAT};
 use pgsql::types::{accepts, to_sql_checked};
 use tokio_postgres as pgsql;
@@ -214,6 +215,30 @@ impl TryFrom<mysql::Value> for Value {
                 us.into(),
             ))),
         }
+    }
+}
+
+impl TryFrom<Literal> for Value {
+    type Error = anyhow::Error;
+    fn try_from(value: Literal) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Literal::Null => Value::Null,
+            Literal::Integer(v) => Value::Integer(v),
+            Literal::FixedPoint(v) => {
+                let integral = v.value as i64;
+                Value::Real(
+                    integral,
+                    ((v.value - (integral as f64)) * (10_u64.pow(v.precision as u32) as f64))
+                        as u64,
+                )
+            }
+            Literal::String(v) => Value::Text(v),
+            Literal::Blob(v) => Value::Text(String::from_utf8(v)?),
+            Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
+            Literal::CurrentDate => Value::Date(Utc::now().naive_utc()),
+            Literal::CurrentTimestamp => Value::Date(Utc::now().naive_utc()),
+            Literal::Placeholder(_) => bail!("Placeholders are not valid values"),
+        })
     }
 }
 
@@ -649,6 +674,33 @@ impl Display for Record {
             Record::Graphviz => f.write_str("graphviz\n"),
             Record::Sleep(msecs) => writeln!(f, "sleep {}", msecs),
         }
+    }
+}
+
+impl Record {
+    /// Constructs a Record::Query with the given query string, optional parsed SqlQuery, list of
+    /// parameters, and list of result rows
+    pub fn query(
+        query: String,
+        parsed: Option<&SqlQuery>,
+        params: Vec<Value>,
+        mut results: Vec<Vec<Value>>,
+    ) -> Self {
+        Self::Query(Query {
+            label: None,
+            column_types: None,
+            sort_mode: Some(match parsed {
+                Some(SqlQuery::Select(select)) if select.order.is_some() => SortMode::NoSort,
+                _ => {
+                    results.sort();
+                    SortMode::RowSort
+                }
+            }),
+            conditionals: vec![],
+            query,
+            results: QueryResults::hash(&results.into_iter().flatten().collect::<Vec<_>>()),
+            params: QueryParams::PositionalParams(params),
+        })
     }
 }
 
