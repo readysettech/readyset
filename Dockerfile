@@ -1,24 +1,21 @@
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as checker
 RUN rustup component add rustfmt clippy
 
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as planner
-WORKDIR /workdir
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as chef
 RUN cargo install cargo-chef
+
+FROM chef as planner
+WORKDIR /workdir
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as cacher
+FROM chef as builder
 WORKDIR /workdir
-RUN cargo install cargo-chef
 COPY --from=planner /workdir/recipe.json recipe.json
-RUN cargo chef cook --recipe-path recipe.json
-
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as builder
-WORKDIR /workdir
+COPY --from=planner $CARGO_HOME $CARGO_HOME
+RUN cargo chef cook --check --all-targets --workspace --recipe-path recipe.json
 COPY . .
-COPY --from=cacher /workdir/target target
-COPY --from=cacher $CARGO_HOME $CARGO_HOME
-RUN cargo build --all
+RUN cargo --offline build --all
 
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as fetcher
 WORKDIR /workdir

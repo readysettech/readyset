@@ -44,9 +44,10 @@ steps:
     commands:
       - "echo --- :docker: Building image"
       - >-
-        docker build \
+        DOCKER_BUILDKIT=1 docker build \
           --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:latest \
           -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT} \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
           .
       - "echo --- :docker: Add latest tag for caching"
       - >-
