@@ -26,7 +26,9 @@ docker build \
     -t "$image:$VERSION" \
     .
 
-docker tag "$image:$VERSION" "$image:latest"
+if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
+    docker tag "$image:$VERSION" "$image:latest"
+fi
 
 echo "--- :docker: Pushing $image"
 docker push --all-tags "$image"
