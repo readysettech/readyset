@@ -42,6 +42,13 @@ pub enum AuthorityWorkerHeartbeatResponse {
     Failed,
 }
 
+/// The set of possible results to retrieving the new leader.
+pub enum GetLeaderResult {
+    NewLeader(LeaderPayload),
+    Unchanged,
+    NoLeader,
+}
+
 /// Initial registration request body, sent from workers to controllers.
 /// ///
 /// (used for the `/worker_rx/register` route)
@@ -72,8 +79,17 @@ pub trait Authority: Send + Sync {
     /// Returns the payload for the current leader, blocking if there is not currently a leader.
     /// This method is intended for clients to determine the current leader.
     fn get_leader(&self) -> Result<LeaderPayload, Error>;
-    /// Same as `get_leader` but return None if there is no leader instead of blocking.
-    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error>;
+
+    /// Non-blocking call to retrieve the leader.
+    fn try_get_leader(&self) -> Result<GetLeaderResult, Error>;
+
+    /// Whether the authority can place a watch that can unpark the thread when
+    /// there is a change in authority state.
+    fn can_watch(&self) -> bool;
+
+    /// Place a watch on the leader that unparks the thread when there is a change
+    /// in the leader state.
+    fn watch_leader(&self) -> Result<(), Error>;
 
     /// Wait until a new leader has been elected, and then return the leader payload epoch or None
     /// if a new leader needs to be elected. This method enables a leader to watch to see if it has

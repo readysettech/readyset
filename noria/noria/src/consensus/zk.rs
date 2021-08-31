@@ -12,7 +12,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
-use super::{Authority, AuthorityWorkerHeartbeatResponse, LeaderPayload, WorkerDescriptor};
+use super::{
+    Authority, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload, WorkerDescriptor,
+};
 use super::{WorkerId, CONTROLLER_KEY, WORKER_PATH, WORKER_PREFIX};
 use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
@@ -222,16 +224,36 @@ impl Authority for ZookeeperAuthority {
         }
     }
 
-    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error> {
-        match self.zk.get_data(CONTROLLER_KEY, false) {
+    fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
+        let inner = self.read_inner()?;
+        let current_epoch = inner.leader_create_epoch;
+        let is_new_epoch = |stat: &Stat| {
+            if let Some(epoch) = current_epoch {
+                stat.czxid > epoch
+            } else {
+                true
+            }
+        };
+
+        Ok(match self.zk.get_data(CONTROLLER_KEY, false) {
+            Ok((_, ref stat)) if !is_new_epoch(stat) => GetLeaderResult::Unchanged,
             Ok((data, stat)) => {
                 self.update_leader_create_epoch(Some(stat.czxid))?;
                 let payload = serde_json::from_slice(&data)?;
-                Ok(Some(payload))
+                GetLeaderResult::NewLeader(payload)
             }
-            Err(ZkError::NoNode) => Ok(None),
+            Err(ZkError::NoNode) => GetLeaderResult::NoLeader,
             Err(e) => bail!(e),
-        }
+        })
+    }
+
+    fn can_watch(&self) -> bool {
+        true
+    }
+
+    fn watch_leader(&self) -> Result<(), Error> {
+        self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new())?;
+        Ok(())
     }
 
     fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {

@@ -209,7 +209,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         config,
         tokio::runtime::Handle::current(),
         region,
-    );
+    )?;
 
     tokio::spawn(abort_on_panic(controller.run().map_err(move |e| {
         crit!(log, "ControllerOuter failed: {}", e.to_string());

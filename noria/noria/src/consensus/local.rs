@@ -16,7 +16,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    Authority, AuthorityWorkerHeartbeatResponse, LeaderPayload, WorkerDescriptor, WorkerId,
+    Authority, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload, WorkerDescriptor,
+    WorkerId,
 };
 use super::{CONTROLLER_KEY, WORKER_PATH};
 use crate::errors::internal_err;
@@ -193,16 +194,41 @@ impl Authority for LocalAuthority {
         }
     }
 
-    fn try_get_leader(&self) -> Result<Option<LeaderPayload>, Error> {
+    fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
+        let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
+            let inner = self.inner_read()?;
+            if let Some(epoch) = inner.known_leader_epoch {
+                Ok(leader_epoch == epoch)
+            } else {
+                Ok(false)
+            }
+        };
+
         let store_inner = self.store.inner_lock()?;
+        if is_same_epoch(store_inner.leader_epoch)? {
+            return Ok(GetLeaderResult::Unchanged);
+        }
 
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
-
-        Ok(store_inner
+        if let Some(r) = store_inner
             .keys
             .get(CONTROLLER_KEY)
-            .and_then(|data| serde_json::from_slice(data).ok()))
+            .and_then(|data| serde_json::from_slice(data).ok())
+        {
+            inner.known_leader_epoch = Some(store_inner.leader_epoch);
+            Ok(GetLeaderResult::NewLeader(r))
+        } else {
+            Ok(GetLeaderResult::NoLeader)
+        }
+    }
+
+    fn can_watch(&self) -> bool {
+        false
+    }
+
+    fn watch_leader(&self) -> Result<(), Error> {
+        unreachable!("LocalAuthority does not support `watch_leader`.");
     }
 
     fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
