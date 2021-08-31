@@ -21,10 +21,11 @@ echo "--- :docker: Pulling $image:latest"
 docker pull "$image:latest" || echo "Failed to pull previous build of image"
 
 echo "+++ :docker: Building $image:$VERSION"
-docker build \
+DOCKER_BUILDKIT=1 docker build \
     -f "$dockerfile" \
     --cache-from "$image:latest" \
     -t "$image:$VERSION" \
+    --build-arg BUILDKIT_INLINE_CACHE=1 \
     "$@" \
     .
 
