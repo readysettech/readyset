@@ -19,19 +19,20 @@ COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef as builder
+ARG release
 WORKDIR /workdir
 COPY rust-toolchain ./rust-toolchain
 RUN rustup toolchain install "$(cat ./rust-toolchain)"
 RUN cargo install cargo-chef
 COPY --from=planner /workdir/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook ${release:+--release} --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --bin noria-server
-RUN strip target/release/noria-server
+RUN cargo build ${release:+--release}  --bin noria-server
+RUN if [ -n "$release" ]; then strip target/release/noria-server; else strip target/debug/noria-server; fi
 
 FROM debian:10 as runtime
 WORKDIR app
 RUN apt-get update
 RUN apt-get install -y libssl-dev curl
-COPY --from=builder /workdir/target/release/noria-server /bin/noria-server
+COPY --from=builder /workdir/target/*/noria-server /bin/noria-server
 CMD noria-server --prometheus-metrics -v
