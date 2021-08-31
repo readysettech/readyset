@@ -14,7 +14,7 @@ use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
 use noria_client::Error;
 
 use crate::schema::convert_column;
-use crate::upstream::{self, MySqlUpstream, WriteResult};
+use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
 
 async fn write_column<W: AsyncWrite + Unpin>(
@@ -214,7 +214,7 @@ where
                 num_rows_updated,
                 last_inserted_id
             })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
-            Ok(QueryResult::UpstreamWrite(upstream::WriteResult {
+            Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
             })) => {
@@ -224,7 +224,7 @@ where
                 )
                 .await
             }
-            Ok(QueryResult::UpstreamRead(upstream::ReadResult { data, columns })) => {
+            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns })) => {
                 let mut data = data.iter().peekable();
                 if let Some(cols) = data.peek() {
                     let cols = cols.columns_ref();
@@ -327,11 +327,11 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
                 results.completed(num_rows_deleted, 0).await
             }
-            Ok(QueryResult::UpstreamWrite(WriteResult {
+            Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
             })) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
-            Ok(QueryResult::UpstreamRead(upstream::ReadResult { data, columns })) => {
+            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns })) => {
                 if let Some(cols) = data.get(0).cloned() {
                     let cols = cols.columns_ref();
                     let formatted_cols = cols.iter().map(|c| c.into()).collect::<Vec<_>>();

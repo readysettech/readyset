@@ -213,7 +213,7 @@ where
                 num_rows_deleted as f64,
             )?;
         }
-        QueryResult::UpstreamWrite(noria_mysql::WriteResult {
+        QueryResult::Upstream(noria_mysql::QueryResult::WriteResult {
             num_rows_affected,
             last_inserted_id,
         }) => {
@@ -231,7 +231,7 @@ where
             )?;
         }
         // TODO(Dan): Implement
-        QueryResult::UpstreamRead(..) => {
+        QueryResult::Upstream(..) => {
             unimplemented!("Query fallback processing not implemented for js-client")
         }
     }

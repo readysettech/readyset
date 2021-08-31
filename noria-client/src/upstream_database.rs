@@ -23,19 +23,13 @@ pub struct UpstreamPrepare<Col> {
 /// [`Writer`]: crate::backend::Writer
 #[async_trait]
 pub trait UpstreamDatabase: Sized + Send {
-    /// The type of results returned by read queries
+    /// The result returned by queries. Likely to be implemented as an enum containing a read or a
+    /// write result.
     ///
-    /// This type is used as the value inside of [`QueryResult::UpstreamRead`][]
+    /// This type is used as the value inside of [`QueryResult::Upstream`][]
     ///
-    /// [`QueryResult::UpstreamRead`]: crate::backend::QueryResult::UpstreamRead
-    type ReadResult: Debug + Send + 'static;
-
-    /// The type of results returned by write queries
-    ///
-    /// This type is used as the value inside of [`QueryResult::UpstreamWrite`][]
-    ///
-    /// [`QueryResult::UpstreamWrite`]: crate::backend::QueryResult::UpstreamWrite
-    type WriteResult: Debug + Send + 'static;
+    /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
+    type QueryResult: Debug + Send + 'static;
 
     /// A type representing metadata about a column in the schema.
     ///
@@ -71,7 +65,7 @@ pub trait UpstreamDatabase: Sized + Send {
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::ReadResult, Error>;
+    ) -> Result<Self::QueryResult, Error>;
 
     /// Execute a write statement that was prepared earlier with [`on_prepare`], with the given
     /// `params`
@@ -83,15 +77,15 @@ pub trait UpstreamDatabase: Sized + Send {
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::WriteResult, Error>;
+    ) -> Result<Self::QueryResult, Error>;
 
     /// Execute a raw, un-prepared read query
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::ReadResult, Error>
+    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
     /// Execute a raw, un-prepared write query
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::WriteResult, Error>
+    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 
@@ -101,7 +95,7 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         query: S,
-    ) -> Result<(Self::WriteResult, String), Error>
+    ) -> Result<(Self::QueryResult, String), Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 }

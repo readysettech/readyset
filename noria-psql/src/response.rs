@@ -1,5 +1,6 @@
 use crate::resultset::Resultset;
 use crate::schema::{NoriaSchema, SelectSchema};
+use crate::upstream;
 use noria_client::backend::noria_connector;
 use noria_client::backend::{self as cl, UpstreamPrepare};
 use psql_srv as ps;
@@ -90,13 +91,15 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
-            UpstreamRead(_rows) => {
+            Upstream(upstream::QueryResult::ReadResult { data: _rows }) => {
                 // TODO(grfn): Implement this
                 Err(ps::Error::Unimplemented(
                     "Handling of pgsql select results not yet implemented".to_string(),
                 ))
             }
-            UpstreamWrite(num_rows_affected) => Ok(Insert(num_rows_affected)),
+            Upstream(upstream::QueryResult::WriteResult { num_rows_affected }) => {
+                Ok(Insert(num_rows_affected))
+            }
         }
     }
 }
