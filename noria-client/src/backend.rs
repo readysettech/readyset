@@ -95,7 +95,7 @@ pub struct Reader<A: 'static + Authority, DB> {
     pub noria_connector: NoriaConnector<A>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum PreparedStatement {
     NoriaPrepStatement(u32),
     UpstreamPrepWrite(u32),
@@ -511,7 +511,7 @@ where
                     .await
                     .map(PrepareResult::Noria),
                 Writer::Upstream(connector) => {
-                    return connector.prepare(query).await.map(PrepareResult::Upstream);
+                    connector.prepare(query).await.map(PrepareResult::Upstream)
                 }
             },
             nom_sql::SqlQuery::Update(_) => match &mut self.writer {
@@ -520,7 +520,7 @@ where
                     .await
                     .map(PrepareResult::Noria),
                 Writer::Upstream(connector) => {
-                    return connector.prepare(query).await.map(PrepareResult::Upstream);
+                    connector.prepare(query).await.map(PrepareResult::Upstream)
                 }
             },
             _ => {
@@ -529,9 +529,10 @@ where
             }
         };
 
-        // Noria prepared queries
-        self.prepared_queries
-            .insert(self.prepared_count, parsed_query.to_owned());
+        if matches!(res, Ok(PrepareResult::Noria(_))) {
+            self.prepared_queries
+                .insert(self.prepared_count, parsed_query.to_owned());
+        }
 
         if let Ok(ref result) = res {
             self.store_prep_statement(result);
