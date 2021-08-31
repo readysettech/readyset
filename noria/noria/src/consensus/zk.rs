@@ -1,6 +1,7 @@
 // TODO: Replace how leader election is done and locking implementation of recipes from
 // https://zookeeper.apache.org/doc/current/recipes.html
 
+use std::collections::HashSet;
 use std::process;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::{self, Thread};
@@ -11,8 +12,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
-use super::CONTROLLER_KEY;
-use super::{Authority, LeaderPayload};
+use super::{Authority, AuthorityWorkerHeartbeatResponse, LeaderPayload, WorkerDescriptor};
+use super::{WorkerId, CONTROLLER_KEY, WORKER_PATH, WORKER_PREFIX};
 use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
 use backoff::backoff::Backoff;
@@ -54,6 +55,16 @@ pub struct ZookeeperAuthority {
 
     // Inner which contains state is only needed for server so making an Option.
     inner: Option<RwLock<ZookeeperAuthorityInner>>,
+}
+
+fn path_to_worker_id(path: &str) -> WorkerId {
+    // See `worker_id_to_prefix` for the type of path this is called on.
+    #[allow(clippy::unwrap_used)]
+    path[(path.rfind('-').unwrap() + 1)..].to_owned()
+}
+
+fn worker_id_to_path(id: &str) -> String {
+    WORKER_PREFIX.to_owned() + id
 }
 
 impl ZookeeperAuthority {
@@ -312,11 +323,58 @@ impl Authority for ZookeeperAuthority {
             Err(e) => bail!(e),
         }
     }
+
+    fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    where
+        WorkerDescriptor: Serialize,
+    {
+        // Attempt to create the base path in case we are the first worker.
+        let _ = self.zk.create(
+            WORKER_PATH,
+            Vec::new(),
+            Acl::open_unsafe().clone(),
+            CreateMode::Persistent,
+        );
+
+        let path = match self.zk.create(
+            WORKER_PREFIX,
+            serde_json::to_vec(&payload)?,
+            Acl::open_unsafe().clone(),
+            CreateMode::EphemeralSequential,
+        ) {
+            Ok(path) => path,
+            Err(ZkError::NodeExists) => return Ok(None),
+            Err(e) => bail!(e),
+        };
+        let worker_id = path_to_worker_id(&path);
+        Ok(Some(worker_id))
+    }
+
+    fn worker_heartbeat(&self, id: WorkerId) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+        let path = worker_id_to_path(&id);
+        Ok(match self.zk.exists(&path, false) {
+            Ok(Some(_)) => AuthorityWorkerHeartbeatResponse::Alive,
+            _ => AuthorityWorkerHeartbeatResponse::Failed,
+        })
+    }
+
+    fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+        let children = match self.zk.get_children(WORKER_PATH, false) {
+            Ok(v) => v,
+            Err(e) => bail!(e),
+        };
+        Ok(children
+            .into_iter()
+            .map(|path| path_to_worker_id(&path))
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::Url;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -324,7 +382,7 @@ mod tests {
     #[ignore]
     fn it_works() {
         let authority =
-            Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/concensus_it_works").unwrap());
+            Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/consensus_it_works").unwrap());
         assert!(authority.try_read::<u32>("/a").unwrap().is_none());
         assert_eq!(
             authority
@@ -335,7 +393,7 @@ mod tests {
         assert_eq!(authority.try_read("/a").unwrap(), Some(12));
 
         let payload = LeaderPayload {
-            controller_uri: url::Url::parse("a").unwrap(),
+            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
             nonce: 1,
         };
         let expected_leader_payload = payload.clone();
@@ -347,12 +405,55 @@ mod tests {
         {
             let authority = authority.clone();
             let payload = LeaderPayload {
-                controller_uri: url::Url::parse("b").unwrap(),
+                controller_uri: url::Url::parse("http://127.0.0.1:2182").unwrap(),
                 nonce: 2,
             };
             thread::spawn(move || authority.become_leader(payload).unwrap());
         }
         thread::sleep(Duration::from_millis(100));
         assert_eq!(&authority.get_leader().unwrap(), &expected_leader_payload);
+    }
+
+    #[test]
+    #[ignore]
+    fn retrieve_workers() {
+        let authority =
+            Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/retrieve_workers").unwrap());
+
+        let worker = WorkerDescriptor {
+            worker_uri: Url::parse("http://127.0.0.1").unwrap(),
+            reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
+            region: None,
+            reader_only: false,
+            volume_id: None,
+        };
+
+        let workers = authority.get_workers().unwrap();
+        assert!(workers.is_empty());
+
+        let worker_id = authority.register_worker(worker.clone()).unwrap().unwrap();
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 1);
+        assert!(workers.contains(&worker_id));
+        assert_eq!(
+            authority.worker_heartbeat(worker_id).unwrap(),
+            AuthorityWorkerHeartbeatResponse::Alive
+        );
+
+        let worker_id = authority.register_worker(worker).unwrap().unwrap();
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 2);
+        assert!(workers.contains(&worker_id));
+
+        // Kill the session, this should remove the keys from the worker set.
+        drop(authority);
+        let authority =
+            Arc::new(ZookeeperAuthority::new("127.0.0.1:2181/retrieve_workers").unwrap());
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(
+            authority.worker_heartbeat(worker_id).unwrap(),
+            AuthorityWorkerHeartbeatResponse::Failed
+        );
+        assert_eq!(workers.len(), 0);
     }
 }

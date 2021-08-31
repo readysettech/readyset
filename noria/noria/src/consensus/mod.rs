@@ -8,6 +8,9 @@
 use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::collections::HashSet;
+use std::net::SocketAddr;
+use url::Url;
 
 mod local;
 mod zk;
@@ -16,14 +19,45 @@ use crate::ControllerDescriptor;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::zk::ZookeeperAuthority;
 
+// TODO(justin): These keys should be encapsulated into their authorities.
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
+pub const WORKER_PATH: &str = "/workers";
+pub const WORKER_PREFIX: &str = "/workers/guid-";
 
 // This should be an associated type on Authority but since Authority will only have one possible
 // type inside of Noria, we are using a type alias here instead.
 // If Authority ever moves out of Noria, it should become an associated type.
 // LeaderPayload must be Serialize + DeserializeOwned + PartialEq
 type LeaderPayload = ControllerDescriptor;
+
+pub type VolumeId = String;
+pub type WorkerId = String;
+
+/// A response to a `worker_heartbeat`, to inform the worker of its
+/// status within the system.
+#[derive(Debug, PartialEq)]
+pub enum AuthorityWorkerHeartbeatResponse {
+    Alive,
+    Failed,
+}
+
+/// Initial registration request body, sent from workers to controllers.
+/// ///
+/// (used for the `/worker_rx/register` route)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WorkerDescriptor {
+    /// URI at which the worker can be reached.
+    pub worker_uri: Url,
+    /// Socket address the worker listens on for data-plane read queries.
+    pub reader_addr: SocketAddr,
+    /// The region the worker is located in.
+    pub region: Option<String>,
+    /// Whether or not this worker is used only to hold reader domains.
+    pub reader_only: bool,
+    /// The volume associated with this server.
+    pub volume_id: Option<VolumeId>,
+}
 
 pub trait Authority: Send + Sync {
     /// Attempt to become leader with a specific payload. The payload should be something that can
@@ -65,15 +99,19 @@ pub trait Authority: Send + Sync {
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned;
 
+    // Register a worker with their descriptor. Returns a unique identifier that represents this worker if successful.
+    fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    where
+        WorkerDescriptor: Serialize;
+
+    /// Workers run this function on a regular cadence to confirm current state. Returns a response
+    /// for next actions for this particular worker or if it should continue being a worker.
+    fn worker_heartbeat(&self, id: WorkerId) -> Result<AuthorityWorkerHeartbeatResponse, Error>;
+
+    /// Retrieves the current set of workers from the authority.
+    fn get_workers(&self) -> Result<HashSet<WorkerId>, Error>;
+
     // Currently all these APIs do not exist but are planned to.
-
-    // type WorkerPayload;
-
-    // Register a worker with a payload. Returns a unique identifier that represents this worker if successful.
-    // Payload can be updated with update_worker_payload.
-    //fn register_worker(&self, payload: WorkerPayload) -> Result<Option<ID>, Error>
-    //where
-    //    WorkerPayload: Serialize;
 
     // After registering as a worker, the authority will have an ID. This method returns that ID.
     //fn get_id(&self) -> Result<Option<ID>, Error>;
@@ -87,10 +125,6 @@ pub trait Authority: Send + Sync {
     //fn update_worker_payload(&self, payload: WorkerPayload) -> Result<(), Error
     //where
     //    WorkerPayload: Serialize;
-
-    // Workers run this function on a regular cadence to confirm current state. Returns a response
-    // for next actions for this particular worker or if it should continue being a worker.
-    //fn worker_heartbeat(&self) -> Result<AuthorityWorkerHeartbeatResponse, Error>;
 
     // Attempt to grab the lock to become leader. The status of this will be returned on the next
     // heartbeat. Will return an Err if this worker should not be attempting this.
