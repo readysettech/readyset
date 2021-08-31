@@ -350,6 +350,10 @@ where
                     rw.finish().await
                 }
             }
+            Ok(QueryResult::Upstream(upstream::QueryResult::None)) => {
+                let rw = results.start(&[]).await?;
+                rw.finish().await
+            }
             Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
                 code,
                 message,

@@ -279,23 +279,57 @@ where
         self.prepared_count
     }
 
+    // Returns whether we are in a transaction currently or not. Transactions are only supported
+    // over fallback, so if we have no fallback connector we return false.
+    fn is_in_tx(&self) -> bool {
+        if let Some(db) = self.reader.upstream.as_ref() {
+            db.is_in_tx()
+        } else {
+            false
+        }
+    }
+
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
-        let is_read = is_read(query);
         let upstream = self
             .reader
             .upstream
             .as_mut()
             .ok_or(ReadySetError::FallbackNoConnector)?;
 
-        if is_read {
+        if is_read(query) {
             upstream.handle_read(query).await.map(QueryResult::Upstream)
         } else {
             upstream
                 .handle_write(query)
                 .await
                 .map(QueryResult::Upstream)
+        }
+    }
+
+    /// Should only be called with a nom_sql::SqlQuery that is of type StartTransaction, Commit, or
+    /// Rollback. Used to handle transaction boundary queries.
+    pub async fn handle_transaction_boundaries(
+        &mut self,
+        query: nom_sql::SqlQuery,
+    ) -> Result<QueryResult<DB>, DB::Error> {
+        let upstream = self
+            .reader
+            .upstream
+            .as_mut()
+            .ok_or(ReadySetError::FallbackNoConnector)?;
+
+        match query {
+            nom_sql::SqlQuery::StartTransaction(_) => {
+                upstream.start_tx().await.map(QueryResult::Upstream)
+            }
+            nom_sql::SqlQuery::Commit(_) => upstream.commit().await.map(QueryResult::Upstream),
+            nom_sql::SqlQuery::Rollback(_) => upstream.rollback().await.map(QueryResult::Upstream),
+            _ => {
+                error!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
+                internal!("handle_transaction_boundary was called with a SqlQuery that was not of type StartTransaction, Commit, or Rollback");
+            }
         }
     }
 
@@ -480,6 +514,17 @@ where
 
         let span = span!(Level::DEBUG, "prepare", query);
         let _g = span.enter();
+
+        if self.is_in_tx() {
+            let res = self
+                .prepare_fallback(query)
+                .await
+                .map(PrepareResult::Upstream);
+            if let Ok(ref result) = res {
+                self.store_prep_statement(result);
+            }
+            return res;
+        }
 
         let res = self.parse_query(query, false);
         let parsed_query = match res {
@@ -668,6 +713,14 @@ where
         let _g = span.enter();
 
         let start = time::Instant::now();
+
+        if self.is_in_tx() {
+            let res = self.query_fallback(query).await?;
+            if self.slowlog {
+                warn_on_slow_query(&start, query);
+            }
+            return Ok(res);
+        }
 
         let parse_result = self.parse_query(query, true);
         let parse_time = start.elapsed().as_micros();
@@ -858,6 +911,11 @@ where
                         .handle_write(&parsed_query.to_string())
                         .await
                         .map(QueryResult::Upstream),
+                    nom_sql::SqlQuery::StartTransaction(_)
+                    | nom_sql::SqlQuery::Commit(_)
+                    | nom_sql::SqlQuery::Rollback(_) => {
+                        self.handle_transaction_boundaries(parsed_query).await
+                    }
                     _ => self.query_fallback(query).await,
                 }
             }

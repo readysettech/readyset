@@ -29,6 +29,7 @@ pub enum QueryResult {
         data: Vec<Row>,
         columns: Option<Arc<[Column]>>,
     },
+    None,
 }
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
@@ -36,6 +37,7 @@ pub struct MySqlUpstream {
     conn: Conn,
     prepared_statements: HashMap<StatementID, mysql_async::Statement>,
     url: String,
+    in_transaction: bool,
 }
 
 #[derive(Debug)]
@@ -74,6 +76,7 @@ impl UpstreamDatabase for MySqlUpstream {
             conn,
             prepared_statements,
             url,
+            in_transaction: false,
         })
     }
 
@@ -204,5 +207,46 @@ impl UpstreamDatabase for MySqlUpstream {
             },
             txid,
         ))
+    }
+
+    async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
+        if self.in_transaction {
+            return Err(
+                mysql_async::Error::Driver(mysql_async::DriverError::NestedTransaction).into(),
+            );
+        }
+
+        self.conn.query_drop("START TRANSACTION").await?;
+
+        self.in_transaction = true;
+        Ok(QueryResult::None)
+    }
+
+    fn is_in_tx(&self) -> bool {
+        self.in_transaction
+    }
+
+    async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
+        if !self.in_transaction {
+            return Err(Error::ReadySet(ReadySetError::NoOngoingTransaction));
+        }
+
+        let result = self.conn.query_iter("COMMIT").await?;
+        result.drop_result().await?;
+        self.in_transaction = false;
+
+        Ok(QueryResult::None)
+    }
+
+    async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
+        if !self.in_transaction {
+            return Err(Error::ReadySet(ReadySetError::NoOngoingTransaction));
+        }
+
+        let result = self.conn.query_iter("ROLLBACK").await?;
+        result.drop_result().await?;
+        self.in_transaction = false;
+
+        Ok(QueryResult::None)
     }
 }
