@@ -1,0 +1,181 @@
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+SELECT @@max_allowed_packet
+
+
+statement ok
+DROP TABLE IF EXISTS payment
+
+
+statement ok
+CREATE TABLE payment (		customer_id INT NOT NULL,		amount INT NOT NULL,		account_name TEXT	)
+
+
+query  rowsort
+INSERT INTO payment (customer_id, amount, account_name) VALUES (?, ?, ?)
+? = 1
+? = 2
+? = NULL
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+INSERT INTO payment (customer_id, amount, account_name) VALUES (?, ?, ?)
+? = 3
+? = 4
+? = foo
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+INSERT INTO payment (customer_id, amount, account_name) VALUES (?, ?, ?)
+? = 5
+? = 6
+? = NULL
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+INSERT INTO payment (customer_id, amount, account_name) VALUES (?, ?, ?)
+? = 7
+? = 8
+? = NULL
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+INSERT INTO payment (customer_id, amount, account_name) VALUES (?, ?, ?)
+? = 9
+? = 10
+? = bar
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+SELECT		customer_id,		amount,		account_name	FROM		payment
+----
+15 values hashing to bb865c2c5b6b4e3574d8db005044e17f
+
+query  rowsort
+UPDATE payment SET account_name = ? WHERE (customer_id = ?)
+? = foobar
+? = 5
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+SELECT		customer_id,		amount,		account_name	FROM		payment
+----
+15 values hashing to daf6c27d29ef8e82f65528b8263e3d30
+
+query  rowsort
+DELETE FROM payment WHERE (customer_id = ?)
+? = 9
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+SELECT		customer_id,		amount,		account_name	FROM		payment
+----
+12 values hashing to e1b33f2a7ee95b39a3d184e5ca796359
+
+statement ok
+DROP TABLE payment
+
+
+statement error
+SELECT		customer_id,		amount,		account_name	FROM		payment
+
+
+statement ok
+CREATE TABLE `a` (		`one` int NOT NULL,		`two` int NOT NULL,		PRIMARY KEY(`one`, `two`)	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+
+
+query  nosort
+SELECT		column_name column_name,		data_type data_type,		column_type full_data_type,		character_maximum_length character_maximum_length,		numeric_precision numeric_precision,		numeric_scale numeric_scale,		datetime_precision datetime_precision,		column_default column_default,		is_nullable is_nullable,		extra extra,		table_name table_name	FROM information_schema.columns	WHERE table_schema = 'test'	ORDER BY ordinal_position
+----
+22 values hashing to 977d1157d9750d8916317babf2e18339
+
+query  nosort
+SELECT column_name AS column_name, data_type AS data_type, column_type AS full_data_type, character_maximum_length AS character_maximum_length, numeric_precision AS numeric_precision, numeric_scale AS numeric_scale, datetime_precision AS datetime_precision, column_default AS column_default, is_nullable AS is_nullable, extra AS extra, table_name AS table_name FROM information_schema.columns WHERE (table_schema = ?) ORDER BY ordinal_position ASC
+? = test
+----
+22 values hashing to 977d1157d9750d8916317babf2e18339
+
+statement ok
+CREATE TABLE `ScalarModel` (		`id` VARCHAR(191) NOT NULL,		`optString` VARCHAR(191),		`optInt` INTEGER,		`optFloat` DOUBLE,		`optBoolean` BOOLEAN,		`optEnum` ENUM('A', 'B'),		`optDateTime` DATETIME(3),		`optUnique` VARCHAR(191),		`createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),		`relId` VARCHAR(191),		UNIQUE INDEX `ScalarModel.optUnique_unique`(`optUnique`),		PRIMARY KEY (`id`)	) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+
+
+statement ok
+CREATE TABLE `RelatedModel` (		`id` VARCHAR(191) NOT NULL,		PRIMARY KEY (`id`)	) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+
+
+statement ok
+ALTER TABLE `ScalarModel` ADD FOREIGN KEY (`relId`) REFERENCES `RelatedModel`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+
+
+query  rowsort
+INSERT INTO ScalarModel (id, optString, optInt, optFloat, optBoolean, optEnum, optDateTime) VALUES (?, ?, ?, ?, ?, ?, ?)
+? = ckmayvmxx0000roj6dynmo5uj
+? = lala@฿@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@😠😡😢😣😤😥😦😧😨😩😪😫😬😭😮😯😰😱😲😳😴😵😶😷😸😹😺😻😼😽😾😿🙀🙁🙂🙃🙄🙅🙆🙇🙈🙉🙊🙋🙌🙍🙎🙏@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ठडढणतथदधनऩपफबभमयर@@@@@@@@@@@@@@@@@@@@@
+? = 1337
+? = 1.234
+? = 1
+? = A
+? = 2016-07-31 23:59:01
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+query  rowsort
+SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL
+----
+2 values hashing to 93bdf7b6e06a25bb1be795e3489ce239
+
+statement ok
+ALTER TABLE `ScalarModel` DROP FOREIGN KEY `ScalarModel_ibfk_1`
+
+
+query  rowsort
+SHOW TABLES
+----
+3 values hashing to 1c5a0237c9f05f721770b683c70619ae
+
+statement ok
+DROP TABLE `RelatedModel`,`ScalarModel`,`a`
+
