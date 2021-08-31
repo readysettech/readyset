@@ -1080,7 +1080,7 @@ async fn it_works_with_arithmetic_aliases() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("it_recovers_persisted_bases");
     let persistence_params = PersistenceParameters::new(
@@ -1120,6 +1120,7 @@ async fn it_recovers_persisted_bases() {
 
     sleep().await;
 
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let mut g = Builder::default();
     g.set_persistence(persistence_params);
     g.log_with(crate::logger_pls());
@@ -1141,7 +1142,8 @@ async fn it_recovers_persisted_bases() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases_with_volume_id() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
     let dir = tempfile::tempdir().unwrap();
     let path = dir
         .path()
@@ -1184,6 +1186,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
 
     sleep().await;
 
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let mut g = Builder::default();
     g.set_persistence(persistence_params);
     g.set_volume_id("ef731j2".into());
@@ -1250,6 +1253,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     sleep().await;
 
     let mut g = Builder::default();
+    let authority = Arc::new(LocalAuthority::new());
     g.set_persistence(persistence_params);
     g.set_volume_id("j3131t8".into());
     g.log_with(crate::logger_pls());
@@ -1417,7 +1421,7 @@ async fn table_connection_churn() {
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir
@@ -1460,8 +1464,9 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
 
     sleep().await;
 
-    // Create a new controller with the same authority, and make sure that it recovers to the same
+    // Create a new controller with the same authority store, and make sure that it recovers to the same
     // state that the other one had.
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
     let mut g = g.start(authority.clone()).await.unwrap();
@@ -1478,7 +1483,8 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
-    let authority = Arc::new(LocalAuthority::new());
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
     let dir = tempfile::tempdir().unwrap();
     let path = dir
         .path()
@@ -1521,8 +1527,9 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
 
     sleep().await;
 
-    // Create a new controller with the same authority, and make sure that it recovers to the same
+    // Create a new controller with the same authority store, and make sure that it recovers to the same
     // state that the other one had.
+    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let mut g = Builder::default();
     g.set_persistence(persistence_parameters);
     g.set_volume_id("ef731j2".into());
@@ -4773,7 +4780,8 @@ async fn left_join_null() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_view_includes_replicas() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let w1_authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
+    let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "view_includes_replicas";
 
     let mut w1 = build_custom(
@@ -4781,7 +4789,7 @@ async fn test_view_includes_replicas() {
         Some(DEFAULT_SHARDING),
         false,
         true,
-        authority.clone(),
+        w1_authority,
         Some("r1".try_into().unwrap()),
         false,
     )
@@ -4797,7 +4805,7 @@ async fn test_view_includes_replicas() {
         Some(DEFAULT_SHARDING),
         false,
         false,
-        authority.clone(),
+        w2_authority,
         Some("r2".try_into().unwrap()),
         false,
     )
@@ -6394,7 +6402,8 @@ async fn distinct_select_with_distinct_agg_sharded() {
 #[tokio::test(flavor = "multi_thread")]
 async fn assign_nonreader_domains_to_nonreader_workers() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let w1_authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
+    let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "assign_nonreader_domains_to_nonreader_workers";
 
     let mut w1 = build_custom(
@@ -6402,7 +6411,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         Some(DEFAULT_SHARDING),
         true,
         true,
-        authority.clone(),
+        w1_authority,
         None,
         true,
     )
@@ -6427,7 +6436,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         Some(DEFAULT_SHARDING),
         true,
         false,
-        authority.clone(),
+        w2_authority,
         None,
         false,
     )
@@ -6496,7 +6505,8 @@ async fn replicate_to_unavailable_worker() {
     use crate::logger_pls;
 
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let w1_authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
+    let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "replicate_to_non_existent_worker";
 
     let mut builder = Builder::default();
@@ -6510,7 +6520,7 @@ async fn replicate_to_unavailable_worker() {
 
     let mut w1 = builder
         .clone()
-        .start_local_custom(authority.clone())
+        .start_local_custom(w1_authority)
         .await
         .unwrap();
 
@@ -6521,7 +6531,7 @@ async fn replicate_to_unavailable_worker() {
     .await
     .unwrap();
 
-    let w2 = builder.start(authority).await.unwrap();
+    let w2 = builder.start(w2_authority).await.unwrap();
 
     sleep().await;
 

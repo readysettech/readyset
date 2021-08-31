@@ -10,14 +10,14 @@ use hyper::http::{Method, StatusCode};
 use launchpad::select;
 use noria::ControllerDescriptor;
 use noria::{
-    consensus::{Authority, STATE_KEY},
+    consensus::{Authority, GetLeaderResult, STATE_KEY},
     ReplicationOffset,
 };
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::{self, sleep, JoinHandle};
+use std::thread::sleep;
 use std::time;
 use std::time::Duration;
 use stream_cancel::Valve;
@@ -32,6 +32,17 @@ mod mir_to_flow;
 pub(crate) mod recipe; // crate viz for tests
 pub(crate) mod schema;
 pub(crate) mod sql; // crate viz for tests
+
+/// The maximum number of times to attempt to retrieve the
+/// current leader's state before throwing an error.
+const MAX_LEADER_STATE_GET_ATTEMPTS: usize = 5;
+
+/// Time between leader state change checks without thread parking.
+const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+/// Time between leader state retrieval attempts.
+const LEADER_STATE_RETRIEVE_INTERVAL: Duration = Duration::from_secs(1);
+/// Amount of time to park the thread for if we are watching on the authority.
+const THREAD_PARK_DURATION: Duration = Duration::from_secs(60);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -51,7 +62,7 @@ pub struct NodeRestrictionKey {
     shard: usize,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
 
@@ -106,6 +117,7 @@ impl Worker {
 type WorkerIdentifier = Url;
 
 /// An update on the leader election and failure detection.
+#[derive(Debug)]
 pub(crate) enum AuthorityUpdate {
     /// The current leader has changed.
     ///
@@ -409,100 +421,120 @@ where
     }
 }
 
-pub(crate) fn authority_runner<A: Authority + 'static>(
+/// Manages this authority's leader election state and sends update
+/// along `event_tx` when the state changes.
+struct AuthorityLeaderElectionState<A>
+where
+    A: Authority + 'static,
+{
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
     config: Config,
-    rt_handle: tokio::runtime::Handle,
-    region: Option<String>,
-) -> JoinHandle<()> {
-    let handle = rt_handle.clone();
-    let authority_inner = move |event_tx: Sender<AuthorityUpdate>| -> Result<(), anyhow::Error> {
-        let payload_to_event =
-            |descriptor: ControllerDescriptor| -> Result<AuthorityUpdate, anyhow::Error> {
-                let state: ControllerState = authority
-                    .try_read(STATE_KEY)?
-                    .ok_or_else(|| anyhow!("Key does not yet exist"))?;
-                Ok(AuthorityUpdate::LeaderChange(state, descriptor))
-            };
+    handle: tokio::runtime::Handle,
+    /// True if we are eligible to become the leader.
+    leader_eligible: bool,
+}
 
-        let mut retries = 5;
-        let mut leader_state_retries = 5;
+impl<A> AuthorityLeaderElectionState<A>
+where
+    A: Authority + 'static,
+{
+    fn new(
+        event_tx: Sender<AuthorityUpdate>,
+        authority: Arc<A>,
+        descriptor: ControllerDescriptor,
+        config: Config,
+        handle: tokio::runtime::Handle,
+        region: Option<String>,
+    ) -> Self {
+        // We are eligible to be a leader if we are in the primary region.
+        let can_be_leader = if let Some(pr) = &config.primary_region {
+            matches!(&region, Some(r) if pr == r)
+        } else {
+            true
+        };
+
+        Self {
+            event_tx,
+            authority,
+            descriptor,
+            config,
+            handle,
+            leader_eligible: can_be_leader,
+        }
+    }
+
+    /// Repeatedly tries to retrieve the leader's state from `STATE_KEY`.
+    /// The key may not yet exist as a delay is possible between becoming
+    /// the leader and writing your state.
+    fn retrieve_leader_state(&self, retry_attempts: usize) -> anyhow::Result<ControllerState> {
+        let mut retries = retry_attempts;
         loop {
-            // WORKER STATE - watch for leadership changes
-            //
-            // If there is currently a leader, then loop until there is a period without a
-            // leader, notifying the main thread every time a leader change occurs.
-            if let Some(leader) = authority.try_get_leader()? {
-                retries = 5;
-                if let Err(e) = rt_handle.block_on(async {
-                    event_tx
-                        .send(payload_to_event(leader)?)
-                        .await
-                        .map_err(|_| format_err!("send failed"))?;
-                    while let Some(leader) =
-                        tokio::task::block_in_place(|| authority.await_new_leader())?
-                    {
-                        event_tx
-                            .send(payload_to_event(leader)?)
-                            .await
-                            .map_err(|_| format_err!("send failed"))?;
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }) {
-                    // If there is an error reading from the state key, or communicating
-                    // with the leader, we retry up to 5 times.
-                    leader_state_retries -= 1;
-                    if leader_state_retries <= 0 {
-                        internal!(
+            let state = self
+                .authority
+                .try_read(STATE_KEY)?
+                .ok_or_else(|| anyhow!("Key does not yet exist"));
+
+            if let Err(e) = state {
+                retries -= 1;
+
+                if retries == 0 {
+                    internal!(
                             "After five attempts to read from the leader, we are still unable to. Last error: {}", e
-                        )
-                    }
-                    continue;
+                        );
                 }
+
+                sleep(LEADER_STATE_RETRIEVE_INTERVAL);
+                continue;
             }
 
-            // We check if there's a primary region configured
-            if let Some(pr) = &config.primary_region {
-                match &region {
-                    // If there's a primary region configured and we are in the same region,
-                    // then we can try to become leader.
-                    Some(r) if pr == r => (),
-                    // Otherwise, we won't participate on leader election, and will
-                    // only continue checking if the leader changed.
-                    _ => {
-                        // We decrease our retry counter.
-                        retries -= 1;
-                        // If we reached the maximum number of retries, this means no other Worker
-                        // was present on the primary region to take over as the new Controller.
-                        // Hence, we just return an error and exit.
-                        if retries <= 0 {
-                            internal!("After five attempts to find a leader, no leader was elected in the primary region.")
-                        }
-                        // If we didn't reach the maximum number of retries, then sleep
-                        // for a while before starting the whole process again.
-                        sleep(Duration::from_secs(5));
-                        continue;
-                    }
-                }
+            return state;
+        }
+    }
+
+    fn maybe_watch_leader(&self) -> anyhow::Result<()> {
+        if self.authority.can_watch() {
+            self.authority.watch_leader()?;
+        }
+        Ok(())
+    }
+
+    fn update_leader_state(&self) -> anyhow::Result<()> {
+        let mut should_attempt_leader_election = false;
+        match self.authority.try_get_leader()? {
+            // The leader has changed, inform the worker.
+            GetLeaderResult::NewLeader(payload) => {
+                let leader_state = self.retrieve_leader_state(MAX_LEADER_STATE_GET_ATTEMPTS)?;
+                let authority_update = AuthorityUpdate::LeaderChange(leader_state, payload);
+                self.handle
+                    .block_on(self.event_tx.send(authority_update))
+                    .map_err(|_| format_err!("send failed"))?;
             }
 
-            // ELECTION STATE - attempt to become leader
-            //
-            // Becoming leader requires creating an ephemeral key and then doing an atomic
-            // update to another.
-            // TODO(harley): This still needs to be cleaned up further but leaving for now to minimize changes
-            let _leader_descriptor = match authority.become_leader(descriptor.clone())? {
-                Some(leader_descriptor) => leader_descriptor,
-                None => continue,
-            };
-            let state = authority.read_modify_write(
+            GetLeaderResult::NoLeader if self.leader_eligible => {
+                should_attempt_leader_election = true;
+            }
+            _ => {}
+        }
+
+        if should_attempt_leader_election {
+            // If we fail to become the leader restart, go back to checking for a new leader.
+            if self
+                .authority
+                .become_leader(self.descriptor.clone())?
+                .is_none()
+            {
+                return Ok(());
+            }
+
+            // We are the new leader, attempt to update the leader state with our state.
+            let state = self.authority.read_modify_write(
                 STATE_KEY,
                 |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                     match state {
                         None => Ok(ControllerState {
-                            config: config.clone(),
+                            config: self.config.clone(),
                             recipe_version: 0,
                             recipes: vec![],
                             replication_offset: None,
@@ -512,50 +544,92 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
                             // check that running config is compatible with the new
                             // configuration.
                             assert_eq!(
-                                state.config, config,
+                                state.config, self.config,
                                 "Config in Zk is not compatible with requested config!"
                             );
-                            state.config = config.clone();
+                            state.config = self.config.clone();
                             Ok(state)
                         }
                     }
                 },
             )?;
             if state.is_err() {
-                continue;
+                return Ok(());
             }
 
-            // LEADER STATE - manage system
-            //
-            // It is not currently possible to safely handle involuntary loss of leadership status
-            // (and there is nothing that can currently trigger it), so don't bother watching for
-            // it.
-            rt_handle.block_on(async move {
-                event_tx
-                    .send(AuthorityUpdate::WonLeaderElection(state.clone().unwrap()))
-                    .await
-                    .map_err(|_| format_err!("failed to announce who won leader election"))?;
-                event_tx
-                    .send(AuthorityUpdate::LeaderChange(
-                        state.unwrap(),
-                        descriptor.clone(),
-                    ))
-                    .await
-                    .map_err(|_| format_err!("failed to announce leader change"))?;
-                Ok::<(), anyhow::Error>(())
-            })?;
-            break Ok(());
-        }
-    };
+            // Notify our worker that we have won the leader election.
+            self.handle
+                .block_on(
+                    self.event_tx
+                        .send(AuthorityUpdate::WonLeaderElection(state.clone().unwrap())),
+                )
+                .map_err(|_| format_err!("failed to announce who won leader election"))?;
 
-    thread::Builder::new()
+            self.handle
+                .block_on(self.event_tx.send(AuthorityUpdate::LeaderChange(
+                    state.unwrap(),
+                    self.descriptor.clone(),
+                )))
+                .map_err(|_| format_err!("failed to announce leader change"))?;
+        }
+
+        Ok(())
+    }
+}
+
+fn authority_inner<A: Authority + 'static>(
+    event_tx: Sender<AuthorityUpdate>,
+    authority: Arc<A>,
+    descriptor: ControllerDescriptor,
+    config: Config,
+    handle: tokio::runtime::Handle,
+    region: Option<String>,
+) -> anyhow::Result<()> {
+    let leader_election_state = AuthorityLeaderElectionState::new(
+        event_tx,
+        authority.clone(),
+        descriptor,
+        config,
+        handle,
+        region,
+    );
+
+    loop {
+        leader_election_state.update_leader_state()?;
+
+        leader_election_state.maybe_watch_leader()?;
+        if authority.can_watch() {
+            std::thread::park_timeout(THREAD_PARK_DURATION);
+        } else {
+            sleep(LEADER_STATE_CHECK_INTERVAL);
+        }
+    }
+}
+
+pub(crate) fn authority_runner<A: Authority + 'static>(
+    event_tx: Sender<AuthorityUpdate>,
+    authority: Arc<A>,
+    descriptor: ControllerDescriptor,
+    config: Config,
+    handle: tokio::runtime::Handle,
+    region: Option<String>,
+) -> anyhow::Result<()> {
+    std::thread::Builder::new()
         .name("srv-authority".to_owned())
         .spawn(move || {
-            if let Err(e) = authority_inner(event_tx.clone()) {
+            if let Err(e) = authority_inner(
+                event_tx.clone(),
+                authority,
+                descriptor,
+                config,
+                handle.clone(),
+                region,
+            ) {
                 let _ = handle.block_on(event_tx.send(AuthorityUpdate::AuthorityError(e)));
             }
-        })
-        .unwrap()
+        })?;
+
+    Ok(())
 }
 
 #[cfg(test)]

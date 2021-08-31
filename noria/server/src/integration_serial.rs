@@ -210,7 +210,8 @@ async fn test_metrics_client() {
 #[serial]
 async fn reader_replication() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
-    let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+    let w1_authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
+    let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "reader_replication";
 
     let mut w1 = build_custom(
@@ -218,7 +219,7 @@ async fn reader_replication() {
         Some(DEFAULT_SHARDING),
         true,
         true,
-        authority.clone(),
+        w1_authority,
         None,
         false,
     )
@@ -235,7 +236,7 @@ async fn reader_replication() {
         Some(DEFAULT_SHARDING),
         true,
         false,
-        authority.clone(),
+        w2_authority,
         None,
         false,
     )
