@@ -8,20 +8,23 @@
 //!
 //! The LocalAuthority stores effectively a "cache" of what it was able to get
 //! from LocalAuthorityStore when it last checked in.
-use std::collections::BTreeMap;
+use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use super::CONTROLLER_KEY;
-use super::{Authority, LeaderPayload};
+use super::{
+    Authority, AuthorityWorkerHeartbeatResponse, LeaderPayload, WorkerDescriptor, WorkerId,
+};
+use super::{CONTROLLER_KEY, WORKER_PATH};
 use crate::errors::internal_err;
 
 struct LocalAuthorityStoreInner {
     keys: BTreeMap<String, Vec<u8>>,
     leader_epoch: u64,
+    next_worker_id: u64,
 }
 
 /// LocalAuthorityStore represents a global consensus system but in a single
@@ -51,6 +54,7 @@ impl LocalAuthorityStore {
             inner: Mutex::new(LocalAuthorityStoreInner {
                 keys: BTreeMap::default(),
                 leader_epoch: 0,
+                next_worker_id: 0,
             }),
             cv: Condvar::new(),
         }
@@ -260,11 +264,57 @@ impl Authority for LocalAuthority {
         let store_inner = self.store.inner_lock()?;
         Ok(store_inner.keys.get(path).cloned())
     }
+
+    fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    where
+        WorkerDescriptor: Serialize,
+    {
+        let mut store_inner = self.store.inner_lock()?;
+        let next_id = store_inner.next_worker_id;
+        store_inner.next_worker_id += 1;
+
+        let path = WORKER_PATH.to_string() + "/" + &next_id.to_string();
+
+        if let Entry::Vacant(e) = store_inner.keys.entry(path) {
+            e.insert(serde_json::to_vec(&payload)?);
+            return Ok(Some(next_id.to_string()));
+        }
+
+        Err(anyhow!("Error registering worker"))
+    }
+
+    fn worker_heartbeat(&self, id: WorkerId) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+        let store_inner = self.store.inner_lock()?;
+        let path = WORKER_PATH.to_string() + "/" + &id;
+        Ok(if store_inner.keys.contains_key(&path) {
+            AuthorityWorkerHeartbeatResponse::Alive
+        } else {
+            AuthorityWorkerHeartbeatResponse::Failed
+        })
+    }
+
+    fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+        let store_inner = self.store.inner_lock()?;
+        let worker_prefix = WORKER_PATH.to_string();
+
+        Ok(store_inner
+            .keys
+            .range(worker_prefix.clone()..)
+            .take_while(|(k, _)| k.starts_with(&worker_prefix))
+            .map(|(k, _)| {
+                // The worker path is always in the format: /workers/<id>
+                #[allow(clippy::unwrap_used)]
+                k[(k.rfind('/').unwrap() + 1)..].to_owned()
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::Url;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -305,5 +355,36 @@ mod tests {
         }
         thread::sleep(Duration::from_millis(100));
         assert_eq!(authority.get_leader().unwrap(), leader_payload);
+    }
+
+    #[test]
+    fn retrieve_workers() {
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+
+        let worker = WorkerDescriptor {
+            worker_uri: Url::parse("http://127.0.0.1").unwrap(),
+            reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
+            region: None,
+            reader_only: false,
+            volume_id: None,
+        };
+
+        let workers = authority.get_workers().unwrap();
+        assert!(workers.is_empty());
+
+        let worker_id = authority.register_worker(worker.clone()).unwrap().unwrap();
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 1);
+        assert!(workers.contains(&worker_id));
+        assert_eq!(
+            authority.worker_heartbeat(worker_id).unwrap(),
+            AuthorityWorkerHeartbeatResponse::Alive
+        );
+
+        let worker_id = authority.register_worker(worker).unwrap().unwrap();
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 2);
+        assert!(workers.contains(&worker_id));
     }
 }
