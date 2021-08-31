@@ -1,4 +1,0 @@
-enable_list:
-  - no-log-password
-  - no-same-owner
-  - yaml

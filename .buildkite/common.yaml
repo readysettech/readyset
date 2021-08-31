@@ -247,7 +247,7 @@ steps:
       ecr#v2.2.0:
         login: true
 
-  - label: ':terraform: Lint Terraform module readyset'
+  - label: ':terraform: Format/Validate/Lint readyset module'
     depends_on:
     - build-ops-image
     commands:
@@ -263,23 +263,53 @@ steps:
     - ecr#v2.2.0:
         login: true
 
-  - label: ':ansible: Lint Ansible for Packer provisioners'
-    key: ansible-lint
+  - label: ':packer: Format/Validate new-images'
+    key: ops-packer-lint
     depends_on:
     - build-ops-image
-    command:
-      - cd /workdir/ops/images/provisioners/ansible
-      - ansible-lint
+    commands:
+    - cd /workdir/ops/new-images
+    - packer fmt -check -diff .
+    - packer init .
+    - packer validate .
     plugins:
-      - docker#v3.7.0:
-          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-      - ecr#v2.2.0:
-          login: true
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.2.0:
+        login: true
+
+  - label: ':shell::heavy_check_mark: shellcheck all scripts'
+    key: ops-shellcheck
+    depends_on:
+    - build-ops-image
+    commands:
+    - cd /workdir/ops/new-images
+    - find -name "*.sh" -type f -exec shellcheck {} \;
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.2.0:
+        login: true
+
+  # TODO: Eventually their will be a base image and other images that will be in different steps
+  - label: ':packer: Run test build for all new-images'
+    depends_on:
+    - build-ops-image
+    - ops-packer-lint
+    - ops-shellcheck
+    commands:
+    - cd /workdir/ops/new-images
+    - packer init .
+    - packer build .
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.2.0:
+        login: true
 
   - label: ':pipeline: Upload Packer linting steps'
     depends_on:
     - build-ops-image
-    - ansible-lint
     command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
     env:
       ONLY_VALIDATE: 1

@@ -72,13 +72,21 @@ steps:
               include:
                 - "ops/**"
 
-            - label: ':terraform: Lint Terraform module readyset'
+            - label: ':terraform: Format/Validate/Lint readyset module'
               include:
                 - "ops/tf/**"
 
-            - label: ':ansible: Lint Ansible for Packer provisioners'
+            - label: ':packer: Format/Validate new-images'
               include:
-                - "ops/images/**"
+                - "ops/new-images/**"
+
+            - label: ':shell::heavy_check_mark: shellcheck all scripts'
+              include:
+                - "ops/new-images/**"
+
+            - label: ':packer: Run test build for all new-images'
+              include:
+                - "ops/new-images/**"
 
             - label: ':pipeline: Upload Packer linting steps'
               include:

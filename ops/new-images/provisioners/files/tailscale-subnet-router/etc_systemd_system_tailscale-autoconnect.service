@@ -5,7 +5,7 @@ Wants=network-pre.target tailscaled.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/tailscale-autoconnect
+ExecStart=/usr/local/bin/tailscale-autoconnect.sh
 
 [Install]
 WantedBy=multi-user.target

@@ -7,11 +7,11 @@ sleep 2
 
 # Check to see if we are already authenticated to tailscale
 status="$(/usr/bin/tailscale status -json | /usr/bin/jq -r .BackendState)"
-if [ $status = "Running" ]; then # if so, then do nothing
+if [ "$status" = "Running" ]; then # if so, then do nothing
     exit 0
 fi
 
 # Otherwise authenticate with Tailscale announcing the VPC's CIDR block from the network account.
 /usr/bin/tailscale up \
--authkey "$(aws ssm get-parameter --name /tailscale/subnet_router/AUTH_KEY --with-decryption --output text --query Parameter.Value)" \
--advertise-routes "$(aws ec2 describe-vpcs --filters Name="owner-id",Values="911245771907" | jq '[.Vpcs[].CidrBlock] | join(\",\")')"
+-authkey "$(aws ssm get-parameter --name /tailscale/subnet_router/AUTHKEY --with-decryption --output text --query Parameter.Value)" \
+-advertise-routes "$(aws ec2 describe-vpcs --filters Name=\"owner-id\",Values=\"911245771907\" | jq '[.Vpcs[].CidrBlock] | join(\",\")')"

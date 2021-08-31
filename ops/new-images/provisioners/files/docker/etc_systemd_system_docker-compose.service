@@ -1,0 +1,20 @@
+[Unit]
+Description=Docker Compose
+After=docker.service network-online.target
+Requires=docker.service network-online.target
+
+[Service]
+WorkingDirectory=/etc/docker-compose
+Type=oneshot
+RemainAfterExit=yes
+
+ExecStartPre=/usr/local/bin/docker-compose pull -f /etc/docker-compose/docker-compose.yml --quiet
+ExecStart=/usr/local/bin/docker-compose up -f /etc/docker-compose/docker-compose.yml -d
+
+ExecStop=/usr/local/bin/docker-compose down -f /etc/docker-compose/docker-compose.yml
+
+ExecReload=/usr/local/bin/docker-compose pull -f /etc/docker-compose/docker-compose.yml --quiet
+ExecReload=/usr/local/bin/docker-compose up -f /etc/docker-compose/docker-compose.yml -d
+
+[Install]
+WantedBy=multi-user.target
