@@ -17,9 +17,9 @@ humantime-serde = "1.0.1"
 indicatif = "0.15.0"
 itertools = "0.10.0"
 lazy_static = "1.4.0"
-nom-sql = { version = "0.0.11", path = "../nom-sql" }
-noria = { version = "0.7", path = "../noria/noria/" }
-noria-server = { version = "0.7", path = "../noria/server/" }
+nom-sql = { path = "../nom-sql" }
+noria = { path = "../noria/noria/" }
+noria-server = { path = "../noria/server/" }
 prettytable-rs = "0.8.0"
 rand = "0.8.3"
 regex = "1.4.3"

@@ -39,13 +39,13 @@ futures-executor = "0.3.14"
 pin-project = "1.0.6"
 hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 itertools = "0.10.0"
-maths = { version = "0.0.1", path = "../../maths" }
+maths = { path = "../../maths" }
 metrics = "0.14.2"
 metrics-util = "0.6.2"
 metrics-exporter-prometheus = "0.3.0"
 crossbeam = "0.8"
 nom = "5"
-nom-sql = { version = "0.0.11", path = "../../nom-sql" }
+nom-sql = { path = "../../nom-sql" }
 petgraph = { version = "0.5", features = ["serde-1"] }
 rand = "0.7.0"
 serde_derive = "1.0.8"
@@ -78,10 +78,10 @@ tower = { version = "0.4.6", features = ["util"] }
 strawpoll = "0.2.2"
 
 # local deps
-dataflow = { version = "0.7.0", path = "dataflow", package = "noria-dataflow" }
-mir = { version = "0.7.0", path = "mir", package = "noria-mir" }
-common = { version = "0.7.0", path = "common", package = "noria-common" }
-noria = { version = "0.7.0", path = "../noria" }
+dataflow = { path = "dataflow", package = "noria-dataflow" }
+mir = { path = "mir", package = "noria-mir" }
+common = { path = "common", package = "noria-common" }
+noria = { path = "../noria" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
 

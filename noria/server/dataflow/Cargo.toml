@@ -17,14 +17,14 @@ maintenance = { status = "experimental" }
 [dependencies]
 anyhow = "1.0"
 bincode = "1.0.0"
-reader_map = { version = "0.1.0", path = "reader_map" }
+reader_map = { path = "reader_map" }
 hashbag = "0.1.2"
 ahash = "0.3"
 futures-util = "0.3.13"
 lazy_static = "1.0.0"
 itertools = "0.9"
 metrics = "0.14"
-nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
+nom-sql = { path = "../../../nom-sql" }
 indexmap = "1.1.0"
 rand = "0.7"
 regex = "1"
@@ -56,9 +56,9 @@ rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "a0a
 
 
 # local deps
-common = { version = "0.7.0", path = "../common", package = "noria-common" }
-noria = { version = "0.7.0", path = "../../noria" }
-unbounded-interval-tree = { version = "0.2.3", path = "../../../unbounded-interval-tree" }
+common = { path = "../common", package = "noria-common" }
+noria = { path = "../../noria" }
+unbounded-interval-tree = { path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
 thiserror = "1.0.26"
 test-strategy = "0.1.1"

@@ -9,12 +9,12 @@ exclude = ["index.node"]
 crate-type = ["cdylib"]
 
 [dependencies]
-msql-srv = { version = "0.8.8", path = "../msql-srv" }
 mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"}
-noria-client = { version = "0.1.0", path = "../noria-client" }
+msql-srv = { path = "../msql-srv" }
+noria-client = { path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }
-noria = { version = "0.7", path = "../noria/noria/" }
-nom-sql = { version =  "0.0.11", path = "../nom-sql" }
+noria = { path = "../noria/noria/" }
+nom-sql = { path = "../nom-sql" }
 slog = "2.4.0"
 zookeeper = "0.5.4"
 tokio = { version = "1.8.1", features = ["full"] }

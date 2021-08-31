@@ -10,13 +10,13 @@ jemallocator = "0.3"
 [dependencies]
 clap = "3.0.0-beta.2"
 async-trait = "0.1.51"
-msql-srv = { version = "0.8.7", path = "../msql-srv" }
+msql-srv = { path = "../msql-srv" }
 mysql = "20.1.0"
 mysql_async = {git = "https://github.com/readysettech/mysql_async", tag="v0.27.1_gtid"}
 noria = { path = "../noria/noria" }
-noria-client = { version = "0.1.0", path = "../noria-client" }
-noria-client-adapter = { version = "0.1.0", path = "../noria-client/adapter" }
-nom-sql = { version =  "0.0.11", path = "../nom-sql" }
+noria-client = { path = "../noria-client" }
+noria-client-adapter = { path = "../noria-client/adapter" }
+nom-sql = { path = "../nom-sql" }
 tokio = "1.8.1"
 tracing = "0.1.3"
 anyhow = "1.0.42"

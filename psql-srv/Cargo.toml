@@ -14,7 +14,7 @@ async-trait = "0.1"
 bytes = "1.0.1"
 chrono = "0.4.19"
 futures = "0.3.14"
-nom-sql = { version = "0.0.11", path = "../nom-sql" }
+nom-sql = { path = "../nom-sql" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 thiserror = "1.0.26"

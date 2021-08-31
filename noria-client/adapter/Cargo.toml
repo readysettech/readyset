@@ -9,10 +9,10 @@ async-trait = "0.1"
 clap = "3.0.0-beta.2"
 futures-util = "0.3.0"
 maplit = "1.0.2"
-nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
-noria = { version = "0.7", path = "../../noria/noria/" }
-noria-client = { version = "0.1.0", path = ".." }
-noria-client-metrics = { version = "0.1.0", path = "../metrics" }
+nom-sql = { path = "../../nom-sql" }
+noria = { path = "../../noria/noria/" }
+noria-client = { path = ".." }
+noria-client-metrics = { path = "../metrics" }
 metrics = "0.14.2"
 metrics-exporter-prometheus = "0.3.0"
 slog = "2.4.0"

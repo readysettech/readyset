@@ -17,7 +17,7 @@ hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec a
 itertools = "0.9"
 memcached-rs = "0.4.2"
 mysql_async = "0.27.1"
-nom-sql = { path = "../../nom-sql", version = "0.0.11" }
+nom-sql = { path = "../../nom-sql" }
 noria = { path = "../server", package = "noria-server" }
 num_cpus = "1"
 rand = "0.7"
