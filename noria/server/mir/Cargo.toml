@@ -15,12 +15,12 @@ keywords = ["internal"]
 maintenance = { status = "experimental" }
 
 [dependencies]
-nom-sql = { version = "0.0.11", path = "../../../nom-sql" }
+nom-sql = { path = "../../../nom-sql" }
 regex = "1.0.0"
 slog = "2.4.0"
 petgraph = { version = "0.5", features = ["serde-1"] }
 itertools = "0.10.0"
 
 # local deps
-common = { version = "0.7.0", path = "../common", package = "noria-common" }
-dataflow = { version = "0.7.0", path = "../dataflow", package = "noria-dataflow" }
+common = { path = "../common", package = "noria-common" }
+dataflow = { path = "../dataflow", package = "noria-dataflow" }

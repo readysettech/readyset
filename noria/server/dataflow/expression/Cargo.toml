@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 chrono-tz = { version = "0.5", features = ["serde"] }
-maths = { version = "0.0.1", path = "../../../../maths" }
+maths = { path = "../../../../maths" }
 nom-sql = { path = "../../../../nom-sql" }
 noria = { path = "../../../noria" }
 serde = { version = "1.0.8", features = ["derive"] }

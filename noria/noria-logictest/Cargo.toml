@@ -20,15 +20,15 @@ native-tls = "0.2.7"
 nom = "5.1.2"
 nom-trace = "0.2.1"
 zookeeper = "0.5.9"
-noria-server = { version = "0.7", path = "../server/" }
+noria-server = { path = "../server/" }
 noria-client = { path = "../../noria-client/" }
-noria = { version = "0.7", path = "../noria/" }
-nom-sql = { version =  "0.0.11", path = "../../nom-sql" }
+noria = { path = "../noria/" }
+nom-sql = { path = "../../nom-sql" }
 msql-srv = { path = "../../msql-srv" }
 psql-srv = { path = "../../psql-srv" }
 noria-mysql = { path = "../../noria-mysql" }
 noria-psql = { path = "../../noria-psql" }
-maths = { version =  "0.0.1", path = "../../maths" }
+maths = { path = "../../maths" }
 query_generator = { path = "../../query_generator" }
 mysql-time = { path = "../../mysql-time" }
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time", "net"] }

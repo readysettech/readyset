@@ -9,7 +9,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-evmap = { version = "11.0.0-alpha.3", path = "../" }
+reader_map = { path = "../" }
 chashmap = "2.1.0"
 clap = "2.20.3"
 zipf = "6"

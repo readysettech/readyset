@@ -9,8 +9,8 @@ smallvec = "1.0.0"
 hashbag = "0.1.2"
 rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.9.1"
-unbounded-interval-tree = { version = "0.2.3", path = "../../../../unbounded-interval-tree" }
-noria = { version = "0.7.0", path = "../../../noria" }
+unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
+noria = { path = "../../../noria" }
 itertools = "0.10.0"
 
 [dev-dependencies]

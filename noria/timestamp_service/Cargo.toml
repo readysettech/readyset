@@ -6,5 +6,5 @@ authors = ["ReadySet"]
 
 [dependencies]
 anyhow = "1.0"
-# local deps 
-noria = { version = "0.7.0", path = "../noria" }
+# local deps
+noria = { path = "../noria" }
