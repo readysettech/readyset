@@ -66,7 +66,7 @@ async fn main() {
                 println!("Noria Result:");
                 println!("{:#?}", data);
             }
-            Ok(QueryResult::UpstreamRead(noria_mysql::ReadResult { data, .. })) => {
+            Ok(QueryResult::Upstream(noria_mysql::QueryResult::ReadResult { data, .. })) => {
                 println!("MySQL Result:");
                 println!("{:#?}", data);
             }

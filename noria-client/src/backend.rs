@@ -246,10 +246,8 @@ pub enum PrepareResult<Col> {
 pub enum QueryResult<DB: UpstreamDatabase> {
     /// Results from noria
     Noria(noria_connector::QueryResult),
-    /// Write results from an upstream database
-    UpstreamWrite(DB::WriteResult),
-    /// Read results from an upstream database
-    UpstreamRead(DB::ReadResult),
+    /// Results from upstream
+    Upstream(DB::QueryResult),
 }
 
 impl<DB> Debug for QueryResult<DB>
@@ -259,8 +257,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Noria(r) => f.debug_tuple("Noria").field(r).finish(),
-            Self::UpstreamWrite(r) => f.debug_tuple("UpstreamWrite").field(r).finish(),
-            Self::UpstreamRead(r) => f.debug_tuple("UpstreamRead").field(r).finish(),
+            Self::Upstream(r) => f.debug_tuple("Upstream").field(r).finish(),
         }
     }
 }
@@ -295,15 +292,12 @@ where
             .ok_or(Error::ReadySet(ReadySetError::FallbackNoConnector))?;
 
         if is_read {
-            upstream
-                .handle_read(query)
-                .await
-                .map(QueryResult::UpstreamRead)
+            upstream.handle_read(query).await.map(QueryResult::Upstream)
         } else {
             upstream
                 .handle_write(query)
                 .await
-                .map(QueryResult::UpstreamWrite)
+                .map(QueryResult::Upstream)
         }
     }
 
@@ -416,7 +410,7 @@ where
 
         tokio::select! {
             Ok(Ok(noria_res)) = noria_read => Ok(QueryResult::Noria(noria_res)),
-            Ok(Ok(upstream_res)) = upstream_read => Ok(QueryResult::UpstreamRead(upstream_res)),
+            Ok(Ok(upstream_res)) = upstream_read => Ok(QueryResult::Upstream(upstream_res)),
             Ok((_, Some(e))) = errs => Err(e)
         }
     }
@@ -447,7 +441,7 @@ where
                     Some(ref mut connector) => connector
                         .handle_read(query_str)
                         .await
-                        .map(QueryResult::UpstreamRead),
+                        .map(QueryResult::Upstream),
                     None => Err(e),
                 }
             }
@@ -574,7 +568,7 @@ where
                 return connector
                     .execute_read(id, params)
                     .await
-                    .map(QueryResult::UpstreamRead);
+                    .map(QueryResult::Upstream);
             }
             PreparedStatement::UpstreamPrepWrite(id) => {
                 let connector = match &mut self.writer {
@@ -584,7 +578,7 @@ where
                 return connector
                     .execute_write(id, params)
                     .await
-                    .map(QueryResult::UpstreamWrite);
+                    .map(QueryResult::Upstream);
             }
             PreparedStatement::NoriaPrepStatement(statement_id) => {
                 let prep: SqlQuery = self
@@ -615,7 +609,7 @@ where
                                         conn.prepare(&prep.to_string()).await?;
                                     conn.execute_read(statement_id, params)
                                         .await
-                                        .map(QueryResult::UpstreamRead)
+                                        .map(QueryResult::Upstream)
                                 }
                                 None => Err(e),
                             },
@@ -629,7 +623,7 @@ where
                         Writer::Upstream(connector) => connector
                             .execute_write(statement_id, params)
                             .await
-                            .map(QueryResult::UpstreamWrite),
+                            .map(QueryResult::Upstream),
                     },
                     SqlQuery::Update(ref _q) => match &mut self.writer {
                         Writer::Noria(connector) => connector
@@ -639,7 +633,7 @@ where
                         Writer::Upstream(connector) => connector
                             .execute_write(statement_id, params)
                             .await
-                            .map(QueryResult::UpstreamWrite),
+                            .map(QueryResult::Upstream),
                     },
                     _ => internal!(),
                 };
@@ -853,7 +847,7 @@ where
                             SqlQueryType::Write,
                         );
 
-                        Ok(QueryResult::UpstreamWrite(query_result))
+                        Ok(QueryResult::Upstream(query_result))
                     }
 
                     // Table Create / Drop (RYW not supported)
@@ -864,7 +858,7 @@ where
                     | nom_sql::SqlQuery::Set(_) => connector
                         .handle_write(&parsed_query.to_string())
                         .await
-                        .map(QueryResult::UpstreamWrite),
+                        .map(QueryResult::Upstream),
                     _ => self.query_fallback(query).await,
                 }
             }

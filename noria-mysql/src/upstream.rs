@@ -18,15 +18,15 @@ fn dt_to_value_params(dt: Vec<DataType>) -> Result<Vec<mysql_async::Value>, nori
 }
 
 #[derive(Debug)]
-pub struct WriteResult {
-    pub num_rows_affected: u64,
-    pub last_inserted_id: u64,
-}
-
-#[derive(Debug)]
-pub struct ReadResult {
-    pub data: Vec<Row>,
-    pub columns: Option<Arc<[Column]>>,
+pub enum QueryResult {
+    WriteResult {
+        num_rows_affected: u64,
+        last_inserted_id: u64,
+    },
+    ReadResult {
+        data: Vec<Row>,
+        columns: Option<Arc<[Column]>>,
+    },
 }
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
@@ -38,9 +38,8 @@ pub struct MySqlUpstream {
 
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
-    type ReadResult = ReadResult;
-    type WriteResult = WriteResult;
     type Column = Column;
+    type QueryResult = QueryResult;
 
     async fn connect(url: String) -> Result<Self, Error> {
         // CLIENT_SESSION_TRACK is required for GTID information to be sent in OK packets on commits
@@ -99,7 +98,7 @@ impl UpstreamDatabase for MySqlUpstream {
         &mut self,
         id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::ReadResult, Error> {
+    ) -> Result<Self::QueryResult, Error> {
         let params = dt_to_value_params(params)?;
         let mut result = self
             .conn
@@ -112,37 +111,37 @@ impl UpstreamDatabase for MySqlUpstream {
             .await?;
         let columns = result.columns();
         let data = result.collect().await?;
-        Ok(ReadResult { data, columns })
+        Ok(QueryResult::ReadResult { data, columns })
     }
 
     async fn execute_write(
         &mut self,
         id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::WriteResult, Error> {
+    ) -> Result<Self::QueryResult, Error> {
         let params = dt_to_value_params(params)?;
         let statement = self.prepared_statements.get(&id).ok_or(Error::ReadySet(
             ReadySetError::PreparedStatementMissing { statement_id: id },
         ))?;
         self.conn.exec_drop(statement, params).await?;
-        Ok(WriteResult {
+        Ok(QueryResult::WriteResult {
             num_rows_affected: self.conn.affected_rows(),
             last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
         })
     }
 
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::ReadResult, Error>
+    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
         let mut result = self.conn.query_iter(query).await?;
         let columns = result.columns();
         let data = result.collect().await?;
-        Ok(ReadResult { data, columns })
+        Ok(QueryResult::ReadResult { data, columns })
     }
 
     /// Executes the given query on the mysql backend.
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::WriteResult, Error>
+    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -155,7 +154,7 @@ impl UpstreamDatabase for MySqlUpstream {
             self.conn.affected_rows(),
             self.conn.last_insert_id()
         );
-        Ok(WriteResult {
+        Ok(QueryResult::WriteResult {
             num_rows_affected: self.conn.affected_rows(),
             last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
         })
@@ -165,7 +164,7 @@ impl UpstreamDatabase for MySqlUpstream {
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         query: S,
-    ) -> Result<(Self::WriteResult, String), Error>
+    ) -> Result<(Self::QueryResult, String), Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -186,7 +185,7 @@ impl UpstreamDatabase for MySqlUpstream {
             ))
         })?;
         Ok((
-            WriteResult {
+            QueryResult::WriteResult {
                 num_rows_affected: affected_rows,
                 last_inserted_id: last_insert_id.unwrap_or(0),
             },

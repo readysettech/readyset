@@ -24,11 +24,16 @@ pub struct PostgreSqlUpstream {
     url: String,
 }
 
+#[derive(Debug)]
+pub enum QueryResult {
+    ReadResult { data: Vec<Row> },
+    WriteResult { num_rows_affected: u64 },
+}
+
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
-    type ReadResult = Vec<Row>;
-    type WriteResult = u64;
     type Column = Column;
+    type QueryResult = QueryResult;
 
     async fn connect(url: String) -> Result<Self, Error> {
         let config = Config::from_str(&url)?;
@@ -68,25 +73,27 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         })
     }
 
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::ReadResult, Error>
+    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
         let data = self.client.query(query.as_ref(), &[]).await?;
-        Ok(data)
+        Ok(QueryResult::ReadResult { data })
     }
 
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::WriteResult, Error>
+    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        Ok(self.client.execute(query.as_ref(), &[]).await?)
+        Ok(QueryResult::WriteResult {
+            num_rows_affected: self.client.execute(query.as_ref(), &[]).await?,
+        })
     }
 
     async fn handle_ryw_write<'a, S>(
         &'a mut self,
         _query: S,
-    ) -> Result<(Self::WriteResult, String), Error>
+    ) -> Result<(Self::QueryResult, String), Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -97,28 +104,32 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::ReadResult, Error> {
+    ) -> Result<Self::QueryResult, Error> {
         let statement = self
             .prepared_statements
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(self
-            .client
-            .query_raw(statement, params)
-            .await?
-            .try_collect()
-            .await?)
+        Ok(QueryResult::ReadResult {
+            data: self
+                .client
+                .query_raw(statement, params)
+                .await?
+                .try_collect()
+                .await?,
+        })
     }
 
     async fn execute_write(
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
-    ) -> Result<Self::WriteResult, Error> {
+    ) -> Result<Self::QueryResult, Error> {
         let statement = self
             .prepared_statements
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(self.client.execute_raw(statement, params).await?)
+        Ok(QueryResult::WriteResult {
+            num_rows_affected: self.client.execute_raw(statement, params).await?,
+        })
     }
 }
