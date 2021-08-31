@@ -1,65 +1,28 @@
 steps:
   - label: ':docker: Build build image'
     key: build-image
-    commands:
-    - 'echo --- :docker: Building image'
-    - >-
-      docker build -f build/Dockerfile \
-        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
-        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
-        .
-    - 'echo --- :docker: Pushing image'
-    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+    command: .buildkite/build_image.sh build/Dockerfile readyset-build
     plugins:
       ecr#v2.2.0:
         login: true
 
   - label: ":docker: Build readyset-server image"
     key: readyset-server-image
-    commands:
-      - "echo --- :docker: Building readyset-server image"
-      - >-
-        docker build -f build/Dockerfile.readyset-server \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} \
-          .
-      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT} "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
-      - "echo --- :docker: Pushing image"
-      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
     plugins:
       ecr#v2.2.0:
         login: true
 
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
-    commands:
-      - "echo --- :docker: Building readyset-mysql image"
-      - >-
-        docker build -f build/Dockerfile.readyset-mysql \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} \
-          .
-      - docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${BUILDKITE_COMMIT} "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest"
-      - "echo --- :docker: Pushing image"
-      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
     plugins:
       ecr#v2.2.0:
         login: true
 
   - label: ":docker: Build readyset-psql image"
     key: readyset-psql-image
-    commands:
-      - "echo --- :docker: Building readyset-psql image"
-      - >-
-        docker build -f build/Dockerfile.readyset-psql \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
-          .
-      - >-
-        docker tag 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT} \
-        305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:latest
-      - "echo --- :docker: Pushing image"
-      - docker push --all-tags 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
     branches: refs/heads/main
     plugins:
       ecr#v2.2.0:
@@ -67,32 +30,14 @@ steps:
 
   - label: ':docker: Build prettier image'
     key: prettier-image
-    commands:
-    - 'echo --- :docker: Building image'
-    - >-
-      docker build -f build/Dockerfile.prettier \
-        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
-        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest \
-        .
-    - 'echo --- :docker: Pushing image'
-    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
+    command: .buildkite/build_image.sh Build/Dockerfile.prettier pretttier
     plugins:
       ecr#v2.2.0:
         login: true
 
   - label: ':docker: Build cargo-audit image'
     key: cargo-audit-image
-    commands:
-      #- 'echo --- :docker: Pulling image'
-      #- 'docker pull 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
-    - 'echo --- :docker: Building image'
-    - >-
-      docker build -f build/Dockerfile.cargo-audit \
-        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
-        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest \
-        .
-    - 'echo --- :docker: Pushing image'
-    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
+    command: .buildkite/build_image.sh Build/Dockerfile.cargo-audit cargo-audit
     plugins:
       ecr#v2.2.0:
         login: true
@@ -305,14 +250,7 @@ steps:
     key: build-ops-image
     commands:
       - cd ops
-      - 'echo --- :docker: Building ops image'
-      - >-
-        docker build -f build/Dockerfile \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest \
-          build
-      - 'echo --- :docker: Pushing ops image'
-      - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest'
+      - ../.buildkite/build_image.sh build/Dockerfile readyset-ops
     plugins:
       ecr#v2.2.0:
         login: true

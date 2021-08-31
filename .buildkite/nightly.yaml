@@ -2,15 +2,7 @@
 steps:
   - label: ':docker: Build build image'
     key: build-image
-    commands:
-    - 'echo --- :docker: Building image'
-    - >-
-      docker build -f build/Dockerfile \
-        --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
-        -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest \
-        .
-    - 'echo --- :docker: Pushing image'
-    - 'docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+    command: .buildkite/build_image.sh build/Dockerfile readyset-build
     plugins:
       ecr#v2.2.0:
         login: true

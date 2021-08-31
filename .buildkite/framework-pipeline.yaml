@@ -1,29 +1,13 @@
 steps:
   - label: ":docker: Build readyset-server image"
     key: readyset-server-image
-    commands:
-      - "echo --- :docker: Building readyset-server image"
-      - >-
-        docker build -f build/Dockerfile.readyset-server \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest \
-          .
-      - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest"
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-build
     plugins:
       ecr#v2.2.0:
         login: true
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
-    commands:
-      - "echo --- :docker: Building readyset-mysql image"
-      - >-
-        docker build -f build/Dockerfile.readyset-mysql \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest \
-          .
-      - "echo --- :docker: Pushing image"
-      - "docker push 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest"
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-build
     plugins:
       ecr#v2.2.0:
         login: true
