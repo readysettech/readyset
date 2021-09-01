@@ -3,12 +3,11 @@ use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
 use core::convert::TryInto;
-use launchpad::hash::hash;
 use noria::consistency::Timestamp;
 use noria::errors::ReadySetResult;
 use noria::{internal, KeyComparison, PacketData, ReadySetError, ReplicationOffset};
 use slog::Logger;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 
 /// The results of running a forward pass on a node
@@ -24,26 +23,80 @@ pub(crate) struct NodeProcessingResult {
     pub(crate) captured: HashSet<KeyComparison>,
 }
 
+/// A helper struct that combines unique misses for the same columns in the same node
+struct MissSet<'a> {
+    /// The node we missed when looking up into.
+    on: LocalNodeIndex,
+    /// The columns of `on` we were looking up on.
+    lookup_idx: Vec<usize>,
+    /// The columns of `record` we were using for the lookup.
+    /// Invariant: lookup_cols cannot contain a column index that exceeds record.len()
+    lookup_cols: Vec<usize>,
+    /// The columns of `record` that identify the replay key (if any).
+    /// Invariant: replay_cols cannot contain a column index that exceeds record.len()
+    replay_cols: Option<Vec<usize>>,
+    set: HashMap<&'a crate::processing::MissRecord, &'a Miss>,
+}
+
+impl<'a> MissSet<'a> {
+    /// Create a new [`MissSet`] from a [`Miss`]
+    fn from_miss(miss: &'a Miss) -> Self {
+        let mut set = HashMap::new();
+        set.insert(&miss.record, miss);
+        MissSet {
+            on: miss.on,
+            lookup_idx: miss.lookup_idx.clone(),
+            lookup_cols: miss.lookup_cols.clone(),
+            replay_cols: miss.replay_cols.clone(),
+            set,
+        }
+    }
+
+    /// Adds a [`Miss`] to the set, returns `true` iff it belongs to the set
+    fn add(&mut self, miss: &'a Miss) -> bool {
+        if miss.on == self.on
+            && miss.lookup_cols == self.lookup_cols
+            && miss.lookup_idx == self.lookup_idx
+            && miss.replay_cols == self.replay_cols
+        {
+            self.set.insert(&miss.record, miss);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl NodeProcessingResult {
     /// Returns a vector of the unique contents of `misses`, by only the columns that were missed on
-    ///
-    /// This isn't as simple as just returning a `HashSet` or similar structure of misses, since we
-    /// don't care about the columns in the record that aren't part of the key
     pub(crate) fn unique_misses(&self) -> Vec<&Miss> {
-        let mut res: Vec<&Miss> = self.misses.iter().collect();
-        res.sort_unstable_by(|a, b| {
-            a.on.cmp(&b.on)
-                .then_with(|| a.replay_cols.cmp(&b.replay_cols))
-                .then_with(|| a.lookup_idx.cmp(&b.lookup_idx))
-                .then_with(|| a.lookup_cols.cmp(&b.lookup_cols))
-                // we only need *some* sort of stable ordering on KeyComparisons - we don't require
-                // any semantics here. Keys aren't Ord (since they might contain ranges, which don't
-                // have good ordering semantics) so we just compare the hashes
-                .then_with(|| hash(&a.lookup_key()).cmp(&hash(&b.lookup_key())))
-                .then_with(|| hash(&a.replay_key()).cmp(&hash(&b.replay_key())))
-        });
-        res.dedup();
-        res
+        // Since a list of misses can be rather long, performing a sort on all the misses can be rather expensive.
+        // On the other hand the misses will likely belong to only a handful of queries (or even just one) and
+        // thus share the same parameters in most cases. Therefore we simply perform multiple passes over the
+        // vector removing all the entries that share the same characteristics each time. In most cases a single pass
+        // will suffice.
+        let mut misses = self.misses.iter();
+
+        let first = match misses.next() {
+            Some(miss) => miss,
+            None => return Vec::new(),
+        };
+
+        let mut set = MissSet::from_miss(first);
+        let mut filtered: Vec<_> = misses.filter(|miss| !set.add(miss)).collect();
+        let mut sets = vec![set];
+
+        while !filtered.is_empty() {
+            let mut misses = filtered.iter().copied();
+            let mut set = MissSet::from_miss(misses.next().unwrap());
+            filtered = misses.filter(|miss| !set.add(miss)).collect();
+            sets.push(set);
+        }
+
+        sets.into_iter()
+            .map(|s| s.set.into_values())
+            .flatten()
+            .collect()
     }
 }
 
