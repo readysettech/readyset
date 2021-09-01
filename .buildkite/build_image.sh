@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -xeuo pipefail
+set -euo pipefail
 
 dockerfile="$1"
 image_name="$2"
@@ -18,12 +18,17 @@ docker_repo="$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
 image="$docker_repo/$image_name"
 
 echo "--- :docker: Pulling $image:latest"
-docker pull "$image:latest" || echo "Failed to pull previous build of image"
+if docker pull "$image:latest"; then
+    cache_from="--cache-from=$image:latest"
+else
+    echo "Failed to pull previous build of image"
+    cache_from=""
+fi
 
 echo "+++ :docker: Building $image:$VERSION"
 DOCKER_BUILDKIT=1 docker build \
     -f "$dockerfile" \
-    --cache-from "$image:latest" \
+    $cache_from \
     -t "$image:$VERSION" \
     --build-arg BUILDKIT_INLINE_CACHE=1 \
     "$@" \
