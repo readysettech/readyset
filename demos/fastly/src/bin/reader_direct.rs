@@ -243,7 +243,7 @@ impl QueryExecutor {
 struct QueryBatcher {
     batch_duration: Duration,
     batch_size: u64,
-    batch_start: Option<Instant>,
+    batch_start: Instant,
     current_batch: Vec<BatchedQuery>,
 }
 
@@ -252,12 +252,16 @@ impl QueryBatcher {
         Self {
             batch_duration,
             batch_size,
-            batch_start: None,
+            batch_start: Instant::now(),
             current_batch: Vec::new(),
         }
     }
 
     fn add_query(&mut self, query: BatchedQuery) {
+        if self.current_batch.is_empty() {
+            self.batch_start = Instant::now();
+        }
+
         self.current_batch.push(query)
     }
 
@@ -265,7 +269,7 @@ impl QueryBatcher {
     fn get_batch_if_ready(&mut self) -> Option<Vec<BatchedQuery>> {
         let now = Instant::now();
         if self.current_batch.len() < self.batch_size as usize
-            && now < *self.batch_start.as_ref().unwrap() + self.batch_duration
+            && now < self.batch_start + self.batch_duration
         {
             return None;
         }
