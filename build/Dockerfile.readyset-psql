@@ -1,0 +1,38 @@
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly as chef
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+RUN apt-get update
+RUN apt-get install -y \
+    clang \
+    cmake \
+    libclang-dev \
+    libssl-dev \
+    liblz4-dev \
+    librdkafka-dev \
+    build-essential \
+    llvm
+
+FROM chef as planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef as builder
+ARG release
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+COPY --from=planner /workdir/recipe.json recipe.json
+RUN cargo chef cook ${release:+--release}  --recipe-path recipe.json
+COPY . .
+RUN cargo build ${release:+--release} --bin noria-psql
+RUN if [ -n "$release" ]; then strip target/release/noria-psql; else strip target/debug/noria-psql; fi
+
+FROM debian:10
+RUN apt-get update
+# We install mariadb-client so we have access to psqladmin for healthchecks
+RUN apt-get install -y libssl-dev mariadb-client
+COPY --from=builder /workdir/target/*/noria-psql /bin/noria-psql
+CMD noria-psql --no-require-authentication

@@ -51,6 +51,10 @@ steps:
               exclude:
                 - "ops/**"
 
+            - label: ':docker: Build readyset-psql image'
+              exclude:
+                - "ops/**"
+
             - label: ':rust: Run tests'
               exclude:
                 - "ops/**"
