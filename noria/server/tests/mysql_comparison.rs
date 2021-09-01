@@ -310,8 +310,7 @@ async fn check_query(
                         DataType::UnsignedInt(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),
                         DataType::UnsignedBigInt(i) => i.to_string(),
-                        DataType::Float(f, _) => format!("{}", f),
-                        DataType::Double(f, _) => format!("{}", f),
+                        DataType::Real(f, _) => format!("{}", f),
                         DataType::Text(_) | DataType::TinyText(_) => {
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()

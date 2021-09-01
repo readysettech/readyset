@@ -152,41 +152,20 @@ impl fmt::Display for SqlType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
-pub struct Float {
-    pub value: f32,
-    pub precision: u8,
-}
-
-impl PartialEq for Float {
-    fn eq(&self, other: &Self) -> bool {
-        self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
-    }
-}
-
-impl Eq for Float {}
-
-impl Hash for Float {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u32(self.value.to_bits());
-        state.write_u8(self.precision);
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Arbitrary)]
-pub struct Double {
+pub struct Real {
     pub value: f64,
     pub precision: u8,
 }
 
-impl PartialEq for Double {
+impl PartialEq for Real {
     fn eq(&self, other: &Self) -> bool {
         self.value.to_bits() == other.value.to_bits() && self.precision == other.precision
     }
 }
 
-impl Eq for Double {}
+impl Eq for Real {}
 
-impl Hash for Double {
+impl Hash for Real {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.value.to_bits());
         state.write_u8(self.precision);
@@ -214,14 +193,7 @@ impl ToString for ItemPlaceholder {
 pub enum Literal {
     Null,
     Integer(i64),
-    /// Represents an `f32` floating-point number.
-    /// This distinction was introduced to avoid numeric error when transforming
-    /// a `[Literal]` into another type (`[DataType]` or `[mysql::Value]`), an back.
-    /// As an example, if we read an `f32` from a binlog, we would be transforming that
-    /// `f32` into an `f64` (thus, potentially introducing numeric error) if this type
-    /// didn't exist.
-    Float(Float),
-    Double(Double),
+    FixedPoint(Real),
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
@@ -269,10 +241,12 @@ impl<'a> From<&'a str> for Literal {
 
 impl Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        macro_rules! write_real {
-            ($real:expr, $prec:expr) => {{
-                let precision = if $prec < 30 { $prec } else { 30 };
-                let fstr = format!("{:.*}", precision as usize, $real);
+        match self {
+            Literal::Null => write!(f, "NULL"),
+            Literal::Integer(i) => write!(f, "{}", i),
+            Literal::FixedPoint(fp) => {
+                let precision = if fp.precision < 30 { fp.precision } else { 30 };
+                let fstr = format!("{:.*}", precision as usize, fp.value);
                 // Trim all trailing zeros, but leave one after the dot if this is a whole number
                 let res = fstr.trim_end_matches('0');
                 if res.ends_with('.') {
@@ -280,13 +254,7 @@ impl Display for Literal {
                 } else {
                     write!(f, "{}", res)
                 }
-            }};
-        }
-        match self {
-            Literal::Null => write!(f, "NULL"),
-            Literal::Integer(i) => write!(f, "{}", i),
-            Literal::Float(float) => write_real!(float.value, float.precision),
-            Literal::Double(double) => write_real!(double.value, double.precision),
+            }
             Literal::String(ref s) => {
                 write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
             }
@@ -334,9 +302,8 @@ impl Literal {
             | SqlType::Tinyblob
             | SqlType::Binary(_)
             | SqlType::Varbinary(_) => any::<Vec<u8>>().prop_map(Self::Blob).boxed(),
-            SqlType::Float => any::<Float>().prop_map(Self::Float).boxed(),
-            SqlType::Double | SqlType::Real | SqlType::Decimal(_, _) => {
-                any::<Double>().prop_map(Self::Double).boxed()
+            SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
+                any::<Real>().prop_map(Self::FixedPoint).boxed()
             }
             SqlType::Date => arbitrary_positive_naive_date()
                 .prop_map(|nd| Self::String(nd.format("%Y-%m-%d").to_string()))
@@ -1052,7 +1019,7 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
         ),
         |f| {
             let (_, _, _, frac) = f.0;
-            Literal::Double(Double {
+            Literal::FixedPoint(Real {
                 value: f.1,
                 precision: frac.len() as _,
             })
@@ -1291,7 +1258,7 @@ mod tests {
 
     #[test]
     fn float_formatting_strips_trailing_zeros() {
-        let f = Literal::Double(Double {
+        let f = Literal::FixedPoint(Real {
             value: 1.5,
             precision: u8::MAX,
         });
@@ -1300,7 +1267,7 @@ mod tests {
 
     #[test]
     fn float_formatting_leaves_zero_after_dot() {
-        let f = Literal::Double(Double {
+        let f = Literal::FixedPoint(Real {
             value: 0.0,
             precision: u8::MAX,
         });
@@ -1313,7 +1280,7 @@ mod tests {
             .unwrap()
             .1;
         match res {
-            Literal::Double(Double { value, .. }) => {
+            Literal::FixedPoint(Real { value, .. }) => {
                 assert_approx_eq!(value, 1.5);
             }
             _ => unreachable!(),
@@ -1321,14 +1288,15 @@ mod tests {
     }
 
     #[proptest]
-    fn real_hash_matches_eq(real1: Double, real2: Double) {
+    fn real_hash_matches_eq(real1: Real, real2: Real) {
         assert_eq!(real1 == real2, hash(&real1) == hash(&real2));
     }
 
     #[proptest]
     fn literal_to_string_parse_round_trip(lit: Literal) {
-        prop_assume!(!matches!(lit, Literal::Double(_) | Literal::Float(_)));
+        prop_assume!(!matches!(lit, Literal::FixedPoint(_)));
         let s = lit.to_string();
+        eprintln!("to_string(): {}", s);
         assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
     }
 

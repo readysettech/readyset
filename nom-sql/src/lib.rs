@@ -13,7 +13,7 @@ extern crate pretty_assertions;
 
 pub use self::column::{Column, ColumnConstraint, ColumnSpecification};
 pub use self::common::{
-    Double, FieldDefinitionExpression, Float, ItemPlaceholder, Literal, SqlType, TableKey,
+    FieldDefinitionExpression, ItemPlaceholder, Literal, Real, SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};

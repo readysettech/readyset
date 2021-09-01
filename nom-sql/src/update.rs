@@ -160,7 +160,7 @@ mod tests {
         use crate::column::Column;
         use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
-        use crate::{BinaryOperator, Double};
+        use crate::{BinaryOperator, Real};
 
         #[test]
         fn updated_with_neg_float() {
@@ -182,7 +182,7 @@ mod tests {
                     table: Table::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expression::Literal(Literal::Double(Double {
+                        Expression::Literal(Literal::FixedPoint(Real {
                             value: -19216.5479744,
                             precision: 7,
                         })),
@@ -221,7 +221,7 @@ mod tests {
         use crate::column::Column;
         use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
-        use crate::{BinaryOperator, Double};
+        use crate::{BinaryOperator, Real};
 
         #[test]
         fn updated_with_neg_float() {
@@ -243,7 +243,7 @@ mod tests {
                     table: Table::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expression::Literal(Literal::Double(Double {
+                        Expression::Literal(Literal::FixedPoint(Real {
                             value: -19216.5479744,
                             precision: 7,
                         })),

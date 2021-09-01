@@ -120,7 +120,7 @@ impl AverageDataPair {
         if self.count > DataType::Int(0) {
             &self.sum / &self.count
         } else {
-            Ok(DataType::Double(0.0, 0))
+            Ok(DataType::Real(0.0, 0))
         }
     }
 }
@@ -193,7 +193,7 @@ impl GroupedOperation for Aggregator {
                 .borrow_mut()
                 .entry(diff.group_hash)
                 .or_insert(AverageDataPair {
-                    sum: DataType::Double(0.0, 0),
+                    sum: DataType::Real(0.0, 0),
                     count: DataType::Int(0),
                 })
                 .apply_diff(diff)
