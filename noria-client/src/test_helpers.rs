@@ -17,7 +17,7 @@ use tokio::net::TcpStream;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use crate::backend::noria_connector::NoriaConnector;
-use crate::backend::{BackendBuilder, Reader, Writer};
+use crate::backend::BackendBuilder;
 use crate::{Backend, UpstreamDatabase};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
@@ -157,27 +157,16 @@ where
             TcpStream::from_std(s).unwrap()
         };
 
-        let writer = NoriaConnector::new(
-            ch.clone(),
-            auto_increments.clone(),
-            query_cache.clone(),
-            None,
-        );
+        let noria = rt.block_on(NoriaConnector::new(ch, auto_increments, query_cache, None));
 
-        let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None);
+        // backend either has upstream or noria writer
         let upstream = if fallback {
             Some(rt.block_on(A::make_upstream()))
         } else {
             None
         };
-        let reader = Reader {
-            upstream,
-            noria_connector: rt.block_on(noria_connector),
-        };
 
-        let backend = backend_builder
-            .dialect(A::DIALECT)
-            .build(Writer::Noria(rt.block_on(writer)), reader);
+        let backend = backend_builder.dialect(A::DIALECT).build(noria, upstream);
 
         rt.block_on(A::run_backend(backend, s));
         drop(rt);

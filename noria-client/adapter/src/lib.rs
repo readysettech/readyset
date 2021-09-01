@@ -25,7 +25,6 @@ use tracing::Level;
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::NoriaConnector;
-use noria_client::backend::{Reader, Writer};
 use noria_client::{Backend, BackendBuilder};
 
 #[async_trait]
@@ -217,13 +216,7 @@ where
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
 
-                // initially, our instinct was that constructing this twice (once for reader and
-                // once for writer) did not make sense and we should instead call clone() or use an
-                // Arc<RwLock<NoriaConnector>> as both the reader and writer. however, after more
-                // thought, there is no benefit to sharing any implentation between the two. the
-                // only potential shared state is the query_cache, however, the set of queries
-                // handles by a reader and writer are disjoint
-                let noria_conn = NoriaConnector::new(
+                let noria = NoriaConnector::new(
                     ch.clone(),
                     auto_increments.clone(),
                     query_cache.clone(),
@@ -231,37 +224,19 @@ where
                 )
                 .await;
 
-                let reader = Reader {
-                    noria_connector: noria_conn,
-                    upstream: if let Some(upstream_db_url) = &upstream_db_url {
-                        // TODO(grfn): properly handle errors connecting to the upstream here (but how?)
-                        Some(
-                            H::UpstreamDatabase::connect(upstream_db_url.clone())
-                                .await
-                                .unwrap(),
-                        )
-                    } else {
-                        None
-                    },
-                };
-
-                let _g = connection.enter();
-
-                let writer: Writer<ZookeeperAuthority, _> = if let Some(upstream_db_url) =
-                    &upstream_db_url
-                {
-                    // TODO(grfn): properly handle errors connecting to the upstream here (but how?)
-                    Writer::Upstream(
+                let upstream = if let Some(upstream_db_url) = &upstream_db_url {
+                    Some(
                         H::UpstreamDatabase::connect(upstream_db_url.clone())
                             .await
                             .unwrap(),
                     )
                 } else {
-                    let writer =
-                        NoriaConnector::new(ch, auto_increments, query_cache, region.clone()).await;
-                    Writer::Noria(writer)
+                    None
                 };
-                let backend = backend_builder.clone().build(writer, reader);
+
+                let _g = connection.enter();
+
+                let backend = backend_builder.clone().build(noria, upstream);
 
                 connection_handler.process_connection(s, backend).await;
 

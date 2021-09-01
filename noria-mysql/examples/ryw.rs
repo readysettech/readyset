@@ -9,7 +9,7 @@ use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
         noria_connector::{self, NoriaConnector},
-        BackendBuilder, QueryResult, Reader, Writer,
+        BackendBuilder, QueryResult,
     },
     UpstreamDatabase,
 };
@@ -35,27 +35,14 @@ async fn main() {
 
     // Construct the Writer (to an underlying DB)
     let mysql_url = String::from(mysql_url);
-    let writer = Writer::Upstream(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
+    let upstream = Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
 
-    let upstream = Some(MySqlUpstream::connect(mysql_url).await.unwrap());
-    let noria_connector = NoriaConnector::new(
-        ch.clone(),
-        auto_increments.clone(),
-        query_cache.clone(),
-        None,
-    )
-    .await;
+    let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
     let mut b = BackendBuilder::new()
         .require_authentication(false)
         .enable_ryw(true)
-        .build(
-            writer,
-            Reader {
-                upstream,
-                noria_connector,
-            },
-        );
+        .build(noria, upstream);
 
     // Install Query/Recipe to noria (must match the underlying mysql database structure)
     let test_sql_string = "

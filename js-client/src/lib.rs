@@ -12,7 +12,7 @@ use tokio::runtime::Runtime;
 
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, DataType, ZookeeperAuthority};
-use noria_client::backend::{Backend, BackendBuilder, NoriaConnector, Reader, Writer};
+use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
 use noria_mysql::MySqlUpstream;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
@@ -77,21 +77,8 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     let ch = rt.block_on(ControllerHandle::new(zk_auth));
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let writer = if !mysql_address.is_empty() {
-        let writer = rt
-            .block_on(MySqlUpstream::connect(mysql_address.clone()))
-            .unwrap();
-        Writer::Upstream(writer)
-    } else {
-        let writer = rt.block_on(NoriaConnector::new(
-            ch.clone(),
-            auto_increments.clone(),
-            query_cache.clone(),
-            Some(region.clone()),
-        ));
-        Writer::Noria(writer)
-    };
-    let noria_connector = rt.block_on(NoriaConnector::new(
+
+    let noria = rt.block_on(NoriaConnector::new(
         ch,
         auto_increments,
         query_cache,
@@ -103,16 +90,12 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         None
     };
 
-    let reader = Reader {
-        upstream,
-        noria_connector,
-    };
     let b = BackendBuilder::new()
         .slowlog(slowlog)
         .require_authentication(false)
         .enable_ryw(read_your_write)
         .dialect(dialect)
-        .build(writer, reader);
+        .build(noria, upstream);
 
     let jsclient = RefCell::new(JsClient::new(b, rt));
     Ok(cx.boxed(jsclient))

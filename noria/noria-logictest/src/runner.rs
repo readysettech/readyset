@@ -22,7 +22,7 @@ use tokio_postgres as pgsql;
 use nom_sql::SelectStatement;
 use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
-use noria_client::backend::{BackendBuilder, NoriaConnector, Reader, Writer};
+use noria_client::backend::{BackendBuilder, NoriaConnector};
 use noria_client::UpstreamDatabase;
 use noria_mysql::MySqlUpstream;
 use noria_psql::PostgreSqlUpstream;
@@ -465,45 +465,24 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
-            let noria_connector = NoriaConnector::new(
-                ch.clone(),
-                auto_increments.clone(),
-                query_cache.clone(),
-                None,
-            )
-            .await;
+            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
 
             macro_rules! make_backend {
                 ($upstream:ty) => {{
                     // cannot use .await inside map
                     #[allow(clippy::manual_map)]
-                    let (upstream, writer) = match replication_url.clone() {
-                        Some(url) => (
-                            Some(
-                                <$upstream as UpstreamDatabase>::connect(url.clone())
-                                    .await
-                                    .unwrap(),
-                            ),
-                            Writer::Upstream(
-                                <$upstream as UpstreamDatabase>::connect(url).await.unwrap(),
-                            ),
+                    let upstream = match replication_url.clone() {
+                        Some(url) => Some(
+                            <$upstream as UpstreamDatabase>::connect(url.clone())
+                                .await
+                                .unwrap(),
                         ),
-                        None => (
-                            None,
-                            Writer::Noria(
-                                NoriaConnector::new(ch, auto_increments, query_cache, None).await,
-                            ),
-                        ),
-                    };
-
-                    let reader = Reader {
-                        upstream,
-                        noria_connector,
+                        None => None,
                     };
 
                     BackendBuilder::new()
                         .require_authentication(false)
-                        .build::<A, _>(writer, reader)
+                        .build::<A, _>(noria, upstream)
                 }};
             }
 

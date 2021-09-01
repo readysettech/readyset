@@ -19,7 +19,7 @@ use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria::{DataType, KeyComparison, View, ViewQuery};
-use noria_client::backend::{self, Backend};
+use noria_client::backend::Backend;
 use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
 use noria_client::UpstreamDatabase;
 use noria_mysql::MySqlUpstream;
@@ -123,27 +123,13 @@ impl Writer {
         let zk_auth = ZookeeperAuthority::new(&self.zookeeper_url).unwrap();
         let mut ch = ControllerHandle::new(zk_auth).await;
 
-        let writer = MySqlUpstream::connect(self.database_url.clone()).await?;
-        let writer: backend::Writer<_, _> = backend::Writer::Upstream(writer);
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
-        let noria_connector = NoriaConnector::new(
-            ch.clone(),
-            auto_increments.clone(),
-            query_cache.clone(),
-            None,
-        )
-        .await;
+        let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
         let mut b = BackendBuilder::new()
             .require_authentication(false)
             .enable_ryw(true)
-            .build(
-                writer,
-                backend::Reader {
-                    upstream,
-                    noria_connector,
-                },
-            );
+            .build(noria, upstream);
 
         let mut view = if let Some(region) = self.target_region.clone() {
             ch.view_from_region("w", region).await.unwrap()

@@ -74,25 +74,6 @@ fn is_read(query: &str) -> bool {
     .is_ok()
 }
 
-/// A database connection for performing writes
-///
-/// Noria-client can be either configured to pass-through writes to an [upstream
-/// database](Self::Upstream) or write [directly to noria](Self::Noria)
-#[allow(clippy::large_enum_variant)]
-pub enum Writer<A: 'static + Authority, DB> {
-    Upstream(DB),
-    Noria(NoriaConnector<A>),
-}
-
-/// A database connection for performing reads
-///
-/// A reader consists of a connection to noria, plus optionally a connection to an upstream database
-/// to use for query fallback
-pub struct Reader<A: 'static + Authority, DB> {
-    pub upstream: Option<DB>,
-    pub noria_connector: NoriaConnector<A>,
-}
-
 #[derive(Clone, Debug)]
 pub enum PreparedStatement {
     NoriaPrepStatement(u32),
@@ -133,8 +114,8 @@ impl BackendBuilder {
 
     pub fn build<A: 'static + Authority, DB>(
         self,
-        writer: Writer<A, DB>,
-        reader: Reader<A, DB>,
+        noria: NoriaConnector<A>,
+        upstream: Option<DB>,
     ) -> Backend<A, DB> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
@@ -143,8 +124,8 @@ impl BackendBuilder {
             parsed_query_cache,
             prepared_queries,
             prepared_count,
-            writer,
-            reader,
+            noria,
+            upstream,
             slowlog: self.slowlog,
             dialect: self.dialect,
             race_reads: self.race_reads,
@@ -199,8 +180,10 @@ pub struct Backend<A: 'static + Authority, DB> {
     // all queries previously prepared, mapped by their ID
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
-    writer: Writer<A, DB>,
-    reader: Reader<A, DB>,
+    /// Noria connector used for reads, and writes when no upstream DB is present
+    noria: NoriaConnector<A>,
+    /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
+    upstream: Option<DB>,
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
@@ -282,7 +265,7 @@ where
     // Returns whether we are in a transaction currently or not. Transactions are only supported
     // over fallback, so if we have no fallback connector we return false.
     fn is_in_tx(&self) -> bool {
-        if let Some(db) = self.reader.upstream.as_ref() {
+        if let Some(db) = self.upstream.as_ref() {
             db.is_in_tx()
         } else {
             false
@@ -293,7 +276,6 @@ where
     /// Returns the query result, or an error if fallback is not configured
     pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
         let upstream = self
-            .reader
             .upstream
             .as_mut()
             .ok_or(ReadySetError::FallbackNoConnector)?;
@@ -315,7 +297,6 @@ where
         query: nom_sql::SqlQuery,
     ) -> Result<QueryResult<DB>, DB::Error> {
         let upstream = self
-            .reader
             .upstream
             .as_mut()
             .ok_or(ReadySetError::FallbackNoConnector)?;
@@ -339,18 +320,11 @@ where
         &mut self,
         query: &str,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
-        let q = query.to_string().trim_start().to_lowercase();
-        if is_read(&q) {
-            match self.reader.upstream {
-                Some(ref mut connector) => connector.prepare(query).await,
-                None => Err(ReadySetError::FallbackNoConnector.into()),
-            }
-        } else {
-            match self.writer {
-                Writer::Upstream(ref mut connector) => connector.prepare(query).await,
-                _ => Err(ReadySetError::FallbackNoConnector.into()),
-            }
-        }
+        let upstream = self
+            .upstream
+            .as_mut()
+            .ok_or(ReadySetError::FallbackNoConnector)?;
+        upstream.prepare(query).await
     }
 
     /// Stores the prepared query id in a table
@@ -400,14 +374,13 @@ where
         ticket: Option<Timestamp>,
     ) -> Result<QueryResult<DB>, DB::Error> {
         let url = self
-            .reader
             .upstream
             .as_ref()
             .ok_or_else(|| internal_err("race_read called without fallback configured"))?
             .url()
             .to_owned();
         let mut upstream = DB::connect(url).await?;
-        let mut noria = self.reader.noria_connector.clone();
+        let mut noria = self.noria.clone();
 
         macro_rules! grab_err {
             ($sender: expr) => {
@@ -459,17 +432,12 @@ where
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        match self
-            .reader
-            .noria_connector
-            .handle_select(q, use_params, ticket)
-            .await
-        {
+        match self.noria.handle_select(q, use_params, ticket).await {
             Ok(r) => Ok(QueryResult::Noria(r)),
             Err(e) => {
                 // Check if we have fallback setup. If not, we need to return this error,
                 // otherwise, we transition to fallback.
-                match self.reader.upstream {
+                match self.upstream {
                     Some(ref mut connector) => connector
                         .handle_read(query_str)
                         .await
@@ -489,13 +457,12 @@ where
         query: &str,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         match self
-            .reader
-            .noria_connector
+            .noria
             .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
             .await
         {
             Ok(res) => Ok(PrepareResult::Noria(res)),
-            Err(e) => match self.reader.upstream {
+            Err(e) => match self.upstream {
                 Some(_) => self
                     .prepare_fallback(query)
                     .await
@@ -530,8 +497,7 @@ where
         let parsed_query = match res {
             Ok((parsed_query, _)) => parsed_query,
             Err(e) => {
-                if self.reader.upstream.is_some() {
-                    // Fallback prepare will always go to the reader connector
+                if self.upstream.is_some() {
                     let res = self
                         .prepare_fallback(query)
                         .await
@@ -548,26 +514,28 @@ where
 
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => self.cascade_prepare(stmt.clone(), query).await,
-            nom_sql::SqlQuery::Insert(_) => match &mut self.writer {
-                Writer::Noria(connector) => Ok(PrepareResult::Noria(
-                    connector
-                        .prepare_insert(parsed_query.clone(), self.prepared_count)
-                        .await?,
-                )),
-                Writer::Upstream(connector) => {
-                    connector.prepare(query).await.map(PrepareResult::Upstream)
+            nom_sql::SqlQuery::Insert(_) => {
+                if let Some(ref mut upstream) = self.upstream {
+                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                } else {
+                    Ok(PrepareResult::Noria(
+                        self.noria
+                            .prepare_insert(parsed_query.clone(), self.prepared_count)
+                            .await?,
+                    ))
                 }
-            },
-            nom_sql::SqlQuery::Update(_) => match &mut self.writer {
-                Writer::Noria(connector) => Ok(PrepareResult::Noria(
-                    connector
-                        .prepare_update(parsed_query.clone(), self.prepared_count)
-                        .await?,
-                )),
-                Writer::Upstream(connector) => {
-                    connector.prepare(query).await.map(PrepareResult::Upstream)
+            }
+            nom_sql::SqlQuery::Update(_) => {
+                if let Some(ref mut upstream) = self.upstream {
+                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                } else {
+                    Ok(PrepareResult::Noria(
+                        self.noria
+                            .prepare_update(parsed_query.clone(), self.prepared_count)
+                            .await?,
+                    ))
                 }
-            },
+            }
             _ => {
                 error!("unsupported query");
                 unsupported!("query type unsupported");
@@ -606,22 +574,21 @@ where
 
         match prepared_statement {
             PreparedStatement::UpstreamPrepRead(id) => {
-                let connector = self
-                    .reader
+                let upstream = self
                     .upstream
                     .as_mut()
                     .ok_or(ReadySetError::FallbackNoConnector)?;
-                return connector
+                return upstream
                     .execute_read(id, params)
                     .await
                     .map(QueryResult::Upstream);
             }
             PreparedStatement::UpstreamPrepWrite(id) => {
-                let connector = match &mut self.writer {
-                    Writer::Upstream(conn) => conn,
-                    _ => return Err(ReadySetError::FallbackNoConnector.into()),
-                };
-                return connector
+                let upstream = self
+                    .upstream
+                    .as_mut()
+                    .ok_or(ReadySetError::FallbackNoConnector)?;
+                return upstream
                     .execute_write(id, params)
                     .await
                     .map(QueryResult::Upstream);
@@ -635,8 +602,7 @@ where
                 let res = match prep {
                     SqlQuery::Select(_) => {
                         let try_read = self
-                            .reader
-                            .noria_connector
+                            .noria
                             .execute_prepared_select(
                                 statement_id,
                                 params.clone(),
@@ -647,42 +613,50 @@ where
                         // it was not prepared on the underlying db
                         match try_read {
                             Ok(read) => Ok(QueryResult::Noria(read)),
-                            Err(e) => match &mut self.reader.upstream {
-                                Some(conn) => {
+                            Err(e) => {
+                                if let Some(ref mut upstream) = self.upstream {
                                     // TODO(DAN): The prepared statement id should be returned to
                                     // the backend so that it can be stored
                                     let UpstreamPrepare { statement_id, .. } =
-                                        conn.prepare(&prep.to_string()).await?;
-                                    conn.execute_read(statement_id, params)
+                                        upstream.prepare(&prep.to_string()).await?;
+                                    upstream
+                                        .execute_read(statement_id, params)
                                         .await
                                         .map(QueryResult::Upstream)
+                                } else {
+                                    Err(e.into())
                                 }
-                                None => Err(e.into()),
-                            },
+                            }
                         }
                     }
-                    SqlQuery::Insert(ref _q) => match &mut self.writer {
-                        Writer::Noria(connector) => Ok(QueryResult::Noria(
-                            connector
-                                .execute_prepared_insert(statement_id, params)
-                                .await?,
-                        )),
-                        Writer::Upstream(connector) => connector
-                            .execute_write(statement_id, params)
-                            .await
-                            .map(QueryResult::Upstream),
-                    },
-                    SqlQuery::Update(ref _q) => match &mut self.writer {
-                        Writer::Noria(connector) => Ok(QueryResult::Noria(
-                            connector
-                                .execute_prepared_update(statement_id, params)
-                                .await?,
-                        )),
-                        Writer::Upstream(connector) => connector
-                            .execute_write(statement_id, params)
-                            .await
-                            .map(QueryResult::Upstream),
-                    },
+                    SqlQuery::Insert(ref _q) => {
+                        if let Some(ref mut upstream) = self.upstream {
+                            upstream
+                                .execute_write(statement_id, params)
+                                .await
+                                .map(QueryResult::Upstream)
+                        } else {
+                            Ok(QueryResult::Noria(
+                                self.noria
+                                    .execute_prepared_insert(statement_id, params)
+                                    .await?,
+                            ))
+                        }
+                    }
+                    SqlQuery::Update(ref _q) => {
+                        if let Some(ref mut upstream) = self.upstream {
+                            upstream
+                                .execute_write(statement_id, params)
+                                .await
+                                .map(QueryResult::Upstream)
+                        } else {
+                            Ok(QueryResult::Noria(
+                                self.noria
+                                    .execute_prepared_update(statement_id, params)
+                                    .await?,
+                            ))
+                        }
+                    }
                     _ => internal!(),
                 };
                 if self.slowlog {
@@ -734,17 +708,14 @@ where
                     return Err(e.into());
                 }
                 // TODO(Dan): Implement RYW for query_fallback
-                match self.reader.upstream {
-                    Some(_) => {
-                        let res = self.query_fallback(query).await?;
-                        if self.slowlog {
-                            warn_on_slow_query(&start, query);
-                        }
-                        return Ok(res);
+                if self.upstream.is_some() {
+                    let res = self.query_fallback(query).await?;
+                    if self.slowlog {
+                        warn_on_slow_query(&start, query);
                     }
-                    None => {
-                        return Err(e.into());
-                    }
+                    return Ok(res);
+                } else {
+                    return Err(e.into());
                 }
             }
         };
@@ -761,21 +732,98 @@ where
             }
         }
 
-        let res = match &mut self.writer {
+        // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
+        // default when the upstream connector is present.
+        let res = if let Some(ref mut upstream) = self.upstream {
+            match parsed_query {
+                nom_sql::SqlQuery::Select(q) => {
+                    let execution_timer = std::time::Instant::now();
+                    let res = if self.race_reads {
+                        self.race_read(q, query.to_owned(), use_params, self.ticket.clone())
+                            .await
+                    } else {
+                        self.cascade_read(q, query, use_params, self.ticket.clone())
+                            .await
+                    };
+                    //TODO(Dan): Implement fallback execution timing
+                    let execution_time = execution_timer.elapsed().as_micros();
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Read,
+                    );
+                    res
+                }
+                nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
+                | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
+                | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
+                    let execution_timer = std::time::Instant::now();
+
+                    // Update ticket if RYW enabled
+                    let query_result = if cfg!(feature = "ryw") {
+                        if let Some(timestamp_service) = &mut self.timestamp_client {
+                            let (query_result, identifier) =
+                                upstream.handle_ryw_write(query).await?;
+
+                            // TODO(andrew): Move table name to table index conversion to timestamp service
+                            // https://app.clubhouse.io/readysettech/story/331
+                            let index = self.noria.node_index_of(t.name.as_str()).await?;
+                            let affected_tables = vec![WriteKey::TableIndex(index)];
+
+                            let new_timestamp = timestamp_service
+                                .append_write(WriteId::MySqlGtid(identifier), affected_tables)
+                                .map_err(|e| internal_err(e.to_string()))?;
+
+                            // TODO(andrew, justin): solidify error handling in client
+                            // https://app.clubhouse.io/readysettech/story/366
+                            let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
+                                internal_err("RYW enabled backends must have a current ticket")
+                            })?;
+
+                            self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
+                            query_result
+                        } else {
+                            upstream.handle_write(query).await?
+                        }
+                    } else {
+                        upstream.handle_write(query).await?
+                    };
+                    let execution_time = execution_timer.elapsed().as_micros();
+
+                    measure_parse_and_execution_time(
+                        parse_time,
+                        execution_time,
+                        SqlQueryType::Write,
+                    );
+
+                    Ok(QueryResult::Upstream(query_result))
+                }
+
+                // Table Create / Drop (RYW not supported)
+                // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
+                nom_sql::SqlQuery::CreateView(_)
+                | nom_sql::SqlQuery::CreateTable(_)
+                | nom_sql::SqlQuery::DropTable(_)
+                | nom_sql::SqlQuery::Set(_) => upstream
+                    .handle_write(&parsed_query.to_string())
+                    .await
+                    .map(QueryResult::Upstream),
+                nom_sql::SqlQuery::StartTransaction(_)
+                | nom_sql::SqlQuery::Commit(_)
+                | nom_sql::SqlQuery::Rollback(_) => {
+                    self.handle_transaction_boundaries(parsed_query).await
+                }
+                _ => self.query_fallback(query).await,
+            }
+        } else {
             // Interacting directly with Noria writer (No RYW support)
             //
-            // This is relatively unintuitive and could use a re-write. We only have a single
-            // writer, and potentially multiple readers. If our writer is an upstream database, then
-            // we have fallback setup, and can assume we have two readers, noria and an upstream
-            // database. Otherwise, if our single writer is noria, we assume that there's only a
-            // single reader setup - noria.
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-            Writer::Noria(connector) => Ok(QueryResult::Noria(match parsed_query {
+            Ok(QueryResult::Noria(match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = std::time::Instant::now();
                     let res = self
-                        .reader
-                        .noria_connector
+                        .noria
                         .handle_select(q, use_params, self.ticket.clone())
                         .await;
                     let execution_time = execution_timer.elapsed().as_micros();
@@ -787,14 +835,11 @@ where
                     );
                     res?
                 }
-                nom_sql::SqlQuery::CreateView(q) => {
-                    self.reader.noria_connector.handle_create_view(q).await?
-                }
-
-                nom_sql::SqlQuery::CreateTable(q) => connector.handle_create_table(q).await?,
+                nom_sql::SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await?,
+                nom_sql::SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await?,
                 nom_sql::SqlQuery::Insert(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let res = connector.handle_insert(q).await;
+                    let res = self.noria.handle_insert(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -806,7 +851,7 @@ where
                 }
                 nom_sql::SqlQuery::Update(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let res = connector.handle_update(q).await;
+                    let res = self.noria.handle_update(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -818,7 +863,7 @@ where
                 }
                 nom_sql::SqlQuery::Delete(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let res = connector.handle_delete(q).await;
+                    let res = self.noria.handle_delete(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -832,93 +877,7 @@ where
                     error!("unsupported query");
                     unsupported!("query type unsupported");
                 }
-            })),
-            Writer::Upstream(connector) => {
-                match parsed_query {
-                    nom_sql::SqlQuery::Select(q) => {
-                        let execution_timer = std::time::Instant::now();
-                        let res = if self.race_reads {
-                            self.race_read(q, query.to_owned(), use_params, self.ticket.clone())
-                                .await
-                        } else {
-                            self.cascade_read(q, query, use_params, self.ticket.clone())
-                                .await
-                        };
-                        //TODO(Dan): Implement fallback execution timing
-                        let execution_time = execution_timer.elapsed().as_micros();
-                        measure_parse_and_execution_time(
-                            parse_time,
-                            execution_time,
-                            SqlQueryType::Read,
-                        );
-                        res
-                    }
-                    nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
-                    | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
-                    | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
-                        let execution_timer = std::time::Instant::now();
-
-                        // Update ticket if RYW enabled
-                        let query_result = if cfg!(feature = "ryw") {
-                            if let Some(timestamp_service) = &mut self.timestamp_client {
-                                let (query_result, identifier) =
-                                    connector.handle_ryw_write(query).await?;
-
-                                // TODO(andrew): Move table name to table index conversion to timestamp service
-                                // https://app.clubhouse.io/readysettech/story/331
-                                let index = self
-                                    .reader
-                                    .noria_connector
-                                    .node_index_of(t.name.as_str())
-                                    .await?;
-                                let affected_tables = vec![WriteKey::TableIndex(index)];
-
-                                let new_timestamp = timestamp_service
-                                    .append_write(WriteId::MySqlGtid(identifier), affected_tables)
-                                    .map_err(|e| internal_err(e.to_string()))?;
-
-                                // TODO(andrew, justin): solidify error handling in client
-                                // https://app.clubhouse.io/readysettech/story/366
-                                let current_ticket = &self.ticket.as_ref().ok_or_else(|| {
-                                    internal_err("RYW enabled backends must have a current ticket")
-                                })?;
-
-                                self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
-                                query_result
-                            } else {
-                                connector.handle_write(query).await?
-                            }
-                        } else {
-                            connector.handle_write(query).await?
-                        };
-                        let execution_time = execution_timer.elapsed().as_micros();
-
-                        measure_parse_and_execution_time(
-                            parse_time,
-                            execution_time,
-                            SqlQueryType::Write,
-                        );
-
-                        Ok(QueryResult::Upstream(query_result))
-                    }
-
-                    // Table Create / Drop (RYW not supported)
-                    // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                    nom_sql::SqlQuery::CreateView(_)
-                    | nom_sql::SqlQuery::CreateTable(_)
-                    | nom_sql::SqlQuery::DropTable(_)
-                    | nom_sql::SqlQuery::Set(_) => connector
-                        .handle_write(&parsed_query.to_string())
-                        .await
-                        .map(QueryResult::Upstream),
-                    nom_sql::SqlQuery::StartTransaction(_)
-                    | nom_sql::SqlQuery::Commit(_)
-                    | nom_sql::SqlQuery::Rollback(_) => {
-                        self.handle_transaction_boundaries(parsed_query).await
-                    }
-                    _ => self.query_fallback(query).await,
-                }
-            }
+            }))
         };
 
         if self.slowlog {
