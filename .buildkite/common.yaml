@@ -22,14 +22,14 @@ steps:
 
   - label: ':docker: Build prettier image'
     key: prettier-image
-    command: .buildkite/build_image.sh Build/Dockerfile.prettier pretttier
+    command: .buildkite/build_image.sh build/Dockerfile.prettier pretttier
     plugins:
       ecr#v2.2.0:
         login: true
 
   - label: ':docker: Build cargo-audit image'
     key: cargo-audit-image
-    command: .buildkite/build_image.sh Build/Dockerfile.cargo-audit cargo-audit
+    command: .buildkite/build_image.sh build/Dockerfile.cargo-audit cargo-audit
     plugins:
       ecr#v2.2.0:
         login: true

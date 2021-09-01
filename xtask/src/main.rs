@@ -13,10 +13,14 @@ use sha2::Digest;
 use tracing::{event, Level};
 use tracing_subscriber::EnvFilter;
 
+mod commands;
+use commands::validate_buildkite_common;
+
 #[derive(Clap, Debug)]
 enum Subcommand {
     InstallDockerCredentialECRLogin,
     InstallCommitMsgHook,
+    ValidateBuildkiteCommon,
 }
 
 #[derive(Clap, Debug)]
@@ -172,5 +176,6 @@ fn main() -> Result<()> {
     match opts.subcommand {
         Subcommand::InstallCommitMsgHook => install_commit_msg_hook(),
         Subcommand::InstallDockerCredentialECRLogin => install_docker_credential_ecr_login(),
+        Subcommand::ValidateBuildkiteCommon => validate_buildkite_common::run(),
     }
 }

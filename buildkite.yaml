@@ -31,14 +31,6 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ':docker: Build prettier image'
-              include:
-                - "js-client/**"
-
-            - label: ':prettier: Check prettier'
-              include:
-                - "js-client/**"
-
             - label: ':docker: Build cargo-audit image'
               include:
                 - 'Cargo.lock'
@@ -51,17 +43,13 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: ":docker: Build noria-server image"
-              include:
-                - "js-client/**"
+            - label: ":docker: Build readyset-server image"
+              exclude:
+                - "ops/**"
 
-            - label: ":rust: Build js-client shared library"
-              include:
-                - "js-client/**"
-
-            - label: ':nodejs: Test js-client'
-              include:
-                - "js-client/**"
+            - label: ':docker: Build readyset-mysql image'
+              exclude:
+                - "ops/**"
 
             - label: ':rust: Run tests'
               exclude:
@@ -71,7 +59,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            - label: 'Run logictest with binlog replication'
+            - label: 'Run logictest with MySQL replication'
               exclude:
                 - "ops/**"
 
@@ -79,7 +67,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            # --- START OPS STEPS ----#
+            # --- START OPS STEPS --- #
             - label: ':docker: Build readyset-ops image'
               include:
                 - "ops/**"
@@ -95,7 +83,25 @@ steps:
             - label: ':pipeline: Upload Packer linting steps'
               include:
                 - "ops/images/**"
-            # --- END OPS STEPS ----#
+            # --- END OPS STEPS --- #
+
+            # --- START JS CLIENT STEPS --- #
+            - label: ':docker: Build prettier image'
+              include:
+                - "js-client/**"
+
+            - label: ':prettier: Check prettier'
+              include:
+                - "js-client/**"
+
+            - label: ":rust: Build js-client shared library"
+              include:
+                - "js-client/**"
+
+            - label: ':nodejs: Test js-client'
+              include:
+                - "js-client/**"
+            # --- START JS CLIENT STEPS --- #
 
             - label: 'List frameworks'
               include:
@@ -104,10 +110,6 @@ steps:
             - label: 'Generate framework pipeline'
               include:
                 - "readyset-framework-testing/frameworks/**"
-
-            - label: ':docker: Build readyset-mysql image'
-              exclude:
-                - "ops/**"
 
             - label: 'Test readyset deployment'
               exclude:

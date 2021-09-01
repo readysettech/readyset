@@ -13,5 +13,6 @@ tracing-subscriber = "0.2"
 directories = "3.0"
 reqwest = { version = "0.11", features = [ "blocking" ] }
 serde_json = "1.0"
+yaml-rust = "0.4"
 sha2 = "0.9"
 which = "4.2"
