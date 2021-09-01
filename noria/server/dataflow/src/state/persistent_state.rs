@@ -21,7 +21,6 @@ use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };
 use std::borrow::Cow;
-use std::iter::repeat;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 
@@ -782,35 +781,28 @@ impl PersistentState {
         let index_id = self.index_id(columns);
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
+            // Create an iterator once, reuse it for each key
+            let mut iter = db.raw_iterator_cf(cf);
 
-            if index_id == 0 && self.has_unique_index {
-                let keys = repeat(cf).zip(keys.iter().map(|k| Self::serialize_prefix(k)));
-                db.multi_get_cf(keys)
-                    .into_iter()
-                    .map(|row| {
-                        let row = if let Some(row) = row.unwrap() {
-                            vec![bincode::deserialize(&row).expect("Deserializing from rocksdb")]
-                        } else {
-                            vec![]
-                        };
+            keys.iter()
+                .map(|k| {
+                    let prefix = Self::serialize_prefix(k);
+                    let mut rows = Vec::new();
 
-                        RecordResult::Owned(row)
-                    })
-                    .collect()
-            } else {
-                keys.iter()
-                    .map(|k| {
-                        let prefix = Self::serialize_prefix(k);
-                        RecordResult::Owned(
-                            db.prefix_iterator_cf(cf, &prefix)
-                                .map(|(_, v)| {
-                                    bincode::deserialize(&v).expect("Deserializing from rocksdb")
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect()
-            }
+                    iter.seek(&prefix); // Find the next key
+
+                    while iter.valid()
+                        && iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false)
+                    {
+                        let val = bincode::deserialize(iter.value().unwrap())
+                            .expect("Deserializing from rocksdb");
+                        rows.push(val);
+                        iter.next();
+                    }
+
+                    RecordResult::Owned(rows)
+                })
+                .collect()
         })
     }
 }
@@ -906,23 +898,23 @@ mod tests {
         (dir, path.to_string_lossy().into())
     }
 
-    fn setup_persistent(prefix: &str) -> PersistentState {
+    fn setup_persistent(prefix: &str, primary_key: Option<&[usize]>) -> PersistentState {
         PersistentState::new(
             String::from(prefix),
-            None,
+            primary_key,
             &PersistenceParameters::default(),
         )
     }
 
     pub(self) fn setup_single_key(name: &str) -> PersistentState {
-        let mut state = setup_persistent(name);
+        let mut state = setup_persistent(name, None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         state
     }
 
     #[test]
     fn persistent_state_is_partial() {
-        let state = setup_persistent("persistent_state_is_partial");
+        let state = setup_persistent("persistent_state_is_partial", None);
         assert!(!state.is_partial());
     }
 
@@ -948,7 +940,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multi_key() {
-        let mut state = setup_persistent("persistent_state_multi_key");
+        let mut state = setup_persistent("persistent_state_multi_key", None);
         let index = Index::new(IndexType::BTreeMap, vec![0, 2]);
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap(), 20.into()];
         state.add_key(&index, None);
@@ -969,7 +961,7 @@ mod tests {
 
     #[test]
     fn persistent_state_multiple_indices() {
-        let mut state = setup_persistent("persistent_state_multiple_indices");
+        let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap(), 1.into()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap(), 1.into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
@@ -984,22 +976,6 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state
-            .lookup_multi(
-                &[0],
-                &[KeyType::Single(&10.into()), KeyType::Single(&20.into())],
-            )
-            .as_slice()
-        {
-            &[RecordResult::Owned(ref r0), RecordResult::Owned(ref r1)] => {
-                assert_eq!(r0.len(), 1);
-                assert_eq!(r0[0], first);
-                assert_eq!(r1.len(), 1);
-                assert_eq!(r1[0], second);
-            }
-            _ => unreachable!(),
-        }
-
         match state.lookup(
             &[1, 2],
             &KeyType::Double(("Cat".try_into().unwrap(), 1.into())),
@@ -1010,6 +986,83 @@ mod tests {
                 assert_eq!(&rows[1], &second);
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn persistent_state_lookup_multi() {
+        for primary in [None, Some(&[0usize][..])] {
+            let mut state = setup_persistent("persistent_state_lookup_multi", primary);
+            let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap(), 1.into()];
+            let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap(), 1.into()];
+            let third: Vec<DataType> = vec![30.into(), "Dog".try_into().unwrap(), 1.into()];
+            let fourth: Vec<DataType> = vec![40.into(), "Dog".try_into().unwrap(), 1.into()];
+            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(&Index::new(IndexType::BTreeMap, vec![1, 2]), None);
+            state.process_records(
+                &mut vec![first.clone(), second.clone(), third.clone(), fourth.clone()].into(),
+                None,
+                None,
+            );
+
+            match state
+                .lookup_multi(
+                    &[0],
+                    &[
+                        KeyType::Single(&10.into()),
+                        KeyType::Single(&20.into()),
+                        KeyType::Single(&30.into()),
+                        KeyType::Single(&10.into()),
+                        KeyType::Single(&40.into()),
+                    ],
+                )
+                .as_slice()
+            {
+                &[RecordResult::Owned(ref r0), RecordResult::Owned(ref r1), RecordResult::Owned(ref r2), RecordResult::Owned(ref r3), RecordResult::Owned(ref r4)] =>
+                {
+                    assert_eq!(r0.len(), 1);
+                    assert_eq!(r0[0], first);
+                    assert_eq!(r1.len(), 1);
+                    assert_eq!(r1[0], second);
+                    assert_eq!(r2.len(), 1);
+                    assert_eq!(r2[0], third);
+                    assert_eq!(r3.len(), 1);
+                    assert_eq!(r3[0], first);
+                    assert_eq!(r4.len(), 1);
+                    assert_eq!(r4[0], fourth);
+                }
+                _ => unreachable!(),
+            }
+
+            match state
+                .lookup_multi(
+                    &[1, 2],
+                    &[
+                        KeyType::Double(("Dog".try_into().unwrap(), 1.into())),
+                        KeyType::Double(("Cat".try_into().unwrap(), 1.into())),
+                        KeyType::Double(("Dog".try_into().unwrap(), 1.into())),
+                        KeyType::Double(("Cat".try_into().unwrap(), 1.into())),
+                    ],
+                )
+                .as_slice()
+            {
+                &[RecordResult::Owned(ref r0), RecordResult::Owned(ref r1), RecordResult::Owned(ref r2), RecordResult::Owned(ref r3)] =>
+                {
+                    assert_eq!(r0.len(), 2);
+                    assert_eq!(r0[0], third);
+                    assert_eq!(r0[1], fourth);
+                    assert_eq!(r1.len(), 2);
+                    assert_eq!(r1[0], first);
+                    assert_eq!(r1[1], second);
+                    assert_eq!(r2.len(), 2);
+                    assert_eq!(r2[0], third);
+                    assert_eq!(r2[1], fourth);
+                    assert_eq!(r3.len(), 2);
+                    assert_eq!(r3[0], first);
+                    assert_eq!(r3[1], second);
+                }
+                _ => unreachable!(),
+            }
         }
     }
 
@@ -1099,7 +1152,7 @@ mod tests {
 
     #[test]
     fn persistent_state_not_unique_primary() {
-        let mut state = setup_persistent("persistent_state_multiple_indices");
+        let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DataType> = vec![0.into(), 0.into()];
         let second: Vec<DataType> = vec![0.into(), 1.into()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
@@ -1126,7 +1179,7 @@ mod tests {
 
     #[test]
     fn persistent_state_different_indices() {
-        let mut state = setup_persistent("persistent_state_different_indices");
+        let mut state = setup_persistent("persistent_state_different_indices", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Bob".try_into().unwrap()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
@@ -1216,7 +1269,7 @@ mod tests {
 
     #[test]
     fn persistent_state_remove() {
-        let mut state = setup_persistent("persistent_state_remove");
+        let mut state = setup_persistent("persistent_state_remove", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let duplicate: Vec<DataType> = vec![10.into(), "Other Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap()];
@@ -1263,7 +1316,7 @@ mod tests {
 
     #[test]
     fn persistent_state_is_useful() {
-        let mut state = setup_persistent("persistent_state_is_useful");
+        let mut state = setup_persistent("persistent_state_is_useful", None);
         assert!(!state.is_useful());
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         assert!(state.is_useful());
@@ -1271,7 +1324,7 @@ mod tests {
 
     #[test]
     fn persistent_state_rows() {
-        let mut state = setup_persistent("persistent_state_rows");
+        let mut state = setup_persistent("persistent_state_rows", None);
         let mut rows = vec![];
         for i in 0..30 {
             let row = vec![DataType::from(i); 30];
@@ -1291,7 +1344,7 @@ mod tests {
 
     #[test]
     fn persistent_state_deep_size_of() {
-        let state = setup_persistent("persistent_state_deep_size_of");
+        let state = setup_persistent("persistent_state_deep_size_of", None);
         let size = state.deep_size_of();
         assert_eq!(size, 0);
     }
@@ -1348,7 +1401,7 @@ mod tests {
 
     #[test]
     fn persistent_state_all_rows() {
-        let mut state = setup_persistent("persistent_state_all_rows");
+        let mut state = setup_persistent("persistent_state_all_rows", None);
         let mut rows = vec![];
         for i in 0..10 {
             let row = vec![DataType::from(i); 10];
@@ -1372,7 +1425,7 @@ mod tests {
 
     #[test]
     fn persistent_state_cloned_records() {
-        let mut state = setup_persistent("persistent_state_cloned_records");
+        let mut state = setup_persistent("persistent_state_cloned_records", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
@@ -1402,7 +1455,7 @@ mod tests {
 
     #[test]
     fn persistent_state_old_records_new_index() {
-        let mut state = setup_persistent("persistent_state_old_records_new_index");
+        let mut state = setup_persistent("persistent_state_old_records_new_index", None);
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         insert(&mut state, row.clone());
@@ -1416,7 +1469,7 @@ mod tests {
 
     #[test]
     fn persistent_state_process_records() {
-        let mut state = setup_persistent("persistent_state_process_records");
+        let mut state = setup_persistent("persistent_state_process_records", None);
         let records: Records = vec![
             (vec![1.into(), "A".try_into().unwrap()], true),
             (vec![2.into(), "B".try_into().unwrap()], true),
@@ -1446,7 +1499,7 @@ mod tests {
 
     #[test]
     fn replication_offset_roundtrip() {
-        let mut state = setup_persistent("replication_offset_roundtrip");
+        let mut state = setup_persistent("replication_offset_roundtrip", None);
         state.add_key(&Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".try_into().unwrap()], true)].into();
         let replication_offset = ReplicationOffset {
@@ -1461,7 +1514,7 @@ mod tests {
     #[test]
     #[allow(clippy::op_ref)]
     fn persistent_state_prefix_transform() {
-        let mut state = setup_persistent("persistent_state_prefix_transform");
+        let mut state = setup_persistent("persistent_state_prefix_transform", None);
         state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
         let data = (DataType::from(1), DataType::from(10));
         let r = KeyType::Double(data.clone());
