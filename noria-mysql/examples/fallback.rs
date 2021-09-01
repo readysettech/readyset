@@ -8,7 +8,7 @@ use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
         noria_connector::{self, NoriaConnector},
-        BackendBuilder, QueryResult, Reader, Writer,
+        BackendBuilder, QueryResult,
     },
     UpstreamDatabase,
 };
@@ -19,7 +19,6 @@ use noria_mysql::{Error, MySqlUpstream};
 /// needed components of the system before running this script.
 #[tokio::main]
 async fn main() {
-    println!("Begin!");
     let mysql_url = "mysql://root:mysqlroot@127.0.0.1:3308/inventory";
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
@@ -30,28 +29,16 @@ async fn main() {
 
     let ch = ControllerHandle::new(zk_auth).await;
 
-    let noria_conn = NoriaConnector::new(
-        ch.clone(),
-        auto_increments.clone(),
-        query_cache.clone(),
-        None,
-    )
-    .await;
+    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
 
     let mysql_url = String::from(mysql_url);
 
-    let reader = Reader {
-        noria_connector: noria_conn,
-        upstream: Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap()),
-    };
-
-    // Construct the Writer (to an underlying DB)
-    let writer = Writer::Upstream(MySqlUpstream::connect(mysql_url).await.unwrap());
+    let upstream = Some(MySqlUpstream::connect(mysql_url).await.unwrap());
 
     let mut b = BackendBuilder::new()
         .require_authentication(false)
         .enable_ryw(true)
-        .build(writer, reader);
+        .build(noria, upstream);
 
     let noria_res = b.query("select * from customers;").await;
     let mysql_res = b.query("show tables;").await;

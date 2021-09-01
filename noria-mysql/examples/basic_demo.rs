@@ -3,7 +3,7 @@ use maplit::hashmap;
 use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::{self, NoriaConnector};
-use noria_client::backend::{BackendBuilder, QueryResult, Reader, Writer};
+use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_mysql::MySqlUpstream;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -20,22 +20,8 @@ async fn main() -> Result<()> {
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-    let writer: Writer<_, MySqlUpstream> = {
-        Writer::Noria(
-            NoriaConnector::new(
-                ch.clone(),
-                auto_increments.clone(),
-                query_cache.clone(),
-                None,
-            )
-            .await,
-        )
-    };
-    let noria_connector = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
-    let reader = Reader {
-        upstream: None,
-        noria_connector,
-    };
+    let upstream: Option<MySqlUpstream> = None;
+    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
     let slowlog = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()
@@ -46,7 +32,7 @@ async fn main() -> Result<()> {
         .slowlog(slowlog)
         .users(users.clone())
         .require_authentication(require_authentication)
-        .build(writer, reader);
+        .build(noria, upstream);
 
     let res = b.query("select * from employees;").await;
 
