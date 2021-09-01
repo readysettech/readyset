@@ -4,12 +4,12 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use noria::{DataType, ReadySetError};
 
+/// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 #[derive(Debug)]
-pub struct UpstreamPrepare<Col> {
+pub struct UpstreamPrepare<DB: UpstreamDatabase> {
     pub statement_id: u32,
-    pub params: Vec<Col>,
-    pub schema: Vec<Col>,
     pub is_read: bool,
+    pub meta: DB::StatementMeta,
 }
 
 /// A connector to some kind of upstream database which can be used for passthrough write queries
@@ -30,11 +30,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`QueryResult::Upstream`]: crate::backend::QueryResult::Upstream
     type QueryResult: Debug + Send + 'static;
 
-    /// A type representing metadata about a column in the schema.
+    /// A type representing metadata about a prepared statement.
     ///
-    /// Column is used in [`UpstreamPrepare`], to communicate the schema for the query parameters of
-    /// a prepared statement in addition to the schema for the actual returned rows.
-    type Column: Debug + Send + 'static;
+    /// This type is used as a field of [`UpstreamPrepare`], returned from
+    /// [`prepare`](UpstreamDatabase::prepaare)
+    type StatementMeta: Debug + Send + 'static;
 
     /// Errors that can be returned from operations on this database
     ///
@@ -57,10 +57,7 @@ pub trait UpstreamDatabase: Sized + Send {
     /// associated with statement IDs, as long as after calling `on_prepare` on one instance of an
     /// UpstreamDatabase a later call of [`on_execute`] on the same UpstreamDatabase with the same
     /// statement ID executes that statement.
-    async fn prepare<'a, S>(
-        &'a mut self,
-        query: S,
-    ) -> Result<UpstreamPrepare<Self::Column>, Self::Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Self::Error>
     where
         S: AsRef<str> + Send + Sync + 'a;
 

@@ -11,6 +11,7 @@ use noria::errors::internal_err;
 use noria::{internal, DataType, ReadySetError};
 use noria_client::backend::noria_connector;
 use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
+use upstream::StatementMeta;
 
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
@@ -143,7 +144,10 @@ where
                     .collect::<Vec<_>>();
                 info.reply(self.prepared_count(), &params, &[]).await
             }
-            Ok(PrepareResult::Upstream(UpstreamPrepare { params, schema, .. })) => {
+            Ok(PrepareResult::Upstream(UpstreamPrepare {
+                meta: StatementMeta { params, schema },
+                ..
+            })) => {
                 let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
 

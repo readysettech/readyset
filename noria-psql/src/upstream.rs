@@ -6,7 +6,6 @@ use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use pgsql::{Config, Row};
-use psql_srv::Column;
 use tokio_postgres as pgsql;
 
 use crate::Error;
@@ -33,9 +32,9 @@ pub enum QueryResult {
 
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
-    type Column = Column;
     type QueryResult = QueryResult;
     type Error = Error;
+    type StatementMeta = (); // TODO(grfn)
 
     async fn connect(url: String) -> Result<Self, Error> {
         let config = Config::from_str(&url)?;
@@ -57,7 +56,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &self.url
     }
 
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -68,10 +67,8 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         self.prepared_statements.insert(statement_id, statement);
         Ok(UpstreamPrepare {
             statement_id,
-            // TODO: fill these in
-            params: vec![],
-            schema: vec![],
             is_read: false,
+            meta: (),
         })
     }
 

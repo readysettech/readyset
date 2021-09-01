@@ -234,9 +234,9 @@ pub struct SelectSchema {
 
 /// The type returned when a query is prepared by `Backend` through the `prepare` function.
 #[derive(Debug)]
-pub enum PrepareResult<Col> {
+pub enum PrepareResult<DB: UpstreamDatabase> {
     Noria(noria_connector::PrepareResult),
-    Upstream(UpstreamPrepare<Col>),
+    Upstream(UpstreamPrepare<DB>),
 }
 
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
@@ -304,7 +304,7 @@ where
     pub async fn prepare_fallback(
         &mut self,
         query: &str,
-    ) -> Result<UpstreamPrepare<DB::Column>, DB::Error> {
+    ) -> Result<UpstreamPrepare<DB>, DB::Error> {
         let q = query.to_string().trim_start().to_lowercase();
         if is_read(&q) {
             match self.reader.upstream {
@@ -320,7 +320,7 @@ where
     }
 
     /// Stores the prepared query id in a table
-    fn store_prep_statement(&mut self, prepare: &PrepareResult<DB::Column>) {
+    fn store_prep_statement(&mut self, prepare: &PrepareResult<DB>) {
         use noria_connector::PrepareResult::*;
 
         match prepare {
@@ -453,7 +453,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
-    ) -> Result<PrepareResult<DB::Column>, DB::Error> {
+    ) -> Result<PrepareResult<DB>, DB::Error> {
         match self
             .reader
             .noria_connector
@@ -474,7 +474,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB::Column>, DB::Error> {
+    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
