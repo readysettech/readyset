@@ -7,12 +7,11 @@ use crate::message::{
     StatementName::*,
     TransferFormat::{self, *},
 };
-use crate::r#type::Type;
 use crate::value::Value;
 use arccstr::ArcCStr;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::NaiveDateTime;
-use postgres_types::FromSql;
+use postgres_types::{FromSql, Type};
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::convert::TryInto;

@@ -1,11 +1,12 @@
-use crate::resultset::Resultset;
-use crate::schema::{NoriaSchema, SelectSchema};
-use crate::upstream;
 use noria_client::backend::noria_connector;
 use noria_client::backend::{self as cl, UpstreamPrepare};
 use psql_srv as ps;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
+use upstream::StatementMeta;
 
+use crate::resultset::Resultset;
+use crate::schema::{NoriaSchema, SelectSchema};
+use crate::upstream;
 use crate::PostgreSqlUpstream;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
@@ -26,8 +27,8 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 schema,
             }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
-                param_schema: NoriaSchema(params).into(),
-                row_schema: NoriaSchema(schema).into(),
+                param_schema: NoriaSchema(params).try_into()?,
+                row_schema: NoriaSchema(schema).try_into()?,
             }),
             Noria(Insert {
                 statement_id,
@@ -35,8 +36,8 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 schema,
             }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
-                param_schema: NoriaSchema(params).into(),
-                row_schema: NoriaSchema(schema).into(),
+                param_schema: NoriaSchema(params).try_into()?,
+                row_schema: NoriaSchema(schema).try_into()?,
             }),
             Noria(Update {
                 statement_id,
@@ -45,14 +46,17 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 // NOTE u32::try_from is used because NoriaPrepareUpdate's statement_id has a
                 // non-standard u64 data type.
                 prepared_statement_id: u32::try_from(statement_id)?,
-                param_schema: NoriaSchema(params).into(),
+                param_schema: NoriaSchema(params).try_into()?,
                 row_schema: vec![],
             }),
-            Upstream(UpstreamPrepare { statement_id, .. }) => Ok(ps::PrepareResponse {
+            Upstream(UpstreamPrepare {
+                statement_id,
+                meta: StatementMeta { params, schema },
+                ..
+            }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
-                // TODO(grfn): Fill these in
-                param_schema: vec![],
-                row_schema: vec![],
+                param_schema: params,
+                row_schema: schema,
             }),
         }
     }
@@ -83,7 +87,7 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
                 let select_schema = SelectSchema(select_schema);
                 let resultset = Resultset::try_new(data, &select_schema)?;
                 Ok(Select {
-                    schema: select_schema.into(),
+                    schema: select_schema.try_into()?,
                     resultset,
                 })
             }

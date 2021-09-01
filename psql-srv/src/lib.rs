@@ -23,14 +23,13 @@ mod message;
 mod protocol;
 mod response;
 mod runner;
-mod r#type;
 mod value;
 
 pub use crate::error::Error;
-pub use crate::r#type::ColType;
 pub use crate::value::Value;
 
 use async_trait::async_trait;
+use postgres_types::Type;
 use std::convert::TryInto;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -94,11 +93,8 @@ pub struct Column {
     pub name: String,
 
     /// The type of the column
-    pub col_type: ColType,
+    pub col_type: Type,
 }
-
-/// A description of a sequence of fields, consisting of the name and type of each field.
-pub type Schema = Vec<Column>;
 
 /// A response produced by `Backend::on_prepare`, containing metadata about a newly created
 /// prepared statement.
@@ -106,9 +102,9 @@ pub struct PrepareResponse {
     /// An identifier for the new prepared statement.
     pub prepared_statement_id: u32,
     /// The schema for parameters to be provided to the prepared statement.
-    pub param_schema: Schema,
+    pub param_schema: Vec<Type>,
     /// The schema for rows to be returned when the prepared statement is executed.
-    pub row_schema: Schema,
+    pub row_schema: Vec<Column>,
 }
 
 /// A response produced by `Backend::on_query` or `Backend::on_execute`, containing either data
@@ -117,7 +113,7 @@ pub enum QueryResponse<S> {
     /// The response to a select statement.
     Select {
         /// The schema of the resultset produced by the select statement.
-        schema: Schema,
+        schema: Vec<Column>,
         /// The actual resultset produced by the select statement.
         resultset: S,
     },

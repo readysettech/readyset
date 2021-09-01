@@ -3,9 +3,9 @@ mod encoder;
 mod error;
 
 pub use error::{DecodeError, EncodeError};
+use postgres_types::Type;
 
 use crate::error::Error;
-use crate::r#type::Type;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::convert::TryInto;

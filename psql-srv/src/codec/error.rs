@@ -1,4 +1,4 @@
-use crate::r#type::Type;
+use postgres_types::Type;
 use std::ffi::FromBytesWithNulError;
 use std::fmt;
 use std::marker::{Send, Sync};

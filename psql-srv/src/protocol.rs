@@ -8,10 +8,10 @@ use crate::message::{
     StatementName::*,
     TransferFormat::{self, *},
 };
-use crate::r#type::{ColType, Type};
 use crate::response::Response;
 use crate::value::Value;
-use crate::{Backend, Column, PrepareResponse, QueryResponse::*, Schema};
+use crate::{Backend, Column, PrepareResponse, QueryResponse::*};
+use postgres_types::Type;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,8 +52,8 @@ pub struct Protocol {
 #[derive(Debug, PartialEq)]
 struct PreparedStatementData {
     prepared_statement_id: u32,
-    param_schema: Schema,
-    row_schema: Schema,
+    param_schema: Vec<Type>,
+    row_schema: Vec<Column>,
 }
 
 /// A portal is a combination of a prepared statement and a list of values provided by the frontend
@@ -231,10 +231,7 @@ impl Protocol {
                         .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
                     Ok(Response::Message2(
                         ParameterDescription {
-                            parameter_data_types: param_schema
-                                .iter()
-                                .map(|col| to_type(&col.col_type))
-                                .collect::<Result<Vec<Type>, Error>>()?,
+                            parameter_data_types: param_schema.clone(),
                         },
                         RowDescription {
                             field_descriptions: row_schema
@@ -324,10 +321,7 @@ impl Protocol {
                 } = backend.on_prepare(query.borrow()).await?;
                 channel.set_statement_param_types(
                     prepared_statement_name.borrow() as &str,
-                    param_schema
-                        .iter()
-                        .map(|col| to_type(&col.col_type))
-                        .collect::<Result<Vec<Type>, Error>>()?,
+                    param_schema.clone(),
                 );
                 self.prepared_statements.insert(
                     prepared_statement_name.to_string(),
@@ -400,85 +394,29 @@ fn make_field_description(
     col: &Column,
     transfer_format: TransferFormat,
 ) -> Result<FieldDescription, Error> {
-    let data_type = to_type(&col.col_type)?;
-    let (data_type_size, type_modifier) = match col.col_type {
-        ColType::Bool => (TYPLEN_1, ATTTYPMOD_NONE),
-        ColType::Char(Some(v)) => (TYPLEN_1, i32::from(v)),
-        ColType::Varchar(v) => (TYPLEN_VARLENA, i32::from(v)),
-        ColType::UnsignedInt(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Int(_) => (TYPLEN_4, ATTTYPMOD_NONE),
-        ColType::Bigint(_) => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::UnsignedBigint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Tinyint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::UnsignedTinyint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Smallint(_) => (TYPLEN_2, ATTTYPMOD_NONE),
-        ColType::UnsignedSmallint(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Blob => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Longblob => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Mediumblob => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Tinyblob => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Double => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Float => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Real => (TYPLEN_4, ATTTYPMOD_NONE),
-        ColType::Tinytext => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Mediumtext => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Longtext => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Text | ColType::Char(None) => (TYPLEN_VARLENA, ATTTYPMOD_NONE),
-        ColType::Date => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::DateTime(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Time => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Timestamp => (TYPLEN_8, ATTTYPMOD_NONE),
-        ColType::Binary(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Varbinary(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Enum(_) => return Err(Error::UnsupportedType(col.col_type.clone())),
-        ColType::Decimal(_, _) => return Err(Error::UnsupportedType(col.col_type.clone())),
+    let data_type_size = match col.col_type {
+        Type::BOOL => TYPLEN_1,
+        Type::CHAR => TYPLEN_1,
+        Type::TEXT => TYPLEN_VARLENA,
+        Type::VARCHAR => TYPLEN_VARLENA,
+        Type::INT2 => TYPLEN_2,
+        Type::INT4 => TYPLEN_4,
+        Type::INT8 => TYPLEN_8,
+        Type::FLOAT4 => TYPLEN_4,
+        Type::FLOAT8 => TYPLEN_8,
+        Type::TIMESTAMP => TYPLEN_8,
+        _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
     Ok(FieldDescription {
         field_name: col.name.clone(),
         table_id: UNKNOWN_TABLE,
         col_id: UNKNOWN_COLUMN,
-        data_type,
+        data_type: col.col_type.clone(),
         data_type_size,
-        type_modifier,
+        type_modifier: ATTTYPMOD_NONE,
         transfer_format,
     })
 }
-
-fn to_type(col_type: &ColType) -> Result<Type, Error> {
-    match *col_type {
-        ColType::Bool => Ok(Type::BOOL),
-        ColType::Char(_) => Ok(Type::CHAR),
-        ColType::Varchar(_) => Ok(Type::VARCHAR),
-        ColType::Int(_) => Ok(Type::INT4),
-        ColType::UnsignedInt(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Bigint(_) => Ok(Type::INT8),
-        ColType::UnsignedBigint(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Tinyint(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::UnsignedTinyint(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Smallint(_) => Ok(Type::INT2),
-        ColType::UnsignedSmallint(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Blob => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Longblob => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Mediumblob => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Tinyblob => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Double => Ok(Type::FLOAT8),
-        ColType::Float => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Real => Ok(Type::FLOAT4),
-        ColType::Tinytext => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Mediumtext => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Longtext => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Text => Ok(Type::TEXT),
-        ColType::Date => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::DateTime(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Time => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Timestamp => Ok(Type::TIMESTAMP),
-        ColType::Binary(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Varbinary(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Enum(_) => Err(Error::UnsupportedType(col_type.clone())),
-        ColType::Decimal(_, _) => Err(Error::UnsupportedType(col_type.clone())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -565,11 +503,11 @@ mod tests {
                     schema: vec![
                         Column {
                             name: "col1".to_string(),
-                            col_type: ColType::Int(None),
+                            col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".to_string(),
-                            col_type: ColType::Double,
+                            col_type: Type::FLOAT8,
                         },
                     ],
                     resultset: vec![
@@ -589,24 +527,15 @@ mod tests {
             } else {
                 Ok(PrepareResponse {
                     prepared_statement_id: 1,
-                    param_schema: vec![
-                        Column {
-                            name: "x".to_string(),
-                            col_type: ColType::Double,
-                        },
-                        Column {
-                            name: "y".to_string(),
-                            col_type: ColType::Int(None),
-                        },
-                    ],
+                    param_schema: vec![Type::FLOAT8, Type::INT4],
                     row_schema: vec![
                         Column {
                             name: "col1".to_string(),
-                            col_type: ColType::Int(None),
+                            col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".to_string(),
-                            col_type: ColType::Double,
+                            col_type: Type::FLOAT8,
                         },
                     ],
                 })
@@ -627,11 +556,11 @@ mod tests {
                     schema: vec![
                         Column {
                             name: "col1".to_string(),
-                            col_type: ColType::Int(None),
+                            col_type: Type::INT4,
                         },
                         Column {
                             name: "col2".to_string(),
-                            col_type: ColType::Double,
+                            col_type: Type::FLOAT8,
                         },
                     ],
                     resultset: vec![
@@ -943,24 +872,15 @@ mod tests {
             *protocol.prepared_statements.get("prepared1").unwrap(),
             PreparedStatementData {
                 prepared_statement_id: 1,
-                param_schema: vec![
-                    Column {
-                        name: "x".to_string(),
-                        col_type: ColType::Double
-                    },
-                    Column {
-                        name: "y".to_string(),
-                        col_type: ColType::Int(None)
-                    }
-                ],
+                param_schema: vec![Type::FLOAT8, Type::INT4],
                 row_schema: vec![
                     Column {
                         name: "col1".to_string(),
-                        col_type: ColType::Int(None)
+                        col_type: Type::INT4
                     },
                     Column {
                         name: "col2".to_string(),
-                        col_type: ColType::Double
+                        col_type: Type::FLOAT8
                     },
                 ],
             }
