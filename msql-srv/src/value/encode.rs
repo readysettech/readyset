@@ -414,6 +414,9 @@ where
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         (*self).to_mysql_bin(w, c)
     }
+    fn is_null(&self) -> bool {
+        (*self).is_null()
+    }
 }
 
 use chrono::{self, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
