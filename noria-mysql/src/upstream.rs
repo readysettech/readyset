@@ -38,10 +38,18 @@ pub struct MySqlUpstream {
     url: String,
 }
 
+#[derive(Debug)]
+pub struct StatementMeta {
+    /// Metadata about the query parameters for this statement
+    pub params: Vec<Column>,
+    /// Metadata about the types of the columns in the rows returned by this statement
+    pub schema: Vec<Column>,
+}
+
 #[async_trait]
 impl UpstreamDatabase for MySqlUpstream {
-    type Column = Column;
     type QueryResult = QueryResult;
+    type StatementMeta = StatementMeta;
     type Error = Error;
 
     async fn connect(url: String) -> Result<Self, Error> {
@@ -75,7 +83,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
-    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self::Column>, Error>
+    async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
@@ -90,9 +98,11 @@ impl UpstreamDatabase for MySqlUpstream {
             .insert(statement.id(), statement.clone());
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
-            params: statement.params().to_owned(),
-            schema: statement.columns().to_owned(),
             is_read,
+            meta: StatementMeta {
+                params: statement.params().to_owned(),
+                schema: statement.columns().to_owned(),
+            },
         })
     }
 

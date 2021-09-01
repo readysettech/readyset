@@ -10,7 +10,7 @@ use crate::PostgreSqlUpstream;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.
-pub struct PrepareResponse(pub cl::PrepareResult<ps::Column>);
+pub struct PrepareResponse(pub cl::PrepareResult<PostgreSqlUpstream>);
 
 impl TryFrom<PrepareResponse> for ps::PrepareResponse {
     type Error = ps::Error;

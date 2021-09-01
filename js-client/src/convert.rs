@@ -1,6 +1,5 @@
 use crate::utils;
 use chrono::NaiveDateTime;
-use mysql_async::Column;
 use neon::{prelude::*, types::JsDate};
 use noria::ColumnSchema;
 use noria::{results::Results, DataType};
@@ -35,7 +34,7 @@ where
 
 pub(crate) fn convert_prepare_result<'a, C>(
     cx: &mut C,
-    raw_prepare_result: PrepareResult<Column>,
+    raw_prepare_result: PrepareResult<MySqlUpstream>,
 ) -> NeonResult<Handle<'a, JsObject>>
 where
     C: Context<'a>,
