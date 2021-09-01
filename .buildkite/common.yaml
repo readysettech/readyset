@@ -32,7 +32,7 @@ steps:
 
   - label: ':docker: Build prettier image'
     key: prettier-image
-    command: .buildkite/build_image.sh build/Dockerfile.prettier pretttier
+    command: .buildkite/build_image.sh build/Dockerfile.prettier prettier
     plugins:
       ecr#v2.2.0:
         login: true
