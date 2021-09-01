@@ -13,7 +13,7 @@ use noria::errors::ReadySetResult;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
 
-#[derive(PartialEq, Eq, Debug, From)]
+#[derive(PartialEq, Eq, Debug, From, Hash)]
 pub(crate) enum MissRecord {
     /// A miss on a point query
     Point(Vec1<DataType>),
