@@ -20,14 +20,6 @@ steps:
       ecr#v2.2.0:
         login: true
 
-  - label: ":docker: Build readyset-psql image"
-    key: readyset-psql-image
-    command: .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
-    branches: refs/heads/main
-    plugins:
-      ecr#v2.2.0:
-        login: true
-
   - label: ':docker: Build prettier image'
     key: prettier-image
     command: .buildkite/build_image.sh Build/Dockerfile.prettier pretttier
