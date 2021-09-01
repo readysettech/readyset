@@ -1,7 +1,7 @@
 use crate::value::Value;
 use noria::DataType;
-use psql_srv as ps;
 use std::sync::Arc;
+use tokio_postgres::types::Type;
 
 /// A structure containing a `Vec<DataType>`, representing one row of data, which facilitates
 /// iteration over the values within this row as `Value` structures.
@@ -20,7 +20,7 @@ pub struct Row {
     pub project_fields: Arc<Vec<usize>>,
 
     /// The data types of the projected fields for this row.
-    pub project_field_types: Arc<Vec<ps::ColType>>,
+    pub project_field_types: Arc<Vec<Type>>,
 }
 
 impl IntoIterator for Row {
@@ -56,9 +56,9 @@ impl Iterator for RowIterator {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use arccstr::ArcCStr;
+    use psql_srv as ps;
     use std::convert::TryFrom;
 
     fn collect_row_values(row: Row) -> Vec<ps::Value> {
@@ -82,7 +82,7 @@ mod tests {
         let row = Row {
             values: vec![DataType::Int(43)],
             project_fields: Arc::new(vec![0]),
-            project_field_types: Arc::new(vec![ps::ColType::Int(None)]),
+            project_field_types: Arc::new(vec![Type::INT4]),
         };
         assert_eq!(collect_row_values(row), vec![ps::Value::Int(43)]);
     }
@@ -97,12 +97,7 @@ mod tests {
                 DataType::Float(8.99, 2),
             ],
             project_fields: Arc::new(vec![0, 1, 2, 3]),
-            project_field_types: Arc::new(vec![
-                ps::ColType::Int(None),
-                ps::ColType::Text,
-                ps::ColType::Double,
-                ps::ColType::Float,
-            ]),
+            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
         };
         assert_eq!(
             collect_row_values(row),
@@ -127,12 +122,7 @@ mod tests {
             ],
             // Only the first three fields are specified for projection.
             project_fields: Arc::new(vec![0, 1, 2, 3]),
-            project_field_types: Arc::new(vec![
-                ps::ColType::Int(None),
-                ps::ColType::Text,
-                ps::ColType::Double,
-                ps::ColType::Float,
-            ]),
+            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
         };
         assert_eq!(
             collect_row_values(row),
@@ -160,12 +150,7 @@ mod tests {
             ],
             // Only some of the fields are specified for projection.
             project_fields: Arc::new(vec![1, 2, 5, 6]),
-            project_field_types: Arc::new(vec![
-                ps::ColType::Int(None),
-                ps::ColType::Text,
-                ps::ColType::Double,
-                ps::ColType::Float,
-            ]),
+            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
         };
         assert_eq!(
             collect_row_values(row),

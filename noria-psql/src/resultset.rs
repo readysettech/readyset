@@ -1,9 +1,10 @@
 use crate::row::Row;
-use crate::schema::SelectSchema;
+use crate::schema::{type_to_pgsql, SelectSchema};
 use noria::results::Results;
 use psql_srv as ps;
 use std::iter;
 use std::sync::Arc;
+use tokio_postgres::types::Type;
 
 /// A structure that contains a `Vec<Results>`, as provided by `QueryResult::NoriaSelect`, and
 /// facilitates iteration over these results as `Row` values.
@@ -21,7 +22,7 @@ pub struct Resultset {
     project_fields: Arc<Vec<usize>>,
 
     /// The data types of the projected fields for each row.
-    project_field_types: Arc<Vec<ps::ColType>>,
+    project_field_types: Arc<Vec<Type>>,
 }
 
 impl Resultset {
@@ -46,14 +47,14 @@ impl Resultset {
                 })
                 .collect::<Result<Vec<usize>, ps::Error>>()?,
         );
-        // Extract the appropriate `psql_srv::ColType` for each column in the schema.
+        // Extract the appropriate `Type` for each column in the schema.
         let project_field_types = Arc::new(
             schema
                 .0
                 .schema
                 .iter()
-                .map(|c| c.spec.sql_type.clone())
-                .collect::<Vec<ps::ColType>>(),
+                .map(|c| type_to_pgsql(&c.spec.sql_type))
+                .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(Resultset {
             results,
@@ -70,14 +71,9 @@ impl IntoIterator for Resultset {
     type IntoIter = std::iter::Map<
         std::iter::Zip<
             std::iter::Flatten<std::vec::IntoIter<Results>>,
-            std::iter::Repeat<(Arc<Vec<usize>>, Arc<Vec<ps::ColType>>)>,
+            std::iter::Repeat<(Arc<Vec<usize>>, Arc<Vec<Type>>)>,
         >,
-        fn(
-            (
-                noria::results::Row,
-                (Arc<Vec<usize>>, Arc<Vec<ps::ColType>>),
-            ),
-        ) -> Row,
+        fn((noria::results::Row, (Arc<Vec<usize>>, Arc<Vec<Type>>))) -> Row,
     >;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -100,10 +96,9 @@ impl IntoIterator for Resultset {
 mod tests {
     use super::*;
     use arccstr::ArcCStr;
-    use nom_sql::ColumnSpecification;
+    use nom_sql::{ColumnSpecification, SqlType};
     use noria::{ColumnSchema, DataType};
     use noria_client::backend as cl;
-    use ps::ColType;
     use std::convert::TryFrom;
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
@@ -125,7 +120,7 @@ mod tests {
             schema: vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: ColType::Bigint(None),
+                    sql_type: SqlType::Bigint(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -136,10 +131,7 @@ mod tests {
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(resultset.results, Vec::<Results>::new());
         assert_eq!(resultset.project_fields, Arc::new(vec![0]));
-        assert_eq!(
-            resultset.project_field_types,
-            Arc::new(vec![ps::ColType::Bigint(None)])
-        );
+        assert_eq!(resultset.project_field_types, Arc::new(vec![Type::INT8]));
     }
 
     #[test]
@@ -153,7 +145,7 @@ mod tests {
             schema: vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: ColType::Bigint(None),
+                    sql_type: SqlType::Bigint(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -186,7 +178,7 @@ mod tests {
             schema: vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
-                    sql_type: ColType::Bigint(None),
+                    sql_type: SqlType::Bigint(None),
                     comment: None,
                     constraints: vec![],
                 },
@@ -214,7 +206,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
-                        sql_type: ColType::Bigint(None),
+                        sql_type: SqlType::Bigint(None),
                         comment: None,
                         constraints: vec![],
                     },
@@ -223,7 +215,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col2".into(),
-                        sql_type: ColType::Text,
+                        sql_type: SqlType::Text,
                         comment: None,
                         constraints: vec![],
                     },
@@ -244,7 +236,7 @@ mod tests {
         assert_eq!(resultset.project_fields, Arc::new(vec![0, 2]));
         assert_eq!(
             resultset.project_field_types,
-            Arc::new(vec![ps::ColType::Bigint(None), ps::ColType::Text])
+            Arc::new(vec![Type::INT8, Type::TEXT])
         );
     }
 
@@ -278,7 +270,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
-                        sql_type: ColType::Bigint(None),
+                        sql_type: SqlType::Bigint(None),
                         comment: None,
                         constraints: vec![],
                     },
@@ -287,7 +279,7 @@ mod tests {
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col2".into(),
-                        sql_type: ColType::Text,
+                        sql_type: SqlType::Text,
                         comment: None,
                         constraints: vec![],
                     },

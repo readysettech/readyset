@@ -1,6 +1,7 @@
+use postgres_types::Type;
+
 use crate::bytes::BytesStr;
 use crate::message::TransferFormat;
-use crate::r#type::Type;
 use crate::value::Value;
 use std::fmt;
 

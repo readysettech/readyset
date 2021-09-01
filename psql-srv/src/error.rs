@@ -1,6 +1,6 @@
 use crate::codec::{DecodeError, EncodeError};
 use crate::message::FrontendMessage;
-use crate::r#type::ColType;
+use postgres_types::Type;
 use std::num::TryFromIntError;
 use thiserror::Error;
 
@@ -46,7 +46,7 @@ pub enum Error {
     UnsupportedMessage(FrontendMessage),
 
     #[error("unsupported type: {0}")]
-    UnsupportedType(ColType),
+    UnsupportedType(Type),
 
     #[error(transparent)]
     PostgresError(#[from] tokio_postgres::error::Error),

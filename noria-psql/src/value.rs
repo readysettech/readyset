@@ -2,13 +2,14 @@ use arccstr::ArcCStr;
 use noria::{DataType, ReadySetError};
 use psql_srv as ps;
 use std::convert::TryFrom;
+use tokio_postgres::types::Type;
 
 /// An encapsulation of a Noria `DataType` value that facilitates conversion of this `DataType`
 /// into a `psql_srv::Value`.
 pub struct Value {
     /// A type attribute used to determine which variant of `psql_srv::Value` the `value` attribute
     /// should be converted to.
-    pub col_type: ps::ColType,
+    pub col_type: Type,
 
     /// The data value itself.
     pub value: DataType,
@@ -26,31 +27,24 @@ impl TryFrom<Value> for ps::Value {
             )
             .map_err(|_| ps::Error::InternalError("unexpected nul within TinyText".to_string()))
         };
+
+        // TODO: Implement this for the rest of the types, including at least:
+        // - Type::Time
+        // - Unsigned{Int,Smallint,Bigint}
         match (v.col_type, v.value) {
-            (ps::ColType::Char(_), DataType::Text(v)) => Ok(ps::Value::Char(v)),
-            (ps::ColType::Char(_), ref v @ DataType::TinyText(_)) => {
-                Ok(ps::Value::Char(from_tiny_text(v)?))
-            }
-            (ps::ColType::Varchar(_), DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
-            (ps::ColType::Varchar(_), ref v @ DataType::TinyText(_)) => {
+            (Type::CHAR, DataType::Text(v)) => Ok(ps::Value::Char(v)),
+            (Type::CHAR, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Char(from_tiny_text(v)?)),
+            (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
+            (Type::VARCHAR, ref v @ DataType::TinyText(_)) => {
                 Ok(ps::Value::Varchar(from_tiny_text(v)?))
             }
-            (ps::ColType::Int(_), DataType::Int(v)) => Ok(ps::Value::Int(v)),
-            (ps::ColType::Bigint(_), DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
-            (ps::ColType::Real | ps::ColType::Float, v @ DataType::Float(_, _)) => {
-                Ok(ps::Value::Real(f32::try_from(v).map_err(
-                    |e: ReadySetError| ps::Error::InternalError(e.to_string()),
-                )?))
-            }
-            (ps::ColType::Double, v @ DataType::Double(_, _)) => Ok(ps::Value::Double(
-                f64::try_from(v)
-                    .map_err(|e: ReadySetError| ps::Error::InternalError(e.to_string()))?,
-            )),
-            (ps::ColType::Text, DataType::Text(v)) => Ok(ps::Value::Text(v)),
-            (ps::ColType::Text, ref v @ DataType::TinyText(_)) => {
-                Ok(ps::Value::Text(from_tiny_text(v)?))
-            }
-            (ps::ColType::Timestamp, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
+            (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
+            (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
+            (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
+            (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Real(f)),
+            (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
+            (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
+            (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
             (t, _) => Err(ps::Error::UnsupportedType(t)),
         }
     }
@@ -64,7 +58,7 @@ mod tests {
     #[test]
     fn tiny_text_char() {
         let val = Value {
-            col_type: ps::ColType::Char(Some(15)),
+            col_type: Type::CHAR,
             value: DataType::TinyText([b'a'; 15]),
         };
         assert_eq!(
@@ -76,7 +70,7 @@ mod tests {
     #[test]
     fn tiny_text_varchar() {
         let val = Value {
-            col_type: ps::ColType::Varchar(15),
+            col_type: Type::VARCHAR,
             value: DataType::TinyText([b'a'; 15]),
         };
         assert_eq!(
@@ -88,7 +82,7 @@ mod tests {
     #[test]
     fn tiny_text_text() {
         let val = Value {
-            col_type: ps::ColType::Text,
+            col_type: Type::TEXT,
             value: DataType::TinyText([b'a'; 15]),
         };
         assert_eq!(

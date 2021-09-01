@@ -1,7 +1,8 @@
 extern crate psql_srv;
 
 use async_trait::async_trait;
-use psql_srv::{run_backend, Backend, ColType, Column, Error, PrepareResponse, QueryResponse};
+use postgres_types::Type;
+use psql_srv::{run_backend, Backend, Column, Error, PrepareResponse, QueryResponse};
 use std::convert::TryFrom;
 use std::io;
 use tokio::net::TcpListener;
@@ -32,7 +33,7 @@ impl Backend for ServeOneBackend {
         Ok(QueryResponse::Select {
             schema: vec![Column {
                 name: "bar".to_string(),
-                col_type: ColType::Int(None),
+                col_type: Type::INT4,
             }],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })
@@ -44,7 +45,7 @@ impl Backend for ServeOneBackend {
             param_schema: vec![],
             row_schema: vec![Column {
                 name: "bar".to_string(),
-                col_type: ColType::Int(None),
+                col_type: Type::INT4,
             }],
         })
     }
@@ -57,7 +58,7 @@ impl Backend for ServeOneBackend {
         Ok(QueryResponse::Select {
             schema: vec![Column {
                 name: "bar".to_string(),
-                col_type: ColType::Int(None),
+                col_type: Type::INT4,
             }],
             resultset: vec![vec![Value(psql_srv::Value::Int(100))]],
         })

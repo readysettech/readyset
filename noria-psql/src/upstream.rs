@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
+use pgsql::types::Type;
 use pgsql::{Config, Row};
+use psql_srv::Column;
 use tokio_postgres as pgsql;
 
 use crate::Error;
@@ -33,11 +35,19 @@ pub enum QueryResult {
     None,
 }
 
+#[derive(Debug)]
+pub struct StatementMeta {
+    /// The types of the query parameters used for this statement
+    pub params: Vec<Type>,
+    /// Metadata about the types of the columns in the rows returned by this statement
+    pub schema: Vec<Column>,
+}
+
 #[async_trait]
 impl UpstreamDatabase for PostgreSqlUpstream {
+    type StatementMeta = StatementMeta;
     type QueryResult = QueryResult;
     type Error = Error;
-    type StatementMeta = (); // TODO(grfn)
 
     async fn connect(url: String) -> Result<Self, Error> {
         let config = Config::from_str(&url)?;
@@ -66,13 +76,29 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     {
         let query = query.as_ref();
         let statement = self.client.prepare(query).await?;
+
+        let meta = StatementMeta {
+            params: statement.params().to_vec(),
+            schema: statement
+                .columns()
+                .iter()
+                .map(|col| -> Result<_, Error> {
+                    Ok(Column {
+                        name: col.name().to_owned(),
+                        col_type: col.type_().clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
         self.statement_id_counter += 1;
         let statement_id = self.statement_id_counter;
         self.prepared_statements.insert(statement_id, statement);
+
         Ok(UpstreamPrepare {
             statement_id,
+            meta,
             is_read: false,
-            meta: (),
         })
     }
 

@@ -7,10 +7,9 @@ use crate::message::{
     ErrorSeverity,
     TransferFormat::{self, *},
 };
-use crate::r#type::Type;
 use crate::value::Value;
 use bytes::{BufMut, BytesMut};
-use postgres_types::ToSql;
+use postgres_types::{ToSql, Type};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use tokio_util::codec::Encoder;

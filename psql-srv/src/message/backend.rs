@@ -1,11 +1,11 @@
 use crate::error::Error;
 use crate::message::TransferFormat;
-use crate::r#type::Type;
 use crate::value::Value;
 use std::convert::TryInto;
 use std::sync::Arc;
 
 pub use postgres::error::SqlState;
+use postgres_types::Type;
 
 const READY_FOR_QUERY_IDLE: u8 = b'I';
 const SSL_RESPONSE_N: u8 = b'N';

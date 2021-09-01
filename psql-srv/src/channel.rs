@@ -1,10 +1,10 @@
 use crate::codec::{Codec, DecodeError, EncodeError};
 use crate::error::Error;
 use crate::message::FrontendMessage;
-use crate::r#type::Type;
 use crate::response::Response;
 use crate::value::Value;
 use futures::prelude::*;
+use postgres_types::Type;
 use std::convert::TryInto;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
