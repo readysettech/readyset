@@ -318,8 +318,7 @@ impl TryFrom<DataType> for Value {
             DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
             DataType::BigInt(bi) => Ok(Value::Integer(bi)),
             DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
-            DataType::Float(f, _) => Ok(f.into()),
-            DataType::Double(f, _) => Ok(f.into()),
+            DataType::Real(f, _) => Ok(f.into()),
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::Time(t) => Ok(Value::Time(*t)),
@@ -354,12 +353,6 @@ impl Display for Value {
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{}", t),
         }
-    }
-}
-
-impl From<f32> for Value {
-    fn from(f: f32) -> Self {
-        Self::Real(f.trunc() as i64, (f.fract() * 1_000_000_000.0).round() as _)
     }
 }
 
