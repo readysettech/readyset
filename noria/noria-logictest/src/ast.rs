@@ -221,17 +221,21 @@ impl TryFrom<mysql::Value> for Value {
 impl TryFrom<Literal> for Value {
     type Error = anyhow::Error;
     fn try_from(value: Literal) -> Result<Self, Self::Error> {
+        macro_rules! real_value {
+            ($real:expr, $prec:expr) => {{
+                let integral = $real as i64;
+                Value::Real(
+                    integral,
+                    ((($real as f64) - (integral as f64)) * (10_u64.pow($prec as u32) as f64))
+                        as u64,
+                )
+            }};
+        }
         Ok(match value {
             Literal::Null => Value::Null,
             Literal::Integer(v) => Value::Integer(v),
-            Literal::FixedPoint(v) => {
-                let integral = v.value as i64;
-                Value::Real(
-                    integral,
-                    ((v.value - (integral as f64)) * (10_u64.pow(v.precision as u32) as f64))
-                        as u64,
-                )
-            }
+            Literal::Float(float) => real_value!(float.value, float.precision),
+            Literal::Double(double) => real_value!(double.value, double.precision),
             Literal::String(v) => Value::Text(v),
             Literal::Blob(v) => Value::Text(String::from_utf8(v)?),
             Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
@@ -318,7 +322,8 @@ impl TryFrom<DataType> for Value {
             DataType::UnsignedInt(u) => Ok(Value::Integer(u.into())),
             DataType::BigInt(bi) => Ok(Value::Integer(bi)),
             DataType::UnsignedBigInt(bu) => Ok(Value::Integer(bu.try_into()?)),
-            DataType::Real(f, _) => Ok(f.into()),
+            DataType::Float(f, _) => Ok(f.into()),
+            DataType::Double(f, _) => Ok(f.into()),
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::Time(t) => Ok(Value::Time(*t)),
@@ -353,6 +358,12 @@ impl Display for Value {
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{}", t),
         }
+    }
+}
+
+impl From<f32> for Value {
+    fn from(f: f32) -> Self {
+        Self::Real(f.trunc() as i64, (f.fract() * 1_000_000_000.0).round() as _)
     }
 }
 

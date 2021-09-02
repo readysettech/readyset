@@ -8,7 +8,7 @@ use crate::Dialect;
 use crate::FunctionExpression;
 use crate::{
     common::{column_identifier_no_alias, parse_comment, type_identifier, Literal, SqlType},
-    Real,
+    Double,
 };
 use nom::bytes::complete::{tag_no_case, take_until};
 use nom::character::complete::{multispace0, multispace1};
@@ -187,7 +187,7 @@ fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {
     let value = (int as f64) + (dec as f64) / 10.0_f64.powf(precision as f64);
     Ok((
         remaining_input,
-        Literal::FixedPoint(Real {
+        Literal::Double(Double {
             value,
             precision: precision as u8,
         }),

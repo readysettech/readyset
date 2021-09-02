@@ -99,10 +99,8 @@ where
         DataType::UnsignedInt(n) => Ok(cx.number(*n).upcast::<JsValue>()),
         DataType::BigInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
         DataType::UnsignedBigInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),
-        DataType::Real(_, _) => {
-            let n = f64::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
-            Ok(cx.number(n).upcast::<JsValue>())
-        }
+        DataType::Float(float, _) => Ok(cx.number(*float).upcast::<JsValue>()),
+        DataType::Double(double, _) => Ok(cx.number(*double).upcast::<JsValue>()),
         DataType::Text(_) => {
             let s = String::try_from(d).or_else(|e| cx.throw_error(e.to_string()))?;
             Ok(cx.string(s).upcast::<JsValue>())
