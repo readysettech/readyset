@@ -1,7 +1,6 @@
 use std::fmt;
 use std::str;
 
-use crate::alter::{alter_table_statement, AlterTableStatement};
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use crate::delete::{deletion, DeleteStatement};
@@ -9,8 +8,13 @@ use crate::drop::{drop_table, DropTableStatement};
 use crate::insert::{insertion, InsertStatement};
 use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
+use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::update::{updating, UpdateStatement};
 use crate::Dialect;
+use crate::{
+    alter::{alter_table_statement, AlterTableStatement},
+    transaction::{commit, rollback, start_transaction},
+};
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::IResult;
@@ -27,6 +31,9 @@ pub enum SqlQuery {
     DropTable(DropTableStatement),
     Update(UpdateStatement),
     Set(SetStatement),
+    StartTransaction(StartTransactionStatement),
+    Commit(CommitStatement),
+    Rollback(RollbackStatement),
 }
 
 impl fmt::Display for SqlQuery {
@@ -42,6 +49,9 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Set(ref set) => write!(f, "{}", set),
             SqlQuery::AlterTable(ref alter) => write!(f, "{}", alter),
             SqlQuery::CompoundSelect(ref compound) => write!(f, "{}", compound),
+            SqlQuery::StartTransaction(ref tx) => write!(f, "{}", tx),
+            SqlQuery::Commit(ref commit) => write!(f, "{}", commit),
+            SqlQuery::Rollback(ref rollback) => write!(f, "{}", rollback),
         }
     }
 }
@@ -59,6 +69,9 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
+            map(start_transaction(dialect), SqlQuery::StartTransaction),
+            map(commit(dialect), SqlQuery::Commit),
+            map(rollback(dialect), SqlQuery::Rollback),
         ))(i)
     }
 }
