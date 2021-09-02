@@ -58,6 +58,7 @@ if [[ "$refname" == refs/changes/* ]]; then
     # CL show up next to each other in Buildkite (and cancel each other)
     branch=$(dirname "$refname") # refs/changes/28/28/1 -> refs/changes/28/28
 
+    IFS='/' read -r -a refname_parts <<< "$refname"
     # refs/changes/28/28/1
     #                 ^  ^ - patchset
     #                 |--- changeID
