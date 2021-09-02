@@ -1,13 +1,13 @@
 steps:
   - label: ":docker: Build readyset-server image"
     key: readyset-server-image
-    command: .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-build
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
     plugins:
       ecr#v2.2.0:
         login: true
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
-    command: .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-build
+    command: .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
     plugins:
       ecr#v2.2.0:
         login: true
