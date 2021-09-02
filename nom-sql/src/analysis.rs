@@ -27,7 +27,10 @@ impl ReferredTables for SqlQuery {
             | SqlQuery::Delete(_)
             | SqlQuery::DropTable(_)
             | SqlQuery::Update(_)
-            | SqlQuery::Set(_) => HashSet::new(),
+            | SqlQuery::Set(_)
+            | SqlQuery::StartTransaction(_)
+            | SqlQuery::Commit(_)
+            | SqlQuery::Rollback(_) => HashSet::new(),
         }
     }
 }
