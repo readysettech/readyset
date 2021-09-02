@@ -376,7 +376,7 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom_sql::{parse_query, Dialect, Literal, Real};
+    use nom_sql::{parse_query, Dialect, Literal};
 
     /// The primary purpose of this test is to validate that, when we extract literals from
     /// queries, they come out in left-to-right order.  Anything else it covers is a happy
@@ -456,9 +456,9 @@ mod tests {
         assert_eq!(
             values,
             vec![
-                FixedPoint(Real {
+                Literal::Double(nom_sql::Double {
                     value: 3.14,
-                    precision: 2
+                    precision: 2,
                 }),
                 Null,
                 String("somebody".to_string()),

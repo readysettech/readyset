@@ -383,32 +383,39 @@ impl Expression {
                         DataType::UnsignedInt(inner) => *inner as i32,
                         DataType::BigInt(inner) => *inner as i32,
                         DataType::UnsignedBigInt(inner) => *inner as i32,
-                        DataType::Real(f, _) => f.round() as i32,
+                        DataType::Float(f, _) => f.round() as i32,
+                        DataType::Double(f, _) => f.round() as i32,
                         _ => 0,
                     };
 
-                    match non_null!(expr) {
-                        DataType::Real(float, prec) => {
+                    macro_rules! round {
+                        ($real:expr, $prec:expr, $real_type:ty) => {{
+                            let base: $real_type = 10.0;
                             if rnd_prec > 0 {
                                 // If rounding precision is positive, than we keep the returned
                                 // type as a float. We never return greater precision than was
                                 // stored so we choose the minimum of stored precision or rounded
                                 // precision.
-                                let out_prec = min(*prec, rnd_prec as u8);
-                                let rounded_float = (float * 10.0_f64.powf(out_prec as f64))
+                                let out_prec = min(*$prec, rnd_prec as u8);
+                                let rounded_float = ($real * base.powf(out_prec as $real_type))
                                     .round()
-                                    / 10.0_f64.powf(out_prec as f64);
+                                    / base.powf(out_prec as $real_type);
                                 let real = DataType::try_from(rounded_float).unwrap();
                                 Ok(Cow::Owned(real))
                             } else {
                                 // Rounding precision is negative, so we need to convert to a
                                 // rounded int.
-                                let rounded = ((float / 10_f64.powf(-rnd_prec as f64)).round()
-                                    * 10_f64.powf(-rnd_prec as f64))
+                                let rounded = (($real / base.powf(-rnd_prec as $real_type)).round()
+                                    * base.powf(-rnd_prec as $real_type))
                                     as i32;
                                 Ok(Cow::Owned(DataType::Int(rounded)))
                             }
-                        }
+                        }};
+                    }
+
+                    match non_null!(expr) {
+                        DataType::Float(float, prec) => round!(float, prec, f32),
+                        DataType::Double(double, prec) => round!(double, prec, f64),
                         DataType::Int(val) => {
                             let rounded = integer_rnd(*val as i128, rnd_prec) as i32;
                             Ok(Cow::Owned(DataType::Int(rounded)))
@@ -451,6 +458,58 @@ impl Expression {
         &self,
         parent_column_type: impl Fn(usize) -> ReadySetResult<Option<SqlType>>,
     ) -> ReadySetResult<Option<SqlType>> {
+        macro_rules! round {
+            ($e1:expr, $prec:expr, $sql_type:expr) => {
+                match $prec {
+                    // Precision should always be coercable to a DataType::Int.
+                    Expression::Literal(DataType::Int(p)) => {
+                        if p < 0 {
+                            // Precision is negative, which means that we will be returning a rounded Int.
+                            Ok(Some(SqlType::Int(None)))
+                        } else {
+                            // Precision is positive so we will continue to return a Real.
+                            Ok(Some($sql_type))
+                        }
+                    }
+                    Expression::Literal(DataType::BigInt(p)) => {
+                        if p < 0 {
+                            // Precision is negative, which means that we will be returning a rounded Int.
+                            Ok(Some(SqlType::Int(None)))
+                        } else {
+                            // Precision is positive so we will continue to return a Real.
+                            Ok(Some($sql_type))
+                        }
+                    }
+                    Expression::Literal(DataType::UnsignedInt(_)) => {
+                        // Precision is positive so we will continue to return a Real.
+                        Ok(Some($sql_type))
+                    }
+                    Expression::Literal(DataType::UnsignedBigInt(_)) => {
+                        // Precision is positive so we will continue to return a Real.
+                        Ok(Some($sql_type))
+                    }
+                    Expression::Literal(DataType::Double(f, _)) => {
+                        if f.is_sign_negative() {
+                            // Precision is negative, which means that we will be returning a rounded Int.
+                            Ok(Some(SqlType::Int(None)))
+                        } else {
+                            // Precision is positive so we will continue to return a Real.
+                            Ok(Some($sql_type))
+                        }
+                    }
+                    Expression::Literal(DataType::Float(f, _)) => {
+                        if f.is_sign_negative() {
+                            // Precision is negative, which means that we will be returning a rounded Int.
+                            Ok(Some(SqlType::Int(None)))
+                        } else {
+                            // Precision is positive so we will continue to return a Real.
+                            Ok(Some($sql_type))
+                        }
+                    }
+                    _ => $e1.sql_type(parent_column_type),
+                }
+            }
+        }
         // TODO(grfn): Throughout this whole function we basically just assume everything
         // typechecks, which isn't great - but when we actually have a typechecker it'll be
         // attaching types to expressions ahead of time so this is just a stop-gap for now
@@ -467,46 +526,11 @@ impl Expression {
                 BuiltinFunction::Timediff(_, _) => Ok(Some(SqlType::Time)),
                 BuiltinFunction::Addtime(e1, _) => e1.sql_type(parent_column_type),
                 BuiltinFunction::Round(e1, prec) => match **e1 {
-                    Expression::Literal(DataType::Real(_, _)) => {
-                        match **prec {
-                            // Precision should always be coercable to a DataType::Int.
-                            Expression::Literal(DataType::Int(p)) => {
-                                if p < 0 {
-                                    // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(None)))
-                                } else {
-                                    // Precision is positive so we will continue to return a Real.
-                                    Ok(Some(SqlType::Real))
-                                }
-                            }
-                            Expression::Literal(DataType::BigInt(p)) => {
-                                if p < 0 {
-                                    // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(None)))
-                                } else {
-                                    // Precision is positive so we will continue to return a Real.
-                                    Ok(Some(SqlType::Real))
-                                }
-                            }
-                            Expression::Literal(DataType::UnsignedInt(_)) => {
-                                // Precision is positive so we will continue to return a Real.
-                                Ok(Some(SqlType::Real))
-                            }
-                            Expression::Literal(DataType::UnsignedBigInt(_)) => {
-                                // Precision is positive so we will continue to return a Real.
-                                Ok(Some(SqlType::Real))
-                            }
-                            Expression::Literal(DataType::Real(f, _)) => {
-                                if f.is_sign_negative() {
-                                    // Precision is negative, which means that we will be returning a rounded Int.
-                                    Ok(Some(SqlType::Int(None)))
-                                } else {
-                                    // Precision is positive so we will continue to return a Real.
-                                    Ok(Some(SqlType::Real))
-                                }
-                            }
-                            _ => e1.sql_type(parent_column_type),
-                        }
+                    Expression::Literal(DataType::Float(_, _)) => {
+                        round!(e1, **prec, SqlType::Float)
+                    }
+                    Expression::Literal(DataType::Double(_, _)) => {
+                        round!(e1, **prec, SqlType::Real)
                     }
                     // For all other numeric types we always return the same type as they are.
                     Expression::Literal(DataType::UnsignedInt(_)) => {
@@ -949,7 +973,19 @@ mod tests {
             ))))
         );
 
-        let param2 = 3.57;
+        let param2: f32 = 3.57;
+        assert_eq!(
+            expr.eval(&[
+                DataType::try_from(param1).unwrap(),
+                DataType::try_from(param2).unwrap()
+            ])
+            .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+                (-param2 * 1_000_000_f32) as i64
+            ))))
+        );
+
+        let param2: f64 = 3.57;
         assert_eq!(
             expr.eval(&[
                 DataType::try_from(param1).unwrap(),
@@ -1076,7 +1112,19 @@ mod tests {
             ))))
         );
 
-        let param2 = 3.57;
+        let param2: f32 = 3.57;
+        assert_eq!(
+            expr.eval(&[
+                param1.try_into().unwrap(),
+                DataType::try_from(param2).unwrap()
+            ])
+            .unwrap(),
+            Cow::Owned(DataType::Time(Arc::new(MysqlTime::from_microseconds(
+                (param2 * 1_000_000_f32) as i64
+            ))))
+        );
+
+        let param2: f64 = 3.57;
         assert_eq!(
             expr.eval(&[
                 param1.try_into().unwrap(),
@@ -1095,12 +1143,16 @@ mod tests {
             Box::new(Column(0)),
             Box::new(Column(1)),
         ));
-        let number = 4.12345;
+        let number: f64 = 4.12345;
         let precision = 3;
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = Cow::Owned(DataType::try_from(4.123_f64).unwrap());
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want);
+
+        let number: f32 = 4.12345;
+        let param1 = DataType::try_from(number).unwrap();
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
     }
 
     #[test]
@@ -1109,12 +1161,16 @@ mod tests {
             Box::new(Column(0)),
             Box::new(Column(1)),
         ));
-        let number = 52.12345;
+        let number: f64 = 52.12345;
         let precision = -1;
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::Int(precision);
         let want = Cow::Owned(DataType::try_from(50).unwrap());
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want);
+
+        let number: f32 = 52.12345;
+        let param1 = DataType::try_from(number).unwrap();
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
     }
 
     #[test]
@@ -1123,12 +1179,16 @@ mod tests {
             Box::new(Column(0)),
             Box::new(Column(1)),
         ));
-        let number = 52.12345;
+        let number: f32 = 52.12345;
         let precision = -1.0_f64;
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = Cow::Owned(DataType::try_from(50).unwrap());
-        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
+        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want,);
+
+        let number: f64 = 52.12345;
+        let param1 = DataType::try_from(number).unwrap();
+        assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
     }
 
     // This is actually straight from MySQL:
@@ -1145,11 +1205,15 @@ mod tests {
             Box::new(Column(0)),
             Box::new(Column(1)),
         ));
-        let number = 52.12345;
+        let number: f32 = 52.12345;
         let precision = "banana";
         let param1 = DataType::try_from(number).unwrap();
         let param2 = DataType::try_from(precision).unwrap();
         let want = Cow::Owned(DataType::try_from(52).unwrap());
+        assert_eq!(expr.eval(&[param1, param2.clone()]).unwrap(), want,);
+
+        let number: f64 = 52.12345;
+        let param1 = DataType::try_from(number).unwrap();
         assert_eq!(expr.eval(&[param1, param2]).unwrap(), want,);
     }
 

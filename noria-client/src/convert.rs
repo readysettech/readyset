@@ -1,4 +1,4 @@
-use nom_sql::{Literal, Real};
+use nom_sql::{Double, Float, Literal};
 use noria::{DataType, ReadySetError, ReadySetResult};
 
 use arccstr::ArcCStr;
@@ -29,7 +29,8 @@ impl ToDataType for Literal {
                 }
             }
             Literal::Integer(i) => i.into(),
-            Literal::FixedPoint(Real { value, precision }) => DataType::Real(value, precision),
+            Literal::Float(Float { value, precision }) => DataType::Float(value, precision),
+            Literal::Double(Double { value, precision }) => DataType::Double(value, precision),
             Literal::CurrentDate => {
                 DataType::Timestamp(chrono::Local::today().and_hms(0, 0, 0).naive_local())
             }
