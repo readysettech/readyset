@@ -52,7 +52,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -100,7 +100,7 @@ steps:
     - build-image
     plugins:
       - docker#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'target:/workdir/target'
           environment:
@@ -122,7 +122,7 @@ steps:
       - build-image
     plugins:
       - docker#v3.7.0:
-          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
           volumes:
             - "cargo-registry:/usr/local/cargo/registry"
             - "cargo-registry:/usr/local/cargo/registry"
@@ -211,7 +211,7 @@ steps:
     - build-image
     plugins:
       - docker-compose#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           run: app
           environment:
           - SCCACHE_BUCKET=readyset-sccache-e1
@@ -235,7 +235,7 @@ steps:
     - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
     plugins:
       - docker#v3.7.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
