@@ -65,10 +65,14 @@ if [[ "$refname" == refs/changes/* ]]; then
     change_id="${refname_parts[3]}"
     patchset="${refname_parts[4]}"
 
-    env="{
-        \"GERRIT_CHANGE_ID\": \"$change_id\",
-        \"GERRIT_PATCHSET\": \"$patchset\"
-    }"
+    env="$(jq -n \
+        --arg change_id "$change_id" \
+        --arg patchset "$patchset" \
+        '{
+             GERRIT_CHANGE_ID: $change_id,
+             GERRIT_PATCHSET: $patchset
+         }'
+    )"
 else
     # This is a change to a branch (like refs/heads/main), so don't do any of
     # the CL stuff and just kick off a regular build
@@ -82,17 +86,25 @@ author_name=$(git -C /srv/gerrit/git/readyset.git show -s --pretty=format:%an $c
 author_email=$(git -C /srv/gerrit/git/readyset.git show -s --pretty=format:%ae $commit)
 buildkite_token=$(< /srv/gerrit/etc/buildkite_token)
 
-curl \
+jq -n \
+    --arg commit "$commit" \
+    --arg branch "$branch" \
+    --arg message "$message" \
+    --arg author_name "$author_name" \
+    --arg author_email "$author_email" \
+    --argjson env "$env" \
+    '{
+        commit: $commit,
+        branch: $branch,
+        message: $message,
+        author: {
+            name: $author_name,
+            email: $author_email
+        },
+        env: $env
+     }' \
+    | curl \
     -X POST \
     -H "Authorization: Bearer $buildkite_token" \
     "https://api.buildkite.com/v2/organizations/$organization/pipelines/$pipeline/builds" \
-    -d "{
-    \"commit\": \"$commit\",
-    \"branch\": \"$branch\",
-    \"message\": \"$message\",
-    \"author\": {
-      \"name\": \"$author_name\",
-      \"email\": \"$author_email\"
-    },
-    \"env\": $env
-  }"
+    -d@-
