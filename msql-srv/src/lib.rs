@@ -110,7 +110,6 @@ use async_trait::async_trait;
 use error::{other_error, OtherErrorKind};
 use std::collections::HashMap;
 use std::io;
-use std::iter;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net;
 
@@ -388,41 +387,14 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             match cmd {
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);
-                    if q.starts_with(b"SELECT @@") || q.starts_with(b"select @@") {
-                        let var = &q.get(b"SELECT @@".len()..);
-                        match var {
-                            Some(b"max_allowed_packet") => {
-                                let cols = &[Column {
-                                    table: String::new(),
-                                    column: "@@max_allowed_packet".to_owned(),
-                                    coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
-                                    colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
-                                }];
-                                let mut w = w.start(cols).await?;
-                                w.write_row(iter::once(67108864u32)).await?;
-                                w.finish().await?;
-                            }
-                            Some(_) => {
-                                w.completed(0, 0).await?;
-                            }
-                            None => {
-                                return Err(other_error(OtherErrorKind::IndexErr {
-                                    data: "q (query_string)".to_string(),
-                                    index: b"SELECT @@".len(),
-                                    length: q.len(),
-                                })
-                                .into());
-                            }
-                        }
-                    } else {
-                        self.shim
-                            .on_query(
-                                ::std::str::from_utf8(q)
-                                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                                w,
-                            )
-                            .await?;
-                    }
+
+                    self.shim
+                        .on_query(
+                            ::std::str::from_utf8(q)
+                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+                            w,
+                        )
+                        .await?;
                 }
                 Command::Prepare(q) => {
                     let w = StatementMetaWriter {

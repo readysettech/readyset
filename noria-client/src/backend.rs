@@ -887,6 +887,11 @@ where
         res
     }
 
+    /// Whether or not we have fallback enabled.
+    pub fn has_fallback(&self) -> bool {
+        self.upstream.is_some()
+    }
+
     // For debugging purposes
     pub fn ticket(&self) -> &Option<Timestamp> {
         &self.ticket
