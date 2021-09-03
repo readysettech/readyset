@@ -745,10 +745,13 @@ impl ToMysqlValue for myc::value::Value {
 #[allow(unused_imports)]
 mod tests {
     use super::ToMysqlValue;
-    use crate::myc::value;
+    use crate::myc::io::ParseBuf;
+    use crate::myc::proto::MyDeserialize;
     use crate::myc::value::convert::from_value;
+    use crate::myc::value::{BinValue, TextValue, Value, ValueDeserializer};
     use crate::{Column, ColumnFlags, ColumnType};
     use chrono::{self, TimeZone};
+    use std::convert::TryFrom;
     use std::time;
 
     mod roundtrip_text {
@@ -762,10 +765,11 @@ mod tests {
                     let mut data = Vec::new();
                     let v: $t = $v;
                     v.to_mysql_text(&mut data).unwrap();
-                    assert_eq!(
-                        from_value::<$t>(value::read_text_value(&mut &data[..]).unwrap()),
-                        v
-                    );
+                    let mut buf = ParseBuf(&data[..]);
+                    let value = ValueDeserializer::<TextValue>::deserialize((), &mut buf)
+                        .unwrap()
+                        .0;
+                    assert_eq!(from_value::<$t>(value), v);
                 }
             };
         }
@@ -833,12 +837,14 @@ mod tests {
 
                     let v: $t = $v;
                     v.to_mysql_bin(&mut data, &col).unwrap();
-                    assert_eq!(
-                        from_value::<$t>(
-                            value::read_bin_value(&mut &data[..], $ct, !$sig).unwrap()
-                        ),
-                        v
-                    );
+                    let mut buf = ParseBuf(&data[..]);
+                    let value = ValueDeserializer::<BinValue>::deserialize(
+                        (col.coltype, col.colflags),
+                        &mut buf,
+                    )
+                    .unwrap()
+                    .0;
+                    assert_eq!(from_value::<$t>(value), v);
                 }
             };
         }

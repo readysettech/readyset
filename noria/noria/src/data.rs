@@ -1694,34 +1694,6 @@ impl TryFrom<DataType> for mysql_common::value::Value {
     }
 }
 
-impl TryFrom<DataType> for mysql_async::Value {
-    type Error = ReadySetError;
-
-    fn try_from(dt: DataType) -> Result<Self, Self::Error> {
-        use mysql_async::Value;
-
-        match dt {
-            DataType::None => Ok(Value::NULL),
-            DataType::Int(val) => Ok(Value::Int(i64::from(val))),
-            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(val))),
-            DataType::BigInt(val) => Ok(Value::Int(val)),
-            DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
-            DataType::Float(val, _) => Ok(Value::Float(val)),
-            DataType::Double(val, _) => Ok(Value::Double(val)),
-            DataType::Text(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
-            DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
-            DataType::Timestamp(val) => Ok(val.into()),
-            DataType::Time(val) => Ok(Value::Time(
-                !val.is_positive(),
-                (val.hour() / 24).into(),
-                (val.hour() % 24) as _,
-                val.minutes(),
-                val.seconds(),
-                val.microseconds(),
-            )),
-        }
-    }
-}
 // Performs an arithmetic operation on two numeric DataTypes,
 // returning a new DataType as the result.
 macro_rules! arithmetic_operation (

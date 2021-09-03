@@ -3,7 +3,6 @@ use binlog::consts::{BinlogChecksumAlg, EventType};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog;
-use mysql_common::proto::MySerialize;
 use noria::ReplicationOffset;
 use noria::{ReadySetError, ReadySetResult};
 use std::convert::{TryFrom, TryInto};
@@ -146,10 +145,7 @@ impl MySqlBinlogConnector {
         self.connection.query_drop(CHECKSUM_QUERY).await?;
 
         let cmd = mysql_common::packets::ComRegisterSlave::new(self.server_id());
-
-        let mut buf = Vec::new();
-        cmd.serialize(&mut buf);
-        self.connection.write_command_raw(buf).await?;
+        self.connection.write_command(&cmd).await?;
         // Server will respond with OK.
         self.connection.read_packet().await?;
         Ok(())
@@ -161,9 +157,7 @@ impl MySqlBinlogConnector {
             .with_pos(self.next_position.position)
             .with_filename(self.next_position.binlog_file.as_bytes());
 
-        let mut buf = Vec::new();
-        cmd.serialize(&mut buf);
-        self.connection.write_command_raw(buf).await?;
+        self.connection.write_command(&cmd).await?;
         self.connection.read_packet().await?;
         Ok(())
     }

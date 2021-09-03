@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use mysql_async::consts::CapabilityFlags;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Column, Conn, OptsBuilder, Row, TxOpts};
+use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -59,17 +59,15 @@ impl UpstreamDatabase for MySqlUpstream {
         // GTID information is used for RYW
         // Currently this causes rows affected to return an incorrect result, so this is feature
         // gated.
+        let opts =
+            Opts::from_url(&url).map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
         let conn = if cfg!(feature = "ryw") {
             Conn::new(
-                OptsBuilder::from_opts(url.clone())
-                    .add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
+                OptsBuilder::from_opts(opts).add_capability(CapabilityFlags::CLIENT_SESSION_TRACK),
             )
-            .await
-            .unwrap()
+            .await?
         } else {
-            Conn::new(OptsBuilder::from_opts(url.clone()))
-                .await
-                .unwrap()
+            Conn::new(OptsBuilder::from_opts(opts)).await?
         };
         let prepared_statements = HashMap::new();
         Ok(Self {

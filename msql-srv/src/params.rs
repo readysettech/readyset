@@ -2,6 +2,7 @@ use crate::myc;
 use crate::MsqlSrvError;
 use crate::{StatementData, Value};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 /// A `ParamParser` decodes query parameters included in a client's `EXECUTE` command given
 /// type information for the expected parameters.
@@ -69,7 +70,7 @@ impl<'a> Iterator for Params<'a> {
             self.input = rest;
 
             // first if condition guarantees that rest has at least one element
-            #[allow(clippy::indexing_slicing)]
+            #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
             if !rest.is_empty() && rest[0] != 0x00 {
                 let rest = rest.get(1..);
                 let (typmap, rest) = match rest {
@@ -82,9 +83,14 @@ impl<'a> Iterator for Params<'a> {
                     let bound_type_flag = typmap.get(2 * i as usize + 1);
                     match (bound_type_col, bound_type_flag) {
                         (None, _) | (_, None) => return Some(Err(MsqlSrvError::IndexingError)),
-                        (Some(col), Some(flag)) => self
-                            .bound_types
-                            .push((myc::constants::ColumnType::from(*col), ((flag & 128) != 0))),
+                        (Some(col), Some(flag)) => {
+                            match myc::constants::ColumnType::try_from(*col) {
+                                Err(e) => return Some(Err(e.into())),
+                                Ok(col_type) => {
+                                    self.bound_types.push((col_type, ((flag & 128) != 0)))
+                                }
+                            }
+                        }
                     }
                 }
                 self.input = rest;
