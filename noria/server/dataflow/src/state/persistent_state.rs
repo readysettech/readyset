@@ -782,6 +782,7 @@ impl PersistentState {
         let index_id = self.index_id(columns);
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&self.indices[index_id].column_family).unwrap();
+
             if index_id == 0 && self.has_unique_index {
                 let keys = repeat(cf).zip(keys.iter().map(|k| Self::serialize_prefix(k)));
                 db.multi_get_cf(keys)
@@ -1607,5 +1608,115 @@ mod tests {
                 RangeLookupResult::Some((0..3).map(|n| vec![n.into()]).collect::<Vec<_>>().into())
             );
         }
+    }
+}
+
+#[cfg(feature = "bench")]
+pub mod bench {
+    use super::*;
+    use std::convert::TryInto;
+
+    lazy_static::lazy_static! {
+        static ref STATE: PersistentState = {
+            let mut state = PersistentState::new(
+                String::from("bench"),
+                Some(&[0]),
+                &PersistenceParameters::default(),
+            );
+
+            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(&Index::new(IndexType::BTreeMap, vec![1, 2]), None);
+
+            let animals = ["Cat", "Dog", "Bat"];
+
+            for i in 0..100000 {
+                let rec: Vec<DataType> = vec![
+                    i.into(),
+                    animals[i % 3].try_into().unwrap(),
+                    (i % 99).into(),
+                ];
+                state.process_records(&mut vec![rec].into(), None, None);
+            }
+
+            state
+        };
+    }
+
+    pub fn rocksdb_get_primary_key(c: &mut criterion::Criterion) {
+        let state = &*STATE;
+
+        let mut group = c.benchmark_group("RockDB get primary key");
+        group.bench_function("lookup_multi", |b| {
+            b.iter(|| {
+                criterion::black_box(state.lookup_multi(
+                    &[0],
+                    &[
+                        KeyType::Single(&100.into()),
+                        KeyType::Single(&200.into()),
+                        KeyType::Single(&300.into()),
+                        KeyType::Single(&400.into()),
+                        KeyType::Single(&500.into()),
+                        KeyType::Single(&600.into()),
+                        KeyType::Single(&700.into()),
+                        KeyType::Single(&800.into()),
+                        KeyType::Single(&900.into()),
+                        KeyType::Single(&1000.into()),
+                    ],
+                ));
+            })
+        });
+
+        group.bench_function("lookup", |b| {
+            b.iter(|| {
+                criterion::black_box(|| {
+                    state.lookup(&[0], &KeyType::Single(&100.into()));
+                    state.lookup(&[0], &KeyType::Single(&200.into()));
+                    state.lookup(&[0], &KeyType::Single(&300.into()));
+                    state.lookup(&[0], &KeyType::Single(&400.into()));
+                    state.lookup(&[0], &KeyType::Single(&500.into()));
+                    state.lookup(&[0], &KeyType::Single(&600.into()));
+                    state.lookup(&[0], &KeyType::Single(&700.into()));
+                    state.lookup(&[0], &KeyType::Single(&800.into()));
+                    state.lookup(&[0], &KeyType::Single(&900.into()));
+                    state.lookup(&[0], &KeyType::Single(&1000.into()));
+                })
+            })
+        });
+
+        group.finish();
+    }
+
+    pub fn rocksdb_get_secondary_key(c: &mut criterion::Criterion) {
+        let state = &*STATE;
+
+        let mut group = c.benchmark_group("RockDB get secondary key");
+        group.bench_function("lookup_multi", |b| {
+            b.iter(|| {
+                criterion::black_box(state.lookup_multi(
+                    &[1, 2],
+                    &[
+                        KeyType::Double(("Dog".try_into().unwrap(), 1.into())),
+                        KeyType::Double(("Cat".try_into().unwrap(), 2.into())),
+                    ],
+                ));
+            })
+        });
+
+        group.bench_function("lookup", |b| {
+            b.iter(|| {
+                criterion::black_box({
+                    state.lookup(
+                        &[1, 2],
+                        &KeyType::Double(("Dog".try_into().unwrap(), 1.into())),
+                    );
+                    state.lookup(
+                        &[1, 2],
+                        &KeyType::Double(("Cat".try_into().unwrap(), 2.into())),
+                    );
+                })
+            })
+        });
+
+        group.finish();
     }
 }

@@ -5,6 +5,9 @@ mod partial_map;
 mod persistent_state;
 mod single_state;
 
+#[cfg(feature = "bench")]
+pub use persistent_state::bench;
+
 use std::fmt::{self, Debug};
 use std::ops::{Bound, Deref};
 use std::rc::Rc;

@@ -42,6 +42,7 @@ vec1 = "1.6.0"
 maplit = "1.0.2"
 derivative = "2.2.0"
 dataflow_expression = { path = "expression" }
+criterion = { version = "0.3", optional = true }
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
@@ -66,3 +67,6 @@ test-strategy = "0.1.1"
 [dev-dependencies]
 pretty_assertions = "0.7.2"
 proptest = "1.0.0"
+
+[features]
+bench = ["criterion"]

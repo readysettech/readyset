@@ -95,6 +95,7 @@ proptest = "1.0.0"
 chrono = "0.4.19"
 serial_test = "0.5.1"
 assert_approx_eq = "1.1.0"
+criterion = "0.3"
 
 [lib]
 name = "noria_server"
@@ -110,3 +111,7 @@ path = "src/bin/zk.rs"
 
 [[example]]
 name = "local-server"
+
+[[bench]]
+name = "rocksdb"
+harness = false
