@@ -8,13 +8,14 @@ images=(
 
     "mysql:latest"
     "mysql:5.7"
+    "mysql:8.0"
     "postgres:latest"
 
     "redis:6.2"
 
     "rust:latest"
-    "rust:nightly"
     "rust:1.54"
+    "rustlang/rust:nightly"
 
     "node:15.12.0"
     "node:alpine"
@@ -24,6 +25,7 @@ images=(
     "openjdk:alpine"
     "drupal:9-apache"
     "php:7-apache"
+    "python:3"
     "python:3.9-alpine3.12"
     "ruby:2.6.5-alpine"
     "ruby:2.6.3"
@@ -45,5 +47,7 @@ cat << EOF
     plugins:
       ecr#v2.2.0:
         login: true
+
+  - wait
 EOF
 done
