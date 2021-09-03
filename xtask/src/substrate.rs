@@ -36,6 +36,13 @@ pub(crate) struct AdminModuleLocator {
     region: String,
 }
 
+// The deploy modules contain resources that are shared between different accounts. These only have
+// region.
+#[derive(Clap, Debug)]
+pub(crate) struct DeployModuleLocator {
+    region: String,
+}
+
 impl ModuleLocator for ServiceModuleLocator {
     fn to_terraform_path(&self) -> Result<PathBuf> {
         let mut path: PathBuf = PathBuf::from("root-modules");
@@ -116,6 +123,32 @@ impl ModuleLocator for AdminModuleLocator {
     }
 }
 
+impl ModuleLocator for DeployModuleLocator {
+    fn to_terraform_path(&self) -> Result<PathBuf> {
+        let mut path: PathBuf = PathBuf::from("root-modules");
+        if !path.is_dir() {
+            bail!("Cannot find root modules path")
+        }
+        path.push("deploy");
+        if !path.is_dir() {
+            bail!("Cannot find deploy root modules path")
+        }
+        path.push(self.region.clone());
+        if !path.is_dir() {
+            bail!("Cannot find region root module path")
+        }
+        Ok(path)
+    }
+
+    fn to_description(&self) -> String {
+        format!("Deploy Root Region: {}", self.region)
+    }
+
+    fn to_args(&self) -> Vec<String> {
+        vec![self.region.clone()]
+    }
+}
+
 fn root_modules_path() -> PathBuf {
     Path::new("root-modules").to_path_buf()
 }
@@ -158,6 +191,31 @@ pub(crate) fn find_all_admin_module_locators() -> Result<Vec<AdminModuleLocator>
         }
     }
     Ok(admin_module_locators)
+}
+
+pub(crate) fn find_all_deploy_module_locators() -> Result<Vec<DeployModuleLocator>> {
+    let mut deploy_module_locators: Vec<DeployModuleLocator> = vec![];
+    let deploy_path = root_modules_path().join("deploy");
+
+    for entry in deploy_path.read_dir()? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            // If it is a directory, assume it is a region.
+            let region = path
+                .file_name()
+                .map(std::ffi::OsStr::to_string_lossy)
+                .unwrap()
+                .to_string();
+            // If there is a main.tf, this is valid and we should add this to the list.
+            if path.join("main.tf").exists() {
+                deploy_module_locators.push(DeployModuleLocator {
+                    region: String::from(&region),
+                });
+            }
+        }
+    }
+    Ok(deploy_module_locators)
 }
 
 pub(crate) fn find_all_service_module_locators() -> Result<Vec<ServiceModuleLocator>> {

@@ -9,6 +9,7 @@ mod terraform;
 // Some draft commands have been added to this struct to give some guidance on what needs to be implemented.
 // We should have commands that run outside Buildkite just in case Buildkite falls over and we need to run
 // without Buildkite in case of emergency.
+// TODO: Break down this into more subcommands to reduce the size of this enum.
 #[derive(Clap, Debug)]
 enum Subcommand {
     TerraformServiceValidate {
@@ -35,6 +36,18 @@ enum Subcommand {
         #[clap(flatten)]
         admin_module_locator: substrate::AdminModuleLocator,
     },
+    TerraformDeployValidate {
+        #[clap(flatten)]
+        deploy_module_locator: substrate::DeployModuleLocator,
+    },
+    TerraformDeployPlan {
+        #[clap(flatten)]
+        deploy_module_locator: substrate::DeployModuleLocator,
+    },
+    TerraformDeployApply {
+        #[clap(flatten)]
+        deploy_module_locator: substrate::DeployModuleLocator,
+    },
     BuildkiteTerraformServiceValidate {
         #[clap(flatten)]
         service_module_locator: substrate::ServiceModuleLocator,
@@ -52,7 +65,16 @@ enum Subcommand {
         #[clap(flatten)]
         admin_module_locator: substrate::AdminModuleLocator,
     },
-    // BuildkiteTerraformServiceApply,
+    // BuildkiteTerraformAdminApply,
+    BuildkiteTerraformDeployValidate {
+        #[clap(flatten)]
+        deploy_module_locator: substrate::DeployModuleLocator,
+    },
+    BuildkiteTerraformDeployPlan {
+        #[clap(flatten)]
+        deploy_module_locator: substrate::DeployModuleLocator,
+    },
+    // BuildkiteTerraformDeployApply,
     BuildkiteTerraformUploadValidateAllPipeline,
     BuildkiteTerraformUploadPlanAllPipeline,
 }
@@ -91,6 +113,15 @@ fn main() -> Result<()> {
         Subcommand::TerraformAdminApply {
             admin_module_locator,
         } => commands::terraform::apply(&admin_module_locator),
+        Subcommand::TerraformDeployValidate {
+            deploy_module_locator,
+        } => commands::terraform::validate(&deploy_module_locator),
+        Subcommand::TerraformDeployPlan {
+            deploy_module_locator,
+        } => commands::terraform::plan(&deploy_module_locator),
+        Subcommand::TerraformDeployApply {
+            deploy_module_locator,
+        } => commands::terraform::apply(&deploy_module_locator),
         Subcommand::BuildkiteTerraformServiceValidate {
             service_module_locator,
         } => commands::buildkite::terraform_validate(&service_module_locator),
@@ -103,6 +134,12 @@ fn main() -> Result<()> {
         Subcommand::BuildkiteTerraformAdminPlan {
             admin_module_locator,
         } => commands::buildkite::terraform_plan(&admin_module_locator),
+        Subcommand::BuildkiteTerraformDeployValidate {
+            deploy_module_locator,
+        } => commands::buildkite::terraform_validate(&deploy_module_locator),
+        Subcommand::BuildkiteTerraformDeployPlan {
+            deploy_module_locator,
+        } => commands::buildkite::terraform_plan(&deploy_module_locator),
         Subcommand::BuildkiteTerraformUploadValidateAllPipeline => {
             commands::buildkite::terraform_upload_validate_all_pipeline()
         }

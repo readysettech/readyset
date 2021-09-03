@@ -14,11 +14,12 @@ use tracing::{event, Level};
 use serde::Serialize;
 
 use crate::substrate::{
-    find_all_admin_module_locators, find_all_service_module_locators, ModuleLocator,
+    find_all_admin_module_locators, find_all_deploy_module_locators,
+    find_all_service_module_locators, ModuleLocator,
 };
 use crate::terraform;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ModuleTemplateData {
     module_descriptor: String,
     module_locator_args: Vec<String>,
@@ -74,8 +75,18 @@ fn template_registry() -> Result<Handlebars<'static>> {
 }
 
 fn module_template_data_for_all() -> Result<Vec<ModuleTemplateData>> {
+    let all_deploy_module_locators = find_all_deploy_module_locators()?;
     let all_admin_module_locators = find_all_admin_module_locators()?;
     let all_service_module_locators = find_all_service_module_locators()?;
+    let deploy_template_data_iter =
+        all_deploy_module_locators
+            .iter()
+            .map(|locator| ModuleTemplateData {
+                module_descriptor: locator.to_description(),
+                module_locator_args: locator.to_args(),
+                buildkite_validate_command: String::from("buildkite-terraform-deploy-validate"),
+                buildkite_plan_command: String::from("buildkite-terraform-deploy-plan"),
+            });
     let admin_template_data_iter =
         all_admin_module_locators
             .iter()
@@ -94,7 +105,8 @@ fn module_template_data_for_all() -> Result<Vec<ModuleTemplateData>> {
                 buildkite_validate_command: String::from("buildkite-terraform-service-validate"),
                 buildkite_plan_command: String::from("buildkite-terraform-service-plan"),
             });
-    Ok(admin_template_data_iter
+    Ok(deploy_template_data_iter
+        .chain(admin_template_data_iter)
         .chain(service_template_data_iter)
         .collect())
 }
