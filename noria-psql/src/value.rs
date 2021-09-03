@@ -41,7 +41,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
             (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
-            (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Real(f)),
+            (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Float(f)),
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),

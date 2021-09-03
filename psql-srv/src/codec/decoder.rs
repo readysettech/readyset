@@ -305,7 +305,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
         Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
-        Type::FLOAT4 => Ok(Value::Real(f32::from_sql(t, buf)?)),
+        Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
         _ => Err(Error::UnsupportedType(t.clone())),
@@ -333,7 +333,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         }
         Type::FLOAT4 => {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
-            Ok(Value::Real(text_str.parse::<f32>()?))
+            Ok(Value::Float(text_str.parse::<f32>()?))
         }
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(text_str)?)),
         Type::TIMESTAMP => {
@@ -956,7 +956,7 @@ mod tests {
         buf.put_f32(0.12345678); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
-            DataValue::Real(0.12345678)
+            DataValue::Float(0.12345678)
         );
     }
 
@@ -1077,7 +1077,7 @@ mod tests {
         buf.extend_from_slice(b"0.12345678"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
-            DataValue::Real(0.12345678)
+            DataValue::Float(0.12345678)
         );
     }
 
