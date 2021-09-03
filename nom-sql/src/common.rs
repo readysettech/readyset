@@ -640,6 +640,13 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
+fn double_precision(i: &[u8]) -> IResult<&[u8], SqlType> {
+    let (i, _) = tag_no_case("double")(i)?;
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag_no_case("precision")(i)?;
+    Ok((i, SqlType::Double))
+}
+
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
@@ -653,6 +660,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 SqlType::DateTime(fsp)
             }),
             map(tag_no_case("date"), |_| SqlType::Date),
+            double_precision,
             map(
                 tuple((tag_no_case("double"), multispace0, opt_signed)),
                 |_| SqlType::Double,
@@ -712,13 +720,13 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 )),
                 |t| SqlType::Char(t.1),
             ),
-            map(tag_no_case("time"), |_| SqlType::Time),
         ))(i)
     }
 }
 
 fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
     alt((
+        map(tag_no_case("time"), |_| SqlType::Time),
         decimal_or_numeric,
         map(
             tuple((tag_no_case("binary"), opt(delim_u16), multispace0)),

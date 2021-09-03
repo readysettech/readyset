@@ -927,6 +927,27 @@ mod tests {
         }
 
         #[test]
+        fn double_precision_column() {
+            let (rem, res) =
+                creation(Dialect::MySQL)(b"create table t(x double precision)").unwrap();
+            assert_eq!(str::from_utf8(rem).unwrap(), "");
+            assert_eq!(
+                res,
+                CreateTableStatement {
+                    table: "t".into(),
+                    fields: vec![ColumnSpecification {
+                        column: "t.x".into(),
+                        sql_type: SqlType::Double,
+                        constraints: vec![],
+                        comment: None,
+                    }],
+                    keys: None,
+                    if_not_exists: false,
+                }
+            );
+        }
+
+        #[test]
         fn django_create() {
             let qstring = "CREATE TABLE `django_admin_log` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
@@ -1266,6 +1287,27 @@ mod tests {
         use super::*;
         use crate::column::Column;
         use crate::table::Table;
+
+        #[test]
+        fn double_precision_column() {
+            let (rem, res) =
+                creation(Dialect::PostgreSQL)(b"create table t(x double precision)").unwrap();
+            assert_eq!(str::from_utf8(rem).unwrap(), "");
+            assert_eq!(
+                res,
+                CreateTableStatement {
+                    table: "t".into(),
+                    fields: vec![ColumnSpecification {
+                        column: "t.x".into(),
+                        sql_type: SqlType::Double,
+                        constraints: vec![],
+                        comment: None,
+                    }],
+                    keys: None,
+                    if_not_exists: false,
+                }
+            );
+        }
 
         #[test]
         fn django_create() {
