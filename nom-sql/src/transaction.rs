@@ -102,7 +102,6 @@ pub fn rollback(_: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], RollbackStatemen
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
 
     #[test]
     fn start_transaction_simple() {
