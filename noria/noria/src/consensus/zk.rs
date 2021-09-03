@@ -1,7 +1,7 @@
 // TODO: Replace how leader election is done and locking implementation of recipes from
 // https://zookeeper.apache.org/doc/current/recipes.html
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::{self, Thread};
@@ -48,6 +48,7 @@ impl Watcher for UnparkWatcher {
 
 struct ZookeeperAuthorityInner {
     leader_create_epoch: Option<i64>,
+    worker_id: Option<WorkerId>,
 }
 
 /// Coordinator that shares connection information between workers and clients using ZooKeeper.
@@ -119,6 +120,7 @@ impl ZookeeperAuthority {
     pub fn new(connect_string: &str) -> ReadySetResult<Self> {
         let inner = Some(RwLock::new(ZookeeperAuthorityInner {
             leader_create_epoch: None,
+            worker_id: None,
         }));
         Self::new_with_inner(connect_string, inner)
     }
@@ -243,6 +245,11 @@ impl Authority for ZookeeperAuthority {
         Ok(())
     }
 
+    fn watch_workers(&self) -> Result<(), Error> {
+        self.zk.get_children_w(WORKER_PATH, UnparkWatcher::new())?;
+        Ok(())
+    }
+
     fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         let inner = self.read_inner()?;
         let current_epoch = inner.leader_create_epoch;
@@ -356,6 +363,8 @@ impl Authority for ZookeeperAuthority {
             Err(e) => bail!(e),
         };
         let worker_id = path_to_worker_id(&path);
+        let mut inner = self.write_inner()?;
+        inner.worker_id = Some(worker_id.clone());
         Ok(Some(worker_id))
     }
 
@@ -370,12 +379,28 @@ impl Authority for ZookeeperAuthority {
     fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
         let children = match self.zk.get_children(WORKER_PATH, false) {
             Ok(v) => v,
+            Err(ZkError::NoNode) => Vec::new(),
             Err(e) => bail!(e),
         };
         Ok(children
             .into_iter()
             .map(|path| path_to_worker_id(&path))
             .collect())
+    }
+
+    fn worker_data(
+        &self,
+        worker_ids: Vec<WorkerId>,
+    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+        let mut worker_descriptors: HashMap<WorkerId, WorkerDescriptor> = HashMap::new();
+
+        for w in worker_ids {
+            if let Ok((data, _)) = self.zk.get_data(&worker_id_to_path(&w), false) {
+                worker_descriptors.insert(w, serde_json::from_slice::<WorkerDescriptor>(&data)?);
+            }
+        }
+
+        Ok(worker_descriptors)
     }
 }
 
@@ -445,8 +470,12 @@ mod tests {
         assert_eq!(workers.len(), 1);
         assert!(workers.contains(&worker_id));
         assert_eq!(
-            authority.worker_heartbeat(worker_id).unwrap(),
+            authority.worker_heartbeat(worker_id.clone()).unwrap(),
             AuthorityWorkerHeartbeatResponse::Alive
+        );
+        assert_eq!(
+            worker,
+            authority.worker_data(vec![worker_id.clone()]).unwrap()[&worker_id]
         );
 
         let worker_id = authority.register_worker(worker).unwrap().unwrap();
