@@ -1,6 +1,7 @@
 locals {
   mirror_repositories = toset([
     "rust",
+    "rustlang/rust",
 
     "mysql",
     "postgres",
