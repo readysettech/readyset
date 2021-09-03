@@ -7,6 +7,7 @@
 
 pub mod backend;
 mod convert;
+pub mod coverage;
 mod rewrite;
 pub mod test_helpers;
 mod upstream_database;

@@ -6,7 +6,7 @@ use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -15,6 +15,7 @@ use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::UpstreamDatabase;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -91,6 +92,12 @@ pub struct Options {
     /// returning the first successful result
     #[clap(long, requires("upstream-db-url"))]
     race_reads: bool,
+
+    /// Analyze coverage of queries during execution, and save a report of coverage on exit.
+    ///
+    /// Implies --race-reads
+    #[clap(long, requires("upstream-db-url"))]
+    coverage_analysis: bool,
 
     /// Allow database connections authenticated as this user. Ignored if
     /// --no-require-authentication is passed
@@ -197,6 +204,8 @@ where
                 .unwrap();
         }
 
+        let query_coverage_info = options.coverage_analysis.then(QueryCoverageInfoRef::new);
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
@@ -206,10 +215,11 @@ where
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
-                .race_reads(options.race_reads)
+                .race_reads(options.race_reads || options.coverage_analysis)
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
-                .dialect(self.dialect);
+                .dialect(self.dialect)
+                .query_coverage_info(query_coverage_info);
             let fut = async move {
                 let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| debug!("accepted"));
@@ -324,7 +334,6 @@ pub fn logger_pls() -> slog::Logger {
     use slog::Drain;
     use slog::Logger;
     use slog_term::term_full;
-    use std::sync::Mutex;
     Logger::root(Mutex::new(term_full()).fuse(), slog::o!())
 }
 
