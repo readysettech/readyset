@@ -8,7 +8,7 @@
 use anyhow::Error;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use url::Url;
 
@@ -52,7 +52,7 @@ pub enum GetLeaderResult {
 /// Initial registration request body, sent from workers to controllers.
 /// ///
 /// (used for the `/worker_rx/register` route)
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct WorkerDescriptor {
     /// URI at which the worker can be reached.
     pub worker_uri: Url,
@@ -96,6 +96,10 @@ pub trait Authority: Send + Sync {
     /// been overthrown.
     fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error>;
 
+    /// Place a watch on the workers that unparks the thread when there is a change
+    /// in the worker state.
+    fn watch_workers(&self) -> Result<(), Error>;
+
     /// Do a non-blocking read at the indicated key.
     fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
     where
@@ -115,7 +119,7 @@ pub trait Authority: Send + Sync {
         F: FnMut(Option<P>) -> Result<P, E>,
         P: Serialize + DeserializeOwned;
 
-    // Register a worker with their descriptor. Returns a unique identifier that represents this worker if successful.
+    /// Register a worker with their descriptor. Returns a unique identifier that represents this worker if successful.
     fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
     where
         WorkerDescriptor: Serialize;
@@ -126,6 +130,12 @@ pub trait Authority: Send + Sync {
 
     /// Retrieves the current set of workers from the authority.
     fn get_workers(&self) -> Result<HashSet<WorkerId>, Error>;
+
+    /// Retrieves the worker data for a set of workers.
+    fn worker_data(
+        &self,
+        worker_ids: Vec<WorkerId>,
+    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error>;
 
     // Currently all these APIs do not exist but are planned to.
 

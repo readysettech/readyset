@@ -8,6 +8,11 @@
 //!
 //! The LocalAuthority stores effectively a "cache" of what it was able to get
 //! from LocalAuthorityStore when it last checked in.
+//!
+//! The LocalAuthority supports ephemeral keys, instead of tying these keys to
+//! an active session similar to Zookeeper, the authority will drop ephemeral
+//! keys it created when it is dropped.
+use std::collections::HashMap;
 use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -42,6 +47,8 @@ pub struct LocalAuthorityStore {
 /// LocalAuthorityInner is the cache of information received from the store.
 struct LocalAuthorityInner {
     known_leader_epoch: Option<u64>,
+    /// Set of keys that should be removed when the authority is dropped.
+    ephemeral_keys: HashSet<String>,
 }
 
 pub struct LocalAuthority {
@@ -102,6 +109,7 @@ impl LocalAuthority {
             store,
             inner: RwLock::new(LocalAuthorityInner {
                 known_leader_epoch: None,
+                ephemeral_keys: HashSet::new(),
             }),
         }
     }
@@ -127,6 +135,19 @@ impl Default for LocalAuthority {
     }
 }
 
+impl Drop for LocalAuthority {
+    fn drop(&mut self) {
+        // If either mutex is poisoned we don't do anything.
+        if let Ok(mut store_inner) = self.store.inner_lock() {
+            if let Ok(inner) = self.inner_read() {
+                for k in &inner.ephemeral_keys {
+                    store_inner.keys.remove(k);
+                }
+            }
+        }
+    }
+}
+
 // A custom clone is implemented for Authority since each Authority should have its own "connection"
 // to the store. This makes sure the local information from the Authority is not copied around.
 // In addition, each Authority should eventually get a unique ID and we will be implicitly
@@ -134,6 +155,27 @@ impl Default for LocalAuthority {
 impl Clone for LocalAuthority {
     fn clone(&self) -> Self {
         Self::new_with_store(Arc::clone(&self.store))
+    }
+}
+
+impl LocalAuthority {
+    /// Writes a key ephemerally, returns an error if the key already exists.
+    /// Requires a mutex guard already be held as callers will likely have
+    /// checked properties of the inner store.
+    fn write_ephemeral(
+        &self,
+        mut store_inner: MutexGuard<'_, LocalAuthorityStoreInner>,
+        key: &str,
+        val: Vec<u8>,
+    ) -> Result<(), Error> {
+        if let Entry::Vacant(e) = store_inner.keys.entry(key.to_owned()) {
+            let mut inner = self.inner_write()?;
+            inner.ephemeral_keys.insert(key.to_owned());
+            e.insert(val);
+            Ok(())
+        } else {
+            Err(anyhow!("Key already exists"))
+        }
     }
 }
 
@@ -231,6 +273,10 @@ impl Authority for LocalAuthority {
         unreachable!("LocalAuthority does not support `watch_leader`.");
     }
 
+    fn watch_workers(&self) -> Result<(), Error> {
+        unreachable!("LocalAuthority does not support `watch_workers`.");
+    }
+
     fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
         let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
             let inner = self.inner_read()?;
@@ -301,8 +347,8 @@ impl Authority for LocalAuthority {
 
         let path = WORKER_PATH.to_string() + "/" + &next_id.to_string();
 
-        if let Entry::Vacant(e) = store_inner.keys.entry(path) {
-            e.insert(serde_json::to_vec(&payload)?);
+        if !store_inner.keys.contains_key(&path) {
+            self.write_ephemeral(store_inner, &path, serde_json::to_vec(&payload)?)?;
             return Ok(Some(next_id.to_string()));
         }
 
@@ -331,6 +377,25 @@ impl Authority for LocalAuthority {
                 // The worker path is always in the format: /workers/<id>
                 #[allow(clippy::unwrap_used)]
                 k[(k.rfind('/').unwrap() + 1)..].to_owned()
+            })
+            .collect())
+    }
+
+    fn worker_data(
+        &self,
+        worker_ids: Vec<WorkerId>,
+    ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
+        let store_inner = self.store.inner_lock()?;
+        let worker_prefix = WORKER_PATH.to_string();
+
+        Ok(worker_ids
+            .into_iter()
+            .filter_map(|id| {
+                store_inner
+                    .keys
+                    .get(&(worker_prefix.clone() + "/" + &id))
+                    .to_owned()
+                    .map(|data| (id, serde_json::from_slice(data).unwrap()))
             })
             .collect())
     }
@@ -404,13 +469,41 @@ mod tests {
         assert_eq!(workers.len(), 1);
         assert!(workers.contains(&worker_id));
         assert_eq!(
-            authority.worker_heartbeat(worker_id).unwrap(),
+            authority.worker_heartbeat(worker_id.clone()).unwrap(),
             AuthorityWorkerHeartbeatResponse::Alive
+        );
+        assert_eq!(
+            worker,
+            authority.worker_data(vec![worker_id.clone()]).unwrap()[&worker_id]
         );
 
         let worker_id = authority.register_worker(worker).unwrap().unwrap();
         let workers = authority.get_workers().unwrap();
         assert_eq!(workers.len(), 2);
         assert!(workers.contains(&worker_id));
+    }
+
+    #[test]
+    fn test_register_deregister() {
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
+
+        println!("hi");
+        let worker = WorkerDescriptor {
+            worker_uri: Url::parse("http://127.0.0.1").unwrap(),
+            reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
+            region: None,
+            reader_only: false,
+            volume_id: None,
+        };
+        println!("wtf");
+        authority.register_worker(worker.clone()).unwrap().unwrap();
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 1);
+        println!("hi");
+        drop(authority);
+        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+        let workers = authority.get_workers().unwrap();
+        assert_eq!(workers.len(), 0);
     }
 }
