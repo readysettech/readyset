@@ -1319,6 +1319,7 @@ async fn mutator_churn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn view_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
