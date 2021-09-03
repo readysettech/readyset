@@ -1,4 +1,4 @@
-FROM python:3.9-alpine3.12
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
 
 RUN apk add --no-cache mariadb-connector-c
 

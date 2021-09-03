@@ -1,4 +1,4 @@
-FROM haskell:8.6 AS builder
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/haskell:8.6 AS builder
 
 RUN \
 	sed -i 's/stretch/bullseye/' /etc/apt/sources.list && \
@@ -16,6 +16,7 @@ ADD src/* /src/
 
 RUN cabal v2-build --enable-profiling
 
+# TODO: Update this to bullseye, leaving this pulling from Docker Hub for now.
 FROM debian:stretch-slim
 RUN apt-get update && apt-get install -y libgmp10 && rm -Rvf /var/lib/apt
 RUN apt-get update && apt-get install -y libpcre3 && rm -Rvf /var/lib/apt

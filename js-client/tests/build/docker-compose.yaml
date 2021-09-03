@@ -2,7 +2,7 @@ version: "2.2"
 
 services:
   zookeeper:
-    image: zookeeper
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
     expose:
       - 2181
     healthcheck:
@@ -12,7 +12,7 @@ services:
       retries: 5
       start_period: 5s
   mysql:
-    image: mysql:8.0
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
     expose:
       - 3306
     environment:
@@ -60,7 +60,7 @@ services:
       retries: 5
       start_period: 5s
   node:
-    image: node:15.12.0
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/node:15.12.0
     environment:
       ZOOKEEPER_ADDRESS: zookeeper:2181
       NORIA_DEPLOYMENT: jstests

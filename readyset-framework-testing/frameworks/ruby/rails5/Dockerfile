@@ -1,4 +1,4 @@
-FROM ruby:2.6.5-alpine
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ruby:2.6.5-alpine
 
 RUN apk add --no-cache yarn sqlite mariadb-connector-c tzdata shared-mime-info
 RUN gem update bundler

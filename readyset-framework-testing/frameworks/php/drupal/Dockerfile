@@ -1,4 +1,4 @@
-FROM drupal:9-apache
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/drupal:9-apache
 
 RUN \
 	composer require \

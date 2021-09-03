@@ -18,7 +18,7 @@ steps:
     - readyset-mysql-image
     plugins:
       - docker#v3.8.0:
-          image: python:3
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3
           command: ["./.buildkite/list-frameworks.sh"]
           mount-buildkite-agent: true
           mount-ssh-agent: true
@@ -30,9 +30,11 @@ steps:
     - list-frameworks
     plugins:
       - docker#v3.8.0:
-          image: python:3
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3
           command: ["./.buildkite/generate-framework-pipeline.py"]
           mount-buildkite-agent: true
           propagate-environment: true
+      - ecr#v2.2.0:
+          login: true
     artifact_paths:
       - ".buildkite/gen/*"

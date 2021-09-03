@@ -1,4 +1,4 @@
-FROM alpine
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/alpine
 
 RUN apk add --no-cache mysql-client mariadb-connector-c
 

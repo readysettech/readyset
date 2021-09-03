@@ -1,4 +1,4 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:nightly as chef
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly as chef
 WORKDIR /workdir
 COPY rust-toolchain ./rust-toolchain
 RUN rustup toolchain install "$(cat ./rust-toolchain)"
@@ -30,7 +30,7 @@ COPY . .
 RUN cargo build ${release:+--release} --bin noria-mysql
 RUN if [ -n "$release" ]; then strip target/release/noria-mysql; else strip target/debug/noria-mysql; fi
 
-FROM debian:10
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/debian:bullseye-slim
 RUN apt-get update
 # We install mariadb-client so we have access to mysqladmin for healthchecks
 RUN apt-get install -y libssl-dev mariadb-client

@@ -1,4 +1,4 @@
-FROM php:7-apache
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/php:7-apache
 
 RUN \
 	apt-get update && \

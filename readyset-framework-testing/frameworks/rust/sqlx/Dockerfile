@@ -1,4 +1,4 @@
-FROM rust
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rust
 
 RUN apt-get update && apt-get install -y mariadb-client-10.3
 RUN cargo install sqlx-cli

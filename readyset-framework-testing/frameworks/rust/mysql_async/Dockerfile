@@ -1,4 +1,4 @@
-FROM rust AS builder
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rust AS builder
 
 ADD src/Cargo.toml /src/
 WORKDIR /src
@@ -7,7 +7,7 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build && rm -Rvf src
 ADD src/src /src/src
 RUN touch src/main.rs && cargo build
 
-FROM fedora:32
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/fedora:32
 COPY --from=builder /src/target/debug/mysql-test /
 ENTRYPOINT ["/mysql-test"]
 

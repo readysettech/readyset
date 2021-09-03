@@ -1,4 +1,4 @@
-FROM openjdk:alpine
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/openjdk:alpine
 
 RUN apk add --no-update gettext jq curl
 ADD src /src

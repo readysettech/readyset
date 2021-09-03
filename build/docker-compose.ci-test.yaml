@@ -4,15 +4,15 @@ version: '3.8'
 
 services:
   zookeeper:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/zookeeper
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
   consul-server:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/consul
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
   mysql:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mysql
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql
   postgres:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/postgres
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres
   redis:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/redis:6.2
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/redis:6.2
   app:
     build:
       context: .

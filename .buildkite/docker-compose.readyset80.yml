@@ -1,7 +1,7 @@
 version: "3.8"
 services:
   zookeeper:
-    image: zookeeper
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
     healthcheck:
       test: ["CMD", "nc", "-vz", "localhost", "2181"]
       interval: 10s
@@ -9,7 +9,7 @@ services:
       retries: 5
       start_period: 5s
   mysql:
-    image: mysql:8.0
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
     expose:
       - 3306
     environment:

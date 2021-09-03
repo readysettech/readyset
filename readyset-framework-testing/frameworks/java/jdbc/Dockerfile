@@ -1,4 +1,4 @@
-FROM openjdk:12
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/openjdk:12
 
 ENV VERSION "8.0.23"
 ENV CONNECTOR_NAME="mysql-connector-java-${VERSION}"

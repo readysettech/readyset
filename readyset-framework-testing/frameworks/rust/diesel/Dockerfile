@@ -1,4 +1,4 @@
-FROM rust
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rust
 
 RUN \
 	sed -i 's/buster/bullseye/' /etc/apt/sources.list && \

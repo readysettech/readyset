@@ -20,6 +20,9 @@ build_template = """
   - key: build-${FRAMEWORK_SLUG}
     label: "Build test container image for ${FRAMEWORK}"
     command: ./.buildkite/build-framework-image.sh '${FRAMEWORK}'
+    plugins:
+      - ecr#v2.2.0:
+          login: true
 """
 
 
@@ -52,7 +55,7 @@ test_template = """
             - RS_NUM_SHARDS=${NUM_SHARDS}
             - RS_DIALECT=mysql${DIALECT_SHORT}
             - BUILDKITE_COMMIT
-        ecr#v2.2.0:
+      - ecr#v2.2.0:
           login: true
 """
 soft_fail = """
@@ -91,10 +94,14 @@ push_template = """
     command: ./.buildkite/push-image '${FRAMEWORK}'
     depends_on:
       - test-mysql80-${FRAMEWORK_SLUG}
+    plugins:
+      - ecr#v2.2.0:
+        login: true
 """
 
 
 def generate_push_step(framework):
+    # TODO: Actually push. Currently this is dead code.
     framework_slug = framework.replace("/", "_").replace(":", "_")
     step = push_template.replace("${FRAMEWORK}", framework).replace(
         "${FRAMEWORK_SLUG}", framework_slug
@@ -144,6 +151,9 @@ for line in agent.stdout:
 result = "\n".join(result)
 
 print(result)
+print()
+sys.stdout.flush()
 agent = subprocess.run(
     ["buildkite-agent", "pipeline", "upload"], input=result.encode("ascii")
 )
+sys.exit(agent.returncode)

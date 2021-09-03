@@ -1,3 +1,3 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/node:15.12.0
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/node:15.12.0
 
 RUN npm install -g prettier@2.2.1

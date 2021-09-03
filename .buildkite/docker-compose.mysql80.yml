@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   db:
-    image: mysql:8.0
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
     expose:
       - 3333
     environment:

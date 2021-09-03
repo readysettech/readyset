@@ -2,7 +2,7 @@
 version: '3'
 services:
   db:
-    image: postgres
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres
     volumes:
       - ./tmp/db:/var/lib/postgresql/data
     environment:
