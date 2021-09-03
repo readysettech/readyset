@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/buildkite/pipeline-schema/master/schema.json
+# Buildkite pipeline which mirrors the various images in use from Docker Hub to ECR.
+
+# Docker Hub has put limitations in place on how often images can be pulled.
+# To get around these, pull from Docker Hub and push to our ECR on a slower cadence.
+
+steps:
+  - name: ":pipeline: Upload docker mirror pipeline"
+    commands:
+      - .buildkite/generate-docker-mirror-pipeline.sh | buildkite-agent pipeline upload
