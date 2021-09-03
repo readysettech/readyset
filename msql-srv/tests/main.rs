@@ -104,7 +104,7 @@ where
                     w.write_row(iter::once(67108864u32)).await?;
                     Ok(w.finish().await?)
                 }
-                _ => Ok(results.completed(0, 0).await?),
+                _ => Ok(results.completed(0, 0, None).await?),
             };
         } else {
             (self.on_q)(query, results).await
@@ -278,7 +278,7 @@ fn it_pings() {
 #[test]
 fn empty_response() {
     TestingShim::new(
-        |_, w| Box::pin(async move { w.completed(0, 0).await }),
+        |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_, _| unreachable!(),
@@ -687,7 +687,7 @@ fn insert_exec() {
                 "mtok199"
             );
 
-            Box::pin(async move { w.completed(42, 1).await })
+            Box::pin(async move { w.completed(42, 1, None).await })
         },
         |_, _| unreachable!(),
     )
@@ -848,7 +848,7 @@ fn prepared_empty() {
         |_| 0,
         move |_, params, w| {
             assert!(!params.is_empty());
-            Box::pin(async move { w.completed(0, 0).await })
+            Box::pin(async move { w.completed(0, 0, None).await })
         },
         |_, _| unreachable!(),
     )

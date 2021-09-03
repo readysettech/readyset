@@ -80,8 +80,14 @@ impl<'a, W: AsyncWrite + Unpin + 'a> StatementMetaWriter<'a, W> {
 
 #[derive(Debug)]
 enum Finalizer {
-    Ok { rows: u64, last_insert_id: u64 },
-    Eof,
+    Ok {
+        rows: u64,
+        last_insert_id: u64,
+        status_flags: Option<StatusFlags>,
+    },
+    Eof {
+        status_flags: Option<StatusFlags>,
+    },
 }
 
 /// Convenience type for providing query results to clients.
@@ -119,7 +125,21 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     }
 
     async fn finalize(&mut self, more_exists: bool) -> io::Result<()> {
-        let mut status = StatusFlags::empty();
+        let mut status = match self.last_end {
+            Some(Finalizer::Ok {
+                rows: _,
+                last_insert_id: _,
+                status_flags,
+            })
+            | Some(Finalizer::Eof { status_flags }) => {
+                if let Some(sf) = status_flags {
+                    sf
+                } else {
+                    StatusFlags::empty()
+                }
+            }
+            _ => StatusFlags::empty(),
+        };
         if more_exists {
             status.set(StatusFlags::SERVER_MORE_RESULTS_EXISTS, true);
         }
@@ -128,8 +148,9 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
             Some(Finalizer::Ok {
                 rows,
                 last_insert_id,
+                ..
             }) => writers::write_ok_packet(self.writer, rows, last_insert_id, status).await,
-            Some(Finalizer::Eof) => writers::write_eof_packet(self.writer, status).await,
+            Some(Finalizer::Eof { .. }) => writers::write_eof_packet(self.writer, status).await,
         }
     }
 
@@ -150,12 +171,14 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
         mut self,
         rows: u64,
         last_insert_id: u64,
+        status_flags: Option<StatusFlags>,
         // return type not Self because https://github.com/rust-lang/rust/issues/61949
     ) -> io::Result<QueryResultWriter<'a, W>> {
         self.finalize(true).await?;
         self.last_end = Some(Finalizer::Ok {
             rows,
             last_insert_id,
+            status_flags,
         });
         Ok(self)
     }
@@ -163,8 +186,13 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     /// Send an empty resultset response to the client indicating that `rows` rows were affected by
     /// the query. `last_insert_id` may be given to communiate an identifier for a client's most
     /// recent insertion.
-    pub async fn completed(self, rows: u64, last_insert_id: u64) -> io::Result<()> {
-        self.complete_one(rows, last_insert_id)
+    pub async fn completed(
+        self,
+        rows: u64,
+        last_insert_id: u64,
+        status_flags: Option<StatusFlags>,
+    ) -> io::Result<()> {
+        self.complete_one(rows, last_insert_id, status_flags)
             .await?
             .no_more_results()
             .await
@@ -224,6 +252,9 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     col: usize,
 
     finished: bool,
+    // Optionally holds the status flags from the last ok packet that we have
+    // received from communicating with mysql over fallback.
+    last_status_flags: Option<StatusFlags>,
 }
 
 impl<'a, W> RowWriter<'a, W>
@@ -244,6 +275,7 @@ where
             col: 0,
 
             finished: false,
+            last_status_flags: None,
         };
         rw.start().await?;
         Ok(rw)
@@ -423,6 +455,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
                 .last_end = Some(Finalizer::Ok {
                 rows: self.col as u64,
                 last_insert_id: 0,
+                status_flags: self.last_status_flags.take(),
             });
             Ok(())
         } else {
@@ -430,9 +463,17 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
             self.result
                 .as_mut()
                 .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                .last_end = Some(Finalizer::Eof);
+                .last_end = Some(Finalizer::Eof {
+                status_flags: self.last_status_flags.take(),
+            });
             Ok(())
         }
+    }
+
+    /// Sets status flags to be eventually written out when finish() gets called.
+    pub fn set_status_flags(mut self, status_flags: StatusFlags) -> Self {
+        self.last_status_flags = Some(status_flags);
+        self
     }
 
     /// Indicate to the client that no more rows are coming.

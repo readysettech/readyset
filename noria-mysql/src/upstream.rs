@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use mysql_async::consts::CapabilityFlags;
+use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
 use std::collections::HashMap;
@@ -24,12 +24,16 @@ pub enum QueryResult {
     WriteResult {
         num_rows_affected: u64,
         last_inserted_id: u64,
+        status_flags: StatusFlags,
     },
     ReadResult {
         data: Vec<Row>,
         columns: Option<Arc<[Column]>>,
+        status_flags: StatusFlags,
     },
-    None,
+    Command {
+        status_flags: StatusFlags,
+    },
 }
 
 /// A connector to an underlying mysql store. This is really just a wrapper for the mysql crate.
@@ -125,7 +129,11 @@ impl UpstreamDatabase for MySqlUpstream {
             .await?;
         let columns = result.columns();
         let data = result.collect().await?;
-        Ok(QueryResult::ReadResult { data, columns })
+        Ok(QueryResult::ReadResult {
+            data,
+            columns,
+            status_flags: self.conn.status(),
+        })
     }
 
     async fn execute_write(
@@ -141,6 +149,7 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(QueryResult::WriteResult {
             num_rows_affected: self.conn.affected_rows(),
             last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
+            status_flags: self.conn.status(),
         })
     }
 
@@ -151,7 +160,11 @@ impl UpstreamDatabase for MySqlUpstream {
         let mut result = self.conn.query_iter(query).await?;
         let columns = result.columns();
         let data = result.collect().await?;
-        Ok(QueryResult::ReadResult { data, columns })
+        Ok(QueryResult::ReadResult {
+            data,
+            columns,
+            status_flags: self.conn.status(),
+        })
     }
 
     /// Executes the given query on the mysql backend.
@@ -171,6 +184,7 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(QueryResult::WriteResult {
             num_rows_affected: self.conn.affected_rows(),
             last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
+            status_flags: self.conn.status(),
         })
     }
 
@@ -192,6 +206,7 @@ impl UpstreamDatabase for MySqlUpstream {
         let last_insert_id = transaction.last_insert_id();
         debug!("results : {:?}, {:?}", affected_rows, last_insert_id);
 
+        let status_flags = transaction.status();
         let txid = transaction.commit_returning_gtid().await.map_err(|e| {
             internal_err(format!(
                 "Error obtaining GTID from MySQL for RYW-enabled commit: {}",
@@ -202,6 +217,7 @@ impl UpstreamDatabase for MySqlUpstream {
             QueryResult::WriteResult {
                 num_rows_affected: affected_rows,
                 last_inserted_id: last_insert_id.unwrap_or(0),
+                status_flags,
             },
             txid,
         ))
@@ -217,7 +233,9 @@ impl UpstreamDatabase for MySqlUpstream {
         self.conn.query_drop("START TRANSACTION").await?;
 
         self.in_transaction = true;
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command {
+            status_flags: self.conn.status(),
+        })
     }
 
     fn is_in_tx(&self) -> bool {
@@ -233,7 +251,9 @@ impl UpstreamDatabase for MySqlUpstream {
         result.drop_result().await?;
         self.in_transaction = false;
 
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command {
+            status_flags: self.conn.status(),
+        })
     }
 
     async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
@@ -245,6 +265,8 @@ impl UpstreamDatabase for MySqlUpstream {
         result.drop_result().await?;
         self.in_transaction = false;
 
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command {
+            status_flags: self.conn.status(),
+        })
     }
 }
