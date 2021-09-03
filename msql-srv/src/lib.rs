@@ -37,7 +37,7 @@
 //!         _: ParamParser<'_>,
 //!         results: QueryResultWriter<'_, W>,
 //!     ) -> io::Result<()> {
-//!         results.completed(0, 0).await
+//!         results.completed(0, 0, None).await
 //!     }
 //!     async fn on_close(&mut self, _: u32) {}
 //!

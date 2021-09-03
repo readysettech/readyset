@@ -212,6 +212,7 @@ where
         QueryResult::Upstream(noria_mysql::QueryResult::WriteResult {
             num_rows_affected,
             last_inserted_id,
+            ..
         }) => {
             utils::set_num_field(
                 cx,

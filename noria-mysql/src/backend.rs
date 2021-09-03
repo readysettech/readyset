@@ -8,6 +8,7 @@ use tracing::trace;
 use msql_srv::{
     Column, ColumnFlags, ColumnType, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
 };
+use mysql_async::consts::StatusFlags;
 use noria::consensus::Authority;
 use noria::errors::internal_err;
 use noria::{internal, DataType, ReadySetError};
@@ -87,9 +88,14 @@ async fn write_column<W: AsyncWrite + Unpin>(
 async fn write_query_results<W: AsyncWrite + Unpin>(
     r: Result<(u64, u64), Error>,
     results: QueryResultWriter<'_, W>,
+    status_flags: Option<StatusFlags>,
 ) -> io::Result<()> {
     match r {
-        Ok((row_count, last_insert)) => results.completed(row_count, last_insert).await,
+        Ok((row_count, last_insert)) => {
+            results
+                .completed(row_count, last_insert, status_flags)
+                .await
+        }
         Err(e) => {
             results
                 .error(e.error_kind(), e.to_string().as_bytes())
@@ -211,22 +217,24 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
-            } )) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            } )) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results, None).await,
             Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
                 num_rows_updated,
                 last_inserted_id
-            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results, None).await,
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
+                status_flags,
             })) => {
                 write_query_results(
                     Ok((num_rows_affected, last_inserted_id)),
                     results,
+                    Some(status_flags),
                 )
                 .await
             }
-            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns })) => {
+            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns, status_flags })) => {
                 let mut data = data.iter().peekable();
                 if let Some(cols) = data.peek() {
                     let cols = cols.columns_ref();
@@ -241,7 +249,7 @@ where
                         }
                         rw.end_row().await?
                     }
-                    rw.finish().await
+                    rw.set_status_flags(status_flags).finish().await
                 } else {
                     let formatted_cols = if let Some(c) = columns {
                         c.iter()
@@ -251,7 +259,7 @@ where
                         vec![]
                     };
                     let rw = results.start(&formatted_cols).await?;
-                    rw.finish().await
+                    rw.set_status_flags(status_flags).finish().await
                 }
             }
             Err(e @ Error::ReadySet(ReadySetError::PreparedStatementMissing { .. })) => {
@@ -302,7 +310,7 @@ where
                         w.write_row(iter::once(67108864u32)).await?;
                         Ok(w.finish().await?)
                     }
-                    _ => Ok(results.completed(0, 0).await?),
+                    _ => Ok(results.completed(0, 0, None).await?),
                 };
             }
         } else {
@@ -312,11 +320,13 @@ where
             Ok(QueryResult::Noria(
                 noria_connector::QueryResult::CreateTable
                 | noria_connector::QueryResult::CreateView,
-            )) => results.completed(0, 0).await,
+            )) => results.completed(0, 0, None).await,
             Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
-            })) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results).await,
+            })) => {
+                write_query_results(Ok((num_rows_inserted, first_inserted_id)), results, None).await
+            }
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,
@@ -350,15 +360,29 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
                 num_rows_updated,
                 last_inserted_id,
-            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results).await,
+            })) => {
+                write_query_results(Ok((num_rows_updated, last_inserted_id)), results, None).await
+            }
             Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
-                results.completed(num_rows_deleted, 0).await
+                results.completed(num_rows_deleted, 0, None).await
             }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
-            })) => write_query_results(Ok((num_rows_affected, last_inserted_id)), results).await,
-            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns })) => {
+                status_flags,
+            })) => {
+                write_query_results(
+                    Ok((num_rows_affected, last_inserted_id)),
+                    results,
+                    Some(status_flags),
+                )
+                .await
+            }
+            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult {
+                data,
+                columns,
+                status_flags,
+            })) => {
                 if let Some(cols) = data.get(0).cloned() {
                     let cols = cols.columns_ref();
                     let formatted_cols = cols.iter().map(|c| c.into()).collect::<Vec<_>>();
@@ -369,7 +393,7 @@ where
                         }
                         rw.end_row().await?
                     }
-                    rw.finish().await
+                    rw.set_status_flags(status_flags).finish().await
                 } else {
                     let formatted_cols = if let Some(c) = columns {
                         c.iter().map(|c| c.into()).collect::<Vec<_>>()
@@ -377,12 +401,12 @@ where
                         vec![]
                     };
                     let rw = results.start(&formatted_cols).await?;
-                    rw.finish().await
+                    rw.set_status_flags(status_flags).finish().await
                 }
             }
-            Ok(QueryResult::Upstream(upstream::QueryResult::None)) => {
+            Ok(QueryResult::Upstream(upstream::QueryResult::Command { status_flags })) => {
                 let rw = results.start(&[]).await?;
-                rw.finish().await
+                rw.set_status_flags(status_flags).finish().await
             }
             Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
                 code,
