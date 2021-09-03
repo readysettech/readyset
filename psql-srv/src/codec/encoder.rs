@@ -312,7 +312,7 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Double(v) => {
             v.to_sql(&Type::FLOAT8, dst)?;
         }
-        Value::Real(v) => {
+        Value::Float(v) => {
             v.to_sql(&Type::FLOAT4, dst)?;
         }
         Value::Text(v) => {
@@ -371,7 +371,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
             write!(dst, "{}", v)?;
         }
-        Value::Real(v) => {
+        Value::Float(v) => {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
             write!(dst, "{}", v)?;
         }
@@ -936,7 +936,7 @@ mod tests {
     #[test]
     fn test_encode_binary_real() {
         let mut buf = BytesMut::new();
-        put_binary_value(DataValue::Real(0.12345678), &mut buf).unwrap();
+        put_binary_value(DataValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(4); // length
         exp.put_f32(0.12345678); // value
@@ -1058,7 +1058,7 @@ mod tests {
     #[test]
     fn test_encode_text_real() {
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Real(0.12345678), &mut buf).unwrap();
+        put_text_value(DataValue::Float(0.12345678), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // size
         exp.extend_from_slice(b"0.12345678"); // value

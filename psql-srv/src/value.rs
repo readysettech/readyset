@@ -12,7 +12,7 @@ pub enum Value {
     Bigint(i64),
     Smallint(i16),
     Double(f64),
-    Real(f32),
+    Float(f32),
     Text(ArcCStr),
     Timestamp(NaiveDateTime),
 }

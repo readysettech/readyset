@@ -105,7 +105,7 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Real(8.99)
+                ps::Value::Float(8.99)
             ]
         );
     }
@@ -130,7 +130,7 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Real(8.99)
+                ps::Value::Float(8.99)
             ]
         );
     }
@@ -158,7 +158,7 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Real(8.99)
+                ps::Value::Float(8.99)
             ]
         );
     }
