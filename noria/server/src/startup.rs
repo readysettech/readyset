@@ -56,7 +56,6 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time;
-use std::time::Duration;
 use std::{
     future::Future,
     pin::Pin,
@@ -79,8 +78,8 @@ use url::Url;
 use dataflow::Readers;
 use noria::consensus::Authority;
 use noria::metrics::recorded;
-use noria::ControllerDescriptor;
 use noria::ReadySetError;
+use noria::{ControllerDescriptor, WorkerDescriptor};
 
 use crate::controller::{ControllerOuter, ControllerRequest};
 use crate::handle::Handle;
@@ -162,29 +161,22 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     let worker = Worker {
         election_state: None,
         // this initial duration doesn't matter; it gets set upon worker registration
-        heartbeat_interval: tokio::time::interval(Duration::from_secs(10)),
         evict_interval: memory_check_frequency.map(|f| tokio::time::interval(f)),
         memory_limit,
         rx: worker_rx,
         coord: Arc::new(Default::default()),
-        http: reqwest::Client::new(),
-        worker_uri: http_uri.clone(),
         domain_bind: listen_addr,
         domain_external: external_addr.ip(),
-        reader_addr,
         state_sizes: Arc::new(Mutex::new(Default::default())),
         readers,
         valve: valve.clone(),
         domains: Default::default(),
-        region: region.clone(),
-        reader_only,
-        volume_id,
     };
 
     tokio::spawn(abort_on_panic(worker.run()));
 
     let our_descriptor = ControllerDescriptor {
-        controller_uri: http_uri,
+        controller_uri: http_uri.clone(),
         nonce: rand::random(),
     };
 
@@ -202,10 +194,19 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         replicator_task: None,
     };
 
+    let worker_descriptor = WorkerDescriptor {
+        worker_uri: http_uri,
+        reader_addr,
+        region: region.clone(),
+        reader_only,
+        volume_id,
+    };
+
     crate::controller::authority_runner(
         authority_tx,
         authority.clone(),
         our_descriptor.clone(),
+        worker_descriptor,
         config,
         tokio::runtime::Handle::current(),
         region,

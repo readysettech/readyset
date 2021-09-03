@@ -5,13 +5,14 @@ use crate::coordination::do_noria_rpc;
 use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
-use anyhow::{anyhow, format_err};
+use anyhow::format_err;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
+use noria::consensus::WorkerId;
 use noria::ControllerDescriptor;
 use noria::{
-    consensus::{Authority, GetLeaderResult, STATE_KEY},
+    consensus::{Authority, GetLeaderResult, WorkerDescriptor, STATE_KEY},
     ReplicationOffset,
 };
 use noria::{internal, ReadySetError};
@@ -21,7 +22,6 @@ use slog::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -36,14 +36,8 @@ pub(crate) mod recipe; // crate viz for tests
 pub(crate) mod schema;
 pub(crate) mod sql; // crate viz for tests
 
-/// The maximum number of times to attempt to retrieve the
-/// current leader's state before throwing an error.
-const MAX_LEADER_STATE_GET_ATTEMPTS: usize = 5;
-
 /// Time between leader state change checks without thread parking.
-const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
-/// Time between leader state retrieval attempts.
-const LEADER_STATE_RETRIEVE_INTERVAL: Duration = Duration::from_secs(1);
+const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// Amount of time to park the thread for if we are watching on the authority.
 const THREAD_PARK_DURATION: Duration = Duration::from_secs(60);
 
@@ -80,7 +74,6 @@ pub(crate) struct ControllerState {
 
 pub struct Worker {
     healthy: bool,
-    last_heartbeat: time::Instant,
     uri: Url,
     http: reqwest::Client,
     region: Option<String>,
@@ -98,7 +91,6 @@ impl Worker {
     ) -> Self {
         Worker {
             healthy: true,
-            last_heartbeat: time::Instant::now(),
             uri: instance_uri,
             http: reqwest::Client::new(),
             region,
@@ -125,9 +117,13 @@ pub(crate) enum AuthorityUpdate {
     /// The current leader has changed.
     ///
     /// The King is dead; long live the King!
-    LeaderChange(ControllerState, ControllerDescriptor),
+    LeaderChange(ControllerDescriptor),
     /// We are now the new leader.
     WonLeaderElection(ControllerState),
+    /// New worker detected
+    NewWorkers(Vec<WorkerDescriptor>),
+    /// Worker failed.
+    FailedWorkers(Vec<WorkerDescriptor>),
     /// An error occurred in the authority thread, which won't be restarted.
     AuthorityError(anyhow::Error),
 }
@@ -333,16 +329,14 @@ where
 
     async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
-            AuthorityUpdate::LeaderChange(state, descr) => {
+            AuthorityUpdate::LeaderChange(descr) => {
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: descr.controller_uri,
-                    heartbeat_every: state.config.heartbeat_every,
                 })
                 .await?;
             }
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!(self.log, "won leader election, creating ControllerInner");
-
                 self.inner = Some(ControllerInner::new(
                     self.log.clone(),
                     state.clone(),
@@ -350,7 +344,6 @@ where
                 ));
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
-                    heartbeat_every: state.config.heartbeat_every,
                 })
                 .await?;
 
@@ -358,10 +351,25 @@ where
                 // the binlog, it should stop doing it if it stops being a leader
                 self.start_replication_task();
             }
+            AuthorityUpdate::NewWorkers(w) if self.inner.is_some() => {
+                for worker in w {
+                    self.with_controller_blocking(|ctrl, _| {
+                        ctrl.handle_register_from_authority(worker)
+                    })
+                    .await?;
+                }
+            }
+            AuthorityUpdate::FailedWorkers(w) if self.inner.is_some() => {
+                self.with_controller_blocking(|ctrl, _| {
+                    ctrl.handle_failed_workers(w.into_iter().map(|desc| desc.worker_uri).collect())
+                })
+                .await?;
+            }
             AuthorityUpdate::AuthorityError(e) => {
                 // the authority won't be restarted, so the controller should hard-exit
                 internal!("controller's authority thread failed: {}", e);
             }
+            _ => {}
         }
         Ok(())
     }
@@ -393,9 +401,7 @@ where
                         break;
                     }
                 }
-                // note: the campaign sender gets closed when we become the leader, so don't
-                // try to receive from it any more
-                req = self.authority_rx.recv(), if self.inner.is_none() => {
+                req = self.authority_rx.recv() => {
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
                         None if self.inner.is_some() => info!(self.log, "leadership campaign terminated normally"),
@@ -437,6 +443,8 @@ where
     handle: tokio::runtime::Handle,
     /// True if we are eligible to become the leader.
     leader_eligible: bool,
+    /// True if we are the current leader.
+    is_leader: bool,
 }
 
 impl<A> AuthorityLeaderElectionState<A>
@@ -465,35 +473,12 @@ where
             config,
             handle,
             leader_eligible: can_be_leader,
+            is_leader: false,
         }
     }
 
-    /// Repeatedly tries to retrieve the leader's state from `STATE_KEY`.
-    /// The key may not yet exist as a delay is possible between becoming
-    /// the leader and writing your state.
-    fn retrieve_leader_state(&self, retry_attempts: usize) -> anyhow::Result<ControllerState> {
-        let mut retries = retry_attempts;
-        loop {
-            let state = self
-                .authority
-                .try_read(STATE_KEY)?
-                .ok_or_else(|| anyhow!("Key does not yet exist"));
-
-            if let Err(e) = state {
-                retries -= 1;
-
-                if retries == 0 {
-                    internal!(
-                            "After five attempts to read from the leader, we are still unable to. Last error: {}", e
-                        );
-                }
-
-                sleep(LEADER_STATE_RETRIEVE_INTERVAL);
-                continue;
-            }
-
-            return state;
-        }
+    fn is_leader(&self) -> bool {
+        self.is_leader
     }
 
     fn maybe_watch_leader(&self) -> anyhow::Result<()> {
@@ -503,13 +488,13 @@ where
         Ok(())
     }
 
-    fn update_leader_state(&self) -> anyhow::Result<()> {
+    fn update_leader_state(&mut self) -> anyhow::Result<()> {
         let mut should_attempt_leader_election = false;
         match self.authority.try_get_leader()? {
             // The leader has changed, inform the worker.
             GetLeaderResult::NewLeader(payload) => {
-                let leader_state = self.retrieve_leader_state(MAX_LEADER_STATE_GET_ATTEMPTS)?;
-                let authority_update = AuthorityUpdate::LeaderChange(leader_state, payload);
+                self.is_leader = false;
+                let authority_update = AuthorityUpdate::LeaderChange(payload);
                 self.handle
                     .block_on(self.event_tx.send(authority_update))
                     .map_err(|_| format_err!("send failed"))?;
@@ -564,16 +549,115 @@ where
             self.handle
                 .block_on(
                     self.event_tx
-                        .send(AuthorityUpdate::WonLeaderElection(state.clone().unwrap())),
+                        .send(AuthorityUpdate::WonLeaderElection(state.unwrap())),
                 )
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
+        }
 
+        self.is_leader = true;
+
+        Ok(())
+    }
+}
+
+/// Manages this authority's leader worker state and sends update
+/// along `event_tx` when the state changes.
+struct AuthorityWorkerState<A>
+where
+    A: Authority + 'static,
+{
+    event_tx: Sender<AuthorityUpdate>,
+    authority: Arc<A>,
+    descriptor: WorkerDescriptor,
+    handle: tokio::runtime::Handle,
+    active_workers: HashMap<WorkerId, WorkerDescriptor>,
+}
+
+impl<A> AuthorityWorkerState<A>
+where
+    A: Authority + 'static,
+{
+    fn new(
+        event_tx: Sender<AuthorityUpdate>,
+        authority: Arc<A>,
+        descriptor: WorkerDescriptor,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            event_tx,
+            authority,
+            descriptor,
+            handle,
+            active_workers: HashMap::new(),
+        }
+    }
+
+    fn register(&self) -> anyhow::Result<()> {
+        self.authority.register_worker(self.descriptor.clone())?;
+        Ok(())
+    }
+
+    fn maybe_watch_workers(&self) -> anyhow::Result<()> {
+        if self.authority.can_watch() {
+            self.authority.watch_workers()?;
+        }
+        Ok(())
+    }
+
+    fn update_worker_state(&mut self) -> anyhow::Result<()> {
+        // Retrieve the worker ids of current workers.
+        let workers = self.authority.get_workers()?;
+
+        let failed_workers: Vec<_> = self
+            .active_workers
+            .iter()
+            .filter_map(|(w, _)| {
+                if !workers.contains(w) {
+                    Some(w.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Get the descriptors of the failed workers, removing them
+        // from the active worker set.
+        let failed_descriptors: Vec<_> = failed_workers
+            .iter()
+            .map(|w| {
+                // The key was just pulled from the map above.
+                #[allow(clippy::unwrap_used)]
+                self.active_workers.remove(w).unwrap()
+            })
+            .collect();
+
+        if !failed_descriptors.is_empty() {
             self.handle
-                .block_on(self.event_tx.send(AuthorityUpdate::LeaderChange(
-                    state.unwrap(),
-                    self.descriptor.clone(),
-                )))
-                .map_err(|_| format_err!("failed to announce leader change"))?;
+                .block_on(
+                    self.event_tx
+                        .send(AuthorityUpdate::FailedWorkers(failed_descriptors)),
+                )
+                .map_err(|_| format_err!("failed to announce who won leader election"))?;
+        }
+
+        let new_workers = workers
+            .into_iter()
+            .filter(|w| !self.active_workers.contains_key(w))
+            .collect();
+
+        // Get the descriptors of the new workers, adding them to the
+        // active workers set.
+        let new_descriptor_map = self.authority.worker_data(new_workers)?;
+        let new_descriptors: Vec<WorkerDescriptor> = new_descriptor_map.values().cloned().collect();
+        self.active_workers.extend(new_descriptor_map);
+
+        if !new_descriptors.is_empty() {
+            self.handle
+                .block_on(
+                    self.event_tx
+                        .send(AuthorityUpdate::NewWorkers(new_descriptors)),
+                )
+                .map_err(|_| format_err!("failed to announce who won leader election"))?;
         }
 
         Ok(())
@@ -584,23 +668,34 @@ fn authority_inner<A: Authority + 'static>(
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
+    worker_descriptor: WorkerDescriptor,
     config: Config,
     handle: tokio::runtime::Handle,
     region: Option<String>,
 ) -> anyhow::Result<()> {
-    let leader_election_state = AuthorityLeaderElectionState::new(
-        event_tx,
+    let mut leader_election_state = AuthorityLeaderElectionState::new(
+        event_tx.clone(),
         authority.clone(),
         descriptor,
         config,
-        handle,
+        handle.clone(),
         region,
     );
 
+    let mut worker_state =
+        AuthorityWorkerState::new(event_tx, authority.clone(), worker_descriptor, handle);
+
+    // Register the current server as a worker in the system.
+    worker_state.register()?;
     loop {
         leader_election_state.update_leader_state()?;
 
+        if leader_election_state.is_leader() {
+            worker_state.update_worker_state()?;
+        }
+
         leader_election_state.maybe_watch_leader()?;
+        worker_state.maybe_watch_workers()?;
         if authority.can_watch() {
             std::thread::park_timeout(THREAD_PARK_DURATION);
         } else {
@@ -613,6 +708,7 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<A>,
     descriptor: ControllerDescriptor,
+    worker_descriptor: WorkerDescriptor,
     config: Config,
     handle: tokio::runtime::Handle,
     region: Option<String>,
@@ -624,6 +720,7 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
                 event_tx.clone(),
                 authority,
                 descriptor,
+                worker_descriptor,
                 config,
                 handle.clone(),
                 region,
@@ -631,7 +728,6 @@ pub(crate) fn authority_runner<A: Authority + 'static>(
                 let _ = handle.block_on(event_tx.send(AuthorityUpdate::AuthorityError(e)));
             }
         })?;
-
     Ok(())
 }
 

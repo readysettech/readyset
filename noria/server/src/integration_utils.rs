@@ -15,7 +15,9 @@ use crate::metrics::{
 };
 use crate::{Builder, Handle};
 
-pub const DEFAULT_SETTLE_TIME_MS: u64 = 200;
+// Settle time must be longer than the leader state check interval
+// when using a local authority.
+pub const DEFAULT_SETTLE_TIME_MS: u64 = 1000;
 pub const DEFAULT_SHARDING: usize = 2;
 
 /// PersistenceParameters with a log_name on the form of `prefix` + timestamp,

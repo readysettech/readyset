@@ -552,9 +552,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// Replicate the readers associated with the list of queries to the given worker.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn get_instances(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<Vec<(Url, bool, Duration)>>> + '_ {
+    pub fn get_instances(&mut self) -> impl Future<Output = ReadySetResult<Vec<(Url, bool)>>> + '_ {
         self.rpc("instances", ())
     }
 

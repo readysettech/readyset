@@ -301,6 +301,7 @@ impl<T> From<T> for Tagged<T> {
     }
 }
 
+pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
     DataType, Modification, Operation, ReplicationOffset, TableOperation, DATE_FORMAT,

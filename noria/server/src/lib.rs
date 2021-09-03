@@ -423,7 +423,6 @@ pub mod manual {
 
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
-use std::time;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub(crate) struct Config {
@@ -432,8 +431,6 @@ pub(crate) struct Config {
     pub(crate) frontier_strategy: FrontierStrategy,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
-    pub(crate) heartbeat_every: time::Duration,
-    pub(crate) healthcheck_every: time::Duration,
     pub(crate) quorum: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
     pub(crate) primary_region: Option<String>,
@@ -453,8 +450,6 @@ impl Default for Config {
                 aggressively_update_state_sizes: false,
             },
             persistence: Default::default(),
-            heartbeat_every: time::Duration::from_secs(1),
-            healthcheck_every: time::Duration::from_secs(10),
             quorum: 1,
             reuse: None,
             primary_region: None,
