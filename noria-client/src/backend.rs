@@ -19,6 +19,7 @@ use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError, ReadyS
 use noria_client_metrics::recorded::SqlQueryType;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
+use crate::coverage::QueryCoverageInfoRef;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, UpstreamDatabase};
 
@@ -91,6 +92,7 @@ pub struct BackendBuilder {
     require_authentication: bool,
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
+    query_coverage_info: Option<QueryCoverageInfoRef>,
 }
 
 impl Default for BackendBuilder {
@@ -103,6 +105,7 @@ impl Default for BackendBuilder {
             require_authentication: true,
             ticket: None,
             timestamp_client: None,
+            query_coverage_info: None,
         }
     }
 }
@@ -134,6 +137,7 @@ impl BackendBuilder {
             ticket: self.ticket,
             timestamp_client: self.timestamp_client,
             prepared_statements: Default::default(),
+            query_coverage_info: self.query_coverage_info,
         }
     }
 
@@ -172,6 +176,14 @@ impl BackendBuilder {
         }
         self
     }
+
+    pub fn query_coverage_info(
+        mut self,
+        query_coverage_info: Option<QueryCoverageInfoRef>,
+    ) -> Self {
+        self.query_coverage_info = query_coverage_info;
+        self
+    }
 }
 
 pub struct Backend<A: 'static + Authority, DB> {
@@ -206,6 +218,13 @@ pub struct Backend<A: 'static + Authority, DB> {
     /// statements stored in noria or the underlying database. The id may map to a new value to
     /// avoid conflicts between noria and the underlying db.
     prepared_statements: HashMap<u32, PreparedStatement>,
+
+    /// Shared reference to information about the queries that have been executed during the runtime
+    /// of this adapter.
+    ///
+    /// If None, query coverage analysis is disabled
+    #[allow(dead_code)] // TODO: Remove once this is used
+    query_coverage_info: Option<QueryCoverageInfoRef>,
 }
 
 #[derive(Debug)]
