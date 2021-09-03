@@ -15,6 +15,7 @@ use std::net;
 use std::thread;
 use tokio::io::AsyncWrite;
 
+use core::iter;
 use msql_srv::{
     Column, ErrorKind, InitWriter, MysqlIntermediary, MysqlShim, ParamParser, QueryResultWriter,
     StatementMetaWriter,
@@ -90,7 +91,25 @@ where
     }
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
-        (self.on_q)(query, results).await
+        if query.starts_with("SELECT @@") || query.starts_with("select @@") {
+            let var = &query.get(b"SELECT @@".len()..);
+            return match var {
+                Some("max_allowed_packet") => {
+                    let cols = &[Column {
+                        table: String::new(),
+                        column: "@@max_allowed_packet".to_owned(),
+                        coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
+                        colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+                    }];
+                    let mut w = results.start(cols).await?;
+                    w.write_row(iter::once(67108864u32)).await?;
+                    Ok(w.finish().await?)
+                }
+                _ => Ok(results.completed(0, 0).await?),
+            };
+        } else {
+            (self.on_q)(query, results).await
+        }
     }
 
     fn password_for_username(&self, username: &[u8]) -> Option<Vec<u8>> {
