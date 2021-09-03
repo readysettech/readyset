@@ -113,5 +113,5 @@ path = "src/bin/zk.rs"
 name = "local-server"
 
 [[bench]]
-name = "rocksdb"
+name = "dataflow"
 harness = false

@@ -536,3 +536,195 @@ pub(crate) fn materialize(
         .unwrap()
         .process_records(rs, partial, replication_offset);
 }
+
+#[cfg(feature = "bench")]
+pub mod bench {
+    use super::*;
+    use crate::processing::MissRecord::Point;
+    use noria::DataType::Int;
+
+    pub fn unique_misses(c: &mut criterion::Criterion) {
+        let state = unsafe {
+            NodeProcessingResult {
+                misses: vec![
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(2652263)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(5851294)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(522983)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(9807676)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(5210968)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(835640)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(4751888)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(6806915)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(7730521)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(2474859)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(4017737)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(3197849)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(4035289)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(6857801)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(3937104)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(7490175)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(8095737)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(4484071)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(427605)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(8613827)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(401022)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(9310624)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(8671521)]),
+                    },
+                    Miss {
+                        on: LocalNodeIndex::make(4),
+                        lookup_idx: [0].to_vec(),
+                        lookup_cols: [1].to_vec(),
+                        replay_cols: Some(vec![0]),
+                        record: Point(vec1![Int(30995), Int(9955358)]),
+                    },
+                ],
+                lookups: vec![],
+                captured: HashSet::new(),
+            }
+        };
+
+        c.bench_function("unique_misses", |b| {
+            b.iter(|| {
+                criterion::black_box(state.unique_misses());
+            })
+        });
+    }
+}
