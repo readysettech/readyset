@@ -155,9 +155,8 @@ The sub-crates each serve a distinct role:
    to get up and running with.
  - [`server/src/`](server/src/): the Noria server, including
    high-level components such as RPC handling, domain scheduling,
-   connection management, and all the controller operations (listening
-   for heartbeats, handling failed workers, etc.). It contains two
-   notable sub-crates:
+   connection management, and all the controller operations (handling
+   failed workers, etc.). It contains two notable sub-crates:
 
    - [`dataflow/`](server/dataflow/): the code that implements the
      internals of the data-flow graph. This includes implementations of

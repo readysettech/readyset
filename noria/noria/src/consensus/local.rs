@@ -137,14 +137,7 @@ impl Default for LocalAuthority {
 
 impl Drop for LocalAuthority {
     fn drop(&mut self) {
-        // If either mutex is poisoned we don't do anything.
-        if let Ok(mut store_inner) = self.store.inner_lock() {
-            if let Ok(inner) = self.inner_read() {
-                for k in &inner.ephemeral_keys {
-                    store_inner.keys.remove(k);
-                }
-            }
-        }
+        self.delete_ephemeral();
     }
 }
 
@@ -175,6 +168,19 @@ impl LocalAuthority {
             Ok(())
         } else {
             Err(anyhow!("Key already exists"))
+        }
+    }
+
+    /// This helper function deletes all ephemeral keys. It should be used
+    /// for local testing when simulating session failure.
+    pub fn delete_ephemeral(&self) {
+        // If either mutex is poisoned we don't do anything.
+        if let Ok(mut store_inner) = self.store.inner_lock() {
+            if let Ok(inner) = self.inner_read() {
+                for k in &inner.ephemeral_keys {
+                    store_inner.keys.remove(k);
+                }
+            }
         }
     }
 }

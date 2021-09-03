@@ -1116,6 +1116,7 @@ async fn it_recovers_persisted_bases() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
+        authority.delete_ephemeral();
     }
 
     sleep().await;
@@ -1182,6 +1183,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
+        authority.delete_ephemeral();
     }
 
     sleep().await;
@@ -1248,6 +1250,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
+        authority.delete_ephemeral();
     }
 
     sleep().await;
@@ -1461,6 +1464,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
+        authority.delete_ephemeral();
     }
 
     sleep().await;
@@ -1524,8 +1528,8 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         sleep().await;
         g.shutdown();
         g.wait_done().await;
+        authority.delete_ephemeral();
     }
-
     sleep().await;
 
     // Create a new controller with the same authority store, and make sure that it recovers to the same
@@ -1536,6 +1540,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     g.set_volume_id("ef731j2".into());
     let mut g = g.start(authority.clone()).await.unwrap();
     sleep().await;
+    std::thread::sleep(Duration::from_secs(10));
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap();
@@ -4785,6 +4790,7 @@ async fn test_view_includes_replicas() {
     let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "view_includes_replicas";
 
+    println!("building w1");
     let mut w1 = build_custom(
         cluster_name,
         Some(DEFAULT_SHARDING),
@@ -4801,6 +4807,7 @@ async fn test_view_includes_replicas() {
 
     let w1_addr = instances_standalone[0].0.clone();
 
+    println!("Building w2");
     let _w2 = build_custom(
         "view_includes_replicas",
         Some(DEFAULT_SHARDING),
@@ -4820,7 +4827,7 @@ async fn test_view_includes_replicas() {
 
     let w2_addr = instances_cluster
         .iter()
-        .map(|(addr, _, _)| addr)
+        .map(|(addr, _)| addr)
         .find(|&addr| addr != &w1_addr)
         .unwrap()
         .clone();
@@ -6446,6 +6453,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
     sleep().await;
 
     let result = w1.install_recipe(query).await;
+    println!("{:?}", result);
     assert!(matches!(result, Ok(_)));
 }
 
@@ -6514,10 +6522,6 @@ async fn replicate_to_unavailable_worker() {
     builder.log_with(logger_pls());
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params(cluster_name));
-    // Extremely aggressive heartbeat/healthcheck intervals, so we
-    // make the second Worker be marked as failed faster.
-    builder.set_heartbeat_interval(Duration::from_millis(2));
-    builder.set_healthcheck_interval(Duration::from_millis(10));
 
     let mut w1 = builder
         .clone()
@@ -6557,7 +6561,7 @@ async fn replicate_to_unavailable_worker() {
             .await
             .unwrap()
             .iter()
-            .filter(|(_, healthy, _)| *healthy)
+            .filter(|(_, healthy)| *healthy)
             .count()
             < 2
     {

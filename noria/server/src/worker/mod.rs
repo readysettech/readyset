@@ -1,9 +1,7 @@
-use crate::coordination::{
-    do_noria_rpc, DomainDescriptor, HeartbeatPayload, RegisterPayload, RunDomainResponse,
-};
+use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::errors::internal_err;
 use crate::worker::replica::WrappedDomainRequest;
-use crate::{ReadySetResult, VolumeId};
+use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use launchpad::select;
@@ -23,7 +21,6 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::task::{Context, Poll};
-use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
@@ -46,8 +43,6 @@ pub enum WorkerRequestKind {
     NewController {
         /// The URI of the new controller.
         controller_uri: Url,
-        /// The period at which the new controller expects heartbeat packets.
-        heartbeat_every: Duration,
     },
 
     /// A new domain should be started on this worker.
@@ -103,8 +98,6 @@ pub struct DomainHandle {
 pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
     pub(crate) election_state: Option<WorkerElectionState>,
-    /// A timer for sending heartbeats to the controller.
-    pub(crate) heartbeat_interval: Interval,
     /// A timer for doing evictions.
     pub(crate) evict_interval: Option<Interval>,
     /// A memory limit for state, in bytes.
@@ -113,54 +106,24 @@ pub struct Worker {
     pub(crate) rx: Receiver<WorkerRequest>,
     /// Channel coordinator (used by domains to figure out where other domains are).
     pub(crate) coord: Arc<ChannelCoordinator>,
-    /// `reqwest` client (used to make HTTP requests to the controller)
-    pub(crate) http: reqwest::Client,
-    /// The URI of the worker's HTTP server.
-    pub(crate) worker_uri: Url,
     /// The IP address to bind on for domain<->domain traffic.
     pub(crate) domain_bind: IpAddr,
     /// The IP address to expose to other domains for domain<->domain traffic.
     pub(crate) domain_external: IpAddr,
-    /// The address the server instance is listening on for reads.
-    pub(crate) reader_addr: SocketAddr,
     /// A store of the current state size of each domain, used for eviction purposes.
     pub(crate) state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
     /// Read handles.
     pub(crate) readers: Readers,
     /// Valve for shutting down; triggered by the [`Handle`] when [`Handle::shutdown`] is called.
     pub(crate) valve: Valve,
-    /// The region this worker is in.
-    pub(crate) region: Option<String>,
-    /// Whether or not this worker is used only to hold reader domains.
-    pub(crate) reader_only: bool,
 
     /// Handles to domains currently being run by this worker.
     ///
     /// These are indexed by (domain index, shard).
     pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
-
-    /// Volume id associated with the server the worker is running on.
-    pub(crate) volume_id: Option<VolumeId>,
 }
 
 impl Worker {
-    async fn process_heartbeat(&mut self) {
-        if let Some(wes) = self.election_state.as_ref() {
-            #[allow(clippy::unwrap_used)] // This is given a known string, so can't fail
-            let uri = wes.controller_uri.join("/worker_rx/heartbeat").unwrap();
-            #[allow(clippy::unwrap_used)] // This is given a known-good value, so can't fail
-            let body = bincode::serialize(&HeartbeatPayload {
-                worker_uri: self.worker_uri.clone(),
-            })
-            .unwrap();
-            // this happens in a background task to avoid deadlocks
-            tokio::spawn(
-                do_noria_rpc::<()>(self.http.post(uri).body(body))
-                    .map_err(move |e| warn!(error = %e, "heartbeat failed")),
-            );
-        }
-    }
-
     fn process_eviction(&mut self) {
         tokio::spawn(do_eviction(
             self.memory_limit,
@@ -183,33 +146,13 @@ impl Worker {
         req: WorkerRequestKind,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         match req {
-            WorkerRequestKind::NewController {
-                controller_uri,
-                heartbeat_every,
-            } => {
+            WorkerRequestKind::NewController { controller_uri } => {
                 info!(%controller_uri, "worker informed of new controller");
-                tokio::spawn(
-                    do_noria_rpc::<()>(
-                        self.http
-                            .post(controller_uri.join("/worker_rx/register")?)
-                            .body(bincode::serialize(&RegisterPayload {
-                                worker_uri: self.worker_uri.clone(),
-                                reader_addr: self.reader_addr,
-                                region: self.region.clone(),
-                                reader_only: self.reader_only,
-                                volume_id: self.volume_id.clone(),
-                            })?),
-                    )
-                    .map_err(move |e| {
-                        warn!(error = %e, "controller registration failed");
-                    }),
-                );
                 self.domains.clear();
                 for (_, d) in self.domains.drain() {
                     d.join_handle.abort();
                 }
                 self.election_state = Some(WorkerElectionState { controller_uri });
-                self.heartbeat_interval = tokio::time::interval(heartbeat_every);
                 Ok(None)
             }
             WorkerRequestKind::RunDomain(builder) => {
@@ -366,36 +309,33 @@ impl Worker {
             };
 
             select! {
-                req = self.rx.recv() => {
-                    if let Some(req) = req {
-                        self.process_worker_request(req).await;
-                    }
-                    else {
-                        info!("worker shutting down after request handle dropped");
-                        return;
-                    }
-                }
-                failed_domains = poll_domains(&mut self.domains) => {
-                    for (idx, shard, err) in failed_domains {
-                        if let Err(e) = err {
-                            // FIXME(eta): do something about this, now that we can?
-                            error!(domain_index = idx.index(), shard, error = %e, "domain failed");
-                        } else {
-                            error!(domain_index = idx.index(), shard, "domain exited unexpectedly");
-                        }
-                        self.domains.remove(&(idx, shard));
-                    }
-                }
-                _ = shutdown_stream.next() => {
-                    info!("worker shutting down after valve shut");
-                    return;
-                }
-                _ = eviction => {
-                    self.process_eviction();
-                }
-                _ = self.heartbeat_interval.tick() => {
-                    self.process_heartbeat().await;
-                }
+                   req = self.rx.recv() => {
+                       if let Some(req) = req {
+                           self.process_worker_request(req).await;
+                       }
+                       else {
+                           info!("worker shutting down after request handle dropped");
+                           return;
+                       }
+                   }
+                   failed_domains = poll_domains(&mut self.domains) => {
+                       for (idx, shard, err) in failed_domains {
+                           if let Err(e) = err {
+                               // FIXME(eta): do something about this, now that we can?
+                               error!(domain_index = idx.index(), shard, error = %e, "domain failed");
+                           } else {
+                               error!(domain_index = idx.index(), shard, "domain exited unexpectedly");
+                           }
+                           self.domains.remove(&(idx, shard));
+                       }
+                   }
+                   _ = shutdown_stream.next() => {
+                       info!("worker shutting down after valve shut");
+                       return;
+                   }
+                   _ = eviction => {
+                       self.process_eviction();
+                   }
             }
         }
     }

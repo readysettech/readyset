@@ -251,7 +251,7 @@ async fn reader_replication() {
 
     let w2_addr = instances_cluster
         .iter()
-        .map(|(addr, _, _)| addr)
+        .map(|(addr, _)| addr)
         .find(|&addr| addr != &w1_addr)
         .unwrap()
         .clone();

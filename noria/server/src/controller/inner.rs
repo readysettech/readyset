@@ -15,7 +15,7 @@ use crate::controller::recipe::Schema;
 use crate::controller::schema;
 use crate::controller::{ControllerState, DomainPlacementRestriction, Migration, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
-use crate::coordination::{DomainDescriptor, HeartbeatPayload, RegisterPayload, RunDomainResponse};
+use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::debug::info::{DomainKey, GraphInfo};
 use crate::errors::{bad_request_err, internal_err, ReadySetResult};
 use crate::worker::WorkerRequestKind;
@@ -26,7 +26,7 @@ use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::Method;
 use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::{builders::*, ReplicationOffset, ViewSchema};
+use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
 use noria::{
     consensus::{Authority, STATE_KEY},
     RecipeSpec,
@@ -41,7 +41,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use std::{cell, time};
 use vec1::Vec1;
 
@@ -92,9 +91,6 @@ pub struct ControllerInner {
     pending_recovery: Option<(Vec<String>, usize)>,
 
     quorum: usize,
-    heartbeat_every: Duration,
-    healthcheck_every: Duration,
-    last_checked_workers: Instant,
     controller_uri: Url,
 
     log: slog::Logger,
@@ -194,16 +190,6 @@ impl ControllerInner {
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
                 return_serialized!(self.get_statistics()?);
-            }
-            (&Method::POST, "/worker_rx/register") => {
-                let body = bincode::deserialize(&body)?;
-                let ret = self.handle_register(body)?;
-                return_serialized!(ret);
-            }
-            (&Method::POST, "/worker_rx/heartbeat") => {
-                let body = bincode::deserialize(&body)?;
-                let ret = self.handle_heartbeat(body)?;
-                return_serialized!(ret);
             }
             _ => {}
         }
@@ -321,14 +307,17 @@ impl ControllerInner {
         }
     }
 
-    pub(super) fn handle_register(&mut self, msg: RegisterPayload) -> ReadySetResult<()> {
-        let RegisterPayload {
+    pub(super) fn handle_register_from_authority(
+        &mut self,
+        desc: WorkerDescriptor,
+    ) -> ReadySetResult<()> {
+        let WorkerDescriptor {
             worker_uri,
             reader_addr,
             region,
             reader_only,
             volume_id,
-        } = msg;
+        } = desc;
 
         info!(
             self.log,
@@ -354,6 +343,9 @@ impl ControllerInner {
             }
         }
 
+        println!("{:?}", domain_addresses);
+        // Can't send this as we are on the controller thread right now and it also
+        // has to receive this.
         if let Err(e) = futures_executor::block_on(
             ws.rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses)),
         ) {
@@ -413,37 +405,10 @@ impl ControllerInner {
         Ok(())
     }
 
-    fn check_worker_liveness(&mut self) -> ReadySetResult<()> {
-        let mut any_failed = false;
-
-        // check if there are any newly failed workers
-        if self.last_checked_workers.elapsed() > self.healthcheck_every {
-            for (_addr, ws) in self.workers.iter() {
-                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 4 {
-                    any_failed = true;
-                }
-            }
-            self.last_checked_workers = Instant::now();
-        }
-
-        // if we have newly failed workers, iterate again to find all workers that have missed >= 3
-        // heartbeats. This is necessary so that we correctly handle correlated failures of
-        // workers.
-        if any_failed {
-            let mut failed = Vec::new();
-            for (addr, ws) in self.workers.iter_mut() {
-                if ws.healthy && ws.last_heartbeat.elapsed() > self.heartbeat_every * 3 {
-                    error!(self.log, "worker at {:?} has failed!", addr);
-                    ws.healthy = false;
-                    failed.push(addr.clone());
-                }
-            }
-            self.handle_failed_workers(failed)?;
-        }
-        Ok(())
-    }
-
-    fn handle_failed_workers(&mut self, failed: Vec<WorkerIdentifier>) -> ReadySetResult<()> {
+    pub(super) fn handle_failed_workers(
+        &mut self,
+        failed: Vec<WorkerIdentifier>,
+    ) -> ReadySetResult<()> {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = Vec::new();
         for wi in failed {
@@ -468,25 +433,6 @@ impl ControllerInner {
 
         // back to original recipe, which should add the query again
         self.apply_recipe(original)?;
-        Ok(())
-    }
-
-    pub(super) fn handle_heartbeat(&mut self, msg: HeartbeatPayload) -> ReadySetResult<()> {
-        let HeartbeatPayload { worker_uri } = msg;
-
-        match self.workers.get_mut(&worker_uri) {
-            None => {
-                crit!(self.log, "got heartbeat for unknown worker: {}", worker_uri);
-                return Err(ReadySetError::UnknownWorker {
-                    unknown_uri: worker_uri.clone(),
-                });
-            }
-            Some(ref mut ws) => {
-                ws.last_heartbeat = Instant::now();
-            }
-        }
-
-        self.check_worker_liveness()?;
         Ok(())
     }
 
@@ -668,8 +614,6 @@ impl ControllerInner {
             sharding: state.config.sharding,
             domain_config: state.config.domain_config,
             persistence: state.config.persistence,
-            heartbeat_every: state.config.heartbeat_every,
-            healthcheck_every: state.config.healthcheck_every,
             recipe,
             node_restrictions: state.node_restrictions,
             quorum: state.config.quorum,
@@ -684,7 +628,6 @@ impl ControllerInner {
             workers: HashMap::default(),
 
             pending_recovery,
-            last_checked_workers: Instant::now(),
             read_addrs: Default::default(),
             controller_uri,
 
@@ -1230,10 +1173,10 @@ impl ControllerInner {
         Ok(GraphStats { domains })
     }
 
-    fn get_instances(&self) -> Vec<(WorkerIdentifier, bool, Duration)> {
+    fn get_instances(&self) -> Vec<(WorkerIdentifier, bool)> {
         self.workers
             .iter()
-            .map(|(id, status)| (id.clone(), status.healthy, status.last_heartbeat.elapsed()))
+            .map(|(id, status)| (id.clone(), status.healthy))
             .collect()
     }
 
