@@ -48,6 +48,9 @@ pub enum MsqlSrvError {
     /// Error returned when a case is unexpectedly reached.
     #[error("This condition was reached unexpectedly and cannot be handled")]
     UnreachableError,
+    /// Error from mysql_common indicating that the column type is unknown.
+    #[error("Unknown column type")]
+    UnknownColumnType(#[from] myc::constants::UnknownColumnType),
 }
 
 impl From<MsqlSrvError> for io::Error {

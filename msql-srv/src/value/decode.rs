@@ -331,7 +331,8 @@ impl<'a> TryFrom<Value<'a>> for Duration {
 mod tests {
     use super::Value;
     use crate::myc;
-    use crate::myc::io::WriteMysqlExt;
+    use crate::myc::io::{ParseBuf, WriteMysqlExt};
+    use crate::myc::proto::MySerialize;
     use crate::{Column, ColumnFlags, ColumnType};
     use chrono::{self, TimeZone};
     use mysql_time::MysqlTime;
@@ -359,10 +360,9 @@ mod tests {
                 }
 
                 let v: $t = $v;
-                data.write_bin_value(
-                    &myc::value::Value::try_from(v).expect("try_from returned an error"),
-                )
-                .unwrap();
+                myc::value::Value::try_from(v)
+                    .expect("try_from returned an error")
+                    .serialize(&mut data);
                 assert_eq!(
                     TryInto::<$t>::try_into(Value::parse_from(&mut &data[..], $ct, !$sig).unwrap())
                         .expect("try_into returned an error"),

@@ -42,13 +42,13 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "0.4.17"
 futures-util = "0.3.0"
-mysql_common = "0.27"
+mysql_common = "0.27.5"
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "1.0.0"
 derive_more = "0.99.11"
 backoff = "0.3.0"
 url = { version = "2.2", features = ["serde"] }
-mysql_async = { git = "https://github.com/readysettech/mysql_async" }
+mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 metrics = "0.14.2"
 metrics-util = "0.6.2"

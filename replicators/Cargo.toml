@@ -20,8 +20,8 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", fe
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 
-mysql_async = { git = "https://github.com/readysettech/mysql_async" }
-mysql_common = "0.27"
+mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
+mysql_common = "0.27.5"
 
 nom-sql = { path = "../nom-sql" }
 noria = { path = "../noria/noria", package = "noria" }
