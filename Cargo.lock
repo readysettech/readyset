@@ -1338,12 +1338,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "212d0f5754cb6769937f4501cc0e67f4f4483c8d2c3e1e922ee9edbe4ab4c7c0"
 
 [[package]]
-name = "doc-comment"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
-
-[[package]]
 name = "dtoa"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1771,15 +1765,6 @@ dependencies = [
  "futures 0.3.16",
  "memchr",
  "pin-project 0.4.28",
-]
-
-[[package]]
-name = "fxhash"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
-dependencies = [
- "byteorder",
 ]
 
 [[package]]
@@ -2578,7 +2563,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "parking_lot 0.11.1",
- "quanta 0.7.2",
+ "quanta",
  "thiserror",
  "tokio 1.8.1",
 ]
@@ -2612,7 +2597,7 @@ dependencies = [
  "metrics",
  "ordered-float",
  "parking_lot 0.11.1",
- "quanta 0.7.2",
+ "quanta",
  "sketches-ddsketch",
 ]
 
@@ -3337,7 +3322,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
- "tracing-timing",
 ]
 
 [[package]]
@@ -4262,18 +4246,6 @@ dependencies = [
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "tokio-test 0.4.2",
  "tokio-util 0.6.7",
-]
-
-[[package]]
-name = "quanta"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21484fda3d8ad7affee37755c77a5d0da527543f0af0c7f731c14e2215645d39"
-dependencies = [
- "atomic-shim",
- "ctor",
- "libc",
- "winapi 0.3.9",
 ]
 
 [[package]]
@@ -5971,23 +5943,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
-]
-
-[[package]]
-name = "tracing-timing"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c391a1d94103d69add735cc7f2e45fe4efe34fb0de47b4df9ff2c5cd0df10760"
-dependencies = [
- "crossbeam 0.7.3",
- "doc-comment",
- "fxhash",
- "hdrhistogram",
- "indexmap",
- "quanta 0.3.2",
- "slab",
- "tracing-core",
- "tracing-subscriber",
 ]
 
 [[package]]
