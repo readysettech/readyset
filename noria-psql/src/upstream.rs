@@ -9,6 +9,8 @@ use pgsql::types::Type;
 use pgsql::{Config, Row};
 use psql_srv::Column;
 use tokio_postgres as pgsql;
+use tracing::{info, info_span};
+use tracing_futures::Instrument;
 
 use crate::Error;
 
@@ -53,8 +55,15 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let config = Config::from_str(&url)?;
         let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
         let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-        let (client, connection) = config.connect(tls).await?;
+        let span = info_span!(
+            "Connecting to PostgreSQL upstream",
+            host = ?config.get_hosts(),
+            port = ?config.get_ports()
+        );
+        span.in_scope(|| info!("Establishing connection"));
+        let (client, connection) = config.connect(tls).instrument(span.clone()).await?;
         let _connection_handle = tokio::spawn(connection);
+        span.in_scope(|| info!("Established connection to upstream"));
 
         Ok(Self {
             client,
