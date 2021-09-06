@@ -1,0 +1,11 @@
+[package]
+name = "readyset-logging"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+clap = "3.0.0-beta"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.2", features = ["json"] }
