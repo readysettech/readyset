@@ -3316,11 +3316,11 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-metrics",
- "slog",
- "slog-term",
+ "readyset-logging",
  "tokio 1.8.1",
  "tokio-stream",
  "tracing",
+ "tracing-futures",
  "tracing-subscriber",
 ]
 
