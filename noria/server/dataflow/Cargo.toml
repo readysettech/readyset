@@ -30,8 +30,8 @@ rand = "0.7"
 regex = "1"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
-slog = "2.4.0"
 stream-cancel = "0.8.0"
+tracing = "0.1"
 tokio = { version = "1.8.1", features = ["full"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 vec_map = { version = "0.8.0", features = ["eders"] }

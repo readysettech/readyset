@@ -1,7 +1,6 @@
 use derive_more::From;
 use noria::KeyComparison;
 use serde::{Deserialize, Serialize};
-use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -172,19 +171,8 @@ impl Ingredient for NodeOperator {
         replay: ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
-        log: &Logger,
     ) -> ReadySetResult<RawProcessingResult> {
-        impl_ingredient_fn_mut!(
-            self,
-            on_input_raw,
-            ex,
-            from,
-            data,
-            replay,
-            domain,
-            states,
-            log
-        )
+        impl_ingredient_fn_mut!(self, on_input_raw, ex, from, data, replay, domain, states)
     }
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys)
@@ -225,7 +213,6 @@ impl Ingredient for NodeOperator {
 
 #[cfg(test)]
 pub mod test {
-    use slog::o;
     use std::cell;
     use std::collections::HashMap;
 
@@ -242,7 +229,6 @@ pub mod test {
         pub(super) states: StateMap,
         nodes: DomainNodes,
         remap: HashMap<NodeIndex, IndexPair>,
-        pub(super) logger: slog::Logger,
     }
 
     #[allow(clippy::new_without_default)]
@@ -261,7 +247,6 @@ pub mod test {
                 states: StateMap::new(),
                 nodes: DomainNodes::default(),
                 remap: HashMap::new(),
-                logger: slog::Logger::root(slog::Discard, o!()),
             }
         }
 
@@ -443,15 +428,7 @@ pub mod test {
                 let mut n = self.nodes[*id].borrow_mut();
                 n.as_mut_internal()
                     .unwrap()
-                    .on_input_raw(
-                        &mut Ex,
-                        *src,
-                        u.into(),
-                        replay,
-                        &self.nodes,
-                        &self.states,
-                        &self.logger,
-                    )
+                    .on_input_raw(&mut Ex, *src, u.into(), replay, &self.nodes, &self.states)
                     .unwrap()
             };
 
