@@ -22,6 +22,8 @@ postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git
 native-tls = "0.2.7"
 futures = "0.3.16"
 thiserror = "1.0.26"
+tracing = "0.1.26"
+tracing-futures = "0.2.5"
 
 [dev-dependencies]
 chrono = "0.4"

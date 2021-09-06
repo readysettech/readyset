@@ -3496,6 +3496,8 @@ dependencies = [
  "thiserror",
  "tokio 1.8.1",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
+ "tracing",
+ "tracing-futures",
  "zookeeper",
 ]
 
