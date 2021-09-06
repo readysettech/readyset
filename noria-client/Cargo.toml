@@ -29,7 +29,6 @@ launchpad = { path = "../launchpad" }
 metrics = "0.14.2"
 noria-client-metrics = { path = "metrics" }
 futures = "0.3.16"
-slog = "2.4.0"
 zookeeper = "0.5.4"
 noria-server = { path = "../noria/server/" }
 maplit = "1.0.2"

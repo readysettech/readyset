@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use nom_sql::SelectStatement;
 use noria::consensus::Authority;
 use noria_server::{Builder, ControllerHandle, ZookeeperAuthority};
-use slog::{debug, o};
 use tokio::net::TcpStream;
 use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
@@ -96,36 +95,20 @@ pub fn setup<A>(
 where
     A: Adapter,
 {
-    // Run with VERBOSE=1 for log output.
-    let verbose = env::var("VERBOSE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .iter()
-        .any(|i| i == 1);
-
-    let logger = if verbose {
-        noria_server::logger_pls()
-    } else {
-        slog::Logger::root(slog::Discard, o!())
-    };
-
     if fallback {
         A::recreate_database();
     }
 
     let barrier = Arc::new(Barrier::new(2));
 
-    let l = logger.clone();
     let n = deployment.name.clone();
     let b = barrier.clone();
     thread::spawn(move || {
-        let mut authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
+        let authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
         let mut builder = Builder::default();
         if !partial {
             builder.disable_partial();
         }
-        authority.log_with(l.clone());
-        builder.log_with(l);
         if fallback {
             builder.set_replicator_url(A::url());
         }
@@ -146,14 +129,10 @@ where
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let mut zk_auth =
-        ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap();
-    zk_auth.log_with(logger.clone());
+    let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap();
 
-    debug!(logger, "Connecting to Noria...",);
     let rt = tokio::runtime::Runtime::new().unwrap();
     let ch = rt.block_on(ControllerHandle::new(zk_auth));
-    debug!(logger, "Connected!");
 
     // no need for a barrier here since accept() acts as one
     thread::spawn(move || {

@@ -3292,7 +3292,6 @@ dependencies = [
  "noria-client-metrics",
  "noria-server",
  "regex",
- "slog",
  "thiserror",
  "timestamp_service",
  "tokio 1.8.1",
