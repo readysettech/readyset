@@ -80,10 +80,6 @@ pub struct Options {
     #[clap(long)]
     log_slow: bool,
 
-    /// Instead of logging trace events, time them and output metrics on exit
-    #[clap(long)]
-    time: bool,
-
     /// Don't require authentication for any client connections
     #[clap(long)]
     no_require_authentication: bool,
@@ -123,6 +119,20 @@ pub struct Options {
     prometheus_metrics: bool,
 }
 
+fn setup_logging() -> tracing::Dispatch {
+    use tracing::Dispatch;
+    use tracing_subscriber::fmt::{self, format::Format};
+    use tracing_subscriber::{EnvFilter, Layer, Registry};
+
+    let filter = EnvFilter::from_default_env();
+    let registry = Registry::default();
+    let s = Format::default().with_timer(fmt::time::Uptime::default());
+    let s = fmt::Layer::default().event_format(s);
+    let tracer = Dispatch::new(filter.and_then(s).with_subscriber(registry));
+    tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
+    tracer
+}
+
 impl<H> NoriaAdapter<H>
 where
     H: ConnectionHandler + Clone + Send + Sync + 'static,
@@ -141,23 +151,8 @@ where
                 HashMap::new()
             },
         ));
-
-        use tracing_subscriber::Layer;
-        let filter = tracing_subscriber::EnvFilter::from_default_env();
-        let registry = tracing_subscriber::Registry::default();
-        let tracer = if options.time {
-            use tracing_timing::{Builder, Histogram};
-            let s = Builder::default()
-                .layer(|| Histogram::new_with_bounds(1_000, 100_000_000, 3).unwrap());
-            tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
-        } else {
-            use tracing_subscriber::fmt;
-            let s = fmt::format::Format::default().with_timer(fmt::time::Uptime::default());
-            let s = fmt::Layer::default().event_format(s);
-            tracing::Dispatch::new(filter.and_then(s).with_subscriber(registry))
-        };
-        tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
-        let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new).unwrap();
+        let tracer = setup_logging();
+        let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new)?;
         let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt
             .block_on(tokio::net::TcpListener::bind(&listen_address))
@@ -258,72 +253,6 @@ where
 
         drop(rt);
 
-        if let Some(timing) = tracer.downcast_ref::<tracing_timing::TimingLayer>() {
-            timing.force_synchronize();
-            timing.with_histograms(|hs| {
-                for (&span_group, hs) in hs {
-                    if span_group == "connection" {
-                        // we don't care about the event timings relative to the connection context
-                        continue;
-                    }
-
-                    println!("==> {}", span_group);
-                    for (event_group, h) in hs {
-                        // make sure we see the latest samples:
-                        h.refresh();
-                        // compute the "Coefficient of Variation"
-                        // < 1 means "low variance", > 1 means "high variance"
-                        if h.stdev() / h.mean() < 1.0 {
-                            // low variance -- print the median:
-                            println!(
-                                ".. {:?} (median)",
-                                std::time::Duration::from_nanos(h.value_at_quantile(0.5)),
-                            )
-                        } else {
-                            // high variance -- show more stats
-                            println!(
-                                "mean: {:?}, p50: {:?}, p90: {:?}, p99: {:?}, p999: {:?}, max: {:?}",
-                                std::time::Duration::from_nanos(h.mean() as u64),
-                                std::time::Duration::from_nanos(h.value_at_quantile(0.5)),
-                                std::time::Duration::from_nanos(h.value_at_quantile(0.9)),
-                                std::time::Duration::from_nanos(h.value_at_quantile(0.99)),
-                                std::time::Duration::from_nanos(h.value_at_quantile(0.999)),
-                                std::time::Duration::from_nanos(h.max()),
-                            );
-
-                            let p95 = h.value_at_quantile(0.95);
-                            let mut scale = p95 / 5;
-                            // set all but highest digit to 0
-                            let mut shift = 0;
-                            while scale > 10 {
-                                scale /= 10;
-                                shift += 1;
-                            }
-                            for _ in 0..shift {
-                                scale *= 10;
-                            }
-
-                            for v in break_once(
-                                h.iter_linear(scale).skip_while(|v| v.quantile() < 0.01),
-                                |v| v.quantile() > 0.95,
-                            ) {
-                                println!(
-                                    "{:6?} | {:40} | {:4.1}th %-ile",
-                                    std::time::Duration::from_nanos(v.value_iterated_to() + 1),
-                                    "*".repeat(
-                                        (v.count_since_last_iteration() as f64 * 40.0 / h.len() as f64)
-                                            .ceil() as usize
-                                    ),
-                                    v.percentile(),
-                                );
-                            }
-                        }
-                        println!(" -> {}", event_group);
-                    }
-                }
-            });
-        }
-
         Ok(())
     }
 }
@@ -335,28 +264,6 @@ pub fn logger_pls() -> slog::Logger {
     use slog::Logger;
     use slog_term::term_full;
     Logger::root(Mutex::new(term_full()).fuse(), slog::o!())
-}
-
-// until we have https://github.com/rust-lang/rust/issues/62208
-fn break_once<I, F>(it: I, mut f: F) -> impl Iterator<Item = I::Item>
-where
-    I: IntoIterator,
-    F: FnMut(&I::Item) -> bool,
-{
-    let mut got_true = false;
-    it.into_iter().take_while(move |i| {
-        if got_true {
-            // we've already yielded when f was true
-            return false;
-        }
-        if f(i) {
-            // this must be the first time f returns true
-            // we should yield i, and then no more
-            got_true = true;
-        }
-        // f returned false, so we should keep yielding
-        true
-    })
 }
 
 impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
