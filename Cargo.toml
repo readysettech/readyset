@@ -18,6 +18,7 @@ members = [
     "unbounded-interval-tree",
     "launchpad",
     "replicators",
+    "readyset-logging",
     "query_generator",
     "maths",
     "demos/fastly",
