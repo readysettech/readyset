@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{bail, Error};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use slog::{info, o, warn};
+use tracing::{info, warn};
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use super::{
@@ -53,8 +53,6 @@ struct ZookeeperAuthorityInner {
 /// Coordinator that shares connection information between workers and clients using ZooKeeper.
 pub struct ZookeeperAuthority {
     zk: ZooKeeper,
-
-    log: slog::Logger,
 
     // Inner which contains state is only needed for server so making an Option.
     inner: Option<RwLock<ZookeeperAuthorityInner>>,
@@ -114,11 +112,7 @@ impl ZookeeperAuthority {
             Acl::open_unsafe().clone(),
             CreateMode::Persistent,
         );
-        Ok(Self {
-            zk,
-            log: slog::Logger::root(slog::Discard, o!()),
-            inner,
-        })
+        Ok(Self { zk, inner })
     }
 
     /// Create a new instance.
@@ -127,11 +121,6 @@ impl ZookeeperAuthority {
             leader_create_epoch: None,
         }));
         Self::new_with_inner(connect_string, inner)
-    }
-
-    /// Enable logging
-    pub fn log_with(&mut self, log: slog::Logger) {
-        self.log = log;
     }
 
     fn read_inner(&self) -> Result<RwLockReadGuard<'_, ZookeeperAuthorityInner>, Error> {
@@ -186,7 +175,7 @@ impl Authority for ZookeeperAuthority {
         let (ref current_data, ref stat) = self.zk.get_data(&path, false)?;
         let current_payload = serde_json::from_slice::<LeaderPayload>(current_data)?;
         if current_payload == payload {
-            info!(self.log, "became leader at epoch {}", stat.czxid);
+            info!(epoch = %stat.czxid, "became leader");
             self.update_leader_create_epoch(Some(stat.czxid))?;
             Ok(Some(payload))
         } else {
@@ -214,10 +203,7 @@ impl Authority for ZookeeperAuthority {
             match self.zk.exists_w(CONTROLLER_KEY, UnparkWatcher::new()) {
                 Ok(_) => {}
                 Err(ZkError::NoNode) => {
-                    warn!(
-                        self.log,
-                        "no controller present, waiting for one to appear..."
-                    );
+                    warn!("no controller present, waiting for one to appear...");
                     thread::park_timeout(Duration::from_secs(60))
                 }
                 Err(e) => bail!(e),

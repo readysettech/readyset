@@ -3215,7 +3215,6 @@ dependencies = [
  "serde",
  "serde_json",
  "slab",
- "slog",
  "test-strategy",
  "thiserror",
  "tokio 1.8.1",

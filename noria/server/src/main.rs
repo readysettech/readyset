@@ -194,7 +194,7 @@ fn main() -> anyhow::Result<()> {
         install_global_recorder(bufrec).unwrap();
     }
 
-    let mut authority =
+    let authority =
         ZookeeperAuthority::new(&format!("{}/{}", &opts.zookeeper, &opts.deployment)).unwrap();
     let mut builder = Builder::default();
     builder.set_listen_addr(opts.address);
@@ -243,7 +243,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     if opts.verbose {
-        authority.log_with(log.clone());
         builder.log_with(log);
     }
 
