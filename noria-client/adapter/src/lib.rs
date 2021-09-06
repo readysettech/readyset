@@ -6,7 +6,7 @@ use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -19,7 +19,8 @@ use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::UpstreamDatabase;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, span, Level};
+use tracing::{debug, info, span, Level};
+use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, ZookeeperAuthority};
@@ -117,20 +118,9 @@ pub struct Options {
     /// Enable recording and exposing Prometheus metrics
     #[clap(long)]
     prometheus_metrics: bool,
-}
 
-fn setup_logging() -> tracing::Dispatch {
-    use tracing::Dispatch;
-    use tracing_subscriber::fmt::{self, format::Format};
-    use tracing_subscriber::{EnvFilter, Layer, Registry};
-
-    let filter = EnvFilter::from_default_env();
-    let registry = Registry::default();
-    let s = Format::default().with_timer(fmt::time::Uptime::default());
-    let s = fmt::Layer::default().event_format(s);
-    let tracer = Dispatch::new(filter.and_then(s).with_subscriber(registry));
-    tracing::dispatcher::set_global_default(tracer.clone()).unwrap();
-    tracer
+    #[clap(flatten)]
+    logging: readyset_logging::Options,
 }
 
 impl<H> NoriaAdapter<H>
@@ -151,28 +141,29 @@ where
                 HashMap::new()
             },
         ));
-        let tracer = setup_logging();
-        let rt = tracing::dispatcher::with_default(&tracer, tokio::runtime::Runtime::new)?;
+        options.logging.init()?;
+        let rt = tokio::runtime::Runtime::new()?;
         let listen_address = options.address.unwrap_or(self.default_address);
-        let listener = rt
-            .block_on(tokio::net::TcpListener::bind(&listen_address))
-            .unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
 
-        let log = logger_pls();
-        slog::info!(log, "listening on address {}", listen_address);
+        info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-        let mut zk_auth = ZookeeperAuthority::new(&format!(
+        let zk_auth = ZookeeperAuthority::new(&format!(
             "{}/{}",
             options.zookeeper_address, options.deployment
         ))?;
-        zk_auth.log_with(log.clone());
 
-        slog::debug!(log, "Connecting to Noria...",);
-        let ch = rt.block_on(ControllerHandle::new(zk_auth));
-        slog::debug!(log, "Connected!");
+        let rs_connect = span!(
+            Level::INFO,
+            "Connecting to ReadySet server",
+            %options.zookeeper_address,
+            %options.deployment
+        );
+        let ch = rt.block_on(ControllerHandle::new(zk_auth).instrument(rs_connect.clone()));
+        rs_connect.in_scope(|| info!("Connected"));
 
         let ctrlc = tokio::signal::ctrl_c();
         let mut listener = Box::pin(futures_util::stream::select(
@@ -216,8 +207,8 @@ where
                 .dialect(self.dialect)
                 .query_coverage_info(query_coverage_info);
             let fut = async move {
-                let connection = span!(Level::DEBUG, "connection", addr = ?s.peer_addr().unwrap());
-                connection.in_scope(|| debug!("accepted"));
+                let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
+                connection.in_scope(|| info!("Accepted new connection"));
 
                 let noria = NoriaConnector::new(
                     ch.clone(),
@@ -225,45 +216,39 @@ where
                     query_cache.clone(),
                     region.clone(),
                 )
+                .instrument(connection.in_scope(|| span!(Level::DEBUG, "Building noria connector")))
                 .await;
 
-                let upstream = if let Some(upstream_db_url) = &upstream_db_url {
-                    Some(
-                        H::UpstreamDatabase::connect(upstream_db_url.clone())
-                            .await
-                            .unwrap(),
-                    )
-                } else {
-                    None
-                };
-
-                let _g = connection.enter();
+                let upstream =
+                    if let Some(upstream_db_url) = &upstream_db_url {
+                        Some(
+                            H::UpstreamDatabase::connect(upstream_db_url.clone())
+                                .instrument(connection.in_scope(|| {
+                                    span!(Level::INFO, "Connecting to upstream database")
+                                }))
+                                .await
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    };
 
                 let backend = backend_builder.clone().build(noria, upstream);
-
-                connection_handler.process_connection(s, backend).await;
-
-                debug!("disconnected");
+                connection_handler
+                    .process_connection(s, backend)
+                    .instrument(connection.clone())
+                    .await;
+                connection.in_scope(|| debug!("disconnected"));
             };
             rt.handle().spawn(fut);
         }
 
         drop(ch);
-        slog::info!(log, "Exiting...");
-
+        info!("Exiting");
         drop(rt);
 
         Ok(())
     }
-}
-
-// Just give me a damn terminal logger
-// Duplicated from noria-server, as the API subcrate doesn't export it.
-pub fn logger_pls() -> slog::Logger {
-    use slog::Drain;
-    use slog::Logger;
-    use slog_term::term_full;
-    Logger::root(Mutex::new(term_full()).fuse(), slog::o!())
 }
 
 impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
