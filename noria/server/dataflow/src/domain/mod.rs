@@ -13,9 +13,9 @@ use futures_util::{future::FutureExt, stream::StreamExt};
 use metrics::{counter, gauge, histogram};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use slog::{debug, error, info, o, trace, warn, Logger};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
 pub use internal::DomainIndex as Index;
@@ -196,7 +196,6 @@ impl DomainBuilder {
     /// Starts up the domain represented by this `DomainBuilder`.
     pub fn build(
         self,
-        log: Logger,
         readers: Readers,
         channel_coordinator: Arc<ChannelCoordinator>,
         state_size: Arc<AtomicUsize>,
@@ -208,8 +207,6 @@ impl DomainBuilder {
             .map(|n| n.borrow().local_addr())
             .collect();
 
-        let log = log.new(o!("domain" => self.index.index(), "shard" => self.shard.unwrap_or(0)));
-
         Domain {
             index: self.index,
             shard: self.shard,
@@ -218,7 +215,6 @@ impl DomainBuilder {
             persistence_parameters: self.persistence_parameters,
             nodes: self.nodes,
             state: StateMap::default(),
-            log,
             not_ready,
             mode: DomainMode::Forwarding,
             waiting: Default::default(),
@@ -284,8 +280,6 @@ pub struct Domain {
     ///
     /// Invariant: All keys of `self.state` must also be keys in `self.nodes`
     state: StateMap,
-
-    log: Logger,
 
     not_ready: HashSet<LocalNodeIndex>,
 
@@ -625,11 +619,12 @@ impl Domain {
                 // source is sharded by a different key than we are doing lookups for,
                 // so we need to trigger on all the shards.
                 self.concurrent_replays += 1;
-                trace!(self.log, "sending shuffled shard replay request";
-                "tag" => ?tag,
-                "keys" => ?keys,
-                "buffered" => self.replay_request_queue.len(),
-                "concurrent" => self.concurrent_replays,
+                trace!(
+                    ?tag,
+                    ?keys,
+                    buffered = self.replay_request_queue.len(),
+                    concurrent = self.concurrent_replays,
+                    "sending shuffled shard replay request"
                 );
 
                 for trigger in options {
@@ -649,11 +644,12 @@ impl Domain {
             }
 
             self.concurrent_replays += 1;
-            trace!(self.log, "sending replay request";
-                "tag" => ?tag,
-                "keys" => ?keys,
-                "buffered" => self.replay_request_queue.len(),
-                "concurrent" => self.concurrent_replays,
+            trace!(
+                tag = ?tag,
+                keys = ?keys,
+                buffered = %self.replay_request_queue.len(),
+                concurrent = %self.concurrent_replays,
+                "sending replay request",
             );
 
             if options.len() == 1 {
@@ -713,10 +709,11 @@ impl Domain {
             self.send_partial_replay_request(tag, keys)?;
             Ok(())
         } else {
-            trace!(self.log, "buffering replay request";
-                "tag" => ?tag,
-                "keys" => ?keys,
-                "buffered" => self.replay_request_queue.len(),
+            trace!(
+                tag = ?tag,
+                keys = ?keys,
+                buffered = %self.replay_request_queue.len(),
+                "buffering replay request"
             );
             self.replay_request_queue.push_back((tag, keys));
             Ok(())
@@ -764,9 +761,10 @@ impl Domain {
                 // TODO: figure out why this can underflow
                 self.concurrent_replays =
                     self.concurrent_replays.saturating_sub(requests_satisfied);
-                trace!(self.log, "notified of finished replay";
-                "#done" => requests_satisfied,
-                "ongoing" => self.concurrent_replays,
+                trace!(
+                    num_done = requests_satisfied,
+                    ongoing = self.concurrent_replays,
+                    "notified of finished replay"
                 );
                 debug_assert!(self.concurrent_replays < self.max_concurrent_replays);
                 let mut per_tag = HashMap::new();
@@ -782,11 +780,12 @@ impl Domain {
                 }
 
                 for (tag, keys) in per_tag {
-                    trace!(self.log, "releasing replay request";
-                        "tag" => ?tag,
-                        "keys" => ?keys,
-                        "left" => self.replay_request_queue.len(),
-                        "ongoing" => self.concurrent_replays,
+                    trace!(
+                        ?tag,
+                        ?keys,
+                        left = self.replay_request_queue.len(),
+                        ongoing = self.concurrent_replays,
+                        "releasing replay request"
                     );
                     self.send_partial_replay_request(tag, keys)?;
                 }
@@ -845,7 +844,6 @@ impl Domain {
                 None,
                 executor,
                 false,
-                &self.log,
             )?;
             assert_eq!(captured.len(), 0);
             self.process_ptimes.stop();
@@ -1088,7 +1086,7 @@ impl Domain {
                         .add_child(node.local_addr());
                 }
                 self.nodes.insert(addr, cell::RefCell::new(node));
-                trace!(self.log, "new node incorporated"; "local" => addr.id());
+                trace!(local = addr.id(), "new node incorporated");
                 Ok(None)
             }
             DomainRequest::RemoveNodes { nodes } => {
@@ -1106,7 +1104,7 @@ impl Domain {
                         "shard" => self.shard.unwrap_or(0).to_string(),
                         "node" => node.id().to_string()
                     );
-                    trace!(self.log, "node removed"; "local" => node.id());
+                    trace!(local = node.id(), "node removed");
                 }
 
                 for node in nodes {
@@ -1224,9 +1222,11 @@ impl Domain {
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for (index, tags) in strict {
-                            info!(self.log, "told to prepare partial state";
-                                  "index" => ?index,
-                                  "tags" => ?tags);
+                            info!(
+                                index = ?index,
+                                tags = ?tags,
+                                "told to prepare partial state"
+                            );
                             state.add_key(&index, Some(tags));
                         }
 
@@ -1240,8 +1240,10 @@ impl Domain {
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for index in strict {
-                            info!(self.log, "told to prepare full state";
-                                  "key" => ?index);
+                            info!(
+                                key = ?index,
+                                "told to prepare full state"
+                            );
                             state.add_key(&index, None);
                         }
 
@@ -1412,15 +1414,11 @@ impl Domain {
                 raw_path,
             } => {
                 if notify_done {
-                    info!(self.log,
-                          "told about terminating replay path {:?}",
-                          path;
-                          "tag" => tag
-                    );
+                    info!(?path, ?tag, "told about terminating replay path",);
                     // NOTE: we set self.replaying_to when we first receive a replay with
                     // this tag
                 } else {
-                    info!(self.log, "told about replay path {:?}", path; "tag" => tag);
+                    info!(?path, ?tag, "told about replay path");
                 }
 
                 use crate::payload;
@@ -1498,7 +1496,7 @@ impl Domain {
 
                 let start = time::Instant::now();
                 self.total_replay_time.start();
-                info!(self.log, "starting replay");
+                info!("starting replay");
 
                 // we know that the node is materialized, as the migration coordinator
                 // picks path that originate with materialized nodes. if this weren't the
@@ -1514,9 +1512,9 @@ impl Domain {
                     .expect("migration replay path started with non-materialized node")
                     .cloned_records();
 
-                debug!(self.log,
-                       "current state cloned for replay";
-                       "μs" => start.elapsed().as_micros()
+                debug!(
+                    μs = %start.elapsed().as_micros(),
+                    "current state cloned for replay"
                 );
 
                 #[allow(clippy::indexing_slicing)]
@@ -1540,8 +1538,6 @@ impl Domain {
                 });
 
                 if !state.is_empty() {
-                    let log = self.log.new(o!());
-
                     let added_cols = self.ingress_inject.get(from).cloned();
                     let default = {
                         let n = self
@@ -1594,14 +1590,14 @@ impl Domain {
                             // TODO: make async
                             let mut chunked_replay_tx = match replay_tx_desc.build_sync() {
                                 Ok(r) => r,
-                                Err(e) => {
-                                    error!(log, "Error building channel for chunked replay"; "error" => e);
+                                Err(error) => {
+                                    error!(%error, "Error building channel for chunked replay");
                                     return;
                                 }
                             };
 
                             let start = time::Instant::now();
-                            debug!(log, "starting state chunker"; "node" => %link.dst);
+                            debug!(node = %link.dst, "starting state chunker");
 
                             let iter = state.into_iter().chunks(BATCH_SIZE);
                             let mut iter = iter.into_iter().enumerate().peekable();
@@ -1620,17 +1616,17 @@ impl Domain {
                                     data: chunk,
                                 });
 
-                                trace!(log, "sending batch"; "#" => i, "[]" => len);
+                                trace!(num = i, len, "sending batch");
                                 if chunked_replay_tx.send(p).is_err() {
-                                    warn!(log, "replayer noticed domain shutdown");
+                                    warn!("replayer noticed domain shutdown");
                                     break;
                                 }
                             }
 
-                            debug!(log,
-                               "state chunker finished";
-                               "node" => %link.dst,
-                               "μs" => start.elapsed().as_micros()
+                            debug!(
+                               node = %link.dst,
+                               μs = %start.elapsed().as_micros(),
+                               "state chunker finished"
                             );
 
                             histogram!(
@@ -1719,15 +1715,15 @@ impl Domain {
                 }
 
                 if self.not_ready.remove(&node) {
-                    trace!(self.log, "readying empty node"; "local" => node.id());
+                    trace!(local = node.id(), "readying empty node");
                 }
 
                 // swap replayed reader nodes to expose new state
                 if let Some(r) = node_ref.borrow_mut().as_mut_reader() {
                     if let Some(ref mut state) = r.writer_mut() {
-                        trace!(self.log, "swapping state"; "local" => node.id());
+                        trace!(local = node.id(), "swapping state");
                         state.swap();
-                        trace!(self.log, "state swapped"; "local" => node.id());
+                        trace!(local = node.id(), "state swapped");
                     }
                 }
 
@@ -2001,12 +1997,7 @@ impl Domain {
                 unishard,
                 requesting_shard,
             } => {
-                trace!(
-                    self.log,
-                   "got replay request";
-                   "tag" => tag,
-                   "keys" => format!("{:?}", keys)
-                );
+                trace!(%tag, ?keys, "got replay request");
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.seed_all(
@@ -2076,7 +2067,10 @@ impl Domain {
                 #[allow(clippy::indexing_slicing)]
                 // nodes in tp.view must reference nodes in self
                 let mut node = self.nodes[tp.view].borrow_mut();
-                trace!(self.log, "eagerly purging state from reader"; "node" => node.global_addr().index());
+                trace!(
+                    node = node.global_addr().index(),
+                    "eagerly purging state from reader"
+                );
                 #[allow(clippy::unwrap_used)] // nodes in tp.view must reference readers
                 let r = node.as_mut_reader().unwrap();
                 if let Some(wh) = r.writer_mut() {
@@ -2289,10 +2283,11 @@ impl Domain {
         if !replay_keys.is_empty() {
             // we have missed in our lookup, so we have a partial replay through a partial replay
             // trigger a replay to source node, and enqueue this request.
-            trace!(self.log,
-                "missed during replay request";
-                "tag" => tag,
-                "miss_keys" => ?replay_keys);
+            trace!(
+                ?tag,
+                miss_keys = ?replay_keys,
+                "missed during replay request"
+            );
 
             self.on_replay_misses(
                 src,
@@ -2311,10 +2306,10 @@ impl Domain {
         }
 
         if !found_keys.is_empty() {
-            trace!(self.log,
-                   "satisfied replay request";
-                   "tag" => tag,
-                   "keys" => ?found_keys,
+            trace!(
+                %tag,
+                keys = ?found_keys,
+                "satisfied replay request"
             );
 
             self.handle_replay(
@@ -2400,14 +2395,13 @@ impl Domain {
                 } => {
                     if let ReplayPieceContext::Partial { ref for_keys, .. } = context {
                         trace!(
-                            self.log,
-                            "replaying batch";
-                            "#" => data.len(),
-                            "tag" => tag,
-                            "keys" => ?for_keys,
+                            num = data.len(),
+                            %tag,
+                            keys = ?for_keys,
+                            "replaying batch"
                         );
                     } else {
-                        debug!(self.log, "replaying batch"; "#" => data.len());
+                        debug!(num = data.len(), "replaying batch");
                     }
 
                     // let's collect some information about the destination of this replay
@@ -2658,7 +2652,6 @@ impl Domain {
                             Some(rp),
                             ex,
                             materialize_into_all,
-                            &self.log,
                         )?;
 
                         let misses = process_result.unique_misses();
@@ -2898,9 +2891,11 @@ impl Domain {
                                         let state = self.state.get_mut(*src).ok_or_else(|| {
                                             internal_err("replay sourced at non-materialized node")
                                         })?;
-                                        trace!(self.log, "clearing keys from purgeable replay source after replay";
-                                               "node" => n.global_addr().index(),
-                                               "keys" => ?backfill_keys);
+                                        trace!(
+                                            node = n.global_addr().index(),
+                                            keys = ?backfill_keys,
+                                            "clearing keys from purgeable replay source after replay"
+                                        );
                                         for key in backfill_keys {
                                             state.mark_hole(key, tag);
                                         }
@@ -2996,9 +2991,11 @@ impl Domain {
                                     #[allow(clippy::indexing_slicing)] // came from self.nodes
                                     if let Some(tag) = evict_tag {
                                         // NOTE: this assumes that the key order is the same
-                                        trace!(self.log, "clearing keys from purgeable materialization after replay";
-                                               "node" => self.nodes[pn].borrow().global_addr().index(),
-                                               "key" => ?&lookup.key);
+                                        trace!(
+                                            node = self.nodes[pn].borrow().global_addr().index(),
+                                            key = ?&lookup.key,
+                                            "clearing keys from purgeable materialization after replay"
+                                        );
                                         state.mark_hole(&lookup.key, tag);
                                     } else {
                                         internal!(
@@ -3020,7 +3017,7 @@ impl Domain {
                                 ..
                             } = m.as_deref().unwrap()
                             {
-                                trace!(self.log, "dropping empty non-terminal full replay packet");
+                                trace!("dropping empty non-terminal full replay packet");
                                 // don't continue processing empty updates, *except* if this is the
                                 // last replay batch. in that case we need to send it so that the
                                 // next domain knows that we're done
@@ -3072,17 +3069,14 @@ impl Domain {
 
                     match context {
                         ReplayPieceContext::Regular { last } if last => {
-                            debug!(self.log,
-                                   "last batch processed";
-                                   "terminal" => notify_done
-                            );
+                            debug!(terminal = notify_done, "last batch processed");
                             if notify_done {
-                                debug!(self.log, "last batch received"; "local" => dst.id());
+                                debug!(local = dst.id(), "last batch received");
                                 finished = Some((tag, dst, None));
                             }
                         }
                         ReplayPieceContext::Regular { .. } => {
-                            debug!(self.log, "batch processed");
+                            debug!("batch processed");
                         }
                         ReplayPieceContext::Partial {
                             for_keys,
@@ -3108,7 +3102,7 @@ impl Domain {
                                 }
                                 assert_ne!(finished_partial, 0);
                             } else if dst_is_target {
-                                trace!(self.log, "partial replay completed"; "local" => dst.id());
+                                trace!(local = dst.id(), "partial replay completed");
                                 if finished_partial == 0 {
                                     assert!(for_keys.is_empty());
                                 }
@@ -3170,11 +3164,11 @@ impl Domain {
                 )
                 .collect();
 
-            trace!(self.log,
-                   "missed during replay processing";
-                   "tag" => tag,
-                   "misses" => ?misses,
-                   "on" => %next_replay.idx,
+            trace!(
+                %tag,
+                ?misses,
+                on = %next_replay.idx,
+                "missed during replay processing"
             );
 
             self.on_replay_misses(
@@ -3188,15 +3182,16 @@ impl Domain {
         }
 
         if let Some((tag, ni, for_keys)) = finished {
-            trace!(self.log, "partial replay finished";
-                   "node" => ?ni,
-                   "keys" => ?for_keys);
+            trace!(
+                node = ?ni,
+                keys = ?for_keys,
+                "partial replay finished"
+            );
             if let Some(mut waiting) = self.waiting.remove(ni) {
                 trace!(
-                    self.log,
-                    "partial replay finished to node with waiting backfills";
-                    "keys" => ?for_keys,
-                    "waiting" => ?waiting,
+                    keys = ?for_keys,
+                    ?waiting,
+                    "partial replay finished to node with waiting backfills"
                 );
 
                 #[allow(clippy::indexing_slicing)]
@@ -3237,16 +3232,17 @@ impl Domain {
                             *left -= 1;
 
                             if *left == 0 {
-                                trace!(self.log, "filled last hole for key, triggering replay";
-                                   "k" => ?tagged_replay_key);
+                                trace!(k = ?tagged_replay_key, "filled last hole for key, triggering replay");
 
                                 // we've filled all holes that prevented the replay previously!
                                 waiting.holes.remove(tagged_replay_key);
                                 true
                             } else {
-                                trace!(self.log, "filled hole for key, not triggering replay";
-                                   "k" => ?tagged_replay_key,
-                                   "left" => *left);
+                                trace!(
+                                    k = ?tagged_replay_key,
+                                    left = *left,
+                                    "filled hole for key, not triggering replay"
+                                );
                                 false
                             }
                         })
@@ -3372,11 +3368,7 @@ impl Domain {
             if let DomainMode::Replaying { passes, .. } =
                 mem::replace(&mut self.mode, DomainMode::Forwarding)
             {
-                debug!(self.log,
-                       "node is fully up-to-date";
-                       "local" => node.id(),
-                       "passes" => passes
-                );
+                debug!(local = node.id(), passes, "node is fully up-to-date");
             } else {
                 internal!();
             }
@@ -3385,7 +3377,7 @@ impl Domain {
             // tag came from an internal data structure that guarantees it exists
             if self.replay_paths[&tag].notify_done {
                 // NOTE: this will only be Some for non-partial replays
-                info!(self.log, "noting replay completed"; "node" => node.id());
+                info!(node = node.id(), "noting replay completed");
                 self.replay_completed = true;
                 Ok(())
             } else {
@@ -3406,7 +3398,6 @@ impl Domain {
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
-            log: &Logger,
             key_columns: &[usize],
             keys: &[KeyComparison],
             node: LocalNodeIndex,
@@ -3447,8 +3438,10 @@ impl Domain {
                         if !state.contains_key(target.node) {
                             // this is probably because
                             if !not_ready.contains(&target.node) {
-                                debug!(log, "got eviction for ready but stateless node";
-                                       "node" => target.node.id());
+                                debug!(
+                                    node = target.node.id(),
+                                    "got eviction for ready but stateless node"
+                                )
                             }
                             continue;
                         }
@@ -3458,7 +3451,6 @@ impl Domain {
                         #[allow(clippy::unwrap_used)]
                         // we can only evict from partial replay paths, so we must have a partial key
                         trigger_downstream_evictions(
-                            log,
                             &target.partial_key.as_ref().unwrap()[..],
                             &keys[..],
                             target.node,
@@ -3574,7 +3566,7 @@ impl Domain {
                             share
                         };
                         num_bytes -= *size;
-                        trace!(self.log, "chose to evict {}b from node {:?}", *size, n);
+                        trace!(bytes = *size, node = ?n, "chose to evict from node");
                         n -= 1;
                     }
 
@@ -3595,9 +3587,8 @@ impl Domain {
                             freed += freed_now;
                             if r.is_empty() {
                                 trace!(
-                                    self.log,
-                                    "done evicting from now-empty reader node {:?}",
-                                    n
+                                    node = ?n,
+                                    "done evicting from now-empty reader node"
                                 );
                                 break;
                             }
@@ -3621,7 +3612,6 @@ impl Domain {
 
                             if !keys.is_empty() {
                                 trigger_downstream_evictions(
-                                    &self.log,
                                     &key_columns[..],
                                     &keys[..],
                                     node,
@@ -3635,12 +3625,12 @@ impl Domain {
                             }
                             #[allow(clippy::indexing_slicing)] // came from self.nodes
                             if self.state[node].is_empty() {
-                                trace!(self.log, "done evicting from now-empty node {:?}", n);
+                                trace!("done evicting from now-empty node {:?}", n);
                                 break;
                             }
                         }
                     }
-                    debug!(self.log, "evicted {} from node {:?}", freed, n);
+                    debug!(%freed, node = ?n, "evicted from node");
                     self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
                     total_freed += freed;
                 }
@@ -3659,8 +3649,7 @@ impl Domain {
                 let (trigger, path) = if let Some(rp) = self.replay_paths.get(&tag) {
                     (&rp.trigger, &rp.path)
                 } else {
-                    debug!(self.log, "got eviction for tag that has not yet been finalized";
-                           "tag" => tag);
+                    debug!(?tag, "got eviction for tag that has not yet been finalized");
                     return Ok(());
                 };
 
@@ -3691,7 +3680,6 @@ impl Domain {
                         if let Some(evicted) = self.state[target].evict_keys(tag, &keys) {
                             let key_columns = evicted.0.to_vec();
                             trigger_downstream_evictions(
-                                &self.log,
                                 &key_columns[..],
                                 &keys[..],
                                 target,
@@ -3823,7 +3811,7 @@ impl Domain {
         // After we handle an external packet, the domain may have accumulated a bunch of packets to itself
         // we need to process them all next;
         while let Some(message) = self.delayed_for_self.pop_front() {
-            trace!(self.log, "handling local transmission");
+            trace!("handling local transmission");
             self.handle(message, executor)?;
         }
 

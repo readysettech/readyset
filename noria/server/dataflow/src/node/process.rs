@@ -6,7 +6,6 @@ use core::convert::TryInto;
 use noria::consistency::Timestamp;
 use noria::errors::ReadySetResult;
 use noria::{internal, KeyComparison, PacketData, ReadySetError, ReplicationOffset};
-use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
@@ -115,7 +114,6 @@ impl Node {
         // if true, forces a materialization into all indices of the node, not just those for the
         // current replay path tag
         materialize_into_all: bool,
-        log: &Logger,
     ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
@@ -235,7 +233,7 @@ impl Node {
                     // we need to own the data
                     let old_data = mem::take(data);
 
-                    match i.on_input_raw(ex, from, old_data, replay, nodes, state, log)? {
+                    match i.on_input_raw(ex, from, old_data, replay, nodes, state)? {
                         RawProcessingResult::Regular(m) => {
                             *data = m.results;
                             lookups = m.lookups;

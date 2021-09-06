@@ -245,12 +245,8 @@ impl Worker {
                 bind_external.set_ip(self.domain_external);
 
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let domain = builder.build(
-                    self.log.clone(),
-                    self.readers.clone(),
-                    self.coord.clone(),
-                    state_size.clone(),
-                );
+                let domain =
+                    builder.build(self.readers.clone(), self.coord.clone(), state_size.clone());
 
                 // this channel is used for in-process domain traffic, to avoid going through the
                 // network stack unnecessarily
