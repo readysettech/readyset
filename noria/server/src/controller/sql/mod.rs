@@ -741,7 +741,7 @@ impl SqlIncorporator {
                 continue;
             }
             let mq = &self.mir_queries[&m];
-            let res = merge_mir_for_queries(&self.log, &reused_mir, mq);
+            let res = merge_mir_for_queries(&reused_mir, mq);
             reused_mir = res.0;
             if res.1 > num_reused_nodes {
                 num_reused_nodes = res.1;

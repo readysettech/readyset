@@ -1,4 +1,4 @@
-use slog::trace;
+use tracing::trace;
 
 use crate::column::Column;
 use crate::node::node_inner::MirNodeInner;
@@ -36,11 +36,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn merge_mir_for_queries(
-    log: &slog::Logger,
-    new_query: &MirQuery,
-    old_query: &MirQuery,
-) -> (MirQuery, usize) {
+pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (MirQuery, usize) {
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::rc::Rc;
@@ -51,12 +47,12 @@ pub fn merge_mir_for_queries(
         for new_base in &new_query.roots {
             if old_base.borrow().can_reuse_as(&*new_base.borrow()) {
                 found = true;
-                trace!(log, "tracing from reusable base {:?}", old_base);
+                trace!("tracing from reusable base {:?}", old_base);
                 trace_nodes.push_back((old_base.clone(), new_base.clone()));
             }
         }
         if !found {
-            trace!(log, "no reuseable base found for {:?}", old_base);
+            trace!("no reuseable base found for {:?}", old_base);
         }
     }
 
@@ -68,12 +64,7 @@ pub fn merge_mir_for_queries(
     while let Some((old, new)) = trace_nodes.pop_front() {
         let new_id = new.borrow().versioned_name();
         // reuseable node found, keep going
-        trace!(
-            log,
-            "found reuseable node {:?} for {:?}, continuing",
-            old,
-            new
-        );
+        trace!("found reuseable node {:?} for {:?}, continuing", old, new);
         assert!(!reuse.contains_key(&new_id));
 
         let reuse_node;
@@ -102,15 +93,11 @@ pub fn merge_mir_for_queries(
         for new_child in new.borrow().children() {
             let new_child_id = new_child.borrow().versioned_name();
             if visited.contains(&new_child_id) {
-                trace!(
-                    log,
-                    "hit previously visited node {:?}, ignoring",
-                    new_child_id
-                );
+                trace!("hit previously visited node {:?}, ignoring", new_child_id);
                 continue;
             }
 
-            trace!(log, "visiting node {:?}", new_child_id);
+            trace!("visiting node {:?}", new_child_id);
             visited.insert(new_child_id.clone());
 
             let mut found = false;
@@ -120,11 +107,7 @@ pub fn merge_mir_for_queries(
                         continue;
                     }
 
-                    trace!(
-                        log,
-                        "add child {:?} to queue as it has a match",
-                        new_child_id
-                    );
+                    trace!("add child {:?} to queue as it has a match", new_child_id);
                     trace_nodes.push_back((old_child.clone(), new_child.clone()));
                     found = true;
                     reused.insert(old_child.borrow().versioned_name());
@@ -134,7 +117,6 @@ pub fn merge_mir_for_queries(
             if !found {
                 // if no child of this node is reusable, we give up on this path
                 trace!(
-                    log,
                     "no reuseable node found for {:?} in old query, giving up",
                     new_child
                 );
@@ -225,7 +207,6 @@ pub fn merge_mir_for_queries(
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, ColumnSpecification, SqlType};
-    use slog::o;
 
     use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;
@@ -292,8 +273,6 @@ mod tests {
         use crate::node::MirNode;
         use crate::query::MirQuery;
 
-        let log = slog::Logger::root(slog::Discard, o!());
-
         let (a, b, c, d) = make_nodes();
 
         let reuse_a = MirNode::reuse(a, 0);
@@ -311,7 +290,7 @@ mod tests {
         };
 
         // when merging with ourselves, the result should consist entirely of reuse nodes
-        let (merged_reflexive, _) = merge_mir_for_queries(&log, &mq1, &mq1);
+        let (merged_reflexive, _) = merge_mir_for_queries(&mq1, &mq1);
         assert!(merged_reflexive
             .topo_nodes()
             .iter()
@@ -345,7 +324,7 @@ mod tests {
             roots: vec![a, b],
             leaf: d,
         };
-        let (merged_extension, _) = merge_mir_for_queries(&log, &mq2, &mq1);
+        let (merged_extension, _) = merge_mir_for_queries(&mq2, &mq1);
         for n in merged_extension.topo_nodes() {
             match n.borrow().name() {
                 // first three nodes (2x base, 1x join) should have been reused
