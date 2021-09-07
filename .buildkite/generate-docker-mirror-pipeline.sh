@@ -10,6 +10,7 @@ images=(
     "mysql:5.7"
     "mysql:8.0"
     "postgres:latest"
+    "postgres:13"
 
     "redis:6.2"
 
