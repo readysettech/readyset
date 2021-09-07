@@ -16,7 +16,9 @@ exclude_files = [
 	'./association/dict_of_sets_with_default.py',
 	# asyncio is built for postgres specifically
 	'./asyncio/async_orm.py',
+	'./asyncio/base_events.py',
 	'./asyncio/basic.py',
+	'./asyncio/gather_orm_statements.py',
 	'./asyncio/greenlet_orm.py',
 	'./custom_attributes/active_column_defaults.py', # This one seems like it should work
 	# dogpile_caching should likely work, but fails importing files, which
