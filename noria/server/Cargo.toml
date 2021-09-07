@@ -83,6 +83,7 @@ common = { path = "common", package = "noria-common" }
 noria = { path = "../noria" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
+tracing-futures = "0.2.5"
 
 [dev-dependencies]
 backtrace = { version = "0.3.2", features = ["serialize-serde"] }
