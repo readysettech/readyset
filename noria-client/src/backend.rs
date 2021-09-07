@@ -89,6 +89,7 @@ pub struct BackendBuilder {
     slowlog: bool,
     dialect: Dialect,
     race_reads: bool,
+    mirror_ddl: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
     ticket: Option<Timestamp>,
@@ -102,6 +103,7 @@ impl Default for BackendBuilder {
             slowlog: false,
             dialect: Dialect::MySQL,
             race_reads: false,
+            mirror_ddl: false,
             users: Default::default(),
             require_authentication: true,
             ticket: None,
@@ -133,6 +135,7 @@ impl BackendBuilder {
             slowlog: self.slowlog,
             dialect: self.dialect,
             race_reads: self.race_reads,
+            mirror_ddl: self.mirror_ddl,
             users: self.users,
             require_authentication: self.require_authentication,
             ticket: self.ticket,
@@ -155,6 +158,11 @@ impl BackendBuilder {
 
     pub fn race_reads(mut self, race_reads: bool) -> Self {
         self.race_reads = race_reads;
+        self
+    }
+
+    pub fn mirror_ddl(mut self, mirror_ddl: bool) -> Self {
+        self.mirror_ddl = mirror_ddl;
         self
     }
 
@@ -220,6 +228,10 @@ pub struct Backend<A: 'static + Authority, DB, Handler> {
     /// statements stored in noria or the underlying database. The id may map to a new value to
     /// avoid conflicts between noria and the underlying db.
     prepared_statements: HashMap<u32, PreparedStatement>,
+
+    /// If set to `true`, all DDL changes will be mirrored to both the upstream db (if present) and
+    /// noria. Otherwise, DDL changes will only go to the upstream if configured, or noria otherwise
+    mirror_ddl: bool,
 
     /// Shared reference to information about the queries that have been executed during the runtime
     /// of this adapter.
@@ -774,6 +786,19 @@ where
             }
         }
 
+        macro_rules! handle_ddl {
+            ($noria_method: ident ($stmt: expr)) => {
+                if let Some(upstream) = &mut self.upstream {
+                    if self.mirror_ddl {
+                        self.noria.$noria_method($stmt).await?;
+                    }
+                    Ok(QueryResult::Upstream(upstream.handle_write(query).await?))
+                } else {
+                    Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
+                }
+            };
+        }
+
         // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
         // default when the upstream connector is present.
         let res = if let Some(ref mut upstream) = self.upstream {
@@ -843,10 +868,15 @@ where
 
                 // Table Create / Drop (RYW not supported)
                 // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
-                nom_sql::SqlQuery::CreateView(_)
-                | nom_sql::SqlQuery::CreateTable(_)
-                | nom_sql::SqlQuery::DropTable(_)
-                | nom_sql::SqlQuery::Set(_) => upstream
+                nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
+                nom_sql::SqlQuery::CreateTable(stmt) => handle_ddl!(handle_create_table(stmt)),
+                nom_sql::SqlQuery::DropTable(_) => {
+                    unsupported!("DROP TABLE not yet supported");
+                }
+                nom_sql::SqlQuery::AlterTable(_) => {
+                    unsupported!("ALTER TABLE not yet supported");
+                }
+                nom_sql::SqlQuery::Set(_) => upstream
                     .handle_write(&parsed_query.to_string())
                     .await
                     .map(QueryResult::Upstream),
@@ -855,7 +885,7 @@ where
                 | nom_sql::SqlQuery::Rollback(_) => {
                     self.handle_transaction_boundaries(parsed_query).await
                 }
-                _ => self.query_fallback(query).await,
+                nom_sql::SqlQuery::CompoundSelect(_) => self.query_fallback(query).await,
             }
         } else {
             // Interacting directly with Noria writer (No RYW support)

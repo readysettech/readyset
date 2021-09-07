@@ -26,6 +26,7 @@ thiserror = "1.0.26"
 [dev-dependencies]
 chrono = "0.4.19"
 maplit = "1.0.2"
+serial_test = "0.5.1"
 
 [[example]]
 name = "basic_demo"

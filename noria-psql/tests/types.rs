@@ -33,7 +33,7 @@ mod types {
         let mut client = config.connect(NoTls).unwrap();
         client.simple_query("DROP TABLE IF EXISTS t").unwrap();
         client
-            .simple_query(&dbg!(format!("CREATE TABLE t (x {})", type_name)))
+            .simple_query(&format!("CREATE TABLE t (x {})", type_name))
             .unwrap();
 
         // check writes (going to fallback)

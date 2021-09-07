@@ -17,6 +17,7 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
     type Handler = PostgreSqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
+    const MIRROR_DDL: bool = true;
 
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
         let mut config = postgres::Config::new();
