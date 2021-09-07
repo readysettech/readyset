@@ -3,6 +3,7 @@ use std::str;
 use std::vec::Vec;
 
 use petgraph::graph::NodeIndex;
+use slog::{debug, info, o, trace, warn};
 
 use ::mir::query::{MirQuery, QueryFlowParts};
 use ::mir::reuse as mir_reuse;

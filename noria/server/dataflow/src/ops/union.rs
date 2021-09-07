@@ -1,7 +1,8 @@
 use itertools::Itertools;
 use launchpad::hash::hash;
 use noria::{invariant, KeyComparison};
-use slog::Logger;
+use serde::{Deserialize, Serialize};
+use slog::{debug, trace, Logger};
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use vec1::Vec1;

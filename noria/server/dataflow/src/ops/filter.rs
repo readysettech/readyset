@@ -6,6 +6,7 @@ use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
 /// The filter operator

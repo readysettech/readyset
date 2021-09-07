@@ -12,6 +12,7 @@ use nom::combinator::{map, opt};
 use nom::multi::many1;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub enum CompoundSelectOperator {

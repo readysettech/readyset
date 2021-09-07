@@ -3,6 +3,7 @@ use crate::prelude::NodeIndex;
 use crate::Packet;
 use common::DataType;
 use noria::{internal, KeyComparison, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;

@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 use test_strategy::Arbitrary;

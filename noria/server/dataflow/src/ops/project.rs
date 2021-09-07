@@ -1,5 +1,6 @@
 use nom_sql::SqlType;
 use noria::internal;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::iter;

@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 use crate::internal::*;
+use serde::{Deserialize, Serialize};
 use std::iter::FromIterator;
 use std::ops::{Index, IndexMut};
 

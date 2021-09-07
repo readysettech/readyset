@@ -1,5 +1,6 @@
 //! Data types representing metrics dumped from a running Noria instance
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;

@@ -6,6 +6,7 @@ use crate::internal::*;
 use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
+use serde::{Deserialize, Serialize};
 
 use core::convert::TryInto;
 use futures_util::{

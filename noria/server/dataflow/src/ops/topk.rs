@@ -2,6 +2,7 @@ use launchpad::hash::hash;
 use launchpad::Indices;
 use maplit::hashmap;
 use noria::{internal, invariant};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::{min, Ordering};

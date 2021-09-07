@@ -1,7 +1,7 @@
 //! Functions for assigning new nodes to thread domains.
 
 use dataflow::prelude::*;
-use slog::Logger;
+use slog::{debug, Logger};
 
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey};
 use std::collections::HashMap;

@@ -1,12 +1,8 @@
 #![warn(clippy::dbg_macro)]
+#![deny(macro_use_extern_crate)]
 #![feature(box_patterns)]
 
-extern crate nom;
-
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-
+#[allow(macro_use_extern_crate)]
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;

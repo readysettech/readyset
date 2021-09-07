@@ -2,6 +2,7 @@
 //! models within the Noria dataflow graph.
 use crate::LocalNodeIndex;
 use proptest::arbitrary::Arbitrary;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The timestamp maps a each base table to a monotonically increasing

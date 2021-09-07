@@ -5,6 +5,7 @@ use launchpad::Indices;
 use maplit::hashmap;
 use noria::errors::ReadySetResult;
 use noria::{internal, Modification, Operation, ReplicationOffset, TableOperation};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;

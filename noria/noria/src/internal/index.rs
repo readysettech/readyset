@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Types of (key-value) data structures we can use as indices in Noria.
 ///
 /// See [the design doc][0] for more information

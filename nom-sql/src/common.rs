@@ -19,6 +19,7 @@ use nom::{call, char, complete, do_parse, map, named, opt, tag_no_case, IResult,
 use proptest::prelude as prop;
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use test_strategy::Arbitrary;
 

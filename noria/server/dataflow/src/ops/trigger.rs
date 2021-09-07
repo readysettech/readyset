@@ -4,6 +4,7 @@ use crate::prelude::*;
 use crate::processing::ColumnSource;
 use crate::processing::SuggestedIndex;
 use noria::errors::{internal_err, ReadySetResult};
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 

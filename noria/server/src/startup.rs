@@ -68,6 +68,7 @@ use futures_util::future::TryFutureExt;
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use hyper::{service::make_service_fn, Body, Request, Response};
 use launchpad::futures::abort_on_panic;
+use slog::{crit, o, warn};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;

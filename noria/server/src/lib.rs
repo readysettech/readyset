@@ -376,17 +376,11 @@
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]
+#![deny(macro_use_extern_crate)]
 //#![deny(unreachable_pub)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::redundant_closure)]
-
-#[macro_use]
-extern crate anyhow;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate slog;
 
 mod builder;
 mod controller;
@@ -428,6 +422,7 @@ pub mod manual {
 }
 
 use dataflow::DomainConfig;
+use serde::{Deserialize, Serialize};
 use std::time;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -469,8 +464,7 @@ impl Default for Config {
 
 /// Just give me a damn terminal logger
 pub fn logger_pls() -> slog::Logger {
-    use slog::Drain;
-    use slog::Logger;
+    use slog::{o, Drain, Logger};
     use slog_term::term_full;
     use std::sync::Mutex;
     Logger::root(Mutex::new(term_full()).fuse(), o!())

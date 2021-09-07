@@ -3,7 +3,7 @@ use dataflow::ops;
 use dataflow::prelude::*;
 use noria::{internal, invariant, invariant_eq, ReadySetResult};
 use petgraph::graph::NodeIndex;
-use slog::Logger;
+use slog::{debug, error, info, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 
 #[allow(clippy::cognitive_complexity)]

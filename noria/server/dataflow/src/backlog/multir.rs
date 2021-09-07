@@ -7,6 +7,7 @@ use reader_map::{
     self,
     refs::{Miss, Values},
 };
+use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::ops::RangeBounds;

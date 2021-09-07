@@ -28,6 +28,7 @@ use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::errors::{internal_err, table_err, unsupported_err};
 use noria::{internal, invariant_eq, unsupported, ColumnSchema};
 use std::fmt;
+use tracing::{error, info, trace};
 
 type StatementID = u32;
 

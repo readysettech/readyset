@@ -7,7 +7,7 @@
 /// a draft for where this trait will go.
 use anyhow::Error;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use url::Url;

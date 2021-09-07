@@ -1,5 +1,6 @@
 use crate::internal::*;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// [`HashMap`] that has a pair of [`DomainIndex`] and [`usize`] as keys.

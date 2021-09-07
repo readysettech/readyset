@@ -7,9 +7,10 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::{self, Thread};
 use std::time::Duration;
 
-use anyhow::Error;
+use anyhow::{bail, Error};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use slog::{info, o, warn};
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use super::{

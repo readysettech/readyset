@@ -3,7 +3,7 @@ use crate::worker::WorkerRequestKind;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use serde::de::DeserializeOwned;
-use slog::Logger;
+use slog::{error, Logger};
 use std::collections::HashMap;
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given

@@ -1,4 +1,5 @@
 use nom::character::complete::{multispace0, multispace1};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 

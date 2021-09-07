@@ -2,6 +2,7 @@
 // ParamFilter is not implemented. This entire file is being ignored until it is either implemented
 // or removed.
 
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;

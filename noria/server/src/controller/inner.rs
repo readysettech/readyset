@@ -35,7 +35,7 @@ use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use reqwest::Url;
-use slog::Logger;
+use slog::{crit, debug, error, info, o, trace, warn, Logger};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;

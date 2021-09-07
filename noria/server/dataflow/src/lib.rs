@@ -19,13 +19,8 @@
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.
 #![cfg_attr(debug, feature(is_sorted))]
-#![deny(unused_extern_crates)]
+#![deny(unused_extern_crates, macro_use_extern_crate)]
 #![allow(clippy::redundant_closure)]
-
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate slog;
 
 pub(crate) mod backlog;
 pub mod node;
@@ -38,6 +33,7 @@ mod domain;
 mod processing;
 
 use derivative::Derivative;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;

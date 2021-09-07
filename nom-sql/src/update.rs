@@ -11,6 +11,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use nom::IResult;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {

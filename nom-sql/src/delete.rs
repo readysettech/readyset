@@ -1,4 +1,5 @@
 use nom::character::complete::multispace1;
+use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
 use crate::common::{schema_table_reference, statement_terminator};
