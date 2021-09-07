@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use mysql::prelude::Queryable;
 use std::env;
 use tokio::net::TcpStream;
 
@@ -29,6 +30,28 @@ impl test_helpers::Adapter for MySQLAdapter {
         )
     }
 
+    fn recreate_database() {
+        let mut management_db = mysql::Conn::new(
+            mysql::OptsBuilder::default()
+                .user(Some("root"))
+                .pass(Some("noria"))
+                .ip_or_hostname(Some(
+                    env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+                ))
+                .tcp_port(
+                    env::var("MYSQL_TCP_PORT")
+                        .unwrap_or_else(|_| "3306".into())
+                        .parse()
+                        .unwrap(),
+                ),
+        )
+        .unwrap();
+        management_db
+            .query_drop("DROP DATABASE IF EXISTS noria")
+            .unwrap();
+        management_db.query_drop("CREATE DATABASE noria").unwrap();
+    }
+
     async fn run_backend<A>(backend: noria_client::Backend<A, Self::Upstream>, s: TcpStream)
     where
         A: 'static + Authority,
@@ -41,6 +64,7 @@ impl test_helpers::Adapter for MySQLAdapter {
 
 // Initializes a Noria worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
+#[allow(dead_code)] // not all test files use this function
 pub fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
     test_helpers::setup::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
