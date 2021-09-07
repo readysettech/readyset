@@ -13,7 +13,7 @@ use tokio::runtime::Runtime;
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -21,14 +21,17 @@ use std::sync::{Arc, RwLock};
 type BoxedClient = JsBox<RefCell<JsClient>>;
 
 struct JsClient {
-    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority, MySqlUpstream>>>,
+    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>>>,
     runtime: Runtime,
 }
 
 impl Finalize for JsClient {}
 
 impl JsClient {
-    pub fn new(b: Backend<ZookeeperAuthority, MySqlUpstream>, rt: Runtime) -> Self {
+    pub fn new(
+        b: Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
+        rt: Runtime,
+    ) -> Self {
         JsClient {
             backend: Arc::new(tokio::sync::Mutex::new(b)),
             runtime: rt,

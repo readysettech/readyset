@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use noria::ZookeeperAuthority;
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseConnection;
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::convert::TryInto;
 
 const MAX_BATCH_ROWS: usize = 10000;
@@ -57,7 +57,7 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
 }
 
 pub async fn load_to_backend(
-    db: &mut Backend<ZookeeperAuthority, MySqlUpstream>,
+    db: &mut Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
     mut spec: DatabaseGenerationSpec,
 ) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random

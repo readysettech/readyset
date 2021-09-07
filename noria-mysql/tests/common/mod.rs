@@ -8,13 +8,14 @@ use noria::consensus::Authority;
 use noria_client::backend::BackendBuilder;
 use noria_client::test_helpers::{self, Deployment};
 
-use noria_mysql::{Backend, MySqlUpstream};
+use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 
 pub struct MySQLAdapter;
 #[async_trait]
 impl test_helpers::Adapter for MySQLAdapter {
     type ConnectionOpts = mysql::Opts;
     type Upstream = MySqlUpstream;
+    type Handler = MySqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
@@ -52,8 +53,10 @@ impl test_helpers::Adapter for MySQLAdapter {
         management_db.query_drop("CREATE DATABASE noria").unwrap();
     }
 
-    async fn run_backend<A>(backend: noria_client::Backend<A, Self::Upstream>, s: TcpStream)
-    where
+    async fn run_backend<A>(
+        backend: noria_client::Backend<A, Self::Upstream, Self::Handler>,
+        s: TcpStream,
+    ) where
         A: 'static + Authority,
     {
         MysqlIntermediary::run_on_tcp(Backend(backend), s)

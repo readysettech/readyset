@@ -17,7 +17,7 @@ use zookeeper::{WatchedEvent, ZooKeeper, ZooKeeperExt};
 
 use crate::backend::noria_connector::NoriaConnector;
 use crate::backend::BackendBuilder;
-use crate::{Backend, UpstreamDatabase};
+use crate::{Backend, QueryHandler, UpstreamDatabase};
 
 // Appends a unique ID to deployment strings, to avoid collisions between tests.
 pub struct Deployment {
@@ -69,6 +69,7 @@ pub fn zk_addr() -> String {
 pub trait Adapter: Send {
     type ConnectionOpts;
     type Upstream: UpstreamDatabase;
+    type Handler: QueryHandler;
 
     const DIALECT: nom_sql::Dialect;
 
@@ -81,7 +82,7 @@ pub trait Adapter: Send {
 
     fn recreate_database();
 
-    async fn run_backend<A>(backend: Backend<A, Self::Upstream>, s: TcpStream)
+    async fn run_backend<A>(backend: Backend<A, Self::Upstream, Self::Handler>, s: TcpStream)
     where
         A: 'static + Authority;
 }

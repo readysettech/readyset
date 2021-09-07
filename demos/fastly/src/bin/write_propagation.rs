@@ -22,7 +22,7 @@ use noria::{DataType, KeyComparison, View, ViewQuery};
 use noria_client::backend::Backend;
 use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
 use noria_client::UpstreamDatabase;
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::ColumnGenerationSpec;
 use reqwest::Url;
 use rinfluxdb::line_protocol::LineBuilder;
@@ -188,7 +188,7 @@ impl Writer {
         &self,
         article: usize,
         schema: DatabaseSchema,
-        mut backend: &mut Backend<ZookeeperAuthority, MySqlUpstream>,
+        mut backend: &mut Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
     ) -> anyhow::Result<()> {
         let mut database_spec = DatabaseGenerationSpec::new(schema).table_rows("articles", 1);
         // Article table overrides.
