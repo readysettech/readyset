@@ -160,7 +160,6 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     }
 
     let worker = Worker {
-        log: log.new(o!("module" => "worker")),
         election_state: None,
         // this initial duration doesn't matter; it gets set upon worker registration
         heartbeat_interval: tokio::time::interval(Duration::from_secs(10)),

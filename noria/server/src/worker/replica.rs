@@ -12,7 +12,6 @@ use futures_util::FutureExt;
 use noria::channel::{self, CONNECTION_FROM_BASE};
 use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
-use slog::{debug, o, warn};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{atomic, Arc};
@@ -23,6 +22,7 @@ use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::IntervalStream;
+use tracing::{debug, info_span, warn, Span};
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
@@ -52,7 +52,6 @@ pub struct WrappedDomainRequest {
 pub struct Replica {
     /// Wrapped domain
     domain: Domain,
-    pub(super) log: slog::Logger,
 
     coord: Arc<ChannelCoordinator>,
 
@@ -79,17 +78,13 @@ impl Replica {
         on: TcpListener,
         locals: mpsc::UnboundedReceiver<Box<Packet>>,
         requests: mpsc::Receiver<WrappedDomainRequest>,
-        log: slog::Logger,
         cc: Arc<ChannelCoordinator>,
     ) -> Self {
-        let id = domain.id();
-        let id = format!("{}.{}", id.0.index(), id.1);
         Replica {
             coord: cc,
             domain,
             incoming: Strawpoll::from(on),
             locals,
-            log: log.new(o! {"id" => id}),
             out: Outboxes::new(),
             refresh_sizes: IntervalStream::new(tokio::time::interval(Duration::from_millis(500))),
             requests,
@@ -139,18 +134,25 @@ fn flatten_request_reader_replay(
 }
 
 impl Replica {
+    fn span(&self) -> Span {
+        info_span!(
+            "domain",
+            domain_index = self.domain.index().index(),
+            shard = self.domain.shard()
+        )
+    }
+
     /// Read the first byte of a connection to determine if it is from a base node, and convert
     /// it to a DualTcpStream, returning a unique token for the connection together with the
     /// upgraded connection
     async fn handle_new_connection(
         mut stream: TcpStream,
-        log: slog::Logger,
     ) -> Result<(u64, DualTcpStream), anyhow::Error> {
         let mut tag: u8 = 0;
         stream.read_exact(std::slice::from_mut(&mut tag)).await?;
         let is_base = tag == CONNECTION_FROM_BASE;
 
-        debug!(log, "established new connection"; "base" => ?is_base);
+        debug!(base = is_base, "established new connection");
 
         let token = next_token();
         let _ = stream.set_nodelay(true);
@@ -283,10 +285,10 @@ impl Replica {
         // and then keeping it updated once `Fuse` reports `terminated`, or instead simply using `FuturesUnordered` with one
         // entry, and adding the next future when it is empty.
         let mut send_packets = futures::stream::FuturesUnordered::new();
+        let span = self.span();
 
         let Replica {
             domain,
-            log,
             coord,
             refresh_sizes,
             incoming,
@@ -305,8 +307,8 @@ impl Replica {
                 // Accept incoming connections
                 conn = incoming.accept() => {
                     let (conn, addr) = conn.context("listening")?;
-                    debug!(log, "accepted new connection"; "from" => ?addr);
-                    connection_preambles.push(Self::handle_new_connection(conn, log.clone()));
+                    span.in_scope(|| debug!(from = ?addr, "accepted new connection"));
+                    connection_preambles.push(Self::handle_new_connection(conn));
                 },
 
                 // Handle any connections that we accepted but still need to preprocess and convert to DualTcpStream
@@ -321,11 +323,14 @@ impl Replica {
 
                 // Handle domain requests
                 domain_req = requests.recv() => match domain_req {
-                    Some(req) => if req.done_tx.send(domain.domain_request(req.req, out)).is_err() {
-                        warn!(log, "domain request sender hung up");
+                    Some(req) => {
+                        let _guard = span.enter();
+                        if req.done_tx.send(domain.domain_request(req.req, out)).is_err() {
+                            span.in_scope(|| warn!("domain request sender hung up"));
+                        }
                     },
                     None => {
-                        warn!(log, "domain request stream ended");
+                        span.in_scope(|| warn!("domain request stream ended"));
                         return Ok(())
                     }
                 },
@@ -333,7 +338,7 @@ impl Replica {
                 // Handle incoming messages
                 packets = Self::receive_packets(locals, &mut connections) => match packets? {
                     None => {
-                        warn!(log, "local input stream ended");
+                        span.in_scope(|| warn!("local input stream ended"));
                         return Ok(())
                     },
                     Some(mut packets) => {
@@ -355,7 +360,7 @@ impl Replica {
                                 _ => None,
                             };
 
-                            domain.handle_packet(packet, out)?;
+                            span.in_scope(|| domain.handle_packet(packet, out))?;
 
                             if let Some((tag, conn)) = ack {
                                 conn.send(Tagged { tag, v: () }).await?;

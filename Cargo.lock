@@ -3563,6 +3563,7 @@ dependencies = [
  "tower",
  "tower-util",
  "tracing",
+ "tracing-futures",
  "url",
  "vec1",
  "vec_map",

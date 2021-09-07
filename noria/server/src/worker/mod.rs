@@ -13,7 +13,6 @@ use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
 use replica::ReplicaAddr;
 use serde::{Deserialize, Serialize};
-use slog::{debug, error, info, trace, warn};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
@@ -30,6 +29,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::Interval;
+use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
 
 pub(crate) mod readers;
@@ -101,8 +101,6 @@ pub struct DomainHandle {
 
 /// A Noria worker, responsible for executing some domains.
 pub struct Worker {
-    /// `slog` logging thingie.
-    pub(crate) log: slog::Logger,
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
     pub(crate) election_state: Option<WorkerElectionState>,
     /// A timer for sending heartbeats to the controller.
@@ -155,18 +153,16 @@ impl Worker {
                 worker_uri: self.worker_uri.clone(),
             })
             .unwrap();
-            let log = self.log.clone();
             // this happens in a background task to avoid deadlocks
             tokio::spawn(
                 do_noria_rpc::<()>(self.http.post(uri).body(body))
-                    .map_err(move |e| warn!(log, "heartbeat failed: {}", e)),
+                    .map_err(move |e| warn!(error = %e, "heartbeat failed")),
             );
         }
     }
 
     fn process_eviction(&mut self) {
         tokio::spawn(do_eviction(
-            self.log.clone(),
             self.memory_limit,
             self.coord.clone(),
             self.state_sizes.clone(),
@@ -176,7 +172,7 @@ impl Worker {
     async fn process_worker_request(&mut self, req: WorkerRequest) {
         let ret = self.handle_worker_request(req.kind).await;
         if let Err(ref e) = ret {
-            warn!(self.log, "worker request failed: {}", e.to_string());
+            warn!(error = %e, "worker request failed");
         }
         // discard result, since Err(..) means "the receiving end was dropped"
         let _ = req.done_tx.send(ret);
@@ -191,11 +187,7 @@ impl Worker {
                 controller_uri,
                 heartbeat_every,
             } => {
-                info!(
-                    self.log,
-                    "worker informed of new controller at {}", controller_uri
-                );
-                let log = self.log.clone();
+                info!(%controller_uri, "worker informed of new controller");
                 tokio::spawn(
                     do_noria_rpc::<()>(
                         self.http
@@ -209,7 +201,7 @@ impl Worker {
                             })?),
                     )
                     .map_err(move |e| {
-                        warn!(log, "controller registration failed: {}", e);
+                        warn!(error = %e, "controller registration failed");
                     }),
                 );
                 self.domains.clear();
@@ -223,8 +215,8 @@ impl Worker {
             WorkerRequestKind::RunDomain(builder) => {
                 let idx = builder.index;
                 let shard = builder.shard.unwrap_or(0);
-
-                info!(self.log, "received domain {}.{} to run", idx.index(), shard);
+                let span = info_span!("domain", domain_index = idx.index(), shard);
+                span.in_scope(|| info!("received domain to run"));
 
                 let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
@@ -273,7 +265,6 @@ impl Worker {
                     listener,
                     local_rx,
                     request_rx,
-                    self.log.clone(),
                     self.coord.clone(),
                 );
 
@@ -287,14 +278,7 @@ impl Worker {
                     },
                 );
 
-                info!(
-                    self.log,
-                    "domain {}.{} booted; binds on {} and exposes {} to others",
-                    idx.index(),
-                    shard,
-                    bind_actual,
-                    bind_external
-                );
+                span.in_scope(|| info!(%bind_actual, %bind_external, "domain booted",));
                 let resp = RunDomainResponse {
                     external_addr: bind_external,
                 };
@@ -305,13 +289,7 @@ impl Worker {
                     let domain = dd.domain();
                     let shard = dd.shard();
                     let addr = dd.addr();
-                    trace!(
-                        self.log,
-                        "found that domain {}.{} is at {:?}",
-                        domain.index(),
-                        shard,
-                        addr
-                    );
+                    trace!(domain_index = domain.index(), shard, ?addr, "found domain",);
                     self.coord.insert_remote((domain, shard), addr)?;
                 }
                 Ok(None)
@@ -393,19 +371,23 @@ impl Worker {
                         self.process_worker_request(req).await;
                     }
                     else {
-                        info!(self.log, "worker shutting down after request handle dropped");
+                        info!("worker shutting down after request handle dropped");
                         return;
                     }
                 }
                 failed_domains = poll_domains(&mut self.domains) => {
                     for (idx, shard, err) in failed_domains {
-                        // FIXME(eta): do something about this, now that we can?
-                        error!(self.log, "domain {}.{} failed: {:?}", idx.index(), shard, err);
+                        if let Err(e) = err {
+                            // FIXME(eta): do something about this, now that we can?
+                            error!(domain_index = idx.index(), shard, error = %e, "domain failed");
+                        } else {
+                            error!(domain_index = idx.index(), shard, "domain exited unexpectedly");
+                        }
                         self.domains.remove(&(idx, shard));
                     }
                 }
                 _ = shutdown_stream.next() => {
-                    info!(self.log, "worker shutting down after valve shut");
+                    info!("worker shutting down after valve shut");
                     return;
                 }
                 _ = eviction => {
@@ -421,11 +403,11 @@ impl Worker {
 
 #[allow(clippy::type_complexity)]
 async fn do_eviction(
-    log: slog::Logger,
     memory_limit: Option<usize>,
     coord: Arc<ChannelCoordinator>,
     state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
 ) -> ReadySetResult<()> {
+    let span = info_span!("evicting");
     let mut domain_senders = HashMap::new();
 
     use std::cmp;
@@ -438,13 +420,14 @@ async fn do_eviction(
             .iter()
             .map(|(ds, sa)| {
                 let size = sa.load(Ordering::Acquire);
-                trace!(
-                    log,
-                    "domain {}.{} state size is {} bytes",
-                    ds.0.index(),
-                    ds.1,
-                    size
-                );
+                span.in_scope(|| {
+                    trace!(
+                        "domain {}.{} state size is {} bytes",
+                        ds.0.index(),
+                        ds.1,
+                        size
+                    )
+                });
                 (*ds, size)
             })
             .collect()
@@ -497,13 +480,14 @@ async fn do_eviction(
                     over -= evict;
                     n -= 1;
 
-                    debug!(
-                            log,
+                    span.in_scope(|| {
+                        debug!(
                             "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
                             total,
                             limit,
                             target.0.index(),
-                        );
+                        )
+                    });
 
                     counter!(
                         recorded::EVICTION_WORKER_EVICTIONS_REQUESTED,
@@ -531,7 +515,7 @@ async fn do_eviction(
 
                     if let Err(e) = r {
                         // probably exiting?
-                        warn!(log, "failed to evict from {}: {}", target.0.index(), e);
+                        span.in_scope(|| warn!("failed to evict from {}: {}", target.0.index(), e));
                         // remove sender so we don't try to use it again
                         domain_senders.remove(&target);
                     }

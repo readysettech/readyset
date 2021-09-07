@@ -362,6 +362,16 @@ pub struct Domain {
 }
 
 impl Domain {
+    /// Return the unique index for this domain
+    pub fn index(&self) -> Index {
+        self.index
+    }
+
+    /// Return this domain's shard
+    pub fn shard(&self) -> usize {
+        self.shard.unwrap_or(0)
+    }
+
     /// Initiate a replay for a miss represented by the given keys and column indices in the given
     /// node.
     ///
