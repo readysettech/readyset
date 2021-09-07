@@ -144,7 +144,7 @@ for line in agent.stdout:
     )
     result.append(generate_build_step(line))
     result.append(generate_test_step("MySQL", "8.0", 1, "build", line, False))
-    if os.environ.get("MYSQL_ONLY") != "true":
+    if os.environ.get("NIGHTLY") == "true":
         result.append(
             generate_test_step("readyset", "8.0", 1, "test-mysql80", line, fail)
         )

@@ -359,7 +359,7 @@ steps:
           mount-buildkite-agent: true
           propagate-environment: true
           environment:
-          - MYSQL_ONLY=true
+          - NIGHTLY=false
       - ecr#v2.2.0:
           login: true
     artifact_paths:
