@@ -55,7 +55,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 ..
             }) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
-                param_schema: dbg!(params),
+                param_schema: params,
                 row_schema: schema,
             }),
         }

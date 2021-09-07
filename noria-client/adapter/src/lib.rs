@@ -57,6 +57,8 @@ pub struct NoriaAdapter<H> {
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
     pub dialect: Dialect,
+    /// Whether to mirror DDL changes to both upstream or noria, or just send them upstream
+    pub mirror_ddl: bool,
 }
 
 #[derive(Clap)]
@@ -206,6 +208,7 @@ where
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
                 .dialect(self.dialect)
+                .mirror_ddl(self.mirror_ddl)
                 .query_coverage_info(query_coverage_info);
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());

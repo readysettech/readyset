@@ -30,6 +30,7 @@ chrono = "0.4"
 noria-server = { path = "../noria/server/" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 proptest = "1.0.0"
+serial_test = "0.5.1"
 test-strategy = "0.1.1"
 tokio = { version = "1.8.1", features = ["full"] }
 zookeeper = "0.5.4"
