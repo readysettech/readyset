@@ -80,6 +80,8 @@ pub trait Adapter: Send {
         Self::Upstream::connect(Self::url()).await.unwrap()
     }
 
+    fn recreate_database();
+
     async fn run_backend<A>(backend: Backend<A, Self::Upstream>, s: TcpStream)
     where
         A: 'static + Authority;
@@ -106,6 +108,10 @@ where
     } else {
         slog::Logger::root(slog::Discard, o!())
     };
+
+    if fallback {
+        A::recreate_database();
+    }
 
     let barrier = Arc::new(Barrier::new(2));
 

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use postgres::NoTls;
 use std::env;
 use tokio::net::TcpStream;
 
@@ -30,6 +31,30 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
             env::var("PGHOST").unwrap_or_else(|_| "localhost".into()),
             env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
         )
+    }
+
+    fn recreate_database() {
+        let mut management_db = postgres::Config::new()
+            .user(&env::var("PGUSER").unwrap_or_else(|_| "postgres".into()))
+            .password(
+                env::var("PGPASSWORD")
+                    .unwrap_or_else(|_| "noria".into())
+                    .as_bytes(),
+            )
+            .host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".into()))
+            .port(
+                env::var("PGPORT")
+                    .unwrap_or_else(|_| "5432".into())
+                    .parse()
+                    .unwrap(),
+            )
+            .dbname("postgres")
+            .connect(NoTls)
+            .unwrap();
+        management_db
+            .simple_query("DROP DATABASE IF EXISTS noria")
+            .unwrap();
+        management_db.simple_query("CREATE DATABASE noria").unwrap();
     }
 
     async fn run_backend<A>(backend: Backend<A, Self::Upstream>, s: TcpStream)
