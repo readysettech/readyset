@@ -434,7 +434,6 @@ pub mod test {
             struct Ex;
 
             impl Executor for Ex {
-                fn create_universe(&mut self, _: HashMap<String, DataType>) {}
                 fn send(&mut self, _: ReplicaAddr, _: Box<Packet>) {}
             }
 
