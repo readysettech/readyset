@@ -1,6 +1,7 @@
 use derive_more::From;
 use itertools::{Either, Itertools};
 use pratt::{Affix, Associativity, PrattParser, Precedence};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::iter;
 use test_strategy::Arbitrary;

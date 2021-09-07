@@ -12,6 +12,8 @@ use noria::internal::DomainIndex;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
 use replica::ReplicaAddr;
+use serde::{Deserialize, Serialize};
+use slog::{debug, error, info, trace, warn};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;

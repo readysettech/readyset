@@ -5,6 +5,7 @@ use crate::{ReadySetResult, ReuseConfigType};
 use nom_sql::{parser as sql_parser, Dialect, SqlQuery};
 use noria::{internal, ActivationResult, ReadySetError};
 use petgraph::graph::NodeIndex;
+use slog::{crit, debug, o, warn};
 
 use crate::errors::internal_err;
 use nom_sql::CreateTableStatement;

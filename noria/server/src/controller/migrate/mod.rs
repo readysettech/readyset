@@ -37,6 +37,7 @@ use metrics::counter;
 use metrics::histogram;
 use noria::metrics::recorded;
 use noria::ReadySetError;
+use slog::{debug, error, info, o, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 

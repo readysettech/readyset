@@ -1,5 +1,6 @@
 use derive_more::From;
 use noria::KeyComparison;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -229,6 +230,7 @@ impl Ingredient for NodeOperator {
 
 #[cfg(test)]
 pub mod test {
+    use slog::o;
     use std::cell;
     use std::collections::HashMap;
 

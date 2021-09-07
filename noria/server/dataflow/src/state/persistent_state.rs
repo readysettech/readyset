@@ -20,6 +20,7 @@ use noria::{KeyComparison, ReplicationOffset};
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};

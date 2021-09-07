@@ -4,6 +4,7 @@ use crate::channel::tcp::SendError;
 use crate::internal::LocalNodeIndex;
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::io;
 use thiserror::Error;

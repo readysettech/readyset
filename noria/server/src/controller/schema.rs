@@ -5,6 +5,7 @@ use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::{ColumnBase, ColumnSchema};
 use ops::NodeOperator;
+use slog::{error, trace};
 
 type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,

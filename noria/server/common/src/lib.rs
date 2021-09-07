@@ -1,7 +1,6 @@
 #![warn(clippy::dbg_macro)]
+#![deny(macro_use_extern_crate)]
 #![feature(bound_map)]
-#[macro_use]
-extern crate serde_derive;
 
 mod local;
 mod records;
@@ -11,6 +10,7 @@ pub use self::records::*;
 pub use noria::DataType;
 pub use noria::Map;
 use petgraph::prelude::*;
+use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 pub trait SizeOf {

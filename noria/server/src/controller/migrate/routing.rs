@@ -13,7 +13,7 @@ use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use noria::{internal, invariant, invariant_eq, ReadySetError};
 use petgraph::graph::NodeIndex;
-use slog::Logger;
+use slog::{trace, Logger};
 use std::collections::{HashMap, HashSet};
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain

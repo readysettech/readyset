@@ -2,6 +2,7 @@ use crate::controller::migrate::Migration;
 use crate::controller::HandleRequest;
 use crate::errors::bad_request_err;
 use crate::ControllerDescriptor;
+use anyhow::format_err;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
 use noria::internal;

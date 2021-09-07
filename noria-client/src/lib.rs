@@ -5,9 +5,6 @@
 #![feature(drain_filter)]
 #![feature(async_closure)]
 
-#[macro_use]
-extern crate tracing;
-
 pub mod backend;
 mod convert;
 mod rewrite;

@@ -1,5 +1,6 @@
 use derive_more::From;
 use noria::KeyComparison;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};

@@ -11,7 +11,7 @@
 use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use anyhow::Error;
+use anyhow::{anyhow, bail, Error};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 

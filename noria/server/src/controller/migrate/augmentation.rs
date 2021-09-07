@@ -14,7 +14,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::controller::migrate::DomainMigrationPlan;
 use dataflow::DomainRequest;
-use slog::Logger;
+use slog::{o, trace, Logger};
 
 pub(super) fn inform(
     log: &Logger,

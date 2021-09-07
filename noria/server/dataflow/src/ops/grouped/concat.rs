@@ -7,7 +7,7 @@ use crate::prelude::*;
 use common::DataType;
 use launchpad::Indices;
 use noria::invariant_eq;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};

@@ -1,6 +1,7 @@
 use crate::payload;
 use crate::prelude::*;
 use noria::KeyComparison;
+use serde::{Deserialize, Serialize};
 use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]

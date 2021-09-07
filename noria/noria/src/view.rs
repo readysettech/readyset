@@ -13,6 +13,7 @@ use nom_sql::{BinaryOperator, ColumnSpecification};
 use nom_sql::{Column, SqlType};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -1075,7 +1076,7 @@ impl View {
 #[repr(transparent)]
 pub struct ReadReplyBatch(Vec<Vec<DataType>>);
 
-use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, Visitor};
+use serde::de::{self, DeserializeSeed, Deserializer, Visitor};
 impl<'de> Deserialize<'de> for ReadReplyBatch {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

@@ -4,6 +4,7 @@ use crate::prelude::*;
 use crate::processing::ColumnSource;
 use crate::processing::SuggestedIndex;
 use noria::errors::ReadySetResult;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
 /// Applies the identity operation to the view. Since the identity does nothing,

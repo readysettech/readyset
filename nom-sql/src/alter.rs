@@ -7,6 +7,7 @@ use nom::character::complete::{multispace0, multispace1};
 use nom::{
     alt, call, complete, do_parse, named, opt, preceded, separated_list, tag_no_case, terminated,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{literal, schema_table_reference, statement_terminator, ws_sep_comma, Literal};

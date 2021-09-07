@@ -1,3 +1,5 @@
+use slog::trace;
+
 use crate::column::Column;
 use crate::node::node_inner::MirNodeInner;
 use crate::node::MirNode;
@@ -223,6 +225,7 @@ pub fn merge_mir_for_queries(
 #[cfg(test)]
 mod tests {
     use nom_sql::{self, ColumnSpecification, SqlType};
+    use slog::o;
 
     use crate::column::Column;
     use crate::node::node_inner::MirNodeInner;

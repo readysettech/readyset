@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Describe the materialization state of an operator.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MaterializationStatus {

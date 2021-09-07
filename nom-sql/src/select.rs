@@ -5,6 +5,7 @@ use nom::multi::many0;
 use nom::{
     alt, call, char, complete, delimited, do_parse, opt, separated_nonempty_list, tag, tag_no_case,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 

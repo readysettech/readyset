@@ -111,18 +111,11 @@
     bound_map,
     bound_as_ref
 )]
-#![deny(missing_docs)]
+#![deny(missing_docs, macro_use_extern_crate)]
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
 #![warn(clippy::dbg_macro)]
-
-#[macro_use]
-extern crate anyhow;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate slog;
 
 /// Maximum number of requests that may be in-flight _to_ the connection pool at a time.
 ///
@@ -243,6 +236,7 @@ pub use crate::consensus::ZookeeperAuthority;
 // FIXME(eta): get rid of these
 pub use crate::errors::{ReadySetError, ReadySetResult};
 use crate::internal::*;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use tokio::task_local;

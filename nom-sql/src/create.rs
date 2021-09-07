@@ -4,6 +4,7 @@ use nom::{
     character::complete::{digit1, multispace0, multispace1},
     combinator::map_res,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 use std::str::FromStr;

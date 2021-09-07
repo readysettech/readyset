@@ -6,6 +6,7 @@ use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
+use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};

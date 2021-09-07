@@ -1,5 +1,6 @@
 use crate::ops::grouped::GroupedOperation;
 use crate::ops::grouped::GroupedOperator;
+use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
 use noria::{invariant, ReadySetResult};

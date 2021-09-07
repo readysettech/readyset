@@ -1,5 +1,6 @@
 use maplit::hashmap;
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use vec1::vec1;

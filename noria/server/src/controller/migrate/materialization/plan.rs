@@ -15,6 +15,7 @@ use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
+use slog::{debug, info, trace};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use vec1::Vec1;

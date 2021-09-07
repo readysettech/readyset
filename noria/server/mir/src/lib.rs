@@ -1,9 +1,6 @@
 #![warn(clippy::dbg_macro)]
-#![deny(unused_extern_crates)]
+#![deny(unused_extern_crates, macro_use_extern_crate)]
 #![feature(stmt_expr_attributes)]
-
-#[macro_use]
-extern crate slog;
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -5,6 +5,7 @@ use crate::coordination::do_noria_rpc;
 use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
+use anyhow::{anyhow, format_err};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
@@ -15,6 +16,8 @@ use noria::{
 };
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use slog::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::sleep;

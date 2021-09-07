@@ -8,7 +8,7 @@ use futures::FutureExt;
 use metrics::histogram;
 use nom_sql::Dialect;
 use tokio::sync::mpsc;
-use tracing::Level;
+use tracing::{error, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consensus::Authority;

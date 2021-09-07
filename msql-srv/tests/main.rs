@@ -6,10 +6,9 @@ extern crate msql_srv;
 extern crate mysql;
 extern crate mysql_common as myc;
 extern crate nom;
-#[macro_use]
-extern crate async_trait;
 extern crate tokio;
 
+use async_trait::async_trait;
 use std::io;
 use std::net;
 use std::thread;

@@ -1,7 +1,7 @@
 use mysql::prelude::Queryable;
 use mysql::OptsBuilder;
 use mysql::Params;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 use std::collections::BTreeMap;
 use std::convert::TryInto;

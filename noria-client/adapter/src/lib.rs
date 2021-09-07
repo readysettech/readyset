@@ -1,7 +1,5 @@
 #![warn(clippy::dbg_macro)]
-extern crate anyhow;
-#[macro_use]
-extern crate tracing;
+#![deny(macro_use_extern_crate)]
 
 use std::collections::HashMap;
 use std::io;
@@ -20,7 +18,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::UpstreamDatabase;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::Level;
+use tracing::{debug, span, Level};
 
 use nom_sql::{Dialect, SelectStatement};
 use noria::{ControllerHandle, ZookeeperAuthority};

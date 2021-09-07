@@ -4,6 +4,7 @@ use bytes::BytesMut;
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use derive_more::{From, Into};
 use itertools::Either;
+use serde::{Deserialize, Serialize};
 use tokio_postgres::types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 
 use crate::{internal, ReadySetError, ReadySetResult};

@@ -1,6 +1,7 @@
 use crate::node::special;
 use crate::ops;
 use crate::processing::Ingredient;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]

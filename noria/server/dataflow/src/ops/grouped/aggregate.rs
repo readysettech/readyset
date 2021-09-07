@@ -6,6 +6,7 @@ use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
 use noria::{invariant, ReadySetResult};
+use serde::{Deserialize, Serialize};
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
+use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
 use crate::common::{literal, statement_terminator, Literal};
