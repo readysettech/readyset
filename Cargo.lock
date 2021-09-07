@@ -3444,7 +3444,7 @@ dependencies = [
  "noria-dataflow",
  "petgraph",
  "regex",
- "slog",
+ "tracing",
 ]
 
 [[package]]
