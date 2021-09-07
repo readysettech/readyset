@@ -87,8 +87,7 @@ fn type_for_internal_column(
         | NodeOperator::Union(_)
         | NodeOperator::Identity(_)
         | NodeOperator::Filter(_)
-        | NodeOperator::TopK(_)
-        | NodeOperator::Trigger(_) => {
+        | NodeOperator::TopK(_) => {
             Ok(
                 column_schema(graph, next_node_on_path, recipe, column_index, log)?
                     .map(ColumnSchema::take_type),

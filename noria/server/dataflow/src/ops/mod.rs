@@ -16,7 +16,6 @@ pub mod latest;
 pub mod param_filter;
 pub mod project;
 pub mod topk;
-pub mod trigger;
 pub mod union;
 
 use crate::ops::grouped::concat::GroupConcat;
@@ -54,7 +53,6 @@ pub enum NodeOperator {
     Identity(identity::Identity),
     Filter(filter::Filter),
     TopK(topk::TopK),
-    Trigger(trigger::Trigger),
 }
 
 impl ToString for NodeOperator {
@@ -71,7 +69,6 @@ impl ToString for NodeOperator {
             NodeOperator::Identity(_) => "Identity",
             NodeOperator::Filter(_) => "Filter",
             NodeOperator::TopK(_) => "TopK",
-            NodeOperator::Trigger(_) => "Trigger",
         }
         .to_string()
     }
@@ -91,7 +88,6 @@ macro_rules! impl_ingredient_fn_mut {
             NodeOperator::Identity(ref mut i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref mut i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref mut i) => i.$fn($($arg),*),
-            NodeOperator::Trigger(ref mut i) => i.$fn($($arg),*),
         }
     }
 }
@@ -110,7 +106,6 @@ macro_rules! impl_ingredient_fn_ref {
             NodeOperator::Identity(ref i) => i.$fn($($arg),*),
             NodeOperator::Filter(ref i) => i.$fn($($arg),*),
             NodeOperator::TopK(ref i) => i.$fn($($arg),*),
-            NodeOperator::Trigger(ref i) => i.$fn($($arg),*),
         }
     }
 }
