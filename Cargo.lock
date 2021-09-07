@@ -3491,7 +3491,6 @@ dependencies = [
  "postgres-native-tls",
  "proptest",
  "psql-srv",
- "slog",
  "test-strategy",
  "thiserror",
  "tokio 1.8.1",
