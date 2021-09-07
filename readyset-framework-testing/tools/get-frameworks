@@ -5,25 +5,21 @@ import os
 import sys
 import yaml
 
-frameworks = []
+config = {}
 dir_path = os.path.dirname(os.path.realpath(__file__))
-with open('%s/../frameworks.yaml' % dir_path) as conf:
-    config = yaml.load(conf, Loader=yaml.SafeLoader)
-    frameworks = config['frameworks']
+with open("%s/../frameworks.yaml" % dir_path) as conf:
+    config = yaml.load(conf, Loader=yaml.SafeLoader)["frameworks"]
 
-if(os.environ.get('FILTER_FROM_STDIN') != None):
+if os.environ.get("FILTER_FROM_STDIN") != None:
     filter_frameworks = {}
     for f in sys.stdin:
-        path = f.split(os.path.sep)
-        if(len(path) < 3):
+        path = f.strip().split(os.path.sep)
+        if len(path) < 4:
             continue
-        if(path[1] != 'frameworks'):
+        if path[1] != "frameworks":
             continue
         filter_frameworks[os.path.join(path[2], path[3])] = None
-    frameworks = list(filter(lambda f: f in filter_frameworks, frameworks))
+    for (dialect, frameworks) in config.items():
+        config[dialect] = list(filter(lambda f: f in filter_frameworks, frameworks))
 
-if(os.environ.get('OUTPUT') == 'plain'):
-    for framework in frameworks:
-        print(framework)
-else:
-    print(json.dumps(frameworks))
+print(json.dumps(config, indent=4))

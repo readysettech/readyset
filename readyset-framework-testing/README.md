@@ -38,7 +38,7 @@ export RS_DIALECT=mysql80
 #### Testing local changes
 
 To test local changes to a test, there are two steps - build the test's container image, and run it.
-* To build, simply run `./run.sh build_image "$language/$framework"`, e.g. `./run.sh build_image rust/mysql_async`
+* To build, simply run `./run.sh build_image "$dialect" "$language/$framework"`, e.g. `./run.sh build_image mysql rust/mysql_async`
 * To run, follow the instructions under "Running the tests", above.
 
 ##### Example

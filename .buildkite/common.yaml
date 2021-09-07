@@ -382,7 +382,7 @@ steps:
           - NIGHTLY=false
           mount-buildkite-agent: true
           config:
-            - .buildkite/docker-compose.readyset80.yml
+            - .buildkite/docker-compose.readyset-mysql80.yml
             - build/docker-compose.test-deploy.yaml
       - ecr#v2.2.0:
           login: true

@@ -30,34 +30,37 @@ function cleanup_tables() {
   done | mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" 2>/dev/null;
 }
 
-# usage: generate_image_name "$language/$framework"
+# usage: generate_image_name "$dialect" "$language/$framework"
 function generate_image_name() {
-  echo "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/${1}:latest" | tr '[:upper:]' '[:lower:]'
+  echo "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/${1}/${2}:latest" | tr '[:upper:]' '[:lower:]'
 }
 
-# usage: pull_image "$language/$framework"
+# usage: pull_image "$dialect" "$language/$framework"
 function pull_image() {
-  docker pull "$(generate_image_name "${1}")"
+  docker pull "$(generate_image_name "${1}" "${2}")"
 }
 
-# usage: build_image "$language/$framework"
+# usage: build_image "$dialect" "$language/$framework"
 function build_image() {
   SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-  docker build -t "$(generate_image_name "${1}")" "$SCRIPT_DIR/frameworks/${1}"
+  docker build -t "$(generate_image_name "${1}" "${2}")" -f "$SCRIPT_DIR/frameworks/${2}/Dockerfile.${1}" "$SCRIPT_DIR/frameworks/${2}"
 }
 
 # usage: run_test language/framework
-#    To rebuild a framework's container image for testing during local development, use build_image "$language/$framework"
+#    To rebuild a framework's container image for testing during local development, use build_image "$dialect" "$language/$framework"
 function run_test() {
   validate_environment
 
-  local language framework
+  local dialect language framework
   language="$(echo "$1" | cut -d'/' -f1)"
   framework="$(echo "$1" | cut -d'/' -f2)"
+  if [[ "${RS_DIALECT}" == 'mysql57' ]] || [[ "${RS_DIALECT}" == 'mysql80' ]]; then
+    dialect=mysql
+  fi
 
   pushd "frameworks/${language}/${framework}" >/dev/null || return
 
-  tag="$(generate_image_name "${language}/${framework}")"
+  tag="$(generate_image_name "${dialect}" "${language}/${framework}")"
   if [ -n "${QUIET}" ]; then
     docker run --rm -i -e RS_HOST -e RS_USERNAME -e RS_PASSWORD -e RS_PORT -e RS_DATABASE -e RS_NUM_SHARDS -e RS_DIALECT "${tag}" &>/dev/null
   else
@@ -65,7 +68,7 @@ function run_test() {
   fi;
 
   result="$?"
-  echo "${language}/${framework}: $result"
+  echo "${dialect}/${language}/${framework}: $result"
   popd >/dev/null || return
 
   cleanup_tables
