@@ -21,11 +21,12 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::coverage::QueryCoverageInfoRef;
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::{rewrite, UpstreamDatabase};
+use crate::{rewrite, QueryHandler, UpstreamDatabase};
 
 pub mod noria_connector;
 
 pub use self::noria_connector::NoriaConnector;
+use std::marker::PhantomData;
 
 pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
     let took = start.elapsed();
@@ -115,11 +116,11 @@ impl BackendBuilder {
         Self::default()
     }
 
-    pub fn build<A: 'static + Authority, DB>(
+    pub fn build<A: 'static + Authority, DB, Handler>(
         self,
         noria: NoriaConnector<A>,
         upstream: Option<DB>,
-    ) -> Backend<A, DB> {
+    ) -> Backend<A, DB, Handler> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
@@ -138,6 +139,7 @@ impl BackendBuilder {
             timestamp_client: self.timestamp_client,
             prepared_statements: Default::default(),
             query_coverage_info: self.query_coverage_info,
+            _query_handler: PhantomData,
         }
     }
 
@@ -186,7 +188,7 @@ impl BackendBuilder {
     }
 }
 
-pub struct Backend<A: 'static + Authority, DB> {
+pub struct Backend<A: 'static + Authority, DB, Handler> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
     // all queries previously prepared, mapped by their ID
@@ -225,6 +227,7 @@ pub struct Backend<A: 'static + Authority, DB> {
     /// If None, query coverage analysis is disabled
     #[allow(dead_code)] // TODO: Remove once this is used
     query_coverage_info: Option<QueryCoverageInfoRef>,
+    _query_handler: PhantomData<Handler>,
 }
 
 #[derive(Debug)]
@@ -272,10 +275,11 @@ where
 /// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the
 ///    most appropriate MySQL error code and write that back to the caller without dropping the
 ///    connection.
-impl<A, DB> Backend<A, DB>
+impl<A, DB, Handler> Backend<A, DB, Handler>
 where
     A: 'static + Authority,
     DB: 'static + UpstreamDatabase,
+    Handler: 'static + QueryHandler,
 {
     pub fn prepared_count(&self) -> u32 {
         self.prepared_count
@@ -738,6 +742,25 @@ where
                 }
             }
         };
+
+        if Handler::requires_fallback(&parsed_query) {
+            // Noria can't handle this query according to the handler.
+            return if self.upstream.is_some() {
+                // Fallback is enabled, so route this query to the underlying
+                // database.
+                let res = self.query_fallback(query).await?;
+                if self.slowlog {
+                    warn_on_slow_query(&start, query);
+                }
+                Ok(res)
+            } else {
+                // Fallback is not enabled, so let the handler return a default result or
+                // throw an error.
+                Ok(QueryResult::Noria(Handler::default_response(
+                    &parsed_query,
+                )?))
+            };
+        }
 
         // If we have an upstream then we will pass valid set statements across to that upstream.
         // If no upstream is present we will ignore the statement

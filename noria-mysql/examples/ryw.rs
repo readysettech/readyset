@@ -11,9 +11,9 @@ use noria_client::{
         noria_connector::{self, NoriaConnector},
         BackendBuilder, QueryResult,
     },
-    UpstreamDatabase,
+    Backend, UpstreamDatabase,
 };
-use noria_mysql::MySqlUpstream;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 
 /// This example demonstrates setting Noria up with a separate MySQL database.
 /// Run `ryw-setup.sh` once noria is running to configure all of the
@@ -39,7 +39,7 @@ async fn main() {
 
     let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
-    let mut b = BackendBuilder::new()
+    let mut b: Backend<_, _, MySqlQueryHandler> = BackendBuilder::new()
         .require_authentication(false)
         .enable_ryw(true)
         .build(noria, upstream);

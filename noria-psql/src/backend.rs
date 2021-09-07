@@ -6,6 +6,7 @@ use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 
 use crate::error::Error;
+use crate::query_handler::PostgreSqlQueryHandler;
 use crate::response::{PrepareResponse, QueryResponse};
 use crate::resultset::Resultset;
 use crate::row::Row;
@@ -16,7 +17,9 @@ use crate::PostgreSqlUpstream;
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
-pub struct Backend<A: 'static + Authority>(pub cl::Backend<A, PostgreSqlUpstream>);
+pub struct Backend<A: 'static + Authority>(
+    pub cl::Backend<A, PostgreSqlUpstream, PostgreSqlQueryHandler>,
+);
 
 impl<A> Backend<A>
 where

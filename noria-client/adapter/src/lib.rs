@@ -16,7 +16,7 @@ use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
-use noria_client::UpstreamDatabase;
+use noria_client::{QueryHandler, UpstreamDatabase};
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, info, span, Level};
@@ -30,10 +30,11 @@ use noria_client::{Backend, BackendBuilder};
 #[async_trait]
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
+    type Handler: QueryHandler;
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: Backend<ZookeeperAuthority, Self::UpstreamDatabase>,
+        backend: Backend<ZookeeperAuthority, Self::UpstreamDatabase, Self::Handler>,
     );
 }
 

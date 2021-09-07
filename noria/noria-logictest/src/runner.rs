@@ -24,8 +24,8 @@ use noria::consensus::{LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
 use noria_client::backend::{BackendBuilder, NoriaConnector};
 use noria_client::UpstreamDatabase;
-use noria_mysql::MySqlUpstream;
-use noria_psql::PostgreSqlUpstream;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
+use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use noria_server::{Builder, ReuseConfigType};
 
 use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
@@ -468,7 +468,7 @@ impl TestScript {
             let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
 
             macro_rules! make_backend {
-                ($upstream:ty) => {{
+                ($upstream:ty, $handler:ty) => {{
                     // cannot use .await inside map
                     #[allow(clippy::manual_map)]
                     let upstream = match replication_url.clone() {
@@ -482,20 +482,26 @@ impl TestScript {
 
                     BackendBuilder::new()
                         .require_authentication(false)
-                        .build::<A, _>(noria, upstream)
+                        .build::<A, _, $handler>(noria, upstream)
                 }};
             }
 
             match database_type {
                 DatabaseType::MySQL => MysqlIntermediary::run_on_tcp(
-                    noria_mysql::Backend(make_backend!(MySqlUpstream)),
+                    noria_mysql::Backend(make_backend!(MySqlUpstream, MySqlQueryHandler)),
                     s,
                 )
                 .await
                 .unwrap(),
                 DatabaseType::PostgreSQL => {
-                    psql_srv::run_backend(noria_psql::Backend(make_backend!(PostgreSqlUpstream)), s)
-                        .await
+                    psql_srv::run_backend(
+                        noria_psql::Backend(make_backend!(
+                            PostgreSqlUpstream,
+                            PostgreSqlQueryHandler
+                        )),
+                        s,
+                    )
+                    .await
                 }
             }
         });

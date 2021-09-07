@@ -9,7 +9,7 @@ use tokio::net;
 
 use noria_client::backend as cl;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
-use noria_psql::{Backend, PostgreSqlUpstream};
+use noria_psql::{Backend, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use psql_srv::run_backend;
 
 #[cfg(not(target_env = "msvc"))]
@@ -22,11 +22,12 @@ struct PsqlHandler;
 #[async_trait]
 impl ConnectionHandler for PsqlHandler {
     type UpstreamDatabase = PostgreSqlUpstream;
+    type Handler = PostgreSqlQueryHandler;
 
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: cl::Backend<noria::ZookeeperAuthority, PostgreSqlUpstream>,
+        backend: cl::Backend<noria::ZookeeperAuthority, PostgreSqlUpstream, PostgreSqlQueryHandler>,
     ) {
         let backend = Backend(backend);
         run_backend(backend, stream).await;

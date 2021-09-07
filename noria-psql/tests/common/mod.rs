@@ -7,13 +7,14 @@ use noria::consensus::Authority;
 use noria_client::test_helpers;
 use noria_client::Backend;
 
-use noria_psql::PostgreSqlUpstream;
+use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 
 pub struct PostgreSQLAdapter;
 #[async_trait]
 impl test_helpers::Adapter for PostgreSQLAdapter {
     type ConnectionOpts = postgres::Config;
     type Upstream = PostgreSqlUpstream;
+    type Handler = PostgreSqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::PostgreSQL;
 
@@ -57,7 +58,7 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
         management_db.simple_query("CREATE DATABASE noria").unwrap();
     }
 
-    async fn run_backend<A>(backend: Backend<A, Self::Upstream>, s: TcpStream)
+    async fn run_backend<A>(backend: Backend<A, Self::Upstream, Self::Handler>, s: TcpStream)
     where
         A: 'static + Authority,
     {

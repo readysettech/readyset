@@ -4,7 +4,8 @@ use nom_sql::SelectStatement;
 use noria::{ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::{self, NoriaConnector};
 use noria_client::backend::{BackendBuilder, QueryResult};
-use noria_mysql::MySqlUpstream;
+use noria_client::Backend;
+use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
     }));
     let require_authentication = false;
 
-    let mut b = BackendBuilder::new()
+    let mut b: Backend<_, _, MySqlQueryHandler> = BackendBuilder::new()
         .slowlog(slowlog)
         .users(users.clone())
         .require_authentication(require_authentication)

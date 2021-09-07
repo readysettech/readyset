@@ -5,9 +5,7 @@ use derive_more::{Deref, DerefMut};
 use tokio::io::{self, AsyncWrite};
 use tracing::trace;
 
-use msql_srv::{
-    Column, ColumnFlags, ColumnType, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
-};
+use msql_srv::{ColumnFlags, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter};
 use mysql_async::consts::StatusFlags;
 use noria::consensus::Authority;
 use noria::errors::internal_err;
@@ -19,8 +17,7 @@ use upstream::StatementMeta;
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
-use crate::Error;
-use core::iter;
+use crate::{Error, MySqlQueryHandler};
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -105,7 +102,9 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
 }
 
 #[derive(Deref, DerefMut)]
-pub struct Backend<A: 'static + Authority>(pub noria_client::Backend<A, MySqlUpstream>);
+pub struct Backend<A: 'static + Authority>(
+    pub noria_client::Backend<A, MySqlUpstream, MySqlQueryHandler>,
+);
 
 #[async_trait]
 impl<W, A> MysqlShim<W> for Backend<A>
@@ -289,34 +288,7 @@ where
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> Result<(), Error> {
-        let query_result = if query.starts_with("SELECT @@") || query.starts_with("select @@") {
-            // We are selecting system variables, so we would want to fallback to MySQL.
-            if self.has_fallback() {
-                self.query_fallback(query).await
-            } else {
-                // There's no fallback, so we return nothing, except if the variable is
-                // `@@max_allowed_packet`, because that is a result that the MySQL library
-                // needs to establish a connection (when using `[mysql::Conn::new]`).
-                let var = &query.get(b"SELECT @@".len()..);
-                return match var {
-                    Some("max_allowed_packet") => {
-                        let cols = &[Column {
-                            table: String::new(),
-                            column: "@@max_allowed_packet".to_owned(),
-                            coltype: ColumnType::MYSQL_TYPE_LONG,
-                            colflags: ColumnFlags::UNSIGNED_FLAG,
-                        }];
-                        let mut w = results.start(cols).await?;
-                        w.write_row(iter::once(67108864u32)).await?;
-                        Ok(w.finish().await?)
-                    }
-                    _ => Ok(results.completed(0, 0, None).await?),
-                };
-            }
-        } else {
-            self.query(query).await
-        };
-        let res = match query_result {
+        let res = match self.query(query).await {
             Ok(QueryResult::Noria(
                 noria_connector::QueryResult::CreateTable
                 | noria_connector::QueryResult::CreateView,

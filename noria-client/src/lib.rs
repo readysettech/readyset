@@ -8,10 +8,12 @@
 pub mod backend;
 mod convert;
 pub mod coverage;
+mod query_handler;
 mod rewrite;
 pub mod test_helpers;
 mod upstream_database;
 mod utils;
 
 pub use crate::backend::{Backend, BackendBuilder};
+pub use crate::query_handler::QueryHandler;
 pub use crate::upstream_database::{UpstreamDatabase, UpstreamPrepare};
