@@ -4,7 +4,6 @@
 //! same applies to external users of the dataflow crate. Therefore, pay attention to whether `pub`
 //! or `crate` is used.
 use std::cell;
-use std::collections::HashMap;
 
 // core types
 pub(crate) use crate::processing::Ingredient;
@@ -44,6 +43,5 @@ pub use vec1::vec1;
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;
 pub trait Executor {
-    fn create_universe(&mut self, req: HashMap<String, DataType>);
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>);
 }

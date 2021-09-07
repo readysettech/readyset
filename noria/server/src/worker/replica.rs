@@ -4,7 +4,7 @@ use ahash::AHashMap;
 use anyhow::{self, Context as AnyhowContext};
 use async_bincode::AsyncDestination;
 use dataflow::payload::SourceChannelIdentifier;
-use dataflow::prelude::{DataType, Executor};
+use dataflow::prelude::Executor;
 use dataflow::{Domain, DomainRequest, Packet};
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
@@ -14,7 +14,7 @@ use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
 use slog::{debug, o, warn};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::sync::{atomic, Arc};
 use std::time;
 use strawpoll::Strawpoll;
@@ -111,14 +111,6 @@ impl Outboxes {
 }
 
 impl Executor for Outboxes {
-    fn create_universe(&mut self, _universe: HashMap<String, DataType>) {
-        /*
-        self.ctrl_tx
-            .send(CoordinationPayload::CreateUniverse(universe))
-            .expect("asked to send to controller, but controller has gone away");
-         */
-    }
-
     fn send(&mut self, dest: ReplicaAddr, m: Box<Packet>) {
         self.domains.entry(dest).or_default().push_back(m);
     }
