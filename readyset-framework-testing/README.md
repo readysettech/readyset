@@ -80,3 +80,34 @@ Provided there is a `Dockerfile`, tests will be run automatically. The guideline
   * If the framework is strictly used to setup a server, such as a web service, the container entrypoint should start the service as a background process, then interact with it in ways that exercise the database features.
 * The container's entrypoint should exit with a status code of 0 when the test succeeds, or nonzero if it fails in any way.
 * In cases when the test container fails prematurely, the framework will take care of cleaning up tables after each test.
+
+## Automated test workflows (high-level)
+Because the logic around CI and periodic runs is...let's politely say _complicated_, we have it documented here.
+
+Definitions:
+* Framework - a database client or client library; examples:
+  * rust/diesel
+  * mysqldump/import
+  * ruby/rails6
+* Dialect - a SQL dialect; currently two are supported:
+  * MySQL
+    * 8.0
+  * Postgres
+    * 13
+
+Workflows:
+* Periodically (currently every 12 hours)
+  * For each $framework in the test harness
+    * For each $dialect with a test for $framework
+      1. Build a test container image for $framework on $dialect
+      1. Test $framework against $dialect's reference implementation
+      1. If successful, test $framework against ReadySet's implementation of $dialect
+* On every CL
+  * For each $framework whose test was changed in _this CL_
+    * For each $dialect with a test for $framework
+      1. Build a test container image for $framework on $dialect
+        * Hard failure - if building the image doesn't work, we can't consider the test working
+      1. Test $framework against $dialect's reference implementation
+        * Hard failure - if the test doesn't work against a vanilla database, we can't consider the test working
+      1. If successful, test $framework against ReadySet's implementation of $dialect
+        * Soft failure - we know ReadySet will currently fail in lots of cases; expanding coverage is fine, even if we know it doesn't work
