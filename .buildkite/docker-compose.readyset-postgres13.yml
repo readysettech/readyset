@@ -1,0 +1,76 @@
+version: "3.8"
+services:
+  zookeeper:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  postgres:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres:13
+    expose:
+      - 5432
+    environment:
+      POSTGRES_DATABASE: test
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+    # doesn't actually depend on zookeeper, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # noria-server waits on both zookeeper and postgres for fallback.
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: "pg_isready"
+      start_period: 5s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+  readyset-server:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${BUILDKITE_COMMIT}"
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      ZOOKEEPER_ADDRESS: zookeeper:2181
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: frameworktests
+      REPLICATION_URL: postgres://root:root@postgres/test
+    links:
+      - postgres
+      - zookeeper
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:${BUILDKITE_COMMIT}"
+    expose:
+      - 3333
+    environment:
+      ZOOKEEPER_ADDRESS: zookeeper:2181
+      LISTEN_ADDRESS: 0.0.0.0:3333
+      NORIA_DEPLOYMENT: frameworktests
+      UPSTREAM_DB_URL: postgres://root:root@postgres/test
+    links:
+      - readyset-server
+      - postgres
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "pg_isready", "--port=3333"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      readyset-server:
+        condition: service_healthy

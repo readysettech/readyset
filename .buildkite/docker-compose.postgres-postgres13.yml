@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:13
+    expose:
+      - 3333
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      # Undocumented, but used here: https://github.com/docker-library/postgres/blob/master/13/alpine/docker-entrypoint.sh#L245
+      PGPORT: "3333"
+    healthcheck:
+      test: "pg_isready"
+      start_period: 5s
+      interval: 10s
+      timeout: 2s
+      retries: 5

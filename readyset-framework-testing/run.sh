@@ -56,6 +56,8 @@ function run_test() {
   framework="$(echo "$1" | cut -d'/' -f2)"
   if [[ "${RS_DIALECT}" == 'mysql57' ]] || [[ "${RS_DIALECT}" == 'mysql80' ]]; then
     dialect=mysql
+  elif [[ "${RS_DIALECT}" == 'postgres13' ]]; then
+    dialect=postgres
   fi
 
   pushd "frameworks/${language}/${framework}" >/dev/null || return
@@ -80,8 +82,12 @@ function validate_environment() {
     echo "Ensure RS_{HOST,PORT,USERNAME,PASSWORD,DATABASE,NUM_SHARDS,DIALECT} are set"
     exit 1
   fi
-  if [[ "$RS_DIALECT" != 'mysql57' ]] && [[ "$RS_DIALECT" != 'mysql80' ]]; then
-    echo "Unknown RS_DIALECT '$RS_DIALECT'; must be either 'mysql57' or 'mysql80'"
+  if
+    [[ "$RS_DIALECT" != 'mysql57' ]] &&
+    [[ "$RS_DIALECT" != 'mysql80' ]] &&
+    [[ "$RS_DIALECT" != 'postgres13' ]];
+  then
+    echo "Unknown RS_DIALECT '$RS_DIALECT'; must be either 'mysql57', 'mysql80', or 'postgres13'"
     exit 1
   fi
 }

@@ -22,4 +22,5 @@ frameworks:
     - 'rust/mysql'
     - 'rust/mysql_async'
     - 'rust/sqlx'
+  postgres: []
 
