@@ -32,13 +32,14 @@ steps:
 
   - label: ":docker: Build readyset-psql image"
     key: readyset-psql-image
+    depends_on:
+      - list-frameworks
     command: >-
       if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
         .buildkite/build_image.sh  build/Dockerfile.readyset-psql readyset-psql --build-arg release=1
-      else
+      elif .buildkite/will-run-psql-tests.sh; then
         .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
       fi
-    branches: refs/heads/main
     plugins:
       ecr#v2.2.0:
         login: true
