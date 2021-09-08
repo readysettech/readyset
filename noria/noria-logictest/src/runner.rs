@@ -438,11 +438,7 @@ impl TestScript {
     ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
         let database_type = run_opts.database_type;
 
-        let replication_url = run_opts.replication_url.as_ref().map(|replication_url| {
-            // Append the database name to the replication url
-            format!("{}/{}", replication_url, run_opts.db_name())
-        });
-
+        let replication_url = run_opts.replication_url.clone();
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
         let mut retry: usize = 0;
@@ -512,7 +508,9 @@ impl TestScript {
                 DatabaseType::MySQL => mysql::OptsBuilder::default().tcp_port(addr.port()).into(),
                 DatabaseType::PostgreSQL => {
                     let mut config = pgsql::Config::default();
+                    config.host("localhost");
                     config.port(addr.port());
+                    config.dbname("noria");
                     config.into()
                 }
             },
