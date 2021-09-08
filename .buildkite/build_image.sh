@@ -28,7 +28,7 @@ fi
 echo "+++ :docker: Building $image:$VERSION"
 DOCKER_BUILDKIT=1 docker build \
     -f "$dockerfile" \
-    $cache_from \
+    "$cache_from" \
     -t "$image:$VERSION" \
     --build-arg BUILDKIT_INLINE_CACHE=1 \
     "$@" \
@@ -36,6 +36,7 @@ DOCKER_BUILDKIT=1 docker build \
 
 if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
     docker tag "$image:$VERSION" "$image:latest"
+    docker tag "$image:$VERSION" "$image:release-${BUILDKITE_COMMIT}"
 fi
 
 echo "--- :docker: Pushing $image"

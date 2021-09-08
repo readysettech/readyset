@@ -10,7 +10,7 @@ steps:
 
   - label: ':git: Lint commits'
     key: lint-commits
-    branches: '!master'
+    branches: '!refs/heads/main'
     commands:
     - ./scripts/commit_lint.sh
 
@@ -132,6 +132,15 @@ steps:
     continue_on_failure: true
   - command: ".buildkite/set_gerrit_status.sh"
   - wait
+
+  - trigger: "docker-release"
+    branches: refs/heads/main
+    label: ":rocket: Docker Release"
+    build:
+      branch: refs/heads/main
+      commit: HEAD
+      message: ":rocket: Docker Release"
+    async: true
 
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries

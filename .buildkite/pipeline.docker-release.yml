@@ -1,0 +1,10 @@
+steps:
+  - block: "Create :docker: release?"
+    fields:
+      - key: release-name
+        required: true
+        text: Release Name
+
+  - label: ":rocket: :pipeline: Upload docker release pipeline"
+    commands:
+      - .buildkite/generate-pipeline-docker-release.sh | buildkite-agent pipeline upload
