@@ -69,8 +69,7 @@ test_template = """
           login: true
 """
 soft_fail = """
-    soft_fail:
-      - exit_status: 1
+    soft_fail: true
 """
 
 
