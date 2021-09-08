@@ -24,6 +24,8 @@ steps:
           mount-ssh-agent: true
           environment:
           - NIGHTLY=true
+      - ecr#v2.2.0:
+          login: true
   - key: generate-pipeline
     label: "Generate test pipeline"
     depends_on:
