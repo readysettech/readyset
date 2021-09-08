@@ -7,6 +7,10 @@ import sys
 
 dialect_names = {"mysql": "MySQL", "postgres": "Postgres"}
 dialect_versions = {"mysql": ["mysql80"], "postgres": ["postgres13"]}
+dialect_readyset_build_steps = {
+    "mysql": "readyset-mysql-image",
+    "postgres": "readyset-psql-image",
+}
 
 compose_template = """
 version: '3.8'
@@ -71,7 +75,14 @@ soft_fail = """
 
 
 def generate_test_step(
-    server, dialect, dialect_version, num_shards, depends_on, framework, fail
+    server,
+    dialect,
+    dialect_version,
+    num_shards,
+    depends_on,
+    framework,
+    framework_slug,
+    fail,
 ):
     service = "%s-%s%s" % (
         server.lower(),
@@ -87,7 +98,7 @@ def generate_test_step(
         .replace("${NUM_SHARDS}", str(num_shards))
         .replace("${FRAMEWORK}", framework)
         .replace("${FRAMEWORK_SLUG}", framework_slug)
-        .replace("${DEPENDS_ON}", "%s-%s" % (depends_on, framework_slug))
+        .replace("${DEPENDS_ON}", json.dumps(depends_on))
     )
     if fail:
         step = step + soft_fail
@@ -145,9 +156,9 @@ result = ["  - wait"]
 config = json.load(agent.stdout)
 for (dialect, frameworks) in config.items():
     for framework in frameworks:
+        framework_slug = framework.replace("/", "_").replace(":", "_")
         write(
-            ".buildkite/gen/docker-compose.%s.%s.yml"
-            % (framework.replace("/", "_").replace(":", "_"), dialect),
+            ".buildkite/gen/docker-compose.%s.%s.yml" % (framework_slug, dialect),
             compose_template.replace("${DIALECT}", dialect).replace(
                 "${FRAMEWORK}", framework
             ),
@@ -160,8 +171,9 @@ for (dialect, frameworks) in config.items():
                     dialect,
                     dialect_version,
                     1,
-                    "build-%s" % (dialect,),
+                    ["readyset-server-image", "build-%s" % (dialect,)],
                     framework,
+                    framework_slug,
                     False,
                 )
             )
@@ -171,8 +183,13 @@ for (dialect, frameworks) in config.items():
                     dialect,
                     dialect_version,
                     1,
-                    "test-%s-%s" % (dialect, dialect_version),
+                    [
+                        "readyset-server-image",
+                        dialect_readyset_build_steps[dialect],
+                        "test-%s-%s" % (dialect, dialect_version),
+                    ],
                     framework,
+                    framework_slug,
                     fail,
                 )
             )
