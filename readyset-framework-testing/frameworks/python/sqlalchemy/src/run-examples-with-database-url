@@ -106,6 +106,7 @@ if(args['db'] is None):
 
 database_url = 'mysql://' + args['user'] + ((':' + args['passwd']) if 'passwd' in args else '') + '@' + args['host'] + ':' + str(args['port']) + '/' + args['db']
 connection = MySQLdb.connect(**args)
+connection.autocommit(True)
 
 os.chdir('upstream/examples')
 testfiles = []
