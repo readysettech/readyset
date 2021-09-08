@@ -346,6 +346,8 @@ steps:
           command: ["./.buildkite/list-frameworks.sh"]
           mount-buildkite-agent: true
           mount-ssh-agent: true
+          environment:
+          - NIGHTLY=false
       - ecr#v2.2.0:
           login: true
   - key: generate-pipeline
@@ -377,6 +379,7 @@ steps:
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
           - BUILDKITE_COMMIT
+          - NIGHTLY=false
           mount-buildkite-agent: true
           config:
             - .buildkite/docker-compose.readyset80.yml

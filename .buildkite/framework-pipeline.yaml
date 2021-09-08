@@ -34,6 +34,8 @@ steps:
           command: ["./.buildkite/generate-framework-pipeline.py"]
           mount-buildkite-agent: true
           propagate-environment: true
+          environment:
+          - NIGHTLY=true
       - ecr#v2.2.0:
           login: true
     artifact_paths:
