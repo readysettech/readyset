@@ -363,6 +363,7 @@ steps:
           propagate-environment: true
           environment:
           - NIGHTLY=false
+          - SOFT_FAIL=true
       - ecr#v2.2.0:
           login: true
     artifact_paths:

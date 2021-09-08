@@ -5,14 +5,8 @@ import os
 import subprocess
 import sys
 
-dialect_names = {
-    'mysql' : 'MySQL',
-    'postgres' : 'Postgres'
-}
-dialect_versions = {
-    'mysql' : ['mysql80'],
-    'postgres' : ['postgres13']
-}
+dialect_names = {"mysql": "MySQL", "postgres": "Postgres"}
+dialect_versions = {"mysql": ["mysql80"], "postgres": ["postgres13"]}
 
 compose_template = """
 version: '3.8'
@@ -171,18 +165,17 @@ for (dialect, frameworks) in config.items():
                     False,
                 )
             )
-            if os.environ.get("NIGHTLY") == "true":
-                result.append(
-                    generate_test_step(
-                        "readyset",
-                        dialect,
-                        dialect_version,
-                        1,
-                        "test-%s-%s" % (dialect, dialect_version),
-                        framework,
-                        fail,
-                    )
+            result.append(
+                generate_test_step(
+                    "readyset",
+                    dialect,
+                    dialect_version,
+                    1,
+                    "test-%s-%s" % (dialect, dialect_version),
+                    framework,
+                    fail,
                 )
+            )
 result = "\n".join(result)
 
 print(result)
