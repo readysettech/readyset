@@ -648,9 +648,23 @@ where
                     ))
                 }
             }
-            _ => {
-                error!("unsupported query");
-                unsupported!("query type unsupported");
+            nom_sql::SqlQuery::CreateTable(..)
+            | nom_sql::SqlQuery::CreateView(..)
+            | nom_sql::SqlQuery::Set(..)
+            | nom_sql::SqlQuery::StartTransaction(..)
+            | nom_sql::SqlQuery::Commit(..)
+            | nom_sql::SqlQuery::Rollback(..)
+            | nom_sql::SqlQuery::DropTable(..)
+            | nom_sql::SqlQuery::AlterTable(..)
+            | nom_sql::SqlQuery::CompoundSelect(..)
+            | nom_sql::SqlQuery::Delete(..) => {
+                if let Some(ref mut upstream) = self.upstream {
+                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                } else {
+                    // For now we only support prepare deletes over fallback.
+                    error!("unsupported query");
+                    unsupported!("query type unsupported");
+                }
             }
         };
 
