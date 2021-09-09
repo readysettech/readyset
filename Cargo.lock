@@ -2255,6 +2255,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "tokio 1.8.1",
+ "tracing",
 ]
 
 [[package]]

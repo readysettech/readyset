@@ -4,6 +4,7 @@ use futures::{FutureExt, TryFutureExt};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::process;
+use tracing::error;
 
 /// A version of the [`tokio::select`] macro that also emits an `allow` annotation for
 /// `clippy::unreachable` and `clippy::panic`, since both are internal to the expansion of the macro
@@ -26,5 +27,12 @@ where
 {
     AssertUnwindSafe(f) // safe because we don't actually use the future when handling errors
         .catch_unwind()
-        .unwrap_or_else(|_| process::abort())
+        .unwrap_or_else(|e| {
+            if let Some(panic_message) = e.downcast_ref::<String>() {
+                error!(%panic_message, "Task panicked; aborting");
+            } else {
+                error!("Task panicked with non-string message; aborting");
+            }
+            process::abort()
+        })
 }
