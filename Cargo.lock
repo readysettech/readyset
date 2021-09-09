@@ -3290,6 +3290,7 @@ dependencies = [
  "noria",
  "noria-client-metrics",
  "noria-server",
+ "readyset-logging",
  "regex",
  "thiserror",
  "timestamp_service",

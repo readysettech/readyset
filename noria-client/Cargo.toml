@@ -32,6 +32,7 @@ futures = "0.3.16"
 zookeeper = "0.5.4"
 noria-server = { path = "../noria/server/" }
 maplit = "1.0.2"
+readyset-logging = { path = "../readyset-logging" }
 
 [lib]
 path = "src/lib.rs"

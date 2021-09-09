@@ -98,6 +98,11 @@ pub fn setup<A>(
 where
     A: Adapter,
 {
+    // Run with VERBOSE=1 for log output.
+    if env::var("VERBOSE").is_ok() {
+        readyset_logging::init_test_logging();
+    }
+
     if fallback {
         A::recreate_database();
     }

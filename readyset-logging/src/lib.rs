@@ -70,3 +70,10 @@ impl Options {
         Ok(())
     }
 }
+
+/// Configure the global tracing subscriber for logging inside of tests
+pub fn init_test_logging() {
+    // This errors out if it's already been called within the scope of a process, which we don't
+    // care about, so we just discard the result
+    let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+}
