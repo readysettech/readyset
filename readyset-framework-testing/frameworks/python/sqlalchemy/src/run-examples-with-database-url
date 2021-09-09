@@ -103,10 +103,10 @@ args['db'] = os.environ.get('RS_DATABASE')
 if(args['db'] is None):
 	print('RS_DATABASE must be set')
 	os.Exit(3)
+args['autocommit'] = True
 
-database_url = 'mysql://' + args['user'] + ((':' + args['passwd']) if 'passwd' in args else '') + '@' + args['host'] + ':' + str(args['port']) + '/' + args['db']
+database_url = 'mysql://' + args['user'] + ((':' + args['passwd']) if 'passwd' in args else '') + '@' + args['host'] + ':' + str(args['port']) + '/' + args['db'] + '?autocommit=true'
 connection = MySQLdb.connect(**args)
-connection.autocommit(True)
 
 os.chdir('upstream/examples')
 testfiles = []
