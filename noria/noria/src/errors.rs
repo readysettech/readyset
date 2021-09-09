@@ -488,6 +488,15 @@ pub enum ReadySetError {
     /// Attempted to fill a key that has already been filled.
     #[error("attempted to fill already-filled key")]
     KeyAlreadyFilled,
+
+    /// Tried to look up non-existent column.
+    #[error("Could not look up non-existent column {column} in {node}")]
+    NonExistentColumn {
+        /// The column that was attempted to be looked up.
+        column: String,
+        /// The node the column was looked up in.
+        node: String,
+    },
 }
 
 impl ReadySetError {

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Error, Formatter};
 
-use dataflow::ops;
+use dataflow::{ops, prelude::ReadySetError};
 use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::ColumnSpecification;
@@ -246,7 +246,7 @@ impl MirNode {
         }
     }
 
-    pub fn column_id_for_column(&self, c: &Column) -> usize {
+    pub fn column_id_for_column(&self, c: &Column) -> ReadySetResult<usize> {
         #[allow(clippy::cmp_owned)]
         match self.inner {
             // if we're a base, translate to absolute column ID (taking into account deleted
@@ -261,13 +261,13 @@ impl MirNode {
                 .iter()
                 .rposition(|cs| Column::from(&cs.0.column) == *c)
             {
-                None => panic!(
-                    "tried to look up non-existent column {:?} in {}\ncolumn_specs={:?}",
-                    c, self.name, column_specs
-                ),
-                Some(id) => column_specs[id]
+                None => Err(ReadySetError::NonExistentColumn {
+                    column: c.name.clone(),
+                    node: self.name.clone(),
+                }),
+                Some(id) => Ok(column_specs[id]
                     .1
-                    .expect("must have an absolute column ID on base"),
+                    .expect("must have an absolute column ID on base")),
             },
             MirNodeInner::Reuse { ref node } => node.borrow().column_id_for_column(c),
             // otherwise, just look up in the column set
@@ -279,12 +279,11 @@ impl MirNode {
                     self.columns.iter().position(|cc| cc == c)
                 }
             } {
-                Some(id) => id,
-                None => panic!(
-                    "tried to look up non-existent column {:?} on node \
-                        \"{}\" (columns: {:?})",
-                    c, self.name, self.columns
-                ),
+                Some(id) => Ok(id),
+                None => Err(ReadySetError::NonExistentColumn {
+                    column: c.name.clone(),
+                    node: self.name.clone(),
+                }),
             },
         }
     }

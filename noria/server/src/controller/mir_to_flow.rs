@@ -508,7 +508,7 @@ fn make_union_node(
             .ok_or_else(|| internal_err(format!("no index {} in emit cols {:?}", i, emit)))?
             .iter()
             .map(|c| n.borrow().column_id_for_column(c))
-            .collect::<Vec<_>>();
+            .collect::<ReadySetResult<Vec<_>>>()?;
 
         let ni = n.borrow().flow_node_addr()?;
         emit_column_id.insert(ni, emit_cols);
@@ -554,11 +554,11 @@ fn make_grouped_node(
     let parent_na = parent.borrow().flow_node_addr()?;
     let parent_node = parent.borrow();
     let column_names = column_names(columns);
-    let over_col_indx = parent_node.column_id_for_column(on);
+    let over_col_indx = parent_node.column_id_for_column(on)?;
     let group_col_indx = group_by
         .iter()
         .map(|c| parent_node.column_id_for_column(c))
-        .collect::<Vec<_>>();
+        .collect::<ReadySetResult<Vec<_>>>()?;
     invariant!(!group_col_indx.is_empty());
 
     let na = match kind {
@@ -823,7 +823,7 @@ fn make_param_filter_node(
 
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
-    let col = parent.borrow().column_id_for_column(col);
+    let col = parent.borrow().column_id_for_column(col)?;
     let emit_key = column_names
         .iter()
         .rposition(|c| *c == emit_key.name)
@@ -854,7 +854,7 @@ fn make_latest_node(
     let group_col_indx = group_by
         .iter()
         .map(|c| parent.borrow().column_id_for_column(c))
-        .collect::<Vec<_>>();
+        .collect::<ReadySetResult<Vec<_>>>()?;
 
     // latest doesn't support compound group by
     if group_col_indx.len() != 1 {
@@ -904,7 +904,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
         Expression::Column(nom_sql::Column { name, table, .. }) => Ok(DataflowExpression::Column(
             parent
                 .borrow()
-                .column_id_for_column(&Column::new(table.as_deref(), &name)),
+                .column_id_for_column(&Column::new(table.as_deref(), &name))?,
         )),
         Expression::BinaryOp { lhs, op, rhs } => Ok(DataflowExpression::Op {
             op,
@@ -1032,12 +1032,12 @@ fn make_distinct_node(
         columns
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c))
-            .collect::<Vec<_>>()
+            .collect::<ReadySetResult<Vec<_>>>()?
     } else {
         group_by
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c))
-            .collect::<Vec<_>>()
+            .collect::<ReadySetResult<Vec<_>>>()?
     };
 
     // make the new operator and record its metadata
@@ -1078,13 +1078,13 @@ fn make_topk_node(
     let group_by_indx = group_by
         .iter()
         .map(|c| parent.borrow().column_id_for_column(c))
-        .collect::<Vec<_>>();
+        .collect::<ReadySetResult<Vec<_>>>()?;
 
     let cmp_rows = match *order {
         Some(ref o) => {
             invariant_eq!(offset, 0); // Non-zero offset not supported
 
-            let columns: Vec<_> = o
+            let columns = o
                 .iter()
                 .map(|&(ref c, ref order_type)| {
                     // SQL and Soup disagree on what ascending and descending order means, so do the
@@ -1093,9 +1093,12 @@ fn make_topk_node(
                         OrderType::OrderAscending => OrderType::OrderDescending,
                         OrderType::OrderDescending => OrderType::OrderAscending,
                     };
-                    (parent.borrow().column_id_for_column(c), reversed_order_type)
+                    parent
+                        .borrow()
+                        .column_id_for_column(c)
+                        .map(|id| (id, reversed_order_type))
                 })
-                .collect();
+                .collect::<ReadySetResult<Vec<_>>>()?;
 
             columns
         }
@@ -1118,17 +1121,30 @@ fn make_post_lookup(
     returned_cols: &Option<Vec<Column>>,
     default_row: Option<Vec<DataType>>,
 ) -> ReadySetResult<PostLookup> {
-    let order_by = order_by.as_ref().map(|order| {
-        order
-            .iter()
-            .map(|(col, ot)| (parent.borrow().column_id_for_column(col), *ot))
-            .collect()
-    });
-    let returned_cols = returned_cols.as_ref().map(|col| {
-        col.iter()
-            .map(|col| (parent.borrow().column_id_for_column(col)))
-            .collect()
-    });
+    let order_by = if let Some(order) = order_by.as_ref() {
+        Some(
+            order
+                .iter()
+                .map(|(col, ot)| {
+                    parent
+                        .borrow()
+                        .column_id_for_column(col)
+                        .map(|id| (id, *ot))
+                })
+                .collect::<ReadySetResult<Vec<(usize, OrderType)>>>()?,
+        )
+    } else {
+        None
+    };
+    let returned_cols = if let Some(col) = returned_cols.as_ref() {
+        Some(
+            col.iter()
+                .map(|col| (parent.borrow().column_id_for_column(col)))
+                .collect::<ReadySetResult<_>>()?,
+        )
+    } else {
+        None
+    };
     Ok(PostLookup {
         order_by,
         limit,
@@ -1157,7 +1173,7 @@ fn materialize_leaf_node(
         let key_cols: Vec<_> = key_cols
             .iter()
             .map(|c| parent.borrow().column_id_for_column(c))
-            .collect();
+            .collect::<ReadySetResult<Vec<_>>>()?;
         mig.maintain(name, na, &key_cols[..], post_lookup);
     } else {
         // if no key specified, default to the first column
