@@ -19,7 +19,7 @@ pub(crate) trait ModuleLocator {
 }
 
 // The most common kind of root module is Service which contains all of the different forms
-#[derive(Clap, Debug)]
+#[derive(Clap, Debug, PartialEq)]
 pub(crate) struct ServiceModuleLocator {
     domain: String,
     environment: String,
@@ -29,7 +29,7 @@ pub(crate) struct ServiceModuleLocator {
 }
 
 // The admin modules contain IAMs and SSO configuration only. These only have quality and region.
-#[derive(Clap, Debug)]
+#[derive(Clap, Debug, PartialEq)]
 pub(crate) struct AdminModuleLocator {
     #[clap(long, default_value = "default")]
     quality: String,
@@ -38,7 +38,7 @@ pub(crate) struct AdminModuleLocator {
 
 // The deploy modules contain resources that are shared between different accounts. These only have
 // region.
-#[derive(Clap, Debug)]
+#[derive(Clap, Debug, PartialEq)]
 pub(crate) struct DeployModuleLocator {
     region: String,
 }
@@ -260,4 +260,48 @@ pub(crate) fn find_all_service_module_locators() -> Result<Vec<ServiceModuleLoca
         }
     }
     Ok(service_module_locators)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn deploy_module_locator_roundtrip() {
+        let original_module_locator = DeployModuleLocator {
+            region: String::from("us-east-2"),
+        };
+        let mut module_locator_args = original_module_locator.to_args();
+        module_locator_args.insert(0, "command".to_string());
+        let parsed_module_locator =
+            DeployModuleLocator::try_parse_from(module_locator_args).unwrap();
+        assert_eq!(original_module_locator, parsed_module_locator);
+    }
+
+    #[test]
+    fn admin_module_locator_roundtrip() {
+        let original_module_locator = AdminModuleLocator {
+            quality: String::from("default"),
+            region: String::from("us-east-2"),
+        };
+        let mut module_locator_args = original_module_locator.to_args();
+        module_locator_args.insert(0, "command".to_string());
+        let parsed_module_locator =
+            AdminModuleLocator::try_parse_from(module_locator_args).unwrap();
+        assert_eq!(original_module_locator, parsed_module_locator);
+    }
+
+    #[test]
+    fn service_module_locator_roundtrip() {
+        let original_module_locator = ServiceModuleLocator {
+            domain: String::from("readyset"),
+            environment: String::from("build"),
+            quality: String::from("default"),
+            region: String::from("us-east-2"),
+        };
+        let mut module_locator_args = original_module_locator.to_args();
+        module_locator_args.insert(0, "command".to_string());
+        let parsed_module_locator =
+            ServiceModuleLocator::try_parse_from(module_locator_args).unwrap();
+        assert_eq!(original_module_locator, parsed_module_locator);
+    }
 }

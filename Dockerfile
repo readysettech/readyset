@@ -1,5 +1,3 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as checker
-RUN rustup component add rustfmt clippy
 
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as chef
 RUN cargo install cargo-chef

@@ -1,16 +1,16 @@
 steps:
-  - label: ":docker: Build Substrate Rust Checker Image"
-    key: build-rust-checks-image
+  - label: ":docker: Build Substrate Rust Build Image"
+    key: build-rust-build-image
     commands:
-      - "echo --- :docker: Building checker image"
+      - "echo --- :docker: Building build image"
       - >-
         docker build \
-          --target checker \
-          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker \
-          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker \
+          -f Dockerfile.build \
+          --cache-from 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build \
+          -t 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build \
           .
-      - "echo --- :docker: Pushing checker image"
-      - "docker image push 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
+      - "echo --- :docker: Pushing build image"
+      - "docker image push 305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build"
     plugins:
       ecr#v2.2.0:
         login: true
@@ -20,10 +20,12 @@ steps:
     commands:
       - "cargo --locked fmt -- --check"
     depends_on:
-      - build-rust-checks-image
+      - build-rust-build-image
     plugins:
       - docker#v3.7.0:
-          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build"
+          environment:
+            - "CARGO_INCREMENTAL=0"
       - ecr#v2.2.0:
           login: true
 
@@ -32,10 +34,29 @@ steps:
     commands:
       - cargo --locked clippy --all -- -D warnings
     depends_on:
-      - build-rust-checks-image
+      - build-rust-build-image
     plugins:
       - docker#v3.7.0:
-          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:checker"
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build"
+          environment:
+            - "CARGO_INCREMENTAL=0"
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ":rust: Run tests"
+    key: run-tests
+    commands:
+      - "echo --- :rust: Build tests"
+      - cargo test --no-run --locked
+      - "echo --- :rust: Run tests"
+      - cargo test
+    depends_on:
+      - build-rust-build-image
+    plugins:
+      - docker#v3.7.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:build"
+          environment:
+            - "CARGO_INCREMENTAL=0"
       - ecr#v2.2.0:
           login: true
 
@@ -58,6 +79,7 @@ steps:
     depends_on:
       - check-rustfmt
       - check-clippy
+      - run-tests
     plugins:
       - ecr#v2.2.0:
           login: true
