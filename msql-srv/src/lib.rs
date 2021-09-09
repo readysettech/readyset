@@ -41,6 +41,10 @@
 //!     }
 //!     async fn on_close(&mut self, _: u32) {}
 //!
+//!     async fn on_init(&mut self, _: &str, w: InitWriter<'_, W>) -> io::Result<()> {
+//!         w.ok().await
+//!     }
+//!
 //!     async fn on_query(&mut self, _: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
 //!         let cols = [
 //!             Column {
@@ -212,9 +216,7 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     ) -> Result<(), Self::Error>;
 
     /// Called when client switches database.
-    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error> {
-        Ok(())
-    }
+    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error>;
 
     /// Retrieve the password for the user with the given username, if any.
     ///

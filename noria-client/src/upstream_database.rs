@@ -50,6 +50,12 @@ pub trait UpstreamDatabase: Sized + Send {
     /// [`connect`]
     fn url(&self) -> &str;
 
+    /// Returns a database name if it was included in the original connection string, or None if no
+    /// database name was included in the original connection string.
+    fn database(&self) -> Option<&str> {
+        None
+    }
+
     /// Send a request to the upstream database to prepare the given query, returning a unique ID
     /// for that prepared statement
     ///

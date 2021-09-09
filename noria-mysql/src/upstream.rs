@@ -86,6 +86,10 @@ impl UpstreamDatabase for MySqlUpstream {
         &self.url
     }
 
+    fn database(&self) -> Option<&str> {
+        self.conn.opts().db_name()
+    }
+
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
     async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>

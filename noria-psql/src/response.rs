@@ -95,16 +95,16 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
-            Upstream(upstream::QueryResult::ReadResult { data: _rows }) => {
+            Upstream(upstream::QueryResult::Read { data: _rows }) => {
                 // TODO(grfn): Implement this
                 Err(ps::Error::Unimplemented(
                     "Handling of pgsql select results not yet implemented".to_string(),
                 ))
             }
-            Upstream(upstream::QueryResult::WriteResult { num_rows_affected }) => {
+            Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
                 Ok(Insert(num_rows_affected))
             }
-            Upstream(upstream::QueryResult::None) => Ok(Command),
+            Upstream(upstream::QueryResult::Command) => Ok(Command),
         }
     }
 }

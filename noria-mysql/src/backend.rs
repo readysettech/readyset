@@ -5,7 +5,13 @@ use derive_more::{Deref, DerefMut};
 use tokio::io::{self, AsyncWrite};
 use tracing::trace;
 
-use msql_srv::{ColumnFlags, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter};
+use crate::schema::convert_column;
+use crate::upstream::{self, MySqlUpstream};
+use crate::value::mysql_value_to_datatype;
+use crate::{Error, MySqlQueryHandler};
+use msql_srv::{
+    ColumnFlags, InitWriter, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
+};
 use mysql_async::consts::StatusFlags;
 use noria::consensus::Authority;
 use noria::errors::internal_err;
@@ -13,11 +19,6 @@ use noria::{internal, DataType, ReadySetError};
 use noria_client::backend::noria_connector;
 use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
 use upstream::StatementMeta;
-
-use crate::schema::convert_column;
-use crate::upstream::{self, MySqlUpstream};
-use crate::value::mysql_value_to_datatype;
-use crate::{Error, MySqlQueryHandler};
 
 async fn write_column<W: AsyncWrite + Unpin>(
     rw: &mut RowWriter<'_, W>,
@@ -281,6 +282,31 @@ where
         Ok(res?)
     }
 
+    async fn on_init(&mut self, database: &str, w: InitWriter<'_, W>) -> Result<(), Self::Error> {
+        let res = if self.has_fallback() {
+            match self.database() {
+                Some(db_name) => {
+                    if db_name.to_ascii_lowercase() == database.to_ascii_lowercase() {
+                        // We are already using the correct database. Write back an ok packet.
+                        w.ok().await
+                    } else {
+                        w.error(
+                            msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                            "Tried to use database that ReadySet is not replicating from"
+                                .to_string()
+                                .as_bytes(),
+                        )
+                        .await
+                    }
+                }
+                None => w.ok().await,
+            }
+        } else {
+            w.ok().await
+        };
+
+        Ok(res?)
+    }
     async fn on_close(&mut self, _: u32) {}
 
     async fn on_query(
