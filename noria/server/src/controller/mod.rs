@@ -25,6 +25,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::info_span;
 use url::Url;
 
 mod domain_handle;
@@ -673,6 +674,9 @@ fn authority_inner<A: Authority + 'static>(
     handle: tokio::runtime::Handle,
     region: Option<String>,
 ) -> anyhow::Result<()> {
+    let span = info_span!("authority");
+    let _g = span.enter();
+
     let mut leader_election_state = AuthorityLeaderElectionState::new(
         event_tx.clone(),
         authority.clone(),
@@ -698,13 +702,17 @@ fn authority_inner<A: Authority + 'static>(
                 .context("Updating worker state")?;
         }
 
-        leader_election_state
-            .maybe_watch_leader()
-            .context("Watching leader")?;
-        worker_state
-            .maybe_watch_workers()
-            .context("Watching workers")?;
-        if authority.can_watch() {
+        let mut error_watching = false;
+        if let Err(e) = leader_election_state.maybe_watch_leader() {
+            tracing::warn!(error = %e, "failure creating leader watch");
+            error_watching = true;
+        }
+        if let Err(e) = worker_state.maybe_watch_workers() {
+            tracing::warn!(error = %e, "failure creating worker watch");
+            error_watching = true;
+        }
+
+        if !error_watching && authority.can_watch() {
             std::thread::park_timeout(THREAD_PARK_DURATION);
         } else {
             sleep(LEADER_STATE_CHECK_INTERVAL);
