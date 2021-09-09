@@ -20,6 +20,6 @@ if os.environ.get("FILTER_FROM_STDIN") != None:
             continue
         filter_frameworks[os.path.join(path[2], path[3])] = None
     for (dialect, frameworks) in config.items():
-        config[dialect] = list(filter(lambda f: f in filter_frameworks, frameworks))
+        config[dialect] = list(filter(lambda f: f['name'] in filter_frameworks, frameworks))
 
 print(json.dumps(config, indent=4))

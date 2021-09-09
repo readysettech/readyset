@@ -67,6 +67,8 @@ test_template = """
             - BUILDKITE_COMMIT
       - ecr#v2.2.0:
           login: true
+    env:
+      SOFT_FAIL: ${SOFT_FAIL}
 """
 soft_fail = """
     soft_fail: true
@@ -98,6 +100,7 @@ def generate_test_step(
         .replace("${FRAMEWORK}", framework)
         .replace("${FRAMEWORK_SLUG}", framework_slug)
         .replace("${DEPENDS_ON}", json.dumps(depends_on))
+        .replace("${SOFT_FAIL}", str(fail))
     )
     if fail:
         step = step + soft_fail
@@ -155,14 +158,14 @@ result = ["  - wait"]
 config = json.load(agent.stdout)
 for (dialect, frameworks) in config.items():
     for framework in frameworks:
-        framework_slug = framework.replace("/", "_").replace(":", "_")
+        framework_slug = framework['name'].replace("/", "_").replace(":", "_")
         write(
             ".buildkite/gen/docker-compose.%s.%s.yml" % (framework_slug, dialect),
             compose_template.replace("${DIALECT}", dialect).replace(
-                "${FRAMEWORK}", framework
+                "${FRAMEWORK}", framework['name']
             ),
         )
-        result.append(generate_build_step(framework, dialect))
+        result.append(generate_build_step(framework['name'], dialect))
         for dialect_version in dialect_versions[dialect]:
             result.append(
                 generate_test_step(
@@ -171,7 +174,7 @@ for (dialect, frameworks) in config.items():
                     dialect_version,
                     1,
                     ["build-%s-%s" % (dialect, framework_slug)],
-                    framework,
+                    framework['name'],
                     framework_slug,
                     False,
                 )
@@ -187,9 +190,9 @@ for (dialect, frameworks) in config.items():
                         dialect_readyset_build_steps[dialect],
                         "test-%s-%s-%s" % (dialect, dialect_version, framework_slug),
                     ],
-                    framework,
+                    framework['name'],
                     framework_slug,
-                    fail,
+                    fail and not framework['expect_success'],
                 )
             )
 result = "\n".join(result)
