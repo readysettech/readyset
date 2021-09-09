@@ -437,6 +437,10 @@ pub enum ReadySetError {
     #[error("URL parse failed: {0}")]
     UrlParseFailed(String),
 
+    /// An error was encountered when trying to parse an unknown sql mode.
+    #[error("SqlMode parse failed: {0}")]
+    SqlModeParseFailed(String),
+
     /// An attempt was made to compare replication offsets from different logs.
     ///
     /// See the documentation for [`ReplicationOffset`](noria::ReplicationOffset) for why this might
