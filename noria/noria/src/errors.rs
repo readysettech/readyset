@@ -535,6 +535,16 @@ impl ReadySetError {
     pub fn caused_by_unsupported(&self) -> bool {
         self.any_cause(|e| e.is_unsupported())
     }
+
+    /// Returns `true` if self is [`TableNotFound`].
+    pub fn is_table_not_found(&self) -> bool {
+        matches!(self, Self::TableNotFound(..))
+    }
+
+    /// Returns `true` if self either *is* [`TableNotFound`], or was *caused by* [`TableNotFound`].
+    pub fn caused_by_table_not_found(&self) -> bool {
+        self.any_cause(|e| e.is_table_not_found())
+    }
 }
 
 /// Make a new [`ReadySetError::Internal`] with the provided string-able argument.
