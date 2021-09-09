@@ -9,12 +9,12 @@ use mysql_async as mysql;
 use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::Display;
 use std::str::FromStr;
 use tokio_postgres as pgsql;
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -49,6 +49,8 @@ pub struct NoriaAdapter<A: Authority + 'static> {
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
     mutator_map: HashMap<String, Table>,
+    /// A HashSet of tables we've already warned about not existing
+    warned_missing_tables: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -182,6 +184,7 @@ impl<A: Authority> NoriaAdapter<A> {
             noria,
             connector,
             mutator_map: HashMap::new(),
+            warned_missing_tables: HashSet::new(),
         };
 
         adapter.main_loop(pos.try_into()?).await
@@ -240,6 +243,7 @@ impl<A: Authority> NoriaAdapter<A> {
             noria,
             connector,
             mutator_map: HashMap::new(),
+            warned_missing_tables: HashSet::new(),
         };
 
         adapter.main_loop(PostgresPosition::default().into()).await
@@ -266,7 +270,19 @@ impl<A: Authority> NoriaAdapter<A> {
                 txid,
             } => {
                 // Send the rows as are
-                let table_mutator = self.mutator_for_table(table).await?;
+                let table_mutator =
+                    if let Some(table) = self.mutator_for_table(table.clone()).await? {
+                        table
+                    } else {
+                        if self.warned_missing_tables.insert(table.clone()) {
+                            warn!(
+                                table_name = %table,
+                                num_actions = actions.len(),
+                                "Could not find table, discarding actions"
+                            );
+                        }
+                        return Ok(());
+                    };
                 actions.push(TableOperation::SetReplicationOffset(pos));
                 table_mutator.perform_all(actions).await?;
 
@@ -311,14 +327,15 @@ impl<A: Authority> NoriaAdapter<A> {
     }
 
     /// Get a mutator for a noria table from the cache if available, or fetch a new one
-    /// from the controller and cache it
-    async fn mutator_for_table(&mut self, name: String) -> Result<&mut Table, ReadySetError> {
+    /// from the controller and cache it. Returns None if the table doesn't exist in noria.
+    async fn mutator_for_table(&mut self, name: String) -> ReadySetResult<Option<&mut Table>> {
         match self.mutator_map.entry(name) {
-            hash_map::Entry::Occupied(o) => Ok(o.into_mut()),
-            hash_map::Entry::Vacant(v) => {
-                let table = self.noria.table(v.key()).await?;
-                Ok(v.insert(table))
-            }
+            hash_map::Entry::Occupied(o) => Ok(Some(o.into_mut())),
+            hash_map::Entry::Vacant(v) => match self.noria.table(v.key()).await {
+                Ok(table) => Ok(Some(v.insert(table))),
+                Err(e) if e.caused_by_table_not_found() => Ok(None),
+                Err(e) => Err(e),
+            },
         }
     }
 }
