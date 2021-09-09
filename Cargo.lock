@@ -4617,6 +4617,7 @@ dependencies = [
 name = "replicators"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bytes 1.0.1",
  "chrono",
@@ -4632,10 +4633,11 @@ dependencies = [
  "noria-server",
  "postgres-native-tls",
  "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
- "slog",
- "slog-term",
+ "readyset-logging",
  "tokio 1.8.1",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",
+ "tracing",
+ "tracing-futures",
 ]
 
 [[package]]

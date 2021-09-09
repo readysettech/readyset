@@ -6,7 +6,6 @@ use noria::{
 };
 use noria_server::Builder;
 use replicators::NoriaAdapter;
-use slog::{o, Discard, Logger};
 use std::env;
 use std::sync::Arc;
 
@@ -198,13 +197,10 @@ impl TestHandle {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await;
 
-        let log = Logger::root(Discard, o!());
-
         let _ = runtime.spawn(NoriaAdapter::start_with_url(
             self.url.clone(),
             controller,
             None,
-            log,
         ));
 
         if let Some(rt) = self.replication_rt.replace(runtime) {

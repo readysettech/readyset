@@ -7,7 +7,6 @@ pub(crate) mod postgres_connector;
 use clap::Clap;
 use mysql_async as mysql;
 use noria_adapter::{AdapterOpts, NoriaAdapter};
-use slog::{o, Drain, Logger};
 use tokio_postgres as pgsql;
 
 /// A replication connector from an existing database to Noria
@@ -22,6 +21,9 @@ struct Opts {
     zookeeper_address: std::net::SocketAddr,
     #[clap(subcommand)]
     subcmd: DbOpts,
+
+    #[clap(flatten)]
+    logging: readyset_logging::Options,
 }
 
 #[derive(Clap, Debug)]
@@ -125,11 +127,10 @@ impl From<PostgresOpts> for AdapterOpts {
 }
 
 #[tokio::main]
-async fn main() -> noria::ReadySetResult<!> {
+async fn main() -> anyhow::Result<!> {
     let opts: Opts = Opts::parse();
 
-    let plain = slog_term::PlainSyncDecorator::new(std::io::stdout());
-    let log = Logger::root(slog_term::FullFormat::new(plain).build().fuse(), o!());
+    opts.logging.init()?;
 
     let options = match opts.subcmd {
         DbOpts::Url(opts) => opts.url,
@@ -137,5 +138,5 @@ async fn main() -> noria::ReadySetResult<!> {
         DbOpts::Postgres(opts) => opts.into(),
     };
 
-    NoriaAdapter::start(opts.zookeeper_address, opts.deployment, options, Some(log)).await
+    NoriaAdapter::start(opts.zookeeper_address, opts.deployment, options).await?
 }

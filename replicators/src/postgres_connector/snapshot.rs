@@ -2,11 +2,11 @@ use super::PostgresPosition;
 use futures::{pin_mut, StreamExt};
 use noria::{consensus::Authority, ReadySetError, ReadySetResult};
 use postgres_types::Type;
-use slog::{debug, info, trace, Logger};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
 use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
+use tracing::{debug, info, info_span, trace, Instrument};
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
 
@@ -16,7 +16,6 @@ pub struct PostgresReplicator<'a, A: 'static + Authority> {
     pub(crate) noria: &'a mut noria::ControllerHandle<A>,
     /// If Some then only snapshot those tables, otherwise will snapshot all tables
     pub(crate) tables: Option<Vec<String>>,
-    pub(crate) log: Logger,
 }
 
 #[derive(Debug)]
@@ -152,7 +151,7 @@ impl TableEntry {
     ) -> Result<Vec<ConstraintEntry>, pgsql::Error> {
         let query = r"
             SELECT c2.relname, pg_catalog.pg_get_constraintdef(con.oid, true), contype
-            FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i 
+            FROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i
             LEFT JOIN pg_catalog.pg_constraint con ON (conrelid = i.indrelid AND conindid = i.indexrelid AND contype IN ('f','p','u'))
             WHERE c.oid = $1 AND c.oid = i.indrelid AND i.indexrelid = c2.oid
             ORDER BY i.indisprimary DESC, c2.relname;
@@ -279,7 +278,6 @@ impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
         client: &'a mut pgsql::Client,
         noria: &'a mut noria::ControllerHandle<A>,
         tables: Option<Vec<String>>,
-        log: slog::Logger,
     ) -> ReadySetResult<PostgresReplicator<'a, A>> {
         let transaction = client
             .build_transaction()
@@ -293,7 +291,6 @@ impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
             transaction,
             noria,
             tables,
-            log,
         })
     }
 
@@ -312,8 +309,8 @@ impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
             table_list.retain(|e| !tables.contains(&e.name));
         }
 
-        trace!(self.log, "Loaded table list:\n{:?}", table_list);
-        trace!(self.log, "Loaded view list:\n{:?}", view_list);
+        trace!(?table_list, "Loaded table list");
+        trace!(?view_list, "Loaded view list");
 
         // For each table, retreive its structure
         let mut tables = Vec::with_capacity(table_list.len());
@@ -334,17 +331,24 @@ impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
             "\n\n",
         );
 
-        debug!(self.log, "Installing recipe:\n\n{}", recipe);
+        debug!(%recipe, "Installing recipe");
 
         self.noria.install_recipe(&recipe).await?;
 
         // Finally copy each table into noria
         for table in &tables {
             // TODO: parallelize with a connection pool if performance here matters
-            let log = self.log.new(slog::o!("table" => table.name.clone()));
-            info!(log, "Replicating table");
-            let noria_table = self.noria.table(&table.name).await?;
-            table.dump(&self.transaction, noria_table).await?;
+            let span = info_span!("Replicating table", table = %table.name);
+            span.in_scope(|| info!("Replicating table"));
+            let noria_table = self
+                .noria
+                .table(&table.name)
+                .instrument(span.clone())
+                .await?;
+            table
+                .dump(&self.transaction, noria_table)
+                .instrument(span.clone())
+                .await?;
         }
 
         // Only after the repliation is done, mark that we have a replication offset

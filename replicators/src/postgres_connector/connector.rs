@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
 use noria::{ReadySetError, ReadySetResult, ReplicationOffset, TableOperation};
-use slog::{debug, error};
 use tokio_postgres as pgsql;
+use tracing::{debug, error};
 
 use crate::noria_adapter::{Connector, ReplicationAction};
 
@@ -35,7 +35,6 @@ pub struct PostgresWalConnector {
     next_position: Option<PostgresPosition>,
     /// The name of the snapshot that was created with the replication slot
     pub(crate) snapshot_name: Option<String>,
-    log: slog::Logger,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -76,7 +75,6 @@ impl PostgresWalConnector {
         mut config: pgsql::Config,
         dbname: S,
         next_position: Option<PostgresPosition>,
-        logger: slog::Logger,
     ) -> ReadySetResult<Self> {
         let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
         let connector = postgres_native_tls::MakeTlsConnector::new(connector);
@@ -93,7 +91,6 @@ impl PostgresWalConnector {
             peek: None,
             next_position,
             snapshot_name: None,
-            log: logger,
         };
 
         if next_position.is_none() {
@@ -105,7 +102,7 @@ impl PostgresWalConnector {
 
     async fn create_publication_and_slot(&mut self) -> ReadySetResult<()> {
         let system = self.identify_system().await?;
-        debug!(self.log, "{:?}", system);
+        debug!(?system);
 
         match self.create_publication(PUBLICATION_NAME).await {
             Ok(()) => {
@@ -118,10 +115,7 @@ impl PostgresWalConnector {
                 // This is an existing publication we are going to use
             }
             Err(err) if err.to_string().contains("permission denied") => {
-                error!(
-                    self.log,
-                    "Insufficient permissions to create publication FOR ALL TABLES"
-                );
+                error!("Insufficient permissions to create publication FOR ALL TABLES");
             }
             Err(err) => return Err(err),
         }
@@ -257,7 +251,7 @@ impl PostgresWalConnector {
             }
         }
 
-        self.reader = Some(WalReader::new(wal, self.log.clone()));
+        self.reader = Some(WalReader::new(wal));
 
         Ok(())
     }

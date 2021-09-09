@@ -2,9 +2,10 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
 use noria::{consensus::Authority, ReadySetResult};
-use slog::{debug, info, Logger};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
+use tracing::{debug, info, info_span};
+use tracing_futures::Instrument;
 
 use super::BinlogPosition;
 
@@ -20,7 +21,6 @@ pub struct MySqlReplicator {
     pub(crate) pool: mysql::Pool,
     /// If Some then only snapshot those tables, otherwise will snapshot all tables
     pub(crate) tables: Option<Vec<String>>,
-    pub(crate) log: Logger,
 }
 
 /// Get the list of tables defined in the database
@@ -140,13 +140,12 @@ impl MySqlReplicator {
     async fn replicate_table(
         mut dumper: TableDumper,
         mut table_mutator: noria::Table,
-        log: Logger,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
         let mut row_stream = dumper.stream().await?;
         let mut rows = Vec::with_capacity(BATCH_SIZE);
 
-        info!(log, "Replication started");
+        info!("Replication started");
 
         while let Some(row) = row_stream.next().await? {
             rows.push(row);
@@ -163,7 +162,7 @@ impl MySqlReplicator {
             table_mutator.insert_many(rows).await?;
         }
 
-        info!(log, "Replication finished, rows replicated: {}", cnt);
+        info!(rows_replicated = %cnt, "Replication finished");
 
         Ok(())
     }
@@ -212,18 +211,18 @@ impl MySqlReplicator {
         let tables = load_table_list(&mut tx, TableKind::BaseTable).await?;
         let views = load_table_list(&mut tx, TableKind::View).await?;
         lock_tables(&mut tx, tables.into_iter().chain(views)).await?;
-        debug!(self.log, "Acquired table read locks");
+        debug!("Acquired table read locks");
         // Get current binlog position, since all table are locked no action can take place that would
         // advance the binlog *and* affect the tables
         let binlog_position = self.get_binlog_position().await?;
 
         // Even if we don't install the recipe, this will load the tables from the database
         let recipe = self.load_recipe(&mut tx).await?;
-        debug!(self.log, "Loaded recipe:\n{}", recipe);
+        debug!(%recipe, "Loaded recipe");
 
         if install_recipe {
             noria.install_recipe(&recipe).await?;
-            debug!(self.log, "Recipe installed");
+            debug!("Recipe installed");
         }
 
         // Although the table dumping happens on a connection pool, and not within our transaction,
@@ -247,17 +246,17 @@ impl MySqlReplicator {
         // We must hold the locking connection open until replication is finished,
         // if dropped, it would probably remain open in the pool, but we can't risk it
         let _lock = self.flush_and_read_lock().await?;
-        debug!(self.log, "Acquired read lock");
+        debug!("Acquired read lock");
 
         let binlog_position = self.get_binlog_position().await?;
 
         // Even if we don't install the recipe, this will load the tables from the database
         let recipe = self.load_recipe(&mut self.pool.get_conn().await?).await?;
-        debug!(self.log, "Loaded recipe:\n{}", recipe);
+        debug!(%recipe, "Loaded recipe");
 
         if install_recipe {
             noria.install_recipe(&recipe).await?;
-            debug!(self.log, "Recipe installed");
+            debug!("Recipe installed");
         }
 
         self.dump_tables(noria).await?;
@@ -282,14 +281,12 @@ impl MySqlReplicator {
             let dumper = self.dump_table(table_name).await?;
             let table_mutator = noria.table(table_name).await?;
 
-            let log = self.log.new(slog::o!("table" => table_name.clone()));
-            debug!(log, "Replicating table");
+            let span = info_span!("replicating table", table = %table_name);
+            span.in_scope(|| debug!("Replicating table"));
 
-            replication_tasks.push(tokio::spawn(Self::replicate_table(
-                dumper,
-                table_mutator,
-                log,
-            )));
+            replication_tasks.push(tokio::spawn(
+                Self::replicate_table(dumper, table_mutator).instrument(span),
+            ));
         }
 
         while let Some(task_result) = replication_tasks.next().await {
