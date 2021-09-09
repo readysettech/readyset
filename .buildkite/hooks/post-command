@@ -5,6 +5,6 @@ set -euo pipefail
 # If the build fails, set buildkite metadata to mark the pipeline as failed.
 # Buildkite has a concept of a failed pipeline, but doesn't expose this data to
 # running steps (sadly)
-if [ "$BUILDKITE_COMMAND_EXIT_STATUS" != 0 ]; then
+if [ "$BUILDKITE_COMMAND_EXIT_STATUS" != 0 ] && [ "$SOFT_FAIL" != 'true' ]; then
     buildkite-agent meta-data set "failure" "1"
 fi
