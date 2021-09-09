@@ -243,10 +243,6 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
-        if !self.in_transaction {
-            return Err(Error::ReadySet(ReadySetError::NoOngoingTransaction));
-        }
-
         let result = self.conn.query_iter("COMMIT").await?;
         result.drop_result().await?;
         self.in_transaction = false;
@@ -257,10 +253,6 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
-        if !self.in_transaction {
-            return Err(Error::ReadySet(ReadySetError::NoOngoingTransaction));
-        }
-
         let result = self.conn.query_iter("ROLLBACK").await?;
         result.drop_result().await?;
         self.in_transaction = false;
