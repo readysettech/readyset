@@ -5,7 +5,7 @@ use crate::coordination::do_noria_rpc;
 use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
-use anyhow::format_err;
+use anyhow::{format_err, Context};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
@@ -686,16 +686,24 @@ fn authority_inner<A: Authority + 'static>(
         AuthorityWorkerState::new(event_tx, authority.clone(), worker_descriptor, handle);
 
     // Register the current server as a worker in the system.
-    worker_state.register()?;
+    worker_state.register().context("Registering worker")?;
     loop {
-        leader_election_state.update_leader_state()?;
+        leader_election_state
+            .update_leader_state()
+            .context("Updating leader state")?;
 
         if leader_election_state.is_leader() {
-            worker_state.update_worker_state()?;
+            worker_state
+                .update_worker_state()
+                .context("Updating worker state")?;
         }
 
-        leader_election_state.maybe_watch_leader()?;
-        worker_state.maybe_watch_workers()?;
+        leader_election_state
+            .maybe_watch_leader()
+            .context("Watching leader")?;
+        worker_state
+            .maybe_watch_workers()
+            .context("Watching workers")?;
         if authority.can_watch() {
             std::thread::park_timeout(THREAD_PARK_DURATION);
         } else {
