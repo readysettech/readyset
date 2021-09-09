@@ -133,6 +133,12 @@ mod resultset;
 mod value;
 mod writers;
 
+/// CURRENT_VERSION is relayed back to the client as the current server version. Most clients will
+/// interpret the version numbers and use that to dictate which dialect they send us. Anything
+/// after the version can be any text we desire. If you change this, feel free to change the byte
+/// array length as necessary. The length is not a crucial component.
+const CURRENT_VERSION: &[u8; 16] = b"8.0.26-readyset\0";
+
 /// Meta-information abot a single column, used either to describe a prepared statement parameter
 /// or an output column.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,10 +299,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.writer.write_all(&[10]).await?; // protocol 10
 
-        // 5.1.10 because that's what Ruby's ActiveRecord requires
-        self.writer
-            .write_all(&b"5.1.10-alpha-msql-proxy\0"[..])
-            .await?;
+        self.writer.write_all(CURRENT_VERSION).await?;
 
         self.writer.write_all(&[0x08, 0x00, 0x00, 0x00]).await?; // TODO: connection ID
         self.writer.write_all(&auth_data[..8]).await?;
