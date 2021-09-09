@@ -343,7 +343,6 @@ impl ControllerInner {
             }
         }
 
-        println!("{:?}", domain_addresses);
         // Can't send this as we are on the controller thread right now and it also
         // has to receive this.
         if let Err(e) = futures_executor::block_on(
