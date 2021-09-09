@@ -5,16 +5,17 @@ authors = ["Vlad Krasnov <vlad@readyset.io>"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 async-trait = "0.1"
 clap = "3.0.0-beta.2"
 native-tls = "0.2.7"
 tokio = { version = "1.8.1", features = ["full"] }
 futures = { version = "0.3" }
 bytes = "1.0"
-slog = "2.7"
-slog-term = "2.8"
 chrono = "0.4"
 itertools = "0.10.1"
+tracing = "0.1.26"
+tracing-futures = "0.2.5"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
@@ -24,6 +25,7 @@ mysql_common = "0.27.5"
 nom-sql = { path = "../nom-sql" }
 noria = { path = "../noria/noria", package = "noria" }
 launchpad = { path = "../launchpad" }
+readyset-logging = { path = "../readyset-logging" }
 
 [dev-dependencies]
 noria-server = { path = "../noria/server" }

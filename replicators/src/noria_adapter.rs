@@ -9,12 +9,12 @@ use mysql_async as mysql;
 use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
-use slog::{debug, error, info, o, Discard, Logger};
 use std::collections::{hash_map, HashMap};
 use std::convert::TryInto;
 use std::fmt::Display;
 use std::str::FromStr;
 use tokio_postgres as pgsql;
+use tracing::{debug, error, info, info_span, Instrument};
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -49,8 +49,6 @@ pub struct NoriaAdapter<A: Authority + 'static> {
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
     mutator_map: HashMap<String, Table>,
-    /// Logger
-    log: Logger,
 }
 
 #[derive(Debug)]
@@ -87,13 +85,10 @@ impl NoriaAdapter<ZookeeperAuthority> {
         zookeeper_addr: S1,
         deployment: S2,
         options: AdapterOpts,
-        log: Option<Logger>,
     ) -> ReadySetResult<!> {
         let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment))?;
         let noria = noria::ControllerHandle::new(authority).await;
-        let log = log.unwrap_or_else(|| Logger::root(Discard, o!()));
-
-        NoriaAdapter::start_inner(noria, options, log, None).await
+        NoriaAdapter::start_inner(noria, options, None).await
     }
 }
 
@@ -108,28 +103,28 @@ impl<A: Authority> NoriaAdapter<A> {
         url: U,
         noria: ControllerHandle<A>,
         server_id: Option<u32>,
-        log: Logger,
     ) -> ReadySetResult<!> {
         let options = url
             .as_ref()
             .parse()
             .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid URL format: {}", e)))?;
 
-        NoriaAdapter::start_inner(noria, options, log, server_id).await
+        NoriaAdapter::start_inner(noria, options, server_id)
+            .instrument(info_span!("replicator"))
+            .await
     }
 
     async fn start_inner(
         noria: ControllerHandle<A>,
         options: AdapterOpts,
-        log: slog::Logger,
         server_id: Option<u32>,
     ) -> ReadySetResult<!> {
         match options {
             AdapterOpts::MySql(options) => {
-                NoriaAdapter::start_inner_mysql(options, noria, server_id, log).await
+                NoriaAdapter::start_inner_mysql(options, noria, server_id).await
             }
             AdapterOpts::Postgres(options) => {
-                NoriaAdapter::start_inner_postgres(options, noria, log).await
+                NoriaAdapter::start_inner_postgres(options, noria).await
             }
         }
     }
@@ -148,28 +143,26 @@ impl<A: Authority> NoriaAdapter<A> {
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle<A>,
         server_id: Option<u32>,
-        log: slog::Logger,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let pos = match noria.replication_offset().await?.map(Into::into) {
             None => {
-                info!(log, "Taking database snapshot");
-
+                let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
                 let pool = mysql::Pool::new(replicator_options);
-                let replicator = MySqlReplicator {
-                    pool,
-                    tables: None,
-                    log: log.clone(),
-                };
+                let replicator = MySqlReplicator { pool, tables: None };
 
-                replicator.replicate_to_noria(&mut noria, true).await?
+                span.in_scope(|| info!("Starting snapshot"));
+                replicator
+                    .replicate_to_noria(&mut noria, true)
+                    .instrument(span)
+                    .await?
             }
             Some(pos) => pos,
         };
 
-        info!(log, "Binlog position {:?}", pos);
+        info!(binlog_position = ?pos);
 
         let schemas = mysql_options
             .db_name()
@@ -183,13 +176,12 @@ impl<A: Authority> NoriaAdapter<A> {
             MySqlBinlogConnector::connect(mysql_options, schemas, pos.clone(), server_id).await?,
         );
 
-        info!(log, "MySQL connected");
+        info!("MySQL connected");
 
         let mut adapter = NoriaAdapter {
             noria,
             connector,
             mutator_map: HashMap::new(),
-            log,
         };
 
         adapter.main_loop(pos.try_into()?).await
@@ -198,14 +190,13 @@ impl<A: Authority> NoriaAdapter<A> {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle<A>,
-        log: slog::Logger,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
         let pos = noria.replication_offset().await?.map(Into::into);
 
         if let Some(pos) = pos {
-            info!(log, "WAL position {}", pos);
+            info!(wal_position = %pos);
         }
 
         let dbname = pgsql_opts
@@ -214,16 +205,10 @@ impl<A: Authority> NoriaAdapter<A> {
             .unwrap_or_default();
 
         let mut connector = Box::new(
-            PostgresWalConnector::connect(
-                pgsql_opts.clone(),
-                dbname.first().unwrap(),
-                pos,
-                log.clone(),
-            )
-            .await?,
+            PostgresWalConnector::connect(pgsql_opts.clone(), dbname.first().unwrap(), pos).await?,
         );
 
-        info!(log, "Connected to PostgreSQL");
+        info!("Connected to PostgreSQL");
 
         if let Some(snapshot) = connector.snapshot_name.as_deref() {
             // If snapshot name exists, it means we need to make a snapshot to noria
@@ -235,28 +220,26 @@ impl<A: Authority> NoriaAdapter<A> {
 
             let connection_handle = tokio::spawn(connection);
 
-            let mut replicator =
-                PostgresReplicator::new(&mut client, &mut noria, None, log.clone()).await?;
+            let mut replicator = PostgresReplicator::new(&mut client, &mut noria, None).await?;
 
             select! {
                 s = replicator.snapshot_to_noria(snapshot).fuse() => s?,
                 c = connection_handle.fuse() => c.unwrap()?,
             }
 
-            info!(log, "Snapshot finished");
+            info!("Snapshot finished");
         }
 
         connector
             .start_replication(REPLICATION_SLOT, PUBLICATION_NAME)
             .await?;
 
-        info!(log, "Streaming replication started");
+        info!("Streaming replication started");
 
         let mut adapter = NoriaAdapter {
             noria,
             connector,
             mutator_map: HashMap::new(),
-            log,
         };
 
         adapter.main_loop(PostgresPosition::default().into()).await
@@ -313,10 +296,10 @@ impl<A: Authority> NoriaAdapter<A> {
             let (action, pos) = self.connector.next_action(position).await?;
             position = pos.clone();
 
-            debug!(self.log, "{:?}", action);
+            debug!(?action);
 
             if let Err(err) = self.handle_action(action, pos).await {
-                error!(self.log, "{}", err);
+                error!(error = %err);
             }
         }
     }

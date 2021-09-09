@@ -317,8 +317,7 @@ where
                 let noria: noria::ControllerHandle<A> =
                     noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
-                if let Err(err) =
-                    replicators::NoriaAdapter::start_with_url(&url, noria, None, log.clone()).await
+                if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
                 {
                     // On each replication error we wait for 30 seconds and then try again
                     error!(log, "Replication error {}", err);

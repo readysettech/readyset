@@ -1,15 +1,14 @@
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use noria::{ReadySetError, ReadySetResult};
-use slog::{debug, error};
 use std::{collections::HashMap, convert::TryInto};
 use tokio_postgres as pgsql;
+use tracing::{debug, error};
 
 pub struct WalReader {
     /// The handle to the log stream itself
     wal: pgsql::client::Responses,
     /// Keeps track of the relation mappings that we had
     relations: HashMap<i32, (String, RelationMapping)>,
-    log: slog::Logger,
 }
 
 #[derive(Debug)]
@@ -41,20 +40,15 @@ pub enum WalEvent {
 }
 
 impl WalReader {
-    pub(crate) fn new(wal: pgsql::client::Responses, log: slog::Logger) -> Self {
+    pub(crate) fn new(wal: pgsql::client::Responses) -> Self {
         WalReader {
             relations: Default::default(),
             wal,
-            log,
         }
     }
 
     pub(crate) async fn next_event(&mut self) -> ReadySetResult<(WalEvent, i64)> {
-        let WalReader {
-            wal,
-            relations,
-            log,
-        } = self;
+        let WalReader { wal, relations } = self;
 
         loop {
             let data: WalData = match wal.next().await? {
@@ -72,7 +66,7 @@ impl WalReader {
                 }
                 WalData::XLogData { end, data, .. } => (end, data),
                 msg => {
-                    debug!(log, "Unhandled message: {:?}", msg);
+                    debug!(?msg, "Unhandled message");
                     // For any other message, just keep going
                     continue;
                 }
@@ -187,17 +181,17 @@ impl WalReader {
                 WalRecord::Begin { .. } => {}
                 msg @ WalRecord::Type { .. } => {
                     // This happens when a `NEW TYPE` is used, unsupported yet
-                    error!(log, "Unhandled message: {:?}", msg);
+                    error!(?msg, "Unhandled message");
                 }
                 msg @ WalRecord::Truncate { .. } => {
                     // This happens when `TRUNCATE table` is used, unsupported yet
-                    error!(log, "Unhandled message: {:?}", msg);
+                    error!(?msg, "Unhandled message");
                 }
                 WalRecord::Origin { .. } => {
                     // Just tells where the transaction originated
                 }
                 WalRecord::Unknown(payload) => {
-                    error!(log, "Unknown message: {:?}", payload);
+                    error!(?payload, "Unknown message");
                 }
             }
         }
