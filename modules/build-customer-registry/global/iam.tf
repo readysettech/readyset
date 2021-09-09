@@ -1,8 +1,7 @@
-// This defines a role that is the only role allowed to push into ECR in the
-// Deploy account. This role should be used only by very specific Buildkite jobs
-// that have additional auditing as we will be sharing access to the ECR with
-// customers
-data "aws_iam_policy_document" "push_deploy_ecr_assume_role" {
+// This defines a role that is the only role allowed to update artifacts for the
+// custoemrs in an automated way. This role should be used only by automation
+// which has logging on who started the automation.
+data "aws_iam_policy_document" "deploy_customer_artifacts_write_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
 
@@ -13,34 +12,28 @@ data "aws_iam_policy_document" "push_deploy_ecr_assume_role" {
   }
 }
 
-data "aws_iam_policy_document" "push_deploy_ecr" {
+data "aws_iam_policy_document" "deploy_customer_artifacts_write_s3" {
   statement {
     effect = "Allow"
     actions = [
-      "ecr:CompleteLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:InitiateLayerUpload",
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:PutImage"
+      "s3:ListBucket",
+      "s3:GetObject",
+      "s3:PutObject"
     ]
     resources = [
-      "arn:aws:ecr:us-east-2:888984949675:repository/*"
+      "arn:aws:s3:::readysettech-customer-artifacts-us-east-2",
+      "arn:aws:s3:::readysettech-customer-artifacts-us-east-2/*"
     ]
-  }
-  statement {
-    effect    = "Allow"
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
   }
 }
 
-resource "aws_iam_role" "push_deploy_ecr" {
-  name = "PushDeployECR"
+resource "aws_iam_role" "deploy_customer_artifacts_write" {
+  name = "DeployCustomerArtifactsWrite"
 
-  assume_role_policy = data.aws_iam_policy_document.push_deploy_ecr_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.deploy_customer_artifacts_write_assume_role.json
 
   inline_policy {
-    name   = "PushDeployECR"
-    policy = data.aws_iam_policy_document.push_deploy_ecr.json
+    name   = "DeployCustomerArtifactsWriteS3"
+    policy = data.aws_iam_policy_document.deploy_customer_artifacts_write_s3.json
   }
 }
