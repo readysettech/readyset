@@ -32,9 +32,9 @@ pub struct PostgreSqlUpstream {
 
 #[derive(Debug)]
 pub enum QueryResult {
-    ReadResult { data: Vec<Row> },
-    WriteResult { num_rows_affected: u64 },
-    None,
+    Read { data: Vec<Row> },
+    Write { num_rows_affected: u64 },
+    Command,
 }
 
 #[derive(Debug)]
@@ -116,14 +116,14 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         S: AsRef<str> + Send + Sync + 'a,
     {
         let data = self.client.query(query.as_ref(), &[]).await?;
-        Ok(QueryResult::ReadResult { data })
+        Ok(QueryResult::Read { data })
     }
 
     async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        Ok(QueryResult::WriteResult {
+        Ok(QueryResult::Write {
             num_rows_affected: self.client.execute(query.as_ref(), &[]).await?,
         })
     }
@@ -147,7 +147,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .prepared_statements
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(QueryResult::ReadResult {
+        Ok(QueryResult::Read {
             data: self
                 .client
                 .query_raw(statement, params)
@@ -166,7 +166,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .prepared_statements
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(QueryResult::WriteResult {
+        Ok(QueryResult::Write {
             num_rows_affected: self.client.execute_raw(statement, params).await?,
         })
     }
@@ -175,7 +175,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     async fn start_tx(&mut self) -> Result<Self::QueryResult, Error> {
         self.client.query("START TRANSACTION", &[]).await?;
         self.in_transaction = true;
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command)
     }
 
     /// Return whether we are currently in a transaction or not.
@@ -187,13 +187,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     async fn commit(&mut self) -> Result<Self::QueryResult, Error> {
         self.client.query("COMMIT", &[]).await?;
         self.in_transaction = false;
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command)
     }
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback(&mut self) -> Result<Self::QueryResult, Error> {
         self.client.query("ROLLBACK", &[]).await?;
         self.in_transaction = false;
-        Ok(QueryResult::None)
+        Ok(QueryResult::Command)
     }
 }

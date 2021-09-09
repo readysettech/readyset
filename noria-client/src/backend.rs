@@ -1042,6 +1042,16 @@ where
         self.upstream.is_some()
     }
 
+    /// If we are using fallback, this will return the database that was in the original connection
+    /// string, if it exists, otherwise it will return None. If we are not using fallback this will
+    /// always return None.
+    pub fn database(&self) -> Option<&str> {
+        match &self.upstream {
+            Some(db) => db.database(),
+            None => None,
+        }
+    }
+
     // For debugging purposes
     pub fn ticket(&self) -> &Option<Timestamp> {
         &self.ticket
