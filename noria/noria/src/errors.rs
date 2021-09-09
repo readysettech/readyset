@@ -227,10 +227,6 @@ pub enum ReadySetError {
         statement_id: u32,
     },
 
-    /// Tried to commit or rollback, but there is no ongoing transaction.
-    #[error("No ongoing transaction to commit or rollback")]
-    NoOngoingTransaction,
-
     /// An internal invariant has been violated.
     ///
     /// This is produced by the [`internal!`] and [`invariant!`] macros, as an alternative to
