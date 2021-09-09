@@ -16,6 +16,7 @@ images=(
 
     "rust:latest"
     "rust:1.54"
+    "rust:1.55"
     "rustlang/rust:nightly"
 
     "node:15.12.0"
