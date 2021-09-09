@@ -67,12 +67,12 @@ use futures_util::future::TryFutureExt;
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use hyper::{service::make_service_fn, Body, Request, Response};
 use launchpad::futures::abort_on_panic;
-use slog::{crit, o, warn};
 use stream_cancel::Valve;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
+use tracing::{error, warn};
 use url::Url;
 
 use dataflow::Readers;
@@ -111,10 +111,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
 
     let http_listener = TcpListener::bind(SocketAddr::new(listen_addr, external_addr.port()))
         .or_else(|_| {
-            warn!(
-                log,
-                "Could not bind to provided external port; using a random port instead!"
-            );
+            warn!("Could not bind to provided external port; using a random port instead!");
             TcpListener::bind(SocketAddr::new(listen_addr, 0))
         })
         .await?;
@@ -142,7 +139,6 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     )));
 
     {
-        let log = log.clone();
         tokio::spawn(abort_on_panic(
             hyper::server::Server::builder(hyper::server::accept::from_stream(
                 valve.wrap(TcpListenerStream::new(http_listener)),
@@ -151,8 +147,8 @@ pub(super) async fn start_instance<A: Authority + 'static>(
                 let s = http_server.clone();
                 async move { io::Result::Ok(s) }
             }))
-            .map_err(move |e| {
-                crit!(log, "HTTP server failed: {}", e);
+            .map_err(|e| {
+                error!(error = %e, "HTTP server failed");
                 process::abort();
             }),
         ));
@@ -181,7 +177,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     };
 
     let controller = ControllerOuter {
-        log: log.new(o!("module" => "controller")),
+        log: log.new(slog::o!("module" => "controller")),
         inner: None,
         authority: authority.clone(),
         worker_tx,
@@ -213,7 +209,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     )?;
 
     tokio::spawn(abort_on_panic(controller.run().map_err(move |e| {
-        crit!(log, "ControllerOuter failed: {}", e.to_string());
+        error!(error = %e, "ControllerOuter failed");
         process::abort()
     })));
 
