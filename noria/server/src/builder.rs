@@ -45,6 +45,7 @@ impl Builder {
     pub fn for_tests() -> Self {
         let mut builder = Self::default();
         builder.set_abort_on_task_failure(false);
+        builder
     }
 
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
