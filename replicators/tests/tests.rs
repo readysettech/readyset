@@ -161,7 +161,7 @@ impl TestHandle {
         url: String,
         authority: Arc<LocalAuthority>,
     ) -> ReadySetResult<TestHandle> {
-        let noria = Builder::default()
+        let noria = Builder::for_tests()
             .start(Arc::clone(&authority))
             .await
             .unwrap();

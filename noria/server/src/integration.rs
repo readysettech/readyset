@@ -37,7 +37,7 @@ use vec1::vec1;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_completes() {
-    let mut builder = Builder::default();
+    let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.log_with(crate::logger_pls());
     builder.set_persistence(get_persistence_params("it_completes"));
@@ -1091,7 +1091,7 @@ async fn it_recovers_persisted_bases() {
     );
 
     {
-        let mut g = Builder::default();
+        let mut g = Builder::for_tests();
         g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         let mut g = g.start(authority.clone()).await.unwrap();
@@ -1122,7 +1122,7 @@ async fn it_recovers_persisted_bases() {
     sleep().await;
 
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     g.set_persistence(persistence_params);
     g.log_with(crate::logger_pls());
     let mut g = g.start(authority.clone()).await.unwrap();
@@ -1157,7 +1157,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     );
 
     {
-        let mut g = Builder::default();
+        let mut g = Builder::for_tests();
         g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
@@ -1189,7 +1189,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     sleep().await;
 
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     g.set_persistence(persistence_params);
     g.set_volume_id("ef731j2".into());
     g.log_with(crate::logger_pls());
@@ -1224,7 +1224,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     );
 
     {
-        let mut g = Builder::default();
+        let mut g = Builder::for_tests();
         g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
@@ -1255,7 +1255,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 
     sleep().await;
 
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     let authority = Arc::new(LocalAuthority::new());
     g.set_persistence(persistence_params);
     g.set_volume_id("j3131t8".into());
@@ -1327,7 +1327,7 @@ async fn view_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
 
-    let mut builder = Builder::default();
+    let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
     let mut g = builder.start(authority.clone()).await.unwrap();
@@ -1348,7 +1348,7 @@ async fn view_connection_churn() {
             let authority = authority.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut builder = Builder::default();
+                let mut builder = Builder::for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("connection_churn"));
                 let mut g = builder.start(authority.clone()).await.unwrap();
@@ -1378,7 +1378,7 @@ async fn table_connection_churn() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
 
-    let mut builder = Builder::default();
+    let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
     // builder.log_with(crate::logger_pls());
@@ -1395,7 +1395,7 @@ async fn table_connection_churn() {
             let authority = authority.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                let mut builder = Builder::default();
+                let mut builder = Builder::for_tests();
                 builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("connection_churn"));
                 let mut g = builder.start(authority.clone()).await.unwrap();
@@ -1440,7 +1440,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     );
 
     {
-        let mut g = Builder::default();
+        let mut g = Builder::for_tests();
         g.set_persistence(persistence_parameters.clone());
         let mut g = g.start(authority.clone()).await.unwrap();
         sleep().await;
@@ -1472,7 +1472,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     // Create a new controller with the same authority store, and make sure that it recovers to the same
     // state that the other one had.
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     g.set_persistence(persistence_parameters);
     let mut g = g.start(authority.clone()).await.unwrap();
     sleep().await;
@@ -1503,7 +1503,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     );
 
     {
-        let mut g = Builder::default();
+        let mut g = Builder::for_tests();
         g.set_persistence(persistence_parameters.clone());
         g.set_volume_id("ef731j2".into());
         let mut g = g.start(authority.clone()).await.unwrap();
@@ -1535,7 +1535,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     // Create a new controller with the same authority store, and make sure that it recovers to the same
     // state that the other one had.
     let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     g.set_persistence(persistence_parameters);
     g.set_volume_id("ef731j2".into());
     let mut g = g.start(authority.clone()).await.unwrap();
@@ -2132,7 +2132,7 @@ async fn replay_during_replay() {
     // the join key that does not exist in the view the record was sent from. since joins only do
     // lookups into the origin view during forward processing when it receives things from the
     // right in a left join, that's what we have to construct.
-    let mut g = Builder::default();
+    let mut g = Builder::for_tests();
     g.disable_partial();
     g.set_persistence(get_persistence_params("replay_during_replay"));
     let mut g = g.start_local().await.unwrap();
@@ -3743,7 +3743,7 @@ async fn correct_nested_view_schema() {
                      JOIN votes ON (stories.id = votes.story) \
                      WHERE stories.id = ? GROUP BY votes.story;";
 
-    let mut b = Builder::default();
+    let mut b = Builder::for_tests();
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
     b.set_sharding(None);
@@ -4150,7 +4150,7 @@ async fn self_join_param() {
 #[ignore]
 async fn non_sql_materialized_range_query() {
     let mut g = {
-        let mut builder = Builder::default();
+        let mut builder = Builder::for_tests();
         builder.disable_partial();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
@@ -4191,7 +4191,7 @@ async fn non_sql_materialized_range_query() {
 #[ignore]
 async fn non_sql_range_upquery() {
     let mut g = {
-        let mut builder = Builder::default();
+        let mut builder = Builder::for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
@@ -4231,7 +4231,7 @@ async fn non_sql_range_upquery() {
 #[ignore]
 async fn range_upquery_after_point_queries() {
     let mut g = {
-        let mut builder = Builder::default();
+        let mut builder = Builder::for_tests();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
@@ -4392,7 +4392,7 @@ async fn view_reuse_aliases() {
 #[ignore]
 async fn post_read_ilike() {
     let mut g = {
-        let mut builder = Builder::default();
+        let mut builder = Builder::for_tests();
         builder.disable_partial();
         builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("post_read_ilike"));
@@ -6518,7 +6518,7 @@ async fn replicate_to_unavailable_worker() {
     let w2_authority = Arc::new(LocalAuthority::new_with_store(authority_store));
     let cluster_name = "replicate_to_non_existent_worker";
 
-    let mut builder = Builder::default();
+    let mut builder = Builder::for_tests();
     builder.log_with(logger_pls());
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params(cluster_name));
