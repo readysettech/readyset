@@ -36,7 +36,7 @@ cat << EOF
       - docker-archive-$image
     key: s3-upload-$image
     commands:
-      - buildkite-agent artifact download ${image}-${release_name}.tar.gz
+      - buildkite-agent artifact download ${image}-${release_name}.tar.gz .
       - >-
         aws s3 cp ${image}-${release-name}.tar.gz
         s3://readysettech-customer-artifacts-us-east-2/docker-release-${release-name}/$(date --rfc-3339=date --utc)/${image}.tar.gz
