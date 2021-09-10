@@ -3,7 +3,7 @@ steps:
     fields:
       - key: release-name
         required: true
-        text: Release Name
+        text: Release Name (This name WILL be seen by customers)
 
   - label: ":rocket: :pipeline: Upload docker release pipeline"
     commands:
