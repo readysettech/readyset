@@ -40,6 +40,8 @@ impl TryFrom<Value> for ps::Value {
             }
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
+            (Type::INT8, DataType::UnsignedBigInt(v)) => Ok(ps::Value::Bigint(v as _)),
+            (Type::INT8, DataType::Int(v)) => Ok(ps::Value::Bigint(v as _)),
             (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
             (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Float(f)),
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
