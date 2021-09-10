@@ -9,7 +9,7 @@ use anyhow::{format_err, Context};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use launchpad::select;
-use noria::consensus::WorkerId;
+use noria::consensus::{AuthorityWorkerHeartbeatResponse, WorkerId};
 use noria::ControllerDescriptor;
 use noria::{
     consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor, STATE_KEY},
@@ -40,7 +40,7 @@ pub(crate) mod sql; // crate viz for tests
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// Amount of time to park the thread for if we are watching on the authority.
-const THREAD_PARK_DURATION: Duration = Duration::from_secs(60);
+const THREAD_PARK_DURATION: Duration = Duration::from_secs(5);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -556,6 +556,7 @@ struct AuthorityWorkerState {
     authority: Arc<Authority>,
     descriptor: WorkerDescriptor,
     handle: tokio::runtime::Handle,
+    worker_id: Option<WorkerId>,
     active_workers: HashMap<WorkerId, WorkerDescriptor>,
 }
 
@@ -571,13 +572,22 @@ impl AuthorityWorkerState {
             authority,
             descriptor,
             handle,
+            worker_id: None,
             active_workers: HashMap::new(),
         }
     }
 
-    fn register(&self) -> anyhow::Result<()> {
-        self.authority.register_worker(self.descriptor.clone())?;
+    fn register(&mut self) -> anyhow::Result<()> {
+        self.worker_id = self.authority.register_worker(self.descriptor.clone())?;
         Ok(())
+    }
+
+    fn heartbeat(&self) -> anyhow::Result<AuthorityWorkerHeartbeatResponse> {
+        if let Some(id) = &self.worker_id {
+            return self.authority.worker_heartbeat(id.clone());
+        }
+
+        Ok(AuthorityWorkerHeartbeatResponse::Failed)
     }
 
     fn maybe_watch_workers(&self) -> anyhow::Result<()> {
@@ -677,6 +687,8 @@ fn authority_inner(
         leader_election_state
             .update_leader_state()
             .context("Updating leader state")?;
+        // TODO(justin): Handle detected as failed.
+        worker_state.heartbeat()?;
 
         if leader_election_state.is_leader() {
             worker_state
