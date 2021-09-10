@@ -3,6 +3,7 @@ use noria::{DataType, ReadySetError};
 use psql_srv as ps;
 use std::convert::TryFrom;
 use tokio_postgres::types::Type;
+use tracing::error;
 
 /// An encapsulation of a Noria `DataType` value that facilitates conversion of this `DataType`
 /// into a `psql_srv::Value`.
@@ -47,7 +48,14 @@ impl TryFrom<Value> for ps::Value {
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
-            (t, _) => Err(ps::Error::UnsupportedType(t)),
+            (t, dt) => {
+                error!(
+                    psql_type = %t,
+                    data_type = ?dt.sql_type(),
+                    "Tried to serialize value to postgres with unsupported type"
+                );
+                Err(ps::Error::UnsupportedType(t))
+            }
         }
     }
 }
