@@ -76,7 +76,7 @@ pub async fn build_custom(
     reader_only: bool,
 ) -> Handle<LocalAuthority> {
     use crate::logger_pls;
-    let mut builder = Builder::default();
+    let mut builder = Builder::for_tests();
     if log {
         builder.log_with(logger_pls());
     }

@@ -434,6 +434,8 @@ pub(crate) struct Config {
     pub(crate) quorum: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
     pub(crate) primary_region: Option<String>,
+    /// If set to true (the default), failing tokio tasks will cause a full-process abort.
+    pub(crate) abort_on_task_failure: bool,
 }
 
 impl Default for Config {
@@ -453,6 +455,7 @@ impl Default for Config {
             quorum: 1,
             reuse: None,
             primary_region: None,
+            abort_on_task_failure: true,
         }
     }
 }

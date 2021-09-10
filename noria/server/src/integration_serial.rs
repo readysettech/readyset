@@ -184,7 +184,7 @@ async fn test_metrics_client() {
     // Start a local instance of noria and connect the metrics client to it.
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
-    let builder = Builder::default();
+    let mut builder = Builder::for_tests();
     let mut g = builder.start_local().await.unwrap();
     let mut client = initialize_metrics(&mut g).await;
 

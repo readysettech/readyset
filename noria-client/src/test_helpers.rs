@@ -113,7 +113,7 @@ where
     let b = barrier.clone();
     thread::spawn(move || {
         let authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
-        let mut builder = Builder::default();
+        let mut builder = Builder::for_tests();
         if !partial {
             builder.disable_partial();
         }

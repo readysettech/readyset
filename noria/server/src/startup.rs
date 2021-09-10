@@ -63,7 +63,7 @@ use std::{
 };
 use std::{io, process};
 
-use futures_util::future::TryFutureExt;
+use futures_util::future::{Either, TryFutureExt};
 use hyper::{self, header::CONTENT_TYPE, Method, StatusCode};
 use hyper::{service::make_service_fn, Body, Request, Response};
 use launchpad::futures::abort_on_panic;
@@ -132,26 +132,42 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         authority: authority.clone(),
     };
 
-    tokio::spawn(abort_on_panic(crate::worker::readers::listen(
+    let Config {
+        abort_on_task_failure,
+        ..
+    } = config;
+
+    macro_rules! maybe_abort_on_panic {
+        ($fut: expr) => {{
+            let fut = $fut;
+            if abort_on_task_failure {
+                Either::Left(abort_on_panic(fut))
+            } else {
+                Either::Right(fut)
+            }
+        }};
+    }
+
+    tokio::spawn(maybe_abort_on_panic!(crate::worker::readers::listen(
         valve.clone(),
         readers_listener,
         readers.clone(),
     )));
 
     {
-        tokio::spawn(abort_on_panic(
-            hyper::server::Server::builder(hyper::server::accept::from_stream(
-                valve.wrap(TcpListenerStream::new(http_listener)),
-            ))
-            .serve(make_service_fn(move |_| {
-                let s = http_server.clone();
-                async move { io::Result::Ok(s) }
-            }))
-            .map_err(|e| {
-                error!(error = %e, "HTTP server failed");
+        tokio::spawn(maybe_abort_on_panic!(hyper::server::Server::builder(
+            hyper::server::accept::from_stream(valve.wrap(TcpListenerStream::new(http_listener)),)
+        )
+        .serve(make_service_fn(move |_| {
+            let s = http_server.clone();
+            async move { io::Result::Ok(s) }
+        }))
+        .map_err(move |e| {
+            error!(error = %e, "HTTP server failed");
+            if abort_on_task_failure {
                 process::abort();
-            }),
-        ));
+            }
+        })));
     }
 
     let worker = Worker {
@@ -169,7 +185,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         domains: Default::default(),
     };
 
-    tokio::spawn(abort_on_panic(worker.run()));
+    tokio::spawn(maybe_abort_on_panic!(worker.run()));
 
     let our_descriptor = ControllerDescriptor {
         controller_uri: http_uri.clone(),
@@ -208,9 +224,11 @@ pub(super) async fn start_instance<A: Authority + 'static>(
         region,
     )?;
 
-    tokio::spawn(abort_on_panic(controller.run().map_err(move |e| {
+    tokio::spawn(maybe_abort_on_panic!(controller.run().map_err(move |e| {
         error!(error = %e, "ControllerOuter failed");
-        process::abort()
+        if abort_on_task_failure {
+            process::abort()
+        }
     })));
 
     Ok(Handle::new(authority, handle_tx, trigger, our_descriptor))

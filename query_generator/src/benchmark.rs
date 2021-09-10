@@ -409,7 +409,7 @@ impl Benchmark {
     }
 
     async fn setup_noria(&self) -> anyhow::Result<noria_server::Handle<LocalAuthority>> {
-        let mut builder = noria_server::Builder::default();
+        let mut builder = noria_server::Builder::for_tests();
         builder.set_sharding(self.shards);
         builder.set_persistence(PersistenceParameters {
             mode: DurabilityMode::DeleteOnExit,

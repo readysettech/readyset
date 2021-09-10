@@ -405,7 +405,7 @@ impl TestScript {
         loop {
             retry += 1;
 
-            let mut builder = Builder::default();
+            let mut builder = Builder::for_tests();
             builder.log_with(run_opts.logger());
 
             if run_opts.enable_reuse {

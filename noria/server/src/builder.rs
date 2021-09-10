@@ -41,6 +41,12 @@ impl Default for Builder {
     }
 }
 impl Builder {
+    /// Construct a new [`Builder`] with configuration setup for running tests
+    pub fn for_tests() -> Self {
+        let mut builder = Self::default();
+        builder.set_abort_on_task_failure(false);
+    }
+
     /// Set the maximum number of concurrent partial replay requests a domain can have outstanding
     /// at any given time.
     ///
@@ -137,6 +143,12 @@ impl Builder {
     /// Configures the volume id associated with this server.
     pub fn set_volume_id(&mut self, volume_id: VolumeId) {
         self.volume_id = Some(volume_id);
+    }
+
+    /// Set the value of [`Config::abort_on_task_failure`]. See the documentation of that field for
+    /// more information.
+    pub fn set_abort_on_task_failure(&mut self, abort_on_task_failure: bool) {
+        self.config.abort_on_task_failure = abort_on_task_failure;
     }
 
     /// Start a server instance and return a handle to it.
