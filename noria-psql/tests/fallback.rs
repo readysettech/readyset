@@ -43,3 +43,33 @@ fn create_table() {
         .get::<_, i32>(0);
     assert_eq!(result, 1)
 }
+
+#[test]
+#[serial]
+#[ignore] // needs proper detection of reads vs writes through fallback
+fn prepare_execute_fallback() {
+    let d = Deployment::new("create_table");
+    let config = setup(&d);
+    let mut client = config.connect(NoTls).unwrap();
+
+    sleep();
+
+    client
+        .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")
+        .unwrap();
+
+    client
+        .execute("INSERT INTO cats (id) VALUES (1)", &[])
+        .unwrap();
+    sleep();
+
+    // params in subqueries will likely always go to fallback
+    let res = client
+        .query(
+            "SELECT id FROM (SELECT id FROM cats WHERE id = $1) sq",
+            &[&1i32],
+        )
+        .unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].get::<_, i32>(0), 1);
+}
