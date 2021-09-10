@@ -31,7 +31,9 @@ mod types {
         let d = Deployment::new("type_test");
         let config = setup(&d);
         let mut client = config.connect(NoTls).unwrap();
-        client.simple_query("DROP TABLE IF EXISTS t").unwrap();
+
+        sleep();
+
         client
             .simple_query(&format!("CREATE TABLE t (x {})", type_name))
             .unwrap();
@@ -52,7 +54,7 @@ mod types {
         let count_where_result = client
             .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
             .unwrap()
-            .get::<_, i32>(0);
+            .get::<_, i64>(0);
         assert_eq!(count_where_result, 1);
 
         // check parameter passing and value returning when going through fallback
@@ -74,9 +76,10 @@ mod types {
         (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty) => {
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
-                cases: 10,
+                cases: 5,
                 ..ProptestConfig::default()
             })]
+            #[serial_test::serial]
             $(#[$meta])*
             fn $test_name(val: $rust_type) {
                 test_type_roundtrip($pg_type_name, val);
@@ -89,11 +92,11 @@ mod types {
         #[ignore] bool_bool("bool", bool);
         #[ignore] char_i8("char", i8);
         #[ignore] smallint_i16("smallint", i16);
-        #[ignore] int_i32("integer", i32);
+        int_i32("integer", i32);
         #[ignore] oid_u32("oid", u32);
-        #[ignore] bigint_i64("bigint", i64);
+        bigint_i64("bigint", i64);
         #[ignore] real_f32("real", f32);
         #[ignore] double_f64("double precision", f64);
-        #[ignore] text_string("text", String);
+        text_string("text", String);
     }
 }
