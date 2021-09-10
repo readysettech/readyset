@@ -107,6 +107,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(UpstreamPrepare {
             statement_id,
             meta,
+            // TODO(dan): Fill this in based on the returned results
             is_read: false,
         })
     }
