@@ -27,12 +27,40 @@ const TYPLEN_VARLENA: i16 = -1;
 const UNKNOWN_COLUMN: i16 = 0;
 const UNKNOWN_TABLE: i32 = 0;
 
+/// Enum representing the state machine of the request-response flow of a [`Protocol`]
+///
+/// The state transitions are:
+///
+/// * StartingUp -> Ready
+/// * Ready -> Extended
+/// * Extended -> Error
+/// * Error -> Ready
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum State {
+    /// The server is starting up
+    StartingUp,
+
+    /// The server is ready to accept queries
+    Ready,
+
+    /// The server is currently processing an [extended query][0]
+    ///
+    /// [0]: https://www.postgresql.org/docs/13/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+    Extended,
+
+    /// The server has encountered an error while processing an [extended query][0], and should
+    /// (TODO) discard messages until the next [Sync request][1] from a client
+    ///
+    /// [0]: https://www.postgresql.org/docs/13/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
+    /// [1]: psql_srv::message::frontend::FrontendMessage::Sync
+    Error,
+}
+
 /// A struct to maintain state for an implementation of the backend side of the PostgreSQL
 /// frontend/backend protocol.
 pub struct Protocol {
-    /// Indicator of whether the connection to the frontend is starting up. When starting up,
-    /// start-up messages are sent by the frontend rather than regular mode messages.
-    is_starting_up: bool,
+    /// The current state of the request-response flow
+    state: State,
 
     /// A prepared statement allows a frontend to specify the general form of a SQL statement while
     /// leaving some values absent, but parameterized so that they can be provided later. This
@@ -72,7 +100,7 @@ struct PortalData {
 impl Protocol {
     pub fn new() -> Protocol {
         Protocol {
-            is_starting_up: true,
+            state: State::StartingUp,
             prepared_statements: HashMap::new(),
             portals: HashMap::new(),
         }
@@ -100,8 +128,9 @@ impl Protocol {
         backend: &mut B,
         channel: &mut Channel<C, B::Row>,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
-        if self.is_starting_up {
-            return match message {
+        // TODO(grfn): Discard if self.state.is_error()?
+        match self.state {
+            State::StartingUp => match message {
                 // A request for an SSL connection.
                 SSLRequest { .. } => {
                     // Deny the SSL connection. The frontend may choose to proceed without SSL.
@@ -113,7 +142,7 @@ impl Protocol {
                     let database = database
                         .ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
                     backend.on_init(database.borrow()).await?;
-                    self.is_starting_up = false;
+                    self.state = State::Ready;
                     channel.set_start_up_complete();
                     Ok(Response::Message2(
                         AuthenticationOk,
@@ -122,226 +151,236 @@ impl Protocol {
                 }
 
                 m => Err(Error::UnsupportedMessage(m)),
-            };
-        }
+            },
 
-        match message {
-            // A request to bind parameters to a prepared statement, creating a portal.
-            Bind {
-                prepared_statement_name,
-                portal_name,
-                params,
-                result_transfer_formats,
-            } => {
-                let PreparedStatementData {
-                    prepared_statement_id,
-                    row_schema,
-                    ..
-                } = self
-                    .prepared_statements
-                    .get(prepared_statement_name.borrow() as &str)
-                    .ok_or_else(|| {
-                        Error::MissingPreparedStatement(prepared_statement_name.to_string())
-                    })?;
-                let n_cols = row_schema.len();
-                let result_transfer_formats = match result_transfer_formats[..] {
-                    // If no format codes are provided, use the default format (`Text`).
-                    [] => vec![Text; n_cols],
-                    // If only one format code is provided, apply it to all columns.
-                    [f] => vec![f; n_cols],
-                    // Otherwise use the format codes that have been provided, as is.
-                    _ => {
-                        if result_transfer_formats.len() == n_cols {
-                            result_transfer_formats
-                        } else {
-                            return Err(Error::IncorrectFormatCount(n_cols));
+            _ => match message {
+                // A request to bind parameters to a prepared statement, creating a portal.
+                Bind {
+                    prepared_statement_name,
+                    portal_name,
+                    params,
+                    result_transfer_formats,
+                } => {
+                    let PreparedStatementData {
+                        prepared_statement_id,
+                        row_schema,
+                        ..
+                    } = self
+                        .prepared_statements
+                        .get(prepared_statement_name.borrow() as &str)
+                        .ok_or_else(|| {
+                            Error::MissingPreparedStatement(prepared_statement_name.to_string())
+                        })?;
+                    let n_cols = row_schema.len();
+                    let result_transfer_formats = match result_transfer_formats[..] {
+                        // If no format codes are provided, use the default format (`Text`).
+                        [] => vec![Text; n_cols],
+                        // If only one format code is provided, apply it to all columns.
+                        [f] => vec![f; n_cols],
+                        // Otherwise use the format codes that have been provided, as is.
+                        _ => {
+                            if result_transfer_formats.len() == n_cols {
+                                result_transfer_formats
+                            } else {
+                                return Err(Error::IncorrectFormatCount(n_cols));
+                            }
                         }
-                    }
-                };
-                self.portals.insert(
-                    portal_name.to_string(),
-                    PortalData {
-                        prepared_statement_id: *prepared_statement_id,
-                        prepared_statement_name: prepared_statement_name.to_string(),
-                        params,
-                        result_transfer_formats: Arc::new(result_transfer_formats),
-                    },
-                );
-                Ok(Response::Message(BindComplete))
-            }
+                    };
+                    self.portals.insert(
+                        portal_name.to_string(),
+                        PortalData {
+                            prepared_statement_id: *prepared_statement_id,
+                            prepared_statement_name: prepared_statement_name.to_string(),
+                            params,
+                            result_transfer_formats: Arc::new(result_transfer_formats),
+                        },
+                    );
+                    Ok(Response::Message(BindComplete))
+                }
 
-            // A request to close (deallocate) either a prepared statement or a portal.
-            Close { name } => {
-                match name {
+                // A request to close (deallocate) either a prepared statement or a portal.
+                Close { name } => {
+                    match name {
+                        Portal(name) => {
+                            self.portals.remove(name.borrow() as &str);
+                        }
+
+                        PreparedStatement(name) => {
+                            if let Some(id) = self
+                                .prepared_statements
+                                .get(name.borrow() as &str)
+                                .map(|d| d.prepared_statement_id)
+                            {
+                                backend.on_close(id).await?;
+                                channel.clear_statement_param_types(name.borrow() as &str);
+                                self.prepared_statements.remove(name.borrow() as &str);
+                                // TODO Remove all portals referencing this prepared statement.
+                            }
+                        }
+                    };
+                    Ok(Response::Message(CloseComplete))
+                }
+
+                // A request to describe either a prepared statement or a portal.
+                Describe { name } => match name {
                     Portal(name) => {
-                        self.portals.remove(name.borrow() as &str);
+                        let PortalData {
+                            prepared_statement_name,
+                            result_transfer_formats,
+                            ..
+                        } = self
+                            .portals
+                            .get(name.borrow() as &str)
+                            .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
+                        let PreparedStatementData { row_schema, .. } = self
+                            .prepared_statements
+                            .get(prepared_statement_name)
+                            .ok_or_else(|| {
+                                Error::InternalError("missing prepared statement".to_string())
+                            })?;
+                        debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
+                        Ok(Response::Message(RowDescription {
+                            field_descriptions: row_schema
+                                .iter()
+                                .zip(result_transfer_formats.iter())
+                                .map(|(i, f)| make_field_description(i, *f))
+                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
+                        }))
                     }
 
                     PreparedStatement(name) => {
-                        if let Some(id) = self
+                        let PreparedStatementData {
+                            param_schema,
+                            row_schema,
+                            ..
+                        } = self
                             .prepared_statements
                             .get(name.borrow() as &str)
-                            .map(|d| d.prepared_statement_id)
-                        {
-                            backend.on_close(id).await?;
-                            channel.clear_statement_param_types(name.borrow() as &str);
-                            self.prepared_statements.remove(name.borrow() as &str);
-                            // TODO Remove all portals referencing this prepared statement.
-                        }
+                            .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
+                        Ok(Response::Message2(
+                            ParameterDescription {
+                                parameter_data_types: param_schema.clone(),
+                            },
+                            RowDescription {
+                                field_descriptions: row_schema
+                                    .iter()
+                                    .map(|i| make_field_description(i, TRANSFER_FORMAT_PLACEHOLDER))
+                                    .collect::<Result<Vec<FieldDescription>, Error>>()?,
+                            },
+                        ))
                     }
-                };
-                Ok(Response::Message(CloseComplete))
-            }
+                },
 
-            // A request to describe either a prepared statement or a portal.
-            Describe { name } => match name {
-                Portal(name) => {
+                // A request to execute a portal (a combination of a prepared statement with
+                // parameter values).
+                Execute { portal_name, .. } => {
+                    self.state = State::Extended;
                     let PortalData {
-                        prepared_statement_name,
+                        prepared_statement_id,
+                        params,
                         result_transfer_formats,
                         ..
                     } = self
                         .portals
-                        .get(name.borrow() as &str)
-                        .ok_or_else(|| Error::MissingPortal(name.to_string()))?;
-                    let PreparedStatementData { row_schema, .. } = self
-                        .prepared_statements
-                        .get(prepared_statement_name)
-                        .ok_or_else(|| {
-                            Error::InternalError("missing prepared statement".to_string())
-                        })?;
-                    debug_assert_eq!(row_schema.len(), result_transfer_formats.len());
-                    Ok(Response::Message(RowDescription {
-                        field_descriptions: row_schema
-                            .iter()
-                            .zip(result_transfer_formats.iter())
-                            .map(|(i, f)| make_field_description(i, *f))
-                            .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                    }))
+                        .get(portal_name.borrow() as &str)
+                        .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
+                    let response = backend.on_execute(*prepared_statement_id, params).await?;
+                    let res = if let Select { resultset, .. } = response {
+                        Ok(Response::Select {
+                            header: None,
+                            resultset,
+                            result_transfer_formats: Some(result_transfer_formats.clone()),
+                            trailer: None,
+                        })
+                    } else {
+                        let tag = match response {
+                            Insert(n) => CommandCompleteTag::Insert(n),
+                            Update(n) => CommandCompleteTag::Update(n),
+                            Delete(n) => CommandCompleteTag::Delete(n),
+                            Command => CommandCompleteTag::Empty,
+                            #[allow(clippy::unreachable)]
+                            Select { .. } => {
+                                unreachable!("Select is handled as a special case above.")
+                            }
+                        };
+                        Ok(Response::Message(CommandComplete { tag }))
+                    };
+                    self.state = State::Ready;
+                    res
                 }
 
-                PreparedStatement(name) => {
-                    let PreparedStatementData {
-                        param_schema,
-                        row_schema,
-                        ..
-                    } = self
-                        .prepared_statements
-                        .get(name.borrow() as &str)
-                        .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
-                    Ok(Response::Message2(
-                        ParameterDescription {
-                            parameter_data_types: param_schema.clone(),
-                        },
-                        RowDescription {
-                            field_descriptions: row_schema
-                                .iter()
-                                .map(|i| make_field_description(i, TRANSFER_FORMAT_PLACEHOLDER))
-                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        },
-                    ))
+                // A request to directly execute a complete SQL statement, without creating a prepared
+                // statement.
+                Query { query } => {
+                    let response = backend.on_query(query.borrow()).await?;
+                    if let Select { schema, resultset } = response {
+                        Ok(Response::Select {
+                            header: Some(RowDescription {
+                                field_descriptions: schema
+                                    .iter()
+                                    .map(|i| make_field_description(i, Text))
+                                    .collect::<Result<Vec<FieldDescription>, Error>>()?,
+                            }),
+                            resultset,
+                            result_transfer_formats: None,
+                            trailer: Some(BackendMessage::ready_for_query_idle()),
+                        })
+                    } else {
+                        let tag = match response {
+                            Insert(n) => CommandCompleteTag::Insert(n),
+                            Update(n) => CommandCompleteTag::Update(n),
+                            Delete(n) => CommandCompleteTag::Delete(n),
+                            Command => CommandCompleteTag::Empty,
+                            #[allow(clippy::unreachable)]
+                            Select { .. } => {
+                                unreachable!("Select is handled as a special case above.")
+                            }
+                        };
+                        Ok(Response::Message2(
+                            CommandComplete { tag },
+                            BackendMessage::ready_for_query_idle(),
+                        ))
+                    }
                 }
-            },
 
-            // A request to execute a portal (a combination of a prepared statement with
-            // parameter values).
-            Execute { portal_name, .. } => {
-                let PortalData {
-                    prepared_statement_id,
-                    params,
-                    result_transfer_formats,
+                // A request to create a prepared statement.
+                Parse {
+                    prepared_statement_name,
+                    query,
                     ..
-                } = self
-                    .portals
-                    .get(portal_name.borrow() as &str)
-                    .ok_or_else(|| Error::MissingPreparedStatement(portal_name.to_string()))?;
-                let response = backend.on_execute(*prepared_statement_id, params).await?;
-                if let Select { resultset, .. } = response {
-                    Ok(Response::Select {
-                        header: None,
-                        resultset,
-                        result_transfer_formats: Some(result_transfer_formats.clone()),
-                        trailer: None,
-                    })
-                } else {
-                    let tag = match response {
-                        Insert(n) => CommandCompleteTag::Insert(n),
-                        Update(n) => CommandCompleteTag::Update(n),
-                        Delete(n) => CommandCompleteTag::Delete(n),
-                        Command => CommandCompleteTag::Empty,
-                        #[allow(clippy::unreachable)]
-                        Select { .. } => unreachable!("Select is handled as a special case above."),
-                    };
-                    Ok(Response::Message(CommandComplete { tag }))
-                }
-            }
-
-            // A request to directly execute a complete SQL statement, without creating a prepared
-            // statement.
-            Query { query } => {
-                let response = backend.on_query(query.borrow()).await?;
-                if let Select { schema, resultset } = response {
-                    Ok(Response::Select {
-                        header: Some(RowDescription {
-                            field_descriptions: schema
-                                .iter()
-                                .map(|i| make_field_description(i, Text))
-                                .collect::<Result<Vec<FieldDescription>, Error>>()?,
-                        }),
-                        resultset,
-                        result_transfer_formats: None,
-                        trailer: Some(BackendMessage::ready_for_query_idle()),
-                    })
-                } else {
-                    let tag = match response {
-                        Insert(n) => CommandCompleteTag::Insert(n),
-                        Update(n) => CommandCompleteTag::Update(n),
-                        Delete(n) => CommandCompleteTag::Delete(n),
-                        Command => CommandCompleteTag::Empty,
-                        #[allow(clippy::unreachable)]
-                        Select { .. } => unreachable!("Select is handled as a special case above."),
-                    };
-                    Ok(Response::Message2(
-                        CommandComplete { tag },
-                        BackendMessage::ready_for_query_idle(),
-                    ))
-                }
-            }
-
-            // A request to create a prepared statement.
-            Parse {
-                prepared_statement_name,
-                query,
-                ..
-            } => {
-                let PrepareResponse {
-                    prepared_statement_id,
-                    param_schema,
-                    row_schema,
-                } = backend.on_prepare(query.borrow()).await?;
-                channel.set_statement_param_types(
-                    prepared_statement_name.borrow() as &str,
-                    param_schema.clone(),
-                );
-                self.prepared_statements.insert(
-                    prepared_statement_name.to_string(),
-                    PreparedStatementData {
+                } => {
+                    let PrepareResponse {
                         prepared_statement_id,
                         param_schema,
                         row_schema,
-                    },
-                );
-                Ok(Response::Message(ParseComplete))
-            }
+                    } = backend.on_prepare(query.borrow()).await?;
+                    channel.set_statement_param_types(
+                        prepared_statement_name.borrow() as &str,
+                        param_schema.clone(),
+                    );
+                    self.prepared_statements.insert(
+                        prepared_statement_name.to_string(),
+                        PreparedStatementData {
+                            prepared_statement_id,
+                            param_schema,
+                            row_schema,
+                        },
+                    );
+                    Ok(Response::Message(ParseComplete))
+                }
 
-            // A request to synchronize state. Generally sent by the frontend after a query
-            // sequence, or after an error has occurred.
-            Sync => Ok(Response::Message(BackendMessage::ready_for_query_idle())),
+                // A request to synchronize state. Generally sent by the frontend after a query
+                // sequence, or after an error has occurred.
+                Sync => {
+                    self.state = State::Ready;
+                    Ok(Response::Message(BackendMessage::ready_for_query_idle()))
+                }
 
-            // A request to terminate the connection.
-            Terminate => Ok(Response::Empty),
+                // A request to terminate the connection.
+                Terminate => Ok(Response::Empty),
 
-            m => Err(Error::UnsupportedMessage(m)),
+                m => Err(Error::UnsupportedMessage(m)),
+            },
         }
     }
 
@@ -354,13 +393,15 @@ impl Protocol {
         &mut self,
         error: Error,
     ) -> Result<Response<B::Row, B::Resultset>, Error> {
-        if self.is_starting_up {
-            Ok(Response::Message(make_error_response(error)))
-        } else {
-            Ok(Response::Message2(
+        match self.state {
+            State::StartingUp | State::Extended => {
+                self.state = State::Error;
+                Ok(Response::Message(make_error_response(error)))
+            }
+            _ => Ok(Response::Message2(
                 make_error_response(error),
                 BackendMessage::ready_for_query_idle(),
-            ))
+            )),
         }
     }
 }
@@ -626,7 +667,7 @@ mod tests {
     #[test]
     fn startup_message() {
         let mut protocol = Protocol::new();
-        assert!(protocol.is_starting_up);
+        assert_eq!(protocol.state, State::StartingUp);
         let request = FrontendMessage::StartupMessage {
             protocol_version: 12345,
             user: Some(bytes_str("user_name")),
@@ -645,7 +686,7 @@ mod tests {
         // The database has been set on the backend.
         assert_eq!(backend.database.unwrap(), "database_name");
         // The protocol is no longer "starting up".
-        assert!(!protocol.is_starting_up);
+        assert_eq!(protocol.state, State::Ready);
     }
 
     #[test]
@@ -1564,7 +1605,7 @@ mod tests {
     #[test]
     fn on_error_after_starting_up() {
         let mut protocol = Protocol::new();
-        protocol.is_starting_up = false;
+        protocol.state = State::Ready;
         assert_eq!(
             block_on(
                 protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
@@ -1579,5 +1620,23 @@ mod tests {
                 BackendMessage::ready_for_query_idle()
             )
         );
+    }
+
+    #[test]
+    fn on_error_in_extended() {
+        let mut protocol = Protocol::new();
+        protocol.state = State::Extended;
+        assert_eq!(
+            block_on(
+                protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
+            )
+            .unwrap(),
+            Response::Message(ErrorResponse {
+                severity: ErrorSeverity::Error,
+                sqlstate: SqlState::INTERNAL_ERROR,
+                message: "internal error: error requested".to_string()
+            })
+        );
+        assert_eq!(protocol.state, State::Error);
     }
 }
