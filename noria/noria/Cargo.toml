@@ -42,6 +42,7 @@ tracing-futures = "0.2.2"
 slab = "0.4"
 pin-project = "0.4.17"
 futures-util = "0.3.0"
+futures = "0.3.0"
 mysql_common = "0.27.5"
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "1.0.0"
@@ -59,6 +60,8 @@ bytes = "1.0.1"
 zookeeper-async = "4.0.1"
 enum_dispatch = "0.3.7"
 async-trait = "0.1"
+consul = { git = "https://github.com/readysettech/consul-rust" }
+base64 = "0.13"
 
 # channel/
 bufstream = "0.1.3"

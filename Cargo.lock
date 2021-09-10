@@ -1059,6 +1059,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
+name = "consul"
+version = "0.4.2"
+source = "git+https://github.com/readysettech/consul-rust#b5f7c34aa3e8c42ee740a3773bb7b5423d934360"
+dependencies = [
+ "async-trait",
+ "error-chain",
+ "futures 0.3.17",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tokio 1.11.0",
+ "url",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1630,6 +1646,16 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "error-chain"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2f06b9cac1506ece98fe3231e3cc9c4410ec3d5b1f24ae1c8946f0742cdefc"
+dependencies = [
+ "backtrace",
+ "version_check",
 ]
 
 [[package]]
@@ -3505,13 +3531,16 @@ dependencies = [
  "async-bincode",
  "async-trait",
  "backoff",
+ "base64 0.13.0",
  "bincode",
  "bufstream",
  "byteorder",
  "bytes 1.1.0",
  "chrono",
+ "consul",
  "derive_more",
  "enum_dispatch",
+ "futures 0.3.17",
  "futures-util",
  "hyper",
  "itertools 0.10.1",

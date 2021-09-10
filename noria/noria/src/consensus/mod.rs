@@ -11,10 +11,12 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use url::Url;
 
+mod consul;
 mod local;
 pub mod zk;
 use crate::ControllerDescriptor;
 
+pub use self::consul::ConsulAuthority;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::zk::ZookeeperAuthority;
 
@@ -36,6 +38,7 @@ pub enum AuthorityWorkerHeartbeatResponse {
 }
 
 /// The set of possible results to retrieving the new leader.
+#[derive(Debug, PartialEq)]
 pub enum GetLeaderResult {
     NewLeader(LeaderPayload),
     Unchanged,
@@ -62,6 +65,12 @@ pub struct WorkerDescriptor {
 #[async_trait]
 #[enum_dispatch]
 pub trait AuthorityControl: Send + Sync {
+    /// Initializes the authority. This performs any initialization that the authority client
+    /// needs to perform with the backend. This should be performed before any other
+    /// calls are made to AuthorityControl functions.
+    /// TODO(justin): Existing authorities should guarentee authority usage adheres to this.
+    async fn init(&self) -> Result<(), Error>;
+
     /// Attempt to become leader with a specific payload. The payload should be something that can
     /// be deserialized to get the information on how to connect to the leader. If it is successful
     /// the this will return Some(payload), otherwise None and another instance has become leader.
@@ -145,8 +154,10 @@ pub trait AuthorityControl: Send + Sync {
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to
 /// the respective variant.
+#[allow(clippy::large_enum_variant)]
 #[enum_dispatch(AuthorityControl)]
 pub enum Authority {
     ZookeeperAuthority,
+    ConsulAuthority,
     LocalAuthority,
 }

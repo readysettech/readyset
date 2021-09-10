@@ -164,6 +164,17 @@ impl ZookeeperAuthority {
 
 #[async_trait]
 impl AuthorityControl for ZookeeperAuthority {
+    async fn init(&self) -> Result<(), Error> {
+        // Attempt to create the base path in case we are the first worker.
+        let _ = self.zk.create(
+            WORKER_PATH,
+            Vec::new(),
+            Acl::open_unsafe().clone(),
+            CreateMode::Persistent,
+        );
+        Ok(())
+    }
+
     async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let path = match self
             .zk

@@ -652,6 +652,8 @@ async fn authority_inner(
     let span = info_span!("authority");
     let _g = span.enter();
 
+    authority.init().await?;
+
     let mut leader_election_state = AuthorityLeaderElectionState::new(
         event_tx.clone(),
         authority.clone(),

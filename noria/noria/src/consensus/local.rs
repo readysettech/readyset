@@ -191,6 +191,10 @@ impl LocalAuthority {
 
 #[async_trait]
 impl AuthorityControl for LocalAuthority {
+    async fn init(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let mut store_inner = self.store.inner_lock()?;
 
