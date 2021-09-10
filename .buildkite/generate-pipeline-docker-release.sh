@@ -38,8 +38,8 @@ cat << EOF
     commands:
       - buildkite-agent artifact download ${image}-${release_name}.tar.gz .
       - >-
-        aws s3 cp ${image}-${release-name}.tar.gz
-        s3://readysettech-customer-artifacts-us-east-2/docker-release-${release-name}/$(date --rfc-3339=date --utc)/${image}.tar.gz
+        aws s3 cp ${image}-${release_name}.tar.gz
+        s3://readysettech-customer-artifacts-us-east-2/docker-release-${release_name}/$(date --rfc-3339=date --utc)/${image}.tar.gz
     plugins:
     env:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/DeployCustomerArtifactsWrite
