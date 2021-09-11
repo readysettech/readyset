@@ -1,13 +1,12 @@
 //! Functions for assigning new nodes to thread domains.
 
 use dataflow::prelude::*;
-use slog::{debug, Logger};
+use tracing::debug;
 
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey};
 use std::collections::HashMap;
 
 pub fn assign(
-    log: &Logger,
     graph: &mut Graph,
     topo_list: &[NodeIndex],
     ndomains: &mut usize,
@@ -256,10 +255,12 @@ pub fn assign(
             }))
         })()?;
 
-        debug!(log, "node added to domain";
-           "node" => node.index(),
-           "type" => ?graph[node],
-           "domain" => ?assignment);
+        debug!(
+            node = node.index(),
+            node_type = ?graph[node],
+            domain = ?assignment,
+            "node added to domain"
+        );
         graph[node].add_to(assignment.into());
     }
     Ok(())

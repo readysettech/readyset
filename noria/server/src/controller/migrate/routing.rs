@@ -13,13 +13,12 @@ use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use noria::{internal, invariant, invariant_eq, ReadySetError};
 use petgraph::graph::NodeIndex;
-use slog::{trace, Logger};
 use std::collections::{HashMap, HashSet};
+use tracing::trace;
 
 /// Add in ingress and egress nodes as appropriate in the graph to facilitate cross-domain
 /// communication.
 pub fn add(
-    log: &Logger,
     graph: &mut Graph,
     source: NodeIndex,
     new: &mut HashSet<NodeIndex>,
@@ -87,11 +86,11 @@ pub fn add(
                                 // FIXME(malte): this is buggy! it will re-use ingress nodes even if
                                 // they have a different sharding to the one we're about to add
                                 // (whose sharding is only determined below).
-                                trace!(log,
-                                       "re-using cross-domain ingress";
-                                       "to" => node.index(),
-                                       "from" => parent.index(),
-                                       "ingress" => i.index()
+                                trace!(
+                                    to = node.index(),
+                                    from = parent.index(),
+                                    ingress = i.index(),
+                                    "re-using cross-domain ingress"
                                 );
                                 break 'search;
                             }
@@ -133,17 +132,17 @@ pub fn add(
                 new.insert(ingress);
 
                 if parent == source {
-                    trace!(log,
-                           "adding source ingress";
-                           "base" => node.index(),
-                           "ingress" => ingress.index()
+                    trace!(
+                        base = node.index(),
+                        ingress = ingress.index(),
+                        "adding source ingress"
                     );
                 } else {
-                    trace!(log,
-                           "adding cross-domain ingress";
-                           "to" => node.index(),
-                           "from" => parent.index(),
-                           "ingress" => ingress.index()
+                    trace!(
+                        to = node.index(),
+                        from = parent.index(),
+                        ingress = ingress.index(),
+                        "adding cross-domain ingress"
                     );
                 }
 
@@ -195,10 +194,10 @@ pub fn add(
             if graph[sender].is_sender() {
                 // all good -- we're already hooked up with an egress or sharder!
                 if graph[sender].is_egress() {
-                    trace!(log,
-                           "re-using cross-domain egress to new node";
-                           "node" => node.index(),
-                           "egress" => sender.index()
+                    trace!(
+                        node = node.index(),
+                        egress = sender.index(),
+                        "re-using cross-domain egress to new node"
                     );
                 }
                 continue;
@@ -218,10 +217,10 @@ pub fn add(
             };
 
             if let Some(egress) = egress {
-                trace!(log,
-                       "re-using cross-domain egress to ingress";
-                       "ingress" => ingress.index(),
-                       "egress" => egress.index()
+                trace!(
+                    ingress = ingress.index(),
+                    egress = egress.index(),
+                    "re-using cross-domain egress to ingress"
                 );
             }
 
@@ -238,10 +237,10 @@ pub fn add(
                 // we also now need to deal with this egress node
                 new.insert(egress);
 
-                trace!(log,
-                       "adding cross-domain egress to send to new ingress";
-                       "ingress" => ingress.index(),
-                       "egress" => egress.index()
+                trace!(
+                    ingress = ingress.index(),
+                    egress = egress.index(),
+                    "adding cross-domain egress to send to new ingress"
                 );
 
                 egress
@@ -264,7 +263,6 @@ pub fn add(
 }
 
 pub(super) fn connect(
-    log: &Logger,
     graph: &mut Graph,
     dmp: &mut DomainMigrationPlan,
     new: &HashSet<NodeIndex>,
@@ -281,10 +279,10 @@ pub(super) fn connect(
         for sender in graph.neighbors_directed(node, petgraph::EdgeDirection::Incoming) {
             let sender_node = &graph[sender];
             if sender_node.is_egress() {
-                trace!(log,
-                       "connecting";
-                       "egress" => sender.index(),
-                       "ingress" => node.index()
+                trace!(
+                    egress = sender.index(),
+                    ingress = node.index(),
+                    "connecting"
                 );
 
                 let shards = dmp.num_shards(n.domain())?;
@@ -323,10 +321,10 @@ pub(super) fn connect(
                     )?;
                 }
             } else if sender_node.is_sharder() {
-                trace!(log,
-                       "connecting";
-                       "sharder" => sender.index(),
-                       "ingress" => node.index()
+                trace!(
+                    sharder = sender.index(),
+                    ingress = node.index(),
+                    "connecting"
                 );
 
                 let shards = dmp.num_shards(n.domain())?;
