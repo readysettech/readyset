@@ -35,13 +35,14 @@ use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use reqwest::Url;
-use slog::{crit, debug, error, info, o, trace, warn, Logger};
+use slog::{crit, debug, error, info, trace, warn};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{cell, time};
+use tracing::info_span;
 use vec1::Vec1;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
@@ -659,9 +660,10 @@ impl ControllerInner {
         &mut self,
         idx: DomainIndex,
         shard_workers: Vec<WorkerIdentifier>,
-        log: &Logger,
         nodes: Vec<(NodeIndex, bool)>,
     ) -> ReadySetResult<DomainHandle> {
+        use tracing::{error, info};
+
         // Reader nodes are always assigned to their own domains, so it's good enough to see
         // if any of its nodes is a reader.
         // We check for *any* node (and not *all*) since a reader domain has a reader node and an
@@ -712,7 +714,6 @@ impl ControllerInner {
 
             // send domain to worker
             info!(
-                log,
                 "sending domain {}.{} to worker {}",
                 idx.index(),
                 shard,
@@ -746,7 +747,7 @@ impl ControllerInner {
                 }
             }
 
-            info!(log, "worker booted domain at {}", ret.external_addr);
+            info!(external_addr = %ret.external_addr, "worker booted domain");
 
             self.channel_coordinator
                 .insert_remote((idx, shard), ret.external_addr)?;
@@ -776,20 +777,16 @@ impl ControllerInner {
         // result of a nasty deadlock.)
         for (address, w) in self.workers.iter_mut() {
             for &dd in &domain_addresses {
-                info!(
-                    log,
-                    "informing worker at {} about newly placed domain", w.uri
-                );
+                info!(worker_uri = %w.uri, "informing worker about newly placed domain");
                 if let Err(e) = futures_executor::block_on(
                     w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd])),
                 ) {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
                     error!(
-                        log,
-                        "Worker could not be reached and will be ignored. Address: {:?} | Error: {:?}",
-                        address,
-                        e
+                        ?address,
+                        error = ?e,
+                        "Worker could not be reached and will be ignored",
                     );
                 }
             }
@@ -798,7 +795,6 @@ impl ControllerInner {
         Ok(DomainHandle {
             idx,
             shards: assignments,
-            log: log.clone(),
         })
     }
 
@@ -817,8 +813,10 @@ impl ControllerInner {
     where
         F: FnOnce(&mut Migration) -> T,
     {
-        info!(self.log, "starting migration");
-        let miglog = self.log.new(o!());
+        use tracing::info;
+        let span = info_span!("migrate");
+        let _g = span.enter();
+        info!("starting migration");
         let ingredients = self.ingredients.clone();
         let mut m = Migration {
             ingredients,
@@ -829,10 +827,10 @@ impl ControllerInner {
             context: Default::default(),
             worker: None,
             start: time::Instant::now(),
-            log: miglog,
         };
         let r = f(&mut m);
         m.commit(self)?;
+        info!("finished migration");
         Ok(r)
     }
 

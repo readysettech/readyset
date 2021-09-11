@@ -3,15 +3,14 @@ use crate::worker::WorkerRequestKind;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use serde::de::DeserializeOwned;
-use slog::{error, Logger};
 use std::collections::HashMap;
+use tracing::error;
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.
 pub(super) struct DomainHandle {
     pub(super) idx: DomainIndex,
     pub(super) shards: Vec<WorkerIdentifier>,
-    pub(super) log: Logger,
 }
 
 impl DomainHandle {
@@ -62,10 +61,7 @@ impl DomainHandle {
                     rpc_err_no_downcast(format!("domain request to {}.{}", self.idx.index(), i), e)
                 })?)
         } else {
-            error!(
-                self.log,
-                "tried to send domain request to failed worker at {}", addr
-            );
+            error!(%addr, "tried to send domain request to failed worker");
             Err(ReadySetError::WorkerFailed { uri: addr.clone() })
         }
     }

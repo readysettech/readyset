@@ -1,14 +1,12 @@
-use dataflow::node;
-use dataflow::ops;
 use dataflow::prelude::*;
+use dataflow::{node, ops};
 use noria::{internal, invariant, invariant_eq, ReadySetResult};
 use petgraph::graph::NodeIndex;
-use slog::{debug, error, info, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
+use tracing::{debug, error, info, info_span, trace, warn};
 
 #[allow(clippy::cognitive_complexity)]
 pub fn shard(
-    log: &Logger,
     graph: &mut Graph,
     new: &mut HashSet<NodeIndex>,
     topo_list: &[NodeIndex],
@@ -21,6 +19,8 @@ pub fn shard(
     // we want to shard every node by its "input" index. if the index required from a parent
     // doesn't match the current sharding key, we need to do a shuffle (i.e., a Union + Sharder).
     'nodes: for &node in topo_list {
+        let span = info_span!("sharding node", ?node);
+        let _g = span.enter();
         let mut input_shardings: HashMap<_, _> = graph
             .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
             .map(|ni| (ni, graph[ni].sharded_by()))
@@ -52,15 +52,15 @@ pub fn shard(
                 })
                 .unwrap_or(Sharding::ForcedNone);
             if s.is_none() {
-                info!(log, "de-sharding prior to poorly keyed reader"; "node" => ?node);
+                info!("de-sharding prior to poorly keyed reader");
             } else {
-                info!(log, "sharding reader"; "node" => ?node);
+                info!("sharding reader");
                 graph[node].as_mut_reader().unwrap().shard(sharding_factor);
             }
 
             if s != input_shardings[&ni] {
                 // input is sharded by different key -- need shuffle
-                reshard(log, new, &mut swaps, graph, ni, node, s)?;
+                reshard(new, &mut swaps, graph, ni, node, s)?;
             }
             graph.node_weight_mut(node).unwrap().shard_by(s);
             continue;
@@ -82,9 +82,10 @@ pub fn shard(
             } else {
                 input_shardings.iter().map(|(_, &s)| s).next().unwrap()
             };
-            info!(log, "preserving sharding of pass-through node";
-                  "node" => ?node,
-                  "sharding" => ?s);
+            info!(
+                sharding = ?s,
+                "preserving sharding of pass-through node"
+            );
 
             if graph[node].is_internal() || graph[node].is_base() {
                 if let Sharding::ByColumn(c, shards) = s {
@@ -116,9 +117,9 @@ pub fn shard(
                 // not supported yet -- force no sharding
                 // TODO: if we're sharding by a two-part key and need sharding by the *first* part
                 // of that key, we can probably re-use the existing sharding?
-                error!(log, "de-sharding for lack of multi-key sharding support"; "node" => ?node);
+                error!("de-sharding for lack of multi-key sharding support");
                 for &ni in input_shardings.keys() {
-                    reshard(log, new, &mut swaps, graph, ni, node, Sharding::ForcedNone)?;
+                    reshard(new, &mut swaps, graph, ni, node, Sharding::ForcedNone)?;
                 }
             }
             continue;
@@ -132,9 +133,9 @@ pub fn shard(
             let want_sharding = want_sharding[0];
 
             if graph[node].fields()[want_sharding] == "bogokey" {
-                info!(log, "de-sharding node that operates on bogokey"; "node" => ?node);
+                info!("de-sharding node that operates on bogokey");
                 for (ni, s) in input_shardings.iter_mut() {
-                    reshard(log, new, &mut swaps, graph, *ni, node, Sharding::ForcedNone)?;
+                    reshard(new, &mut swaps, graph, *ni, node, Sharding::ForcedNone)?;
                     *s = Sharding::ForcedNone;
                 }
                 continue;
@@ -159,10 +160,9 @@ pub fn shard(
                 None if !graph[node].is_base() => {
                     // weird operator -- needs an index in its output, which it generates.
                     // we need to have *no* sharding on our inputs!
-                    info!(log, "de-sharding node that partitions by output key";
-                          "node" => ?node);
+                    info!("de-sharding node that partitions by output key");
                     for (ni, s) in input_shardings.iter_mut() {
-                        reshard(log, new, &mut swaps, graph, *ni, node, Sharding::ForcedNone)?;
+                        reshard(new, &mut swaps, graph, *ni, node, Sharding::ForcedNone)?;
                         *s = Sharding::ForcedNone;
                     }
                     // ok to continue since standard shard_by is None
@@ -170,7 +170,7 @@ pub fn shard(
                 }
                 None => {
                     // base nodes -- what do we shard them by?
-                    warn!(log, "sharding base node"; "node" => ?node, "column" => want_sharding);
+                    warn!(column = want_sharding, "sharding base node");
                     graph
                         .node_weight_mut(node)
                         .unwrap()
@@ -193,19 +193,21 @@ pub fn shard(
                             if in_shard_col != lookup_col {
                                 // we do lookups on this input on a different column than the one
                                 // that produces the output shard column.
-                                warn!(log, "not sharding self-lookup node; lookup conflict";
-                                      "node" => ?node,
-                                      "wants" => want_sharding,
-                                      "lookup" => ?(ni, lookup_col));
+                                warn!(
+                                    wants = want_sharding,
+                                    lookup = ?(ni, lookup_col),
+                                    "not sharding self-lookup node; lookup conflict"
+                                );
                                 ok = false;
                             }
                         } else {
                             // we do lookups on this input column, but it's not the one we're
                             // sharding output on -- no unambigous sharding.
-                            warn!(log, "not sharding self-lookup node; also looks up by other";
-                                  "node" => ?node,
-                                  "wants" => want_sharding,
-                                  "lookup" => ?(ni, lookup_col));
+                            warn!(
+                                wants = want_sharding,
+                                lookup = ?(ni, lookup_col),
+                                "not sharding self-lookup node; also looks up by other"
+                            );
                             ok = false;
                         }
                     }
@@ -213,15 +215,16 @@ pub fn shard(
                     if ok {
                         // we can shard ourselves and our inputs by a single column!
                         let s = Sharding::ByColumn(want_sharding, sharding_factor);
-                        info!(log, "sharding node doing self-lookup";
-                              "node" => ?node,
-                              "sharding" => ?s);
+                        info!(
+                            sharding = ?s,
+                            "sharding node doing self-lookup"
+                        );
 
                         for (ni, col) in want_sharding_input {
                             let need_sharding = Sharding::ByColumn(col, sharding_factor);
                             if input_shardings[&ni] != need_sharding {
                                 // input is sharded by different key -- need shuffle
-                                reshard(log, new, &mut swaps, graph, ni, node, need_sharding)?;
+                                reshard(new, &mut swaps, graph, ni, node, need_sharding)?;
                                 input_shardings.insert(ni, need_sharding);
                             }
                         }
@@ -241,7 +244,7 @@ pub fn shard(
             // do here is to simply force all our ancestors to be unsharded, but that would lead to
             // a very suboptimal graph. instead, we try to choose a sharding that is "harmonious"
             // with that of our inputs.
-            debug!(log, "testing for harmonious sharding"; "node" => ?node);
+            debug!("testing for harmonious sharding");
 
             // you can think of this loop as happening inside each of the ifs below, just hoisted
             // up to share some code.
@@ -281,9 +284,7 @@ pub fn shard(
                     if all_same {
                         // col is consistent with all input shardings!
                         let s = Sharding::ByColumn(col, sharding_factor);
-                        info!(log, "continuing consistent sharding through node";
-                              "node" => ?node,
-                              "sharding" => ?s);
+                        info!(sharding = ?s, "continuing consistent sharding through node");
                         graph.node_weight_mut(node).unwrap().shard_by(s);
                         continue 'nodes;
                     }
@@ -297,21 +298,23 @@ pub fn shard(
                         match need_sharding.get(&ni) {
                             Some(index) if index.len() != 1 => {
                                 // we're looking up by a compound key -- that's hard to shard
-                                trace!(log, "column traces to node looked up in by compound key";
-                                   "node" => ?node,
-                                   "ancestor" => ?ni,
-                                   "column" => src);
+                                trace!(
+                                    ancestor = ?ni,
+                                    column = src,
+                                    "column traces to node looked up in by compound key"
+                                );
                                 // give up and just force no sharding
                                 break 'outer;
                             }
                             Some(index) if index[0] != src => {
                                 // we're looking up by a different key. it's kind of weird that this
                                 // output column still resolved to a column in all our inputs...
-                                trace!(log, "column traces to node that is not looked up by";
-                                       "node" => ?node,
-                                       "ancestor" => ?ni,
-                                       "column" => src,
-                                       "index" => ?index);
+                                trace!(
+                                    ancestor = ?ni,
+                                    column = src,
+                                    ?index,
+                                    "column traces to node that is not looked up by"
+                                );
                                 // let's hope another column works instead
                                 continue 'outer;
                             }
@@ -329,18 +332,20 @@ pub fn shard(
                     // `col` resolves to the same column we use to lookup in each ancestor
                     // so it's safe for us to shard by `col`!
                     let s = Sharding::ByColumn(col, sharding_factor);
-                    info!(log, "sharding node with consistent lookup column";
-                          "node" => ?node,
-                          "sharding" => ?s);
+                    info!(sharding = ?s, "sharding node with consistent lookup column");
 
                     // we have to ensure that each input is also sharded by that key
                     // specifically, some inputs may _not_ be sharded previously
                     for &(ni, src) in &srcs {
                         let need_sharding = Sharding::ByColumn(src, sharding_factor);
                         if input_shardings[&ni] != need_sharding {
-                            debug!(log, "resharding input with sharding {:?} to match desired sharding {:?}",
-                               input_shardings[&ni], need_sharding; "node" => ?node, "input" => ?ni);
-                            reshard(log, new, &mut swaps, graph, ni, node, need_sharding)?;
+                            debug!(
+                                input = ?ni,
+                                "resharding input with sharding {:?} to match desired sharding {:?}",
+                                input_shardings[&ni],
+                                need_sharding
+                            );
+                            reshard(new, &mut swaps, graph, ni, node, need_sharding)?;
                             input_shardings.insert(ni, need_sharding);
                         }
                     }
@@ -365,11 +370,11 @@ pub fn shard(
 
         // force everything to be unsharded...
         let sharding = Sharding::ForcedNone;
-        warn!(log, "forcing de-sharding"; "node" => ?node);
+        warn!("forcing de-sharding");
         for (&ni, in_sharding) in &mut input_shardings {
             if !in_sharding.is_none() {
                 // ancestor must be forced to right sharding
-                reshard(log, new, &mut swaps, graph, ni, node, sharding)?;
+                reshard(new, &mut swaps, graph, ni, node, sharding)?;
                 *in_sharding = sharding;
             }
         }
@@ -385,10 +390,10 @@ pub fn shard(
     let mut gone = HashSet::new();
     while !new_sharders.is_empty() {
         'sharders: for n in new_sharders.split_off(0) {
-            trace!(log, "can we eliminate sharder {:?}?", n);
+            trace!("can we eliminate sharder {:?}?", n);
 
             if gone.contains(&n) {
-                trace!(log, "no, parent is weird (already eliminated)");
+                trace!("no, parent is weird (already eliminated)");
                 continue;
             }
 
@@ -409,18 +414,18 @@ pub fn shard(
 
             // we can only push sharding above newly created nodes that are not already sharded.
             if !new.contains(&p) || graph[p].sharded_by() != Sharding::None {
-                trace!(log, "no, parent is weird (not new or already sharded)");
+                trace!("no, parent is weird (not new or already sharded)");
                 continue;
             }
 
             // if the parent is a base, the only option we have is to shard the base.
             if graph[p].is_base() {
-                trace!(log, "well, its parent is a base");
+                trace!("well, its parent is a base");
 
                 // we can't shard compound bases (yet)
                 if let Some(k) = graph[p].get_base().unwrap().key() {
                     if k.len() != 1 {
-                        trace!(log, "no, parent is weird (has compound key)");
+                        trace!("no, parent is weird (has compound key)");
                         continue;
                     }
                 }
@@ -433,12 +438,12 @@ pub fn shard(
                 {
                     // TODO: technically we could still do this if the other children were
                     // sharded by the same column.
-                    trace!(log, "no, parent is weird (has other children)");
+                    trace!("no, parent is weird (has other children)");
                     continue;
                 }
 
                 // shard the base
-                warn!(log, "eagerly sharding unsharded base"; "by" => col, "base" => ?p);
+                warn!(by = col, base = ?p, "eagerly sharding unsharded base");
                 graph[p].shard_by(by);
                 // remove the sharder at n by rewiring its outgoing edges directly to the base.
                 let mut cs = graph
@@ -556,7 +561,7 @@ pub fn shard(
             }
 
             // then wire us (n) above the parent instead
-            warn!(log, "hoisting sharder above new unsharded node"; "sharder" => ?n, "node" => ?p);
+            warn!(sharder = ?n, node = ?p ,"hoisting sharder above new unsharded node");
             let new = graph[grandp].mirror(node::special::Sharder::new(src_col));
             *graph.node_weight_mut(n).unwrap() = new;
             let e = graph.find_edge(grandp, p).unwrap();
@@ -592,8 +597,8 @@ pub fn shard(
             invariant!(ps.next().is_none());
             p
         };
-        error!(log, "preventing unsupported sharded shuffle"; "sharder" => ?n);
-        reshard(log, new, &mut swaps, graph, p, n, Sharding::ForcedNone)?;
+        error!(sharder = ?n ,"preventing unsupported sharded shuffle");
+        reshard(new, &mut swaps, graph, p, n, Sharding::ForcedNone)?;
         graph
             .node_weight_mut(n)
             .unwrap()
@@ -621,7 +626,6 @@ pub fn shard(
 /// Modify the graph such that the path between `src` and `dst` shuffles the input such that the
 /// records received by `dst` are sharded by sharding `to`.
 fn reshard(
-    log: &Logger,
     new: &mut HashSet<NodeIndex>,
     swaps: &mut HashMap<(NodeIndex, NodeIndex), NodeIndex>,
     graph: &mut Graph,
@@ -632,10 +636,12 @@ fn reshard(
     invariant!(!graph[src].is_source());
 
     if graph[src].sharded_by().is_none() && to.is_none() {
-        debug!(log, "no need to shuffle";
-               "src" => ?src,
-               "dst" => ?dst,
-               "sharding" => ?to);
+        debug!(
+            ?src,
+            ?dst,
+            sharding = ?to,
+            "no need to shuffle"
+        );
         return Ok(());
     }
 
@@ -656,11 +662,13 @@ fn reshard(
         Sharding::Random(_) => internal!(),
     };
     let node = graph.add_node(node);
-    error!(log, "told to shuffle";
-           "src" => ?src,
-           "dst" => ?dst,
-           "using" => ?node,
-           "sharding" => ?to);
+    error!(
+        ?src,
+        ?dst,
+        using = ?node,
+        sharding = ?to,
+        "told to shuffle"
+    );
 
     new.insert(node);
 

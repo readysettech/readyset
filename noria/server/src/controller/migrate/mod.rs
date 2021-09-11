@@ -37,9 +37,9 @@ use metrics::counter;
 use metrics::histogram;
 use noria::metrics::recorded;
 use noria::ReadySetError;
-use slog::{debug, error, info, o, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use tracing::{debug, debug_span, error, info, info_span, trace, warn};
 
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{
@@ -64,7 +64,7 @@ pub struct StoredDomainRequest {
     pub req: DomainRequest,
 }
 impl StoredDomainRequest {
-    pub fn apply(self, log: &slog::Logger, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub fn apply(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
         let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
             ReadySetError::MigrationUnknownDomain {
                 domain_index: self.domain.index(),
@@ -72,7 +72,7 @@ impl StoredDomainRequest {
             }
         })?;
         if let DomainRequest::QueryReplayDone = self.req {
-            info!(log, "waiting for a done message");
+            info!("waiting for a done message");
 
             invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
 
@@ -89,7 +89,7 @@ impl StoredDomainRequest {
             while !is_done(&mainline.workers)? {
                 spins += 1;
                 if spins == 10 {
-                    warn!(log, "waiting for setup()-initiated replay to complete");
+                    warn!("waiting for setup()-initiated replay to complete");
                     spins = 0;
                 }
                 std::thread::sleep(Duration::from_millis(200));
@@ -152,21 +152,22 @@ impl MigrationPlan {
     /// If the plan fails, the `ControllerInner`'s state is left unchanged; however, no attempt
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
-    pub fn apply(self, log: &slog::Logger, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub fn apply(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+        let span = info_span!("apply");
+        let _g = span.enter();
         let MigrationPlan {
             ingredients,
             domain_nodes,
             ndomains,
             remap,
             materializations,
-            dmp: mut fdh,
+            mut dmp,
         } = self;
 
         warn!(
-            log,
-            "applying migration plan ({} new domains, {} messages)",
-            fdh.place.len(),
-            fdh.stored.len(),
+            new_domains = dmp.place.len(),
+            messages = dmp.stored.len(),
+            "applying migration plan",
         );
 
         let start = Instant::now();
@@ -186,8 +187,8 @@ impl MigrationPlan {
 
         let mut ret = Ok(());
 
-        if let Err(e) = fdh.apply(log, mainline) {
-            error!(log, "migration plan apply failed: {}", e);
+        if let Err(e) = dmp.apply(mainline) {
+            error!(error = %e, "migration plan apply failed");
             mainline.ingredients = ingredients;
             mainline.domain_nodes = domain_nodes;
             mainline.remap = remap;
@@ -196,7 +197,7 @@ impl MigrationPlan {
                 source: Box::new(e),
             });
         } else {
-            warn!(log, "migration plan applied"; "ms" => start.elapsed().as_millis());
+            warn!(ms = %start.elapsed().as_millis(), "migration plan applied");
         }
 
         ret
@@ -246,17 +247,13 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub fn apply(
-        &mut self,
-        log: &slog::Logger,
-        mainline: &mut ControllerInner,
-    ) -> ReadySetResult<()> {
+    pub fn apply(&mut self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
-            let d = mainline.place_domain(place.idx, place.shard_workers, log, place.nodes)?;
+            let d = mainline.place_domain(place.idx, place.shard_workers, place.nodes)?;
             mainline.domains.insert(place.idx, d);
         }
         for req in std::mem::take(&mut self.stored) {
-            req.apply(log, mainline)?;
+            req.apply(mainline)?;
         }
         Ok(())
     }
@@ -349,7 +346,6 @@ pub struct Migration {
     pub(super) worker: Option<WorkerIdentifier>,
 
     pub(super) start: Instant,
-    pub(super) log: slog::Logger,
 
     /// Additional migration information provided by the client
     pub(super) context: HashMap<String, DataType>,
@@ -377,10 +373,10 @@ impl Migration {
 
         // add to the graph
         let ni = self.ingredients.add_node(i);
-        info!(self.log,
-              "adding new node";
-              "node" => ni.index(),
-              "type" => format!("{:?}", self.ingredients[ni])
+        info!(
+            node = ni.index(),
+            node_type = ?self.ingredients[ni],
+            "adding new node"
         );
 
         // keep track of the fact that it's new
@@ -411,10 +407,7 @@ impl Migration {
         let ni = self
             .ingredients
             .add_node(node::Node::new(name.to_string(), fields, b));
-        info!(self.log,
-              "adding new base";
-              "node" => ni.index(),
-        );
+        info!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
         self.added.insert(ni);
@@ -435,9 +428,9 @@ impl Migration {
     /// marked.
     #[cfg(test)]
     pub(crate) fn mark_shallow(&mut self, ni: NodeIndex) {
-        info!(self.log,
-              "marking node as beyond materialization frontier";
-              "node" => ni.index(),
+        info!(
+            node = ni.index(),
+            "marking node as beyond materialization frontier"
         );
         self.ingredients.node_weight_mut(ni).unwrap().purge = true;
 
@@ -570,14 +563,13 @@ impl Migration {
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
     pub(super) fn commit(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
         let start = self.start;
-        let log = self.log.clone();
 
         let plan = self
             .plan(mainline)
             .map_err(|e| ReadySetError::MigrationPlanFailed {
                 source: Box::new(e),
             })?;
-        plan.apply(&log, mainline)?;
+        plan.apply(mainline)?;
 
         histogram!(
             recorded::CONTROLLER_MIGRATION_TIME,
@@ -593,9 +585,10 @@ impl Migration {
     /// See the module-level docs for more information on what a migration entails.
     #[allow(clippy::cognitive_complexity)]
     pub(super) fn plan(self, mainline: &ControllerInner) -> ReadySetResult<MigrationPlan> {
-        info!(self.log, "finalizing migration"; "#nodes" => self.added.len());
+        let span = info_span!("plan");
+        let _g = span.enter();
+        info!(num_nodes = self.added.len(), "finalizing migration");
 
-        let log = self.log;
         let start = self.start;
         let mut ingredients = self.ingredients;
         let source = self.source;
@@ -606,7 +599,7 @@ impl Migration {
 
         // Shard the graph as desired
         let mut swapped0 = if let Some(shards) = mainline.sharding {
-            let (t, swapped) = sharding::shard(&log, &mut ingredients, &mut new, &topo, shards)?;
+            let (t, swapped) = sharding::shard(&mut ingredients, &mut new, &topo, shards)?;
             topo = t;
 
             swapped
@@ -616,7 +609,6 @@ impl Migration {
 
         // Assign domains
         assignment::assign(
-            &log,
             &mut ingredients,
             &topo,
             &mut ndomains,
@@ -624,7 +616,7 @@ impl Migration {
         )?;
 
         // Set up ingress and egress nodes
-        let swapped1 = routing::add(&log, &mut ingredients, source, &mut new, &topo)?;
+        let swapped1 = routing::add(&mut ingredients, source, &mut new, &topo)?;
 
         topo = topo_order(&ingredients, mainline.source, &new);
 
@@ -700,15 +692,16 @@ impl Migration {
                 continue;
             }
 
-            let log = log.new(o!("domain" => domain.index()));
+            let span = debug_span!("domain", domain = domain.index());
+            let _g = span.enter();
 
             // Give local addresses to every (new) node
             for &ni in nodes.iter() {
-                debug!(log,
-                       "assigning local index";
-                       "type" => format!("{:?}", ingredients[ni]),
-                       "node" => ni.index(),
-                       "local" => nnodes
+                debug!(
+                    node_type = ?ingredients[ni],
+                    node = ni.index(),
+                    local = nnodes,
+                    "assigning local index"
                 );
                 counter!(
                     recorded::DOMAIN_NODE_ADDED,
@@ -749,7 +742,7 @@ impl Migration {
                         assert_eq!(old, None);
                     }
 
-                    trace!(log, "initializing new node"; "node" => ni.index());
+                    trace!(node = ni.index(), "initializing new node");
                     ingredients.node_weight_mut(ni).unwrap().on_commit(&remap_);
                 }
             }
@@ -802,7 +795,7 @@ impl Migration {
             .collect();
 
         // Boot up new domains (they'll ignore all updates for now)
-        debug!(log, "booting new domains");
+        debug!("booting new domains");
         let mut dmp = DomainMigrationPlan::new(mainline);
 
         /// Verifies that the worker `worker` meets the domain placement restrictions
@@ -892,14 +885,8 @@ impl Migration {
         }
 
         // Add any new nodes to existing domains (they'll also ignore all updates for now)
-        debug!(log, "mutating existing domains");
-        augmentation::inform(
-            &log,
-            source,
-            &mut ingredients,
-            &mut dmp,
-            uninformed_domain_nodes,
-        )?;
+        debug!("mutating existing domains");
+        augmentation::inform(source, &mut ingredients, &mut dmp, uninformed_domain_nodes)?;
 
         // Tell all base nodes and base ingress children about newly added columns
         for (ni, change) in self.columns {
@@ -941,16 +928,19 @@ impl Migration {
 
         // Set up inter-domain connections
         // NOTE: once we do this, we are making existing domains block on new domains!
-        info!(log, "bringing up inter-domain connections");
-        routing::connect(&log, &mut ingredients, &mut dmp, &new)?;
+        info!("bringing up inter-domain connections");
+        routing::connect(&mut ingredients, &mut dmp, &new)?;
 
         // And now, the last piece of the puzzle -- set up materializations
-        info!(log, "initializing new materializations");
+        info!("initializing new materializations");
         let mut materializations = mainline.materializations.clone();
 
         materializations.commit(&mut ingredients, &new, &mut dmp)?;
 
-        warn!(log, "migration planning completed"; "ms" => start.elapsed().as_millis());
+        warn!(
+            ms = ?start.elapsed().as_millis(),
+            "migration planning completed"
+        );
 
         Ok(MigrationPlan {
             ingredients,

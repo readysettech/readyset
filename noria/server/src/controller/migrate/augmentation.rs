@@ -7,6 +7,7 @@
 //!  - State must be replayed for materializations in other domains that need it
 
 use dataflow::prelude::*;
+use tracing::{debug_span, trace};
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,19 +15,16 @@ use petgraph::graph::NodeIndex;
 
 use crate::controller::migrate::DomainMigrationPlan;
 use dataflow::DomainRequest;
-use slog::{o, trace, Logger};
 
 pub(super) fn inform(
-    log: &Logger,
     source: NodeIndex,
     ingredients: &mut Graph,
     dmp: &mut DomainMigrationPlan,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
 ) -> ReadySetResult<()> {
     for (domain, nodes) in nodes {
-        let log = log.new(o!("domain" => domain.index()));
-
-        trace!(log, "domain ready for migration");
+        let span = debug_span!("informing domain", domain = domain.index());
+        let _g = span.enter();
 
         let old_nodes: HashSet<_> = nodes
             .iter()
@@ -52,7 +50,7 @@ pub(super) fn inform(
                 .map(|n| n.local_addr())
                 .collect();
 
-            trace!(log, "request addition of node"; "node" => ni.index());
+            trace!(node = ni.index(), "request addition of node");
             dmp.add_message(
                 domain,
                 DomainRequest::AddNode {
