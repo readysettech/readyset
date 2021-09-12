@@ -3602,27 +3602,21 @@ impl Domain {
                                 );
                                 break;
                             }
-                        } else {
-                            let (key_columns, keys, bytes) = {
-                                #[allow(clippy::indexing_slicing)] // came from self.nodes
-                                let (key_columns, keys, bytes) =
-                                    self.state[node].evict_random_keys(16);
-                                (
-                                    key_columns.to_vec(),
-                                    keys.into_iter()
-                                        .map(|k| {
-                                            KeyComparison::try_from(k)
-                                                .map_err(|_| internal_err("Empty key evicted"))
-                                        })
-                                        .collect::<ReadySetResult<Vec<_>>>()?,
-                                    bytes,
-                                )
-                            };
-                            freed += bytes;
+                        } else if let Some(evicted) = self.state[node].evict_random_keys(16) {
+                            let keys = evicted
+                                .keys_evicted
+                                .into_iter()
+                                .map(|k| {
+                                    KeyComparison::try_from(k)
+                                        .map_err(|_| internal_err("Empty key evicted"))
+                                })
+                                .collect::<ReadySetResult<Vec<_>>>()?;
+
+                            freed += evicted.bytes_freed;
 
                             if !keys.is_empty() {
                                 trigger_downstream_evictions(
-                                    &key_columns[..],
+                                    &evicted.key_columns[..],
                                     &keys[..],
                                     node,
                                     ex,
@@ -3633,11 +3627,15 @@ impl Domain {
                                     &self.nodes,
                                 )?;
                             }
+
                             #[allow(clippy::indexing_slicing)] // came from self.nodes
                             if self.state[node].is_empty() {
                                 trace!("done evicting from now-empty node {:?}", n);
                                 break;
                             }
+                        } else {
+                            // This node was unable to evict any keys
+                            break;
                         }
                     }
                     debug!(%freed, node = ?n, "evicted from node");

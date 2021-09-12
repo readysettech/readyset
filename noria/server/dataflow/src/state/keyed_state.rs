@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use std::iter;
 use std::ops::{Bound, RangeBounds};
-use std::rc::Rc;
 use tuple::Map;
 use tuple::TupleElements;
 use vec1::Vec1;
@@ -10,7 +9,6 @@ use super::mk_key::MakeKey;
 use super::partial_map::{self, PartialMap};
 use super::Misses;
 use crate::prelude::*;
-use common::SizeOf;
 use launchpad::intervals::into_bound_endpoint;
 
 /// A map containing a single index into the state of a node.
@@ -215,7 +213,8 @@ impl KeyedState {
                     Err(None) => None,
                     Err(Some((row, _))) => {
                         // there are still copies of the row left in rs
-                        Some(row.clone())
+                        // SAFETY: row is never moved to another thread
+                        Some(unsafe { row.clone() })
                     }
                 }
             };
@@ -411,9 +410,9 @@ impl KeyedState {
         }
     }
 
-    /// Remove all rows for a randomly chosen key seeded by `seed`, returning that key along with
-    /// the number of bytes freed. Returns `None` if map is empty.
-    pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(u64, Vec<DataType>)> {
+    /// Remove all rows for a randomly chosen key seeded by `seed`, returning the rows along
+    /// with the key. Returns `None` if map is empty.
+    pub(super) fn evict_with_seed(&mut self, seed: usize) -> Option<(Rows, Vec<DataType>)> {
         let (rs, key) = match *self {
             KeyedState::SingleHash(ref mut m) if !m.is_empty() => {
                 let index = seed % m.len();
@@ -492,13 +491,7 @@ impl KeyedState {
                 return None;
             }
         }?;
-        Some((
-            rs.iter()
-                .filter(|r| Rc::strong_count(&r.0) == 1)
-                .map(SizeOf::deep_size_of)
-                .sum(),
-            key,
-        ))
+        Some((rs, key))
     }
 
     /// Remove all rows for the given key, returning the evicted rows.

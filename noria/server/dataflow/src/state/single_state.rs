@@ -7,6 +7,7 @@ use common::SizeOf;
 use itertools::Either;
 use noria::KeyComparison;
 use rand::prelude::*;
+use std::collections::HashMap;
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use vec1::Vec1;
@@ -317,24 +318,24 @@ impl SingleState {
         };
     }
 
-    /// Evict `count` randomly selected keys from state and return them along with the number of
-    /// bytes freed.
+    /// Evict `count` randomly selected keys from state and return them along with the removed
+    /// rows
     pub(super) fn evict_random_keys(
         &mut self,
         count: usize,
         rng: &mut ThreadRng,
-    ) -> (u64, Vec<Vec<DataType>>) {
-        let mut bytes_freed = 0;
-        let mut keys = Vec::with_capacity(count);
+    ) -> Option<HashMap<Vec<DataType>, Rows>> {
+        let mut removed_rows: Option<HashMap<_, _>> = None;
         for _ in 0..count {
-            if let Some((n, key)) = self.state.evict_with_seed(rng.gen()) {
-                bytes_freed += n;
-                keys.push(key);
+            if let Some((rows, key)) = self.state.evict_with_seed(rng.gen()) {
+                removed_rows.get_or_insert_default().insert(key, rows);
+                self.rows = self.rows.saturating_sub(1);
             } else {
                 break;
             }
         }
-        (bytes_freed, keys)
+
+        removed_rows
     }
 
     /// Evicts a specified key from this state, returning the removed rows
