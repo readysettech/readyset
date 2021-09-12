@@ -52,6 +52,13 @@ pub(crate) use self::persistent_state::PersistentState;
 /// [`add_weak_key`]: State::add_weak_key
 /// [`lookup_weak`]: State::lookup_weak
 /// [weak-keys-doc]: https://docs.google.com/document/d/1JFyvA_3GhMaTewaR0Bsk4N8uhzOwMtB0uH7dD4gJvoQ
+
+pub(crate) struct StateEvicted {
+    pub(crate) key_columns: Vec<usize>,
+    pub(crate) keys_evicted: Vec<Vec<DataType>>,
+    pub(crate) bytes_freed: u64,
+}
+
 pub(crate) trait State: SizeOf + Send {
     /// Add an index of the given type, keyed by the given columns and replayed to by the given
     /// partial tags.
@@ -125,7 +132,7 @@ pub(crate) trait State: SizeOf + Send {
 
     /// Evict `count` randomly selected keys, returning key colunms of the index chosen to evict
     /// from along with the keys evicted and the number of bytes evicted.
-    fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64);
+    fn evict_random_keys(&mut self, count: usize) -> Option<StateEvicted>;
 
     /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
     /// of the index that was evicted from and the number of bytes evicted.
@@ -134,12 +141,22 @@ pub(crate) trait State: SizeOf + Send {
     fn clear(&mut self);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub(crate) struct Row(Rc<Vec<DataType>>);
 
 pub(crate) type Rows = HashBag<Row, RandomState>;
 
 unsafe impl Send for Row {}
+
+impl Row {
+    /// This is very unsafe. Since `Row` unsafely implements `Send`, one can clone a row
+    /// and have two `Row`s with an inner Rc being sent to two different threads leading
+    /// to undefined behaviour. In the context of `State` it is only safe because all references
+    /// to the same row always belong to the same state.
+    pub(in crate::state) unsafe fn clone(&self) -> Self {
+        Row(Rc::clone(&self.0))
+    }
+}
 
 impl From<Vec<DataType>> for Row {
     fn from(r: Vec<DataType>) -> Self {
@@ -171,6 +188,7 @@ impl Deref for Row {
         &*self.0
     }
 }
+
 impl SizeOf for Row {
     fn size_of(&self) -> u64 {
         use std::mem::size_of;

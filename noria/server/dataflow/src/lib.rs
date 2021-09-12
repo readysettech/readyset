@@ -14,7 +14,8 @@
     bound_map,
     stmt_expr_attributes,
     drain_filter,
-    hash_drain_filter
+    hash_drain_filter,
+    option_get_or_insert_default
 )]
 // Only used in a `debug_assert!` in `ops/grouped/mod.rs` therefore I added it
 // conditionally to avoid requiring another unstable feature for release builds.

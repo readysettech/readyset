@@ -9,7 +9,7 @@ use crate::state::single_state::SingleState;
 use common::SizeOf;
 
 use super::keyed_state::KeyedState;
-use super::{RangeLookupResult, Rows};
+use super::{RangeLookupResult, Rows, StateEvicted};
 
 #[derive(Default)]
 pub struct MemoryState {
@@ -226,12 +226,40 @@ impl State for MemoryState {
         self.state[0].values().flat_map(fix).collect()
     }
 
-    fn evict_random_keys(&mut self, count: usize) -> (&[usize], Vec<Vec<DataType>>, u64) {
+    /// Evicts `count` random keys from the state. The key are first evicted from the strongly
+    /// referenced `state`, then they are removed from the weakly referenced `weak_indices`.
+    fn evict_random_keys(&mut self, count: usize) -> Option<StateEvicted> {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0, self.state.len());
-        let (bytes_freed, keys) = self.state[index].evict_random_keys(count, &mut rng);
+        let mut bytes_freed = 0;
+
+        let evicted = self.state[index].evict_random_keys(count, &mut rng)?;
+
+        let keys_evicted: Vec<_> = evicted
+            .into_iter()
+            .map(|(key, rows)| {
+                for row in &rows {
+                    for (key, weak_index) in self.weak_indices.iter_mut() {
+                        weak_index.remove(key, row, None);
+                    }
+
+                    // Only count strong references after we removed a row from `weak_indices`
+                    // otherwise if it is there, it will never have a reference count of 1
+                    if Rc::strong_count(&row.0) == 1 {
+                        bytes_freed += row.deep_size_of();
+                    }
+                }
+                key
+            })
+            .collect();
+
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-        (self.state[index].key(), keys, bytes_freed)
+
+        Some(StateEvicted {
+            key_columns: self.state[index].key().to_vec(),
+            keys_evicted,
+            bytes_freed,
+        })
     }
 
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&[usize], u64)> {
@@ -240,15 +268,17 @@ impl State for MemoryState {
         // been told about, but that has not yet been finalized.
         self.by_tag.get(&tag).cloned().map(move |index| {
             let rows = self.state[index].evict_keys(keys);
-            let bytes = rows
-                .iter()
-                .filter(|r| Rc::strong_count(&r.0) == 1)
-                .map(SizeOf::deep_size_of)
-                .sum();
+            let mut bytes = 0;
 
             for row in &rows {
                 for (key, weak_index) in self.weak_indices.iter_mut() {
                     weak_index.remove(key, row, None);
+                }
+
+                // Only count strong references after we removed a row from `weak_indices`
+                // otherwise if it is there, it will never have a reference count of 1
+                if Rc::strong_count(&row.0) == 1 {
+                    bytes += row.deep_size_of();
                 }
             }
 
@@ -299,11 +329,13 @@ impl MemoryState {
                 }
             };
             self.mem_size += r.deep_size_of();
-            self.state[i].insert_row(r.clone())
+            // SAFETY: row remains inside the same state
+            self.state[i].insert_row(unsafe { r.clone() })
         } else {
             let mut hit_any = false;
             for i in 0..self.state.len() {
-                hit_any |= self.state[i].insert_row(r.clone());
+                // SAFETY: row remains inside the same state
+                hit_any |= self.state[i].insert_row(unsafe { r.clone() });
             }
             if hit_any {
                 self.mem_size += r.deep_size_of();
@@ -313,7 +345,8 @@ impl MemoryState {
 
         if hit {
             for (key, weak_index) in self.weak_indices.iter_mut() {
-                weak_index.insert(key, r.clone(), false);
+                // SAFETY: row remains inside the same state
+                weak_index.insert(key, unsafe { r.clone() }, false);
             }
         }
 
