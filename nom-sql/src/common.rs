@@ -70,6 +70,7 @@ pub enum SqlType {
     Enum(Vec<Literal>),
     #[weight(0)]
     Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=#0)] u8),
+    Json,
 }
 
 impl SqlType {
@@ -148,6 +149,7 @@ impl fmt::Display for SqlType {
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
             SqlType::Enum(_) => write!(f, "ENUM(...)"),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
+            SqlType::Json => write!(f, "JSON"),
         }
     }
 }
@@ -349,6 +351,7 @@ impl Literal {
                 .prop_map(|nt| Self::String(nt.format("%H:%M:%S").to_string()))
                 .boxed(),
             SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
+            SqlType::Json => unimplemented!("Json isn't implemented yet"),
         }
     }
 }
@@ -743,6 +746,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             tuple((tag_no_case("varbinary"), delim_u16, multispace0)),
             |t| SqlType::Varbinary(t.1),
         ),
+        map(tag_no_case("json"), |_| SqlType::Json),
     ))(i)
 }
 
@@ -1338,6 +1342,15 @@ mod tests {
         prop_assume!(!matches!(lit, Literal::Double(_) | Literal::Float(_)));
         let s = lit.to_string();
         assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
+    }
+
+    #[test]
+    fn json_type() {
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            let res = type_identifier(dialect)(b"json");
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Json);
+        }
     }
 
     mod mysql {

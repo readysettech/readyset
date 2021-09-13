@@ -135,6 +135,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
         SqlType::Bool => 1i32.into(),
         SqlType::Enum(_) => unimplemented!(),
+        SqlType::Json => unimplemented!(),
     }
 }
 
@@ -213,8 +214,9 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Date => {
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
         }
-        SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => DataType::from(rng.gen_bool(0.5)),
+        SqlType::Enum(_) => unimplemented!(),
+        SqlType::Json => unimplemented!(),
     }
 }
 
@@ -278,6 +280,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
         SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
+        SqlType::Json => unimplemented!(),
     }
 }
 

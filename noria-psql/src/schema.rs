@@ -76,6 +76,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Double => Ok(Type::FLOAT8),
         SqlType::Text => Ok(Type::TEXT),
         SqlType::Timestamp => Ok(Type::TIMESTAMP),
+        SqlType::Json => Ok(Type::JSON),
         SqlType::UnsignedInt(_) => unsupported_type!(),
         SqlType::UnsignedBigint(_) => unsupported_type!(),
         SqlType::Tinyint(_) => unsupported_type!(),
