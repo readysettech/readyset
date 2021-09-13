@@ -307,8 +307,6 @@ impl ControllerOuter {
         };
 
         let authority = Arc::clone(&self.authority);
-        let log = self.log.clone();
-
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
                 let noria: noria::ControllerHandle =
@@ -317,7 +315,7 @@ impl ControllerOuter {
                 if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
                 {
                     // On each replication error we wait for 30 seconds and then try again
-                    error!(log, "Replication error {}", err);
+                    tracing::error!(error = %err, "replication error");
                     tokio::time::sleep(Duration::from_secs(30)).await;
                 }
             }
