@@ -3,12 +3,17 @@
 
 #![allow(dead_code)] // TODO: remove once this is used
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::Serialize;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
+
 use noria::ReadySetError;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct PrepareEvent {
     /// How long the prepare request took to run on the upstream database
     pub(crate) upstream_duration: Duration,
@@ -26,7 +31,7 @@ pub(crate) struct PrepareEvent {
     pub(crate) is_fallback: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct ExecuteEvent {
     /// How long the prepare request took to run on the upstream database
     pub(crate) upstream_duration: Duration,
@@ -48,7 +53,7 @@ pub(crate) struct ExecuteEvent {
 }
 
 /// Data structure representing information about a single, unique query run against an adapter
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct QueryInfo {
     /// Information about times this query was prepared
     prepare_events: Vec<PrepareEvent>,
@@ -64,8 +69,12 @@ pub(crate) struct QueryInfo {
 /// See [this design doc][design-doc] for more information
 ///
 /// [design-doc]: https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit
-#[derive(Debug, Default)]
+#[derive(Debug, Serialize)]
 struct QueryCoverageInfo {
+    /// Path to which to write when save() is called
+    #[serde(skip)]
+    file: PathBuf,
+
     /// Queries that have been run during the execution of an adapter
     queries: HashMap<String, QueryInfo>,
 
@@ -76,6 +85,14 @@ struct QueryCoverageInfo {
 }
 
 impl QueryCoverageInfo {
+    fn new(file: PathBuf) -> Self {
+        Self {
+            file,
+            queries: HashMap::new(),
+            schema: None,
+        }
+    }
+
     /// Record in this QueryCoverageInfo that a query was prepared
     fn query_prepared(&mut self, query: String, event: PrepareEvent) {
         self.queries
@@ -94,6 +111,22 @@ impl QueryCoverageInfo {
             .execute_events
             .push(event)
     }
+
+    /// Serialize this QueryCoverageInfo to JSON and write it to self.file.  Takes care of
+    /// opening/flushing/closing the file on its own.
+    pub async fn save(&self) -> anyhow::Result<()> {
+        let mut file = OpenOptions::new()
+            .read(false)
+            .write(true)
+            .append(false)
+            .truncate(true)
+            .create(true)
+            .open(&self.file)
+            .await?;
+        let data = serde_json::to_vec_pretty(&self)?;
+        file.write_all(&data).await?;
+        Ok(())
+    }
 }
 
 /// A reference to a [`QueryCoverageInfo`] shared between multiple connections
@@ -103,19 +136,13 @@ impl QueryCoverageInfo {
 #[derive(Clone, Copy, Debug)]
 pub struct QueryCoverageInfoRef(&'static Mutex<QueryCoverageInfo>);
 
-impl Default for QueryCoverageInfoRef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl QueryCoverageInfoRef {
     /// Allocate a shared [`QueryCoverageInfo`] on the heap that lives for the lifetime of the
     /// program, and return a cloneable reference to it
-    pub fn new() -> Self {
-        Self(Box::leak(Box::new(
-            Mutex::new(QueryCoverageInfo::default()),
-        )))
+    pub fn new(path: PathBuf) -> Self {
+        Self(Box::leak(Box::new(Mutex::new(QueryCoverageInfo::new(
+            path,
+        )))))
     }
 
     /// Record that a query was prepared
@@ -136,5 +163,15 @@ impl QueryCoverageInfoRef {
     /// exceptional cases)
     pub(crate) fn query_executed(&self, query: String, event: ExecuteEvent) {
         self.0.lock().unwrap().query_executed(query, event)
+    }
+
+    /// Serialize to JSON and write to the file that was passed into new().
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing mutex has been poisoned (this should generally only happen in
+    /// exceptional cases)
+    pub async fn save(&self) -> anyhow::Result<()> {
+        self.0.lock().unwrap().save().await
     }
 }
