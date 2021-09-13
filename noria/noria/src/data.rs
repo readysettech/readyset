@@ -584,6 +584,10 @@ impl DataType {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
             }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Json) => {
+                // TODO(grfn): Validate JSON here
+                Ok(Cow::Borrowed(self))
+            }
             (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
         }
     }
@@ -3155,6 +3159,13 @@ mod tests {
                 String::try_from(&result.into_owned()).unwrap().as_str(),
                 text.as_str()
             );
+        }
+
+        #[test]
+        fn text_to_json() {
+            let input = DataType::from("{\"foo\": \"bar\"}");
+            let result = input.coerce_to(&SqlType::Json).unwrap();
+            assert_eq!(&input, result.as_ref());
         }
     }
 }
