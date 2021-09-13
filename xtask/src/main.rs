@@ -14,13 +14,17 @@ use tracing::{event, Level};
 use tracing_subscriber::EnvFilter;
 
 mod commands;
-use commands::validate_buildkite_common;
+use commands::{presigned_docker_image_urls, validate_buildkite_common};
 
 #[derive(Clap, Debug)]
 enum Subcommand {
     InstallDockerCredentialECRLogin,
     InstallCommitMsgHook,
     ValidateBuildkiteCommon,
+    PresignedDockerImageUrls {
+        #[clap(flatten)]
+        opts: commands::presigned_docker_image_urls::Opts,
+    },
 }
 
 #[derive(Clap, Debug)]
@@ -177,5 +181,6 @@ fn main() -> Result<()> {
         Subcommand::InstallCommitMsgHook => install_commit_msg_hook(),
         Subcommand::InstallDockerCredentialECRLogin => install_docker_credential_ecr_login(),
         Subcommand::ValidateBuildkiteCommon => validate_buildkite_common::run(),
+        Subcommand::PresignedDockerImageUrls { opts } => presigned_docker_image_urls::run(opts),
     }
 }
