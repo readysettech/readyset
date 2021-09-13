@@ -73,6 +73,7 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
             MYSQL_TYPE_VAR_STRING
         }
         SqlType::Time => MYSQL_TYPE_TIME,
+        SqlType::Json => MYSQL_TYPE_JSON,
     };
 
     for c in &col.constraints {
