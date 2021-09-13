@@ -1,0 +1,11 @@
+[Unit]
+Description="Set hostname using hostname prefix"
+Before=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/set-hostname.sh
+
+[Install]
+WantedBy=multi-user.target
+

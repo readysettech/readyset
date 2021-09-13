@@ -124,7 +124,7 @@ steps:
             - label: ':nodejs: Test js-client'
               include:
                 - "js-client/**"
-            # --- START JS CLIENT STEPS --- #
+            # --- END JS CLIENT STEPS --- #
 
             - label: 'List frameworks'
               include:
@@ -149,8 +149,18 @@ steps:
     build:
       branch: refs/heads/main
       commit: HEAD
-      message: ":rocket: Docker Release"
+      message: ":rocket: Docker Release for ${BUILDKITE_COMMIT}"
     async: true
+
+  - trigger: "internal-amis"
+    branches: refs/heads/main
+    label: ":rocket: Internal AMIs"
+    build:
+      branch: refs/heads/main
+      commit: HEAD
+      message: ":rocket: Internal AMIs for ${BUILDKITE_COMMIT}"
+    async: true
+
 
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries

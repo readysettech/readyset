@@ -10,12 +10,14 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   ca-certificates \
   curl \
   gnupg \
+  jq \
   lsb-release \
   software-properties-common \
   unattended-upgrades \
+  unzip
 
 # Enable auto upgrading packages for security updates
 sudo install -o root -g root -m 644 \
-  /tmp/base/etc_apt_apt.conf.d_20-auto-upgrades \
+  /tmp/internal-base/etc_apt_apt.conf.d_20-auto-upgrades \
   /etc/apt/apt.conf.d/20-auto-upgrades
 

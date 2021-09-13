@@ -1,0 +1,35 @@
+steps:
+  - block: "Create internal :amazon-ec2: AMIs?"
+
+  - label: ":packer: Run production build for internal-base"
+    commands:
+    - cd /workdir/ops/new-images
+    - packer init .
+    - packer build -only=amazon-ebs.internal-base .
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+        propagate-environment: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.2.0:
+        login: true
+
+
+  - label: ":packer: Run production build for all internal images"
+    commands:
+    - cd /workdir/ops/new-images
+    - packer init .
+    - packer build -only=amazon-ebs.consul-server,amazon-ebs.tailscale-subnet-router .
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+        propagate-environment: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.2.0:
+        login: true
+
+  # TODO: Use Packer to launch the images created in build in the deploy account and save them there.

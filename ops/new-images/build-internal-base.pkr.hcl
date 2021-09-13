@@ -1,5 +1,7 @@
+# Base image used for generating all images used internally.
+# Another base image will be used for generating images used by customers.
 build {
-  sources = ["source.amazon-ebs.tailscale-subnet-router"]
+  sources = ["source.amazon-ebs.internal-base"]
 
   provisioner "file" {
     source      = "provisioners/files/internal-base"
@@ -7,7 +9,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "provisioners/files/tailscale-subnet-router"
+    source      = "provisioners/files/node_exporter"
     destination = "/tmp/"
   }
 
@@ -17,7 +19,7 @@ build {
       "provisioners/scripts/internal-base/00-init.sh",
       "provisioners/scripts/internal-base/10-aws-cli.sh",
       "provisioners/scripts/internal-base/99-tailscale.sh",
-      "provisioners/scripts/tailscale-subnet-router/00-init.sh",
+      "provisioners/scripts/node_exporter/00-init.sh",
     ]
   }
 }

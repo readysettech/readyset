@@ -1,19 +1,17 @@
 locals {
-  tailscale_subnet_router_ami_name = format(
-    "readyset/images/%s-ssd/tailscale-subnet-router-%s-amd64-%s",
+  internal_base_ami_name = format("readyset/images/%s-ssd/internal-base-%s-amd64-%s",
     local.ami_virtualization_type,
     local.ami_version,
     local.ami_suffix
   )
 }
 
-source "amazon-ebs" "tailscale-subnet-router" {
+source "amazon-ebs" "internal-base" {
   # Settings to allow development of images outside of CI.
   skip_create_ami       = local.skip_create_ami
   force_deregister      = local.force_degregister
   force_delete_snapshot = local.force_delete_snapshots
 
-  # TODO: Make the source AMI internal-base after making two step pipeline
   source_ami_filter {
     owners      = ["099720109477"]
     most_recent = true
@@ -27,7 +25,8 @@ source "amazon-ebs" "tailscale-subnet-router" {
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
 
-  ami_name                  = local.tailscale_subnet_router_ami_name
+
+  ami_name                  = local.internal_base_ami_name
   ssh_clear_authorized_keys = true
 
   ami_users = local.ami_users

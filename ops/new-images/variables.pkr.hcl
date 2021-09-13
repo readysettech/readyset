@@ -1,17 +1,17 @@
 variable "production" {
   type        = bool
-  description = "Only set this to true when wanting to attempt to build production images, ensure that the appropriate environment variables have been set"
+  description = "Set this to true when building production images. This makes sure that we are not overwriting production images."
   default     = env("PACKER_PRODUCTION") == "true"
 }
 
 variable "create_ami" {
   type        = bool
-  description = "To save AMIs"
+  description = "By default, we do not create an AMI permanently. Setting this will save the AMI into storage."
   default     = env("PACKER_CREATE_AMI") == "true"
 }
 
 variable "buildkite_commit" {
   type        = string
-  description = "Used in development only for separating developers"
+  description = "Git commit ID from Buildkite. Used to tag images made in Buildkite appropriately"
   default     = env("BUILDKITE_COMMIT")
 }
