@@ -68,3 +68,47 @@ fn add_column() {
         .unwrap();
     assert_eq!(row, Some((1, "Whiskers".to_owned())));
 }
+
+#[test]
+#[serial]
+fn json_column_insert_read() {
+    let d = Deployment::new("insert_quoted_string");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+
+    conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO Cats (id, data) VALUES (1, '{\"name\": \"Mr. Mistoffelees\"}')")
+        .unwrap();
+    sleep();
+    sleep();
+
+    let rows: Vec<(i32, String)> = conn.query("SELECT * FROM Cats WHERE Cats.id = 1").unwrap();
+    assert_eq!(
+        rows,
+        vec![(1, "{\"name\":\"Mr. Mistoffelees\"}".to_string())]
+    );
+}
+
+#[test]
+#[serial]
+fn json_column_partial_update() {
+    let d = Deployment::new("insert_quoted_string");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+
+    conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO Cats (id, data) VALUES (1, '{\"name\": \"xyz\"}')")
+        .unwrap();
+    conn.query_drop("UPDATE Cats SET data = JSON_REMOVE(data, '$.name') WHERE id = 1")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, String)> = conn.query("SELECT * FROM Cats WHERE Cats.id = 1").unwrap();
+    assert_eq!(rows, vec![(1, "{}".to_string())]);
+}
