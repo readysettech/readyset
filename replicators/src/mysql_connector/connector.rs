@@ -1,9 +1,12 @@
 use async_trait::async_trait;
 use binlog::consts::{BinlogChecksumAlg, EventType};
+use mysql::binlog::jsonb::{self, JsonbToJsonError};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog;
-use noria::ReplicationOffset;
+use mysql_common::binlog::row::BinlogRow;
+use mysql_common::binlog::value::BinlogValue;
+use noria::{DataType, ReplicationOffset};
 use noria::{ReadySetError, ReadySetResult};
 use std::convert::{TryFrom, TryInto};
 
@@ -74,7 +77,7 @@ impl PartialOrd for BinlogPosition {
 impl TryFrom<&BinlogPosition> for noria::ReplicationOffset {
     type Error = ReadySetError;
 
-    /// `ReplicationOffset` is a filename and a u128 offset   
+    /// `ReplicationOffset` is a filename and a u128 offset
     /// We use the binlog basefile name as the filename, and we use the binlog suffix len for
     /// the top 5 bits, which can be as big as 31 digits in theory, but we only allow up to 17
     /// decimal digits, which is more than enough for the binlog spec. This is required to be
@@ -470,7 +473,7 @@ fn binlog_val_to_noria_val(
     val: &mysql_common::value::Value,
     col_kind: mysql_common::constants::ColumnType,
     meta: &[u8],
-) -> mysql::Result<noria::DataType> {
+) -> mysql::Result<DataType> {
     // Not all values are coereced to the value expected by Noria directly
 
     use mysql_common::constants::ColumnType;
@@ -508,29 +511,47 @@ fn binlog_val_to_noria_val(
 }
 
 fn binlog_row_to_noria_row(
-    binlog_row: &binlog::row::BinlogRow,
+    binlog_row: &BinlogRow,
     tme: &binlog::events::TableMapEvent<'static>,
-) -> mysql::Result<Vec<noria::DataType>> {
-    let mut noria_row = Vec::with_capacity(binlog_row.len());
-
-    for idx in 0..binlog_row.len() {
-        let val = match binlog_row.as_ref(idx).unwrap() {
-            binlog::value::BinlogValue::Value(val) => val,
-            _ => {
-                return Err(format!("Expected a value in WRITE_ROWS_EVENT {:?}", binlog_row).into())
+) -> mysql::Result<Vec<DataType>> {
+    (0..binlog_row.len())
+        .map(|idx| {
+            match binlog_row.as_ref(idx).unwrap() {
+                BinlogValue::Value(val) => {
+                    let (kind, meta) = (
+                        tme.get_column_type(idx)
+                            .map_err(|e| format!("Unable to get column type {}", e))?
+                            .unwrap(),
+                        tme.get_column_metadata(idx).unwrap(),
+                    );
+                    binlog_val_to_noria_val(val, kind, meta)
+                }
+                BinlogValue::Jsonb(val) => {
+                    let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
+                    match json {
+                        Ok(val) => Ok(DataType::from(val.to_string())),
+                        Err(JsonbToJsonError::Opaque) => match val {
+                            jsonb::Value::Opaque(opaque_val) => {
+                                // As far as I can *tell* Opaque is just a raw JSON string, which we
+                                // can just translate into a DataType as JSON directly without going
+                                // through serde_json::Value first.
+                                Ok(DataType::from(opaque_val.data().as_ref()))
+                            }
+                            _ => {
+                                #[allow(clippy::unreachable)] // actually unreachable
+                                {
+                                    unreachable!("Opaque error only returned for opaque values")
+                                }
+                            }
+                        },
+                        Err(JsonbToJsonError::InvalidUtf8(err)) => Err(err.to_string().into()),
+                        Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
+                    }
+                }
+                _ => Err(format!("Expected a value in WRITE_ROWS_EVENT {:?}", binlog_row).into()),
             }
-        };
-
-        let (kind, meta) = (
-            tme.get_column_type(idx)
-                .map_err(|e| format!("Unable to get column type {}", e))?
-                .unwrap(),
-            tme.get_column_metadata(idx).unwrap(),
-        );
-
-        noria_row.push(binlog_val_to_noria_val(val, kind, meta)?);
-    }
-    Ok(noria_row)
+        })
+        .collect()
 }
 
 #[async_trait]
