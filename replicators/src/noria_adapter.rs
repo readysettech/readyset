@@ -42,9 +42,9 @@ pub(crate) trait Connector {
 }
 
 /// An adapter that converts database events into Noria API calls
-pub struct NoriaAdapter<A: Authority + 'static> {
+pub struct NoriaAdapter {
     /// The Noria API handle
-    noria: ControllerHandle<A>,
+    noria: ControllerHandle,
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
     /// A map of cached table mutators
@@ -82,19 +82,22 @@ impl FromStr for AdapterOpts {
     }
 }
 
-impl NoriaAdapter<ZookeeperAuthority> {
-    pub async fn start<S1: Display, S2: Display>(
+impl NoriaAdapter {
+    pub async fn start_zk<S1: Display, S2: Display>(
         zookeeper_addr: S1,
         deployment: S2,
         options: AdapterOpts,
     ) -> ReadySetResult<!> {
-        let authority = ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment))?;
+        let authority = Authority::from(ZookeeperAuthority::new(&format!(
+            "{}/{}",
+            zookeeper_addr, deployment
+        ))?);
         let noria = noria::ControllerHandle::new(authority).await;
         NoriaAdapter::start_inner(noria, options, None).await
     }
 }
 
-impl<A: Authority> NoriaAdapter<A> {
+impl NoriaAdapter {
     /// Same as [`start`](Builder::start), but accepts a MySQL/PostgreSQL url for options
     /// and an externally supplied Noria `ControllerHandle`.
     /// The MySQL url must contain the database name, and user and password if applicable.
@@ -103,7 +106,7 @@ impl<A: Authority> NoriaAdapter<A> {
     #[allow(dead_code)]
     pub async fn start_with_url<U: AsRef<str>>(
         url: U,
-        noria: ControllerHandle<A>,
+        noria: ControllerHandle,
         server_id: Option<u32>,
     ) -> ReadySetResult<!> {
         let options = url
@@ -117,7 +120,7 @@ impl<A: Authority> NoriaAdapter<A> {
     }
 
     async fn start_inner(
-        noria: ControllerHandle<A>,
+        noria: ControllerHandle,
         options: AdapterOpts,
         server_id: Option<u32>,
     ) -> ReadySetResult<!> {
@@ -143,7 +146,7 @@ impl<A: Authority> NoriaAdapter<A> {
     /// * Adapter keeps reading binlog from the next position keeping Noria up to date
     async fn start_inner_mysql(
         mysql_options: mysql::Opts,
-        mut noria: ControllerHandle<A>,
+        mut noria: ControllerHandle,
         server_id: Option<u32>,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
@@ -192,7 +195,7 @@ impl<A: Authority> NoriaAdapter<A> {
 
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
-        mut noria: ControllerHandle<A>,
+        mut noria: ControllerHandle,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process

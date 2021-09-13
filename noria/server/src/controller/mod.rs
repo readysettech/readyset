@@ -12,7 +12,7 @@ use launchpad::select;
 use noria::consensus::WorkerId;
 use noria::ControllerDescriptor;
 use noria::{
-    consensus::{Authority, GetLeaderResult, WorkerDescriptor, STATE_KEY},
+    consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor, STATE_KEY},
     ReplicationOffset,
 };
 use noria::{internal, ReadySetError};
@@ -166,13 +166,13 @@ pub enum HandleRequest {
 
 /// A wrapper for a potential controller, also handling leader elections, HTTP requests that aren't
 /// destined for the worker, and requests originated from this server instance's `Handle`.
-pub struct ControllerOuter<A> {
+pub struct ControllerOuter {
     /// `slog` logging thingie.
     pub(crate) log: slog::Logger,
     /// If we're the leader, the actual controller.
     pub(crate) inner: Option<ControllerInner>,
     /// The `Authority` structure used for leadership elections & such state.
-    pub(crate) authority: Arc<A>,
+    pub(crate) authority: Arc<Authority>,
     /// Channel to the `Worker` running inside this server instance.
     ///
     /// This is used to convey changes in leadership state.
@@ -192,17 +192,14 @@ pub struct ControllerOuter<A> {
     /// A handle to the replicator task
     pub(crate) replicator_task: Option<tokio::task::JoinHandle<()>>,
 }
-impl<A> ControllerOuter<A>
-where
-    A: Authority + 'static,
-{
+impl ControllerOuter {
     /// Run the provided *blocking* closure with the `ControllerInner` and the `Authority` if this
     /// server instance is currently the leader.
     ///
     /// If it isn't, returns `Err(ReadySetError::NotLeader)`, and doesn't run the closure.
     async fn with_controller_blocking<F, T>(&mut self, func: F) -> ReadySetResult<T>
     where
-        F: FnOnce(&mut ControllerInner, Arc<A>) -> ReadySetResult<T>,
+        F: FnOnce(&mut ControllerInner, Arc<Authority>) -> ReadySetResult<T>,
     {
         // FIXME: this is potentially slow, and it's only like this because borrowck sucks
         let auth = self.authority.clone();
@@ -314,7 +311,7 @@ where
 
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
-                let noria: noria::ControllerHandle<A> =
+                let noria: noria::ControllerHandle =
                     noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
                 if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
@@ -432,12 +429,9 @@ where
 
 /// Manages this authority's leader election state and sends update
 /// along `event_tx` when the state changes.
-struct AuthorityLeaderElectionState<A>
-where
-    A: Authority + 'static,
-{
+struct AuthorityLeaderElectionState {
     event_tx: Sender<AuthorityUpdate>,
-    authority: Arc<A>,
+    authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     config: Config,
     handle: tokio::runtime::Handle,
@@ -447,13 +441,10 @@ where
     is_leader: bool,
 }
 
-impl<A> AuthorityLeaderElectionState<A>
-where
-    A: Authority + 'static,
-{
+impl AuthorityLeaderElectionState {
     fn new(
         event_tx: Sender<AuthorityUpdate>,
-        authority: Arc<A>,
+        authority: Arc<Authority>,
         descriptor: ControllerDescriptor,
         config: Config,
         handle: tokio::runtime::Handle,
@@ -562,24 +553,18 @@ where
 
 /// Manages this authority's leader worker state and sends update
 /// along `event_tx` when the state changes.
-struct AuthorityWorkerState<A>
-where
-    A: Authority + 'static,
-{
+struct AuthorityWorkerState {
     event_tx: Sender<AuthorityUpdate>,
-    authority: Arc<A>,
+    authority: Arc<Authority>,
     descriptor: WorkerDescriptor,
     handle: tokio::runtime::Handle,
     active_workers: HashMap<WorkerId, WorkerDescriptor>,
 }
 
-impl<A> AuthorityWorkerState<A>
-where
-    A: Authority + 'static,
-{
+impl AuthorityWorkerState {
     fn new(
         event_tx: Sender<AuthorityUpdate>,
-        authority: Arc<A>,
+        authority: Arc<Authority>,
         descriptor: WorkerDescriptor,
         handle: tokio::runtime::Handle,
     ) -> Self {
@@ -664,9 +649,9 @@ where
     }
 }
 
-fn authority_inner<A: Authority + 'static>(
+fn authority_inner(
     event_tx: Sender<AuthorityUpdate>,
-    authority: Arc<A>,
+    authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
@@ -719,9 +704,9 @@ fn authority_inner<A: Authority + 'static>(
     }
 }
 
-pub(crate) fn authority_runner<A: Authority + 'static>(
+pub(crate) fn authority_runner(
     event_tx: Sender<AuthorityUpdate>,
-    authority: Arc<A>,
+    authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,

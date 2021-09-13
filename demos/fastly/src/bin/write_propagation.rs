@@ -17,7 +17,7 @@ use demo_utils::generate::load_to_backend;
 use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
 use noria::{DataType, KeyComparison, View, ViewQuery};
 use noria_client::backend::Backend;
 use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
@@ -120,7 +120,7 @@ impl Writer {
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-        let zk_auth = ZookeeperAuthority::new(&self.zookeeper_url).unwrap();
+        let zk_auth = Authority::from(ZookeeperAuthority::new(&self.zookeeper_url).unwrap());
         let mut ch = ControllerHandle::new(zk_auth).await;
 
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
@@ -188,7 +188,7 @@ impl Writer {
         &self,
         article: usize,
         schema: DatabaseSchema,
-        mut backend: &mut Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
+        mut backend: &mut Backend<MySqlUpstream, MySqlQueryHandler>,
     ) -> anyhow::Result<()> {
         let mut database_spec = DatabaseGenerationSpec::new(schema).table_rows("articles", 1);
         // Article table overrides.

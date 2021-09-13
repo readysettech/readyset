@@ -2,7 +2,6 @@
 use clap::{App, Arg};
 use mysql::prelude::*;
 use mysql::*;
-use noria::consensus::LocalAuthority;
 use noria::{Builder, DataType, Handle};
 use rand::Rng;
 use std::convert::TryFrom;
@@ -47,7 +46,7 @@ async fn main() {
 }
 
 pub struct BenchmarkApplication {
-    g: Handle<LocalAuthority>,
+    g: Handle,
     mysql: PooledConn,
 }
 

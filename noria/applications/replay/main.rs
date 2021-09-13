@@ -2,6 +2,7 @@
 use clap::{value_t_or_exit, App, Arg};
 use hdrhistogram::Histogram;
 use itertools::Itertools;
+use noria::consensus::Authority;
 use noria::{Builder, DataType, DurabilityMode, Handle, PersistenceParameters, ZookeeperAuthority};
 use rand::prelude::*;
 use std::fs;
@@ -40,10 +41,10 @@ QUERY query_c9: SELECT * FROM TableRow WHERE c9 = ?;
 ";
 
 async fn build_graph(
-    authority: Arc<ZookeeperAuthority>,
+    authority: Arc<Authority>,
     persistence: PersistenceParameters,
     verbose: bool,
-) -> Handle<ZookeeperAuthority> {
+) -> Handle {
     let mut builder = Builder::default();
     if verbose {
         builder.log_with(noria::logger_pls());
@@ -54,7 +55,7 @@ async fn build_graph(
     builder.start(authority).await.unwrap()
 }
 
-async fn populate(g: &mut Handle<ZookeeperAuthority>, rows: i64, skewed: bool) {
+async fn populate(g: &mut Handle, rows: i64, skewed: bool) {
     let mut mutator = g.table("TableRow").await.unwrap();
 
     let chunks = (0..rows)
@@ -79,7 +80,7 @@ async fn populate(g: &mut Handle<ZookeeperAuthority>, rows: i64, skewed: bool) {
 
 // Synchronously read `reads` times, where each read should trigger a full replay from the base.
 async fn perform_reads(
-    g: &mut Handle<ZookeeperAuthority>,
+    g: &mut Handle,
     reads: i64,
     rows: i64,
     skewed: bool,
@@ -112,11 +113,7 @@ async fn perform_reads(
 }
 
 // Reads every row with the primary key index.
-async fn perform_primary_reads(
-    g: &mut Handle<ZookeeperAuthority>,
-    hist: &mut Histogram<u64>,
-    row_ids: Vec<i64>,
-) {
+async fn perform_primary_reads(g: &mut Handle, hist: &mut Histogram<u64>, row_ids: Vec<i64>) {
     let mut getter = g.view("ReadRow").await.unwrap();
 
     for i in row_ids {
@@ -139,7 +136,7 @@ async fn perform_primary_reads(
 
 // Reads each row from one of the secondary indices.
 async fn perform_secondary_reads(
-    g: &mut Handle<ZookeeperAuthority>,
+    g: &mut Handle,
     hist: &mut Histogram<u64>,
     rows: i64,
     row_ids: Vec<i64>,
@@ -303,7 +300,9 @@ async fn main() {
     };
 
     let zk_address = args.value_of("zookeeper-address").unwrap();
-    let authority = Arc::new(ZookeeperAuthority::new(zk_address).unwrap());
+    let authority = Arc::new(Authority::from(
+        ZookeeperAuthority::new(zk_address).unwrap(),
+    ));
 
     if !args.is_present("use-existing-data") {
         clear_zookeeper(zk_address);

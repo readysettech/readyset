@@ -1,5 +1,5 @@
 use clap::Clap;
-use noria::consensus::ZookeeperAuthority;
+use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::ControllerHandle;
 use std::sync::Arc;
 
@@ -13,10 +13,11 @@ struct AddQuery {
 
 impl AddQuery {
     pub async fn run(&'static self) -> anyhow::Result<()> {
-        let authority = Arc::new(ZookeeperAuthority::new(&self.zookeeper_url)?);
+        let authority = Arc::new(Authority::from(ZookeeperAuthority::new(
+            &self.zookeeper_url,
+        )?));
 
-        let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(Arc::clone(&authority)).await;
+        let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
         let q = "QUERY w : SELECT * FROM articles WHERE id = ?;";
 

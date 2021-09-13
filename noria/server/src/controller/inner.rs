@@ -28,7 +28,7 @@ use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
 use noria::{
-    consensus::{Authority, STATE_KEY},
+    consensus::{Authority, AuthorityControl, STATE_KEY},
     RecipeSpec,
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
@@ -164,13 +164,13 @@ pub(super) fn graphviz(
 
 impl ControllerInner {
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
-    pub(super) fn external_request<A: Authority + 'static>(
+    pub(super) fn external_request(
         &mut self,
         method: hyper::Method,
         path: String,
         query: Option<String>,
         body: hyper::body::Bytes,
-        authority: &Arc<A>,
+        authority: &Arc<Authority>,
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
@@ -1298,9 +1298,9 @@ impl ControllerInner {
         r
     }
 
-    fn extend_recipe<A: Authority + 'static>(
+    fn extend_recipe(
         &mut self,
-        authority: &Arc<A>,
+        authority: &Arc<Authority>,
         add_txt_spec: RecipeSpec,
     ) -> Result<ActivationResult, ReadySetError> {
         let old = self.recipe.clone();
@@ -1353,9 +1353,9 @@ impl ControllerInner {
         }
     }
 
-    fn install_recipe<A: Authority + 'static>(
+    fn install_recipe(
         &mut self,
-        authority: &Arc<A>,
+        authority: &Arc<Authority>,
         r_txt_spec: RecipeSpec,
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
@@ -1408,9 +1408,9 @@ impl ControllerInner {
         }
     }
 
-    fn set_replication_offset<A: Authority + 'static>(
+    fn set_replication_offset(
         &mut self,
-        authority: &Arc<A>,
+        authority: &Arc<Authority>,
         offset: Option<ReplicationOffset>,
     ) -> Result<(), ReadySetError> {
         self.replication_offset = offset.clone();

@@ -4,7 +4,6 @@ use std::env;
 use tokio::net::TcpStream;
 
 use msql_srv::MysqlIntermediary;
-use noria::consensus::Authority;
 use noria_client::backend::BackendBuilder;
 use noria_client::test_helpers::{self, Deployment};
 
@@ -53,12 +52,10 @@ impl test_helpers::Adapter for MySQLAdapter {
         management_db.query_drop("CREATE DATABASE noria").unwrap();
     }
 
-    async fn run_backend<A>(
-        backend: noria_client::Backend<A, Self::Upstream, Self::Handler>,
+    async fn run_backend(
+        backend: noria_client::Backend<Self::Upstream, Self::Handler>,
         s: TcpStream,
-    ) where
-        A: 'static + Authority,
-    {
+    ) {
         MysqlIntermediary::run_on_tcp(Backend(backend), s)
             .await
             .unwrap()

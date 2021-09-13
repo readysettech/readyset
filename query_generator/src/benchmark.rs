@@ -16,7 +16,6 @@ use size_format::SizeFormatterSI;
 use thiserror::Error;
 use tokio::time::Instant;
 
-use noria::consensus::LocalAuthority;
 use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
@@ -386,7 +385,7 @@ impl Benchmark {
 
     async fn seed_data(
         &self,
-        noria: &mut noria_server::Handle<LocalAuthority>,
+        noria: &mut noria_server::Handle,
         table_name: &TableName,
         data: Vec<HashMap<ColumnName, DataType>>,
     ) -> anyhow::Result<()> {
@@ -408,7 +407,7 @@ impl Benchmark {
         Ok(())
     }
 
-    async fn setup_noria(&self) -> anyhow::Result<noria_server::Handle<LocalAuthority>> {
+    async fn setup_noria(&self) -> anyhow::Result<noria_server::Handle> {
         let mut builder = noria_server::Builder::for_tests();
         builder.set_sharding(self.shards);
         builder.set_persistence(PersistenceParameters {

@@ -1,7 +1,7 @@
 #![warn(clippy::dbg_macro)]
 mod test_populate;
 
-use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
+use noria::{Builder, DataType, Handle, ReuseConfigType};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs::File;
@@ -9,7 +9,7 @@ use std::io::Write;
 use std::time;
 
 pub struct Backend {
-    g: Handle<LocalAuthority>,
+    g: Handle,
 }
 
 impl Backend {

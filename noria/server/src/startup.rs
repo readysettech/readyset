@@ -76,7 +76,7 @@ use tracing::{error, warn};
 use url::Url;
 
 use dataflow::Readers;
-use noria::consensus::Authority;
+use noria::consensus::{Authority, AuthorityControl};
 use noria::metrics::recorded;
 use noria::ReadySetError;
 use noria::{ControllerDescriptor, WorkerDescriptor};
@@ -89,8 +89,8 @@ use crate::{Config, VolumeId};
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
 /// instance. Make sure that this method is run while on a runtime.
-pub(super) async fn start_instance<A: Authority + 'static>(
-    authority: Arc<A>,
+pub(super) async fn start_instance(
+    authority: Arc<Authority>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     config: Config,
@@ -101,7 +101,7 @@ pub(super) async fn start_instance<A: Authority + 'static>(
     replicator_url: Option<String>,
     reader_only: bool,
     volume_id: Option<VolumeId>,
-) -> Result<Handle<A>, anyhow::Error> {
+) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
     let (authority_tx, authority_rx) = tokio::sync::mpsc::channel(16);
@@ -235,16 +235,16 @@ pub(super) async fn start_instance<A: Authority + 'static>(
 }
 
 /// The main Noria HTTP server object.
-struct NoriaServer<A> {
+struct NoriaServer {
     /// Channel to the running `Worker`.
     worker_tx: Sender<WorkerRequest>,
     /// Channel to the running `ControllerOuter`.
     controller_tx: Sender<ControllerRequest>,
     /// The `Authority` used inside the server.
-    authority: Arc<A>,
+    authority: Arc<Authority>,
 }
 
-impl<A> Clone for NoriaServer<A> {
+impl Clone for NoriaServer {
     fn clone(&self) -> Self {
         Self {
             worker_tx: self.worker_tx.clone(),
@@ -254,7 +254,7 @@ impl<A> Clone for NoriaServer<A> {
     }
 }
 
-impl<A: Authority> Service<Request<Body>> for NoriaServer<A> {
+impl Service<Request<Body>> for NoriaServer {
     type Response = Response<Body>;
     type Error = hyper::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dataflow::{DurabilityMode, PersistenceParameters};
-use noria::consensus::{LocalAuthority, LocalAuthorityStore};
+use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::{
     metrics::client::MetricsClient,
     metrics::{DumpedMetric, DumpedMetricValue, MetricsDump},
@@ -32,33 +32,35 @@ pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 }
 
 /// Builds a local worker.
-pub async fn start_simple(prefix: &str) -> Handle<LocalAuthority> {
+pub async fn start_simple(prefix: &str) -> Handle {
     build(prefix, Some(DEFAULT_SHARDING), false).await
 }
 
 #[allow(dead_code)]
 /// Builds a lock worker without sharding.
-pub async fn start_simple_unsharded(prefix: &str) -> Handle<LocalAuthority> {
+pub async fn start_simple_unsharded(prefix: &str) -> Handle {
     build(prefix, None, false).await
 }
 
 #[allow(dead_code)]
 /// Builds a local worker with DEFAULT_SHARDING shards and
 /// logging.
-pub async fn start_simple_logging(prefix: &str) -> Handle<LocalAuthority> {
+pub async fn start_simple_logging(prefix: &str) -> Handle {
     build(prefix, Some(DEFAULT_SHARDING), true).await
 }
 
 /// Builds a custom local worker with log prefix `prefix`,
 /// with optional sharding and logging.
-pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle<LocalAuthority> {
+pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
         sharding,
         log,
         true,
-        Arc::new(LocalAuthority::new_with_store(authority_store)),
+        Arc::new(Authority::from(LocalAuthority::new_with_store(
+            authority_store,
+        ))),
         None,
         false,
     )
@@ -71,10 +73,10 @@ pub async fn build_custom(
     sharding: Option<usize>,
     log: bool,
     controller: bool,
-    authority: Arc<LocalAuthority>,
+    authority: Arc<Authority>,
     region: Option<String>,
     reader_only: bool,
-) -> Handle<LocalAuthority> {
+) -> Handle {
     use crate::logger_pls;
     let mut builder = Builder::for_tests();
     if log {
@@ -116,9 +118,7 @@ pub async fn sleep() {
 /// the metrics recorder if it has not been initialized yet. Initializing the
 /// metrics clears all previously recorded metrics. As such if tests are run
 /// in parallel that depends on metrics, this may cause flaky metrics results.
-pub async fn initialize_metrics(
-    handle: &mut Handle<LocalAuthority>,
-) -> MetricsClient<LocalAuthority> {
+pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
     unsafe {
         if get_global_recorder_opt().is_none() {
             let rec = CompositeMetricsRecorder::new();

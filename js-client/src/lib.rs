@@ -11,7 +11,7 @@ use std::str::FromStr;
 use tokio::runtime::Runtime;
 
 use nom_sql::{Dialect, SelectStatement};
-use noria::{ControllerHandle, DataType, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::collections::{HashMap, HashSet};
@@ -21,17 +21,14 @@ use std::sync::{Arc, RwLock};
 type BoxedClient = JsBox<RefCell<JsClient>>;
 
 struct JsClient {
-    backend: Arc<tokio::sync::Mutex<Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>>>,
+    backend: Arc<tokio::sync::Mutex<Backend<MySqlUpstream, MySqlQueryHandler>>>,
     runtime: Runtime,
 }
 
 impl Finalize for JsClient {}
 
 impl JsClient {
-    pub fn new(
-        b: Backend<ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
-        rt: Runtime,
-    ) -> Self {
+    pub fn new(b: Backend<MySqlUpstream, MySqlQueryHandler>, rt: Runtime) -> Self {
         JsClient {
             backend: Arc::new(tokio::sync::Mutex::new(b)),
             runtime: rt,
@@ -76,7 +73,8 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
+    let zk_auth =
+        Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap());
     let ch = rt.block_on(ControllerHandle::new(zk_auth));
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();

@@ -3,7 +3,6 @@ use postgres::NoTls;
 use std::env;
 use tokio::net::TcpStream;
 
-use noria::consensus::Authority;
 use noria_client::test_helpers;
 use noria_client::Backend;
 
@@ -73,10 +72,7 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
         management_db.simple_query("CREATE DATABASE noria").unwrap();
     }
 
-    async fn run_backend<A>(backend: Backend<A, Self::Upstream, Self::Handler>, s: TcpStream)
-    where
-        A: 'static + Authority,
-    {
+    async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream) {
         psql_srv::run_backend(noria_psql::Backend(backend), s).await
     }
 }

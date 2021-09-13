@@ -4,7 +4,7 @@ mod populate;
 use crate::parameters::SampleKeys;
 use clap::value_t_or_exit;
 use futures_util::stream::StreamExt;
-use noria::{Builder, Handle, LocalAuthority};
+use noria::{Builder, Handle};
 use rand::prelude::*;
 use std::collections::HashMap;
 use std::future::Future;
@@ -13,7 +13,7 @@ use std::time;
 
 pub struct Backend {
     r: String,
-    g: Handle<LocalAuthority>,
+    g: Handle,
     parallel_prepop: bool,
     prepop_counts: HashMap<String, usize>,
     barrier: Arc<Barrier>,

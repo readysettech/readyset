@@ -23,7 +23,7 @@ use tracing::{debug, info, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::{Backend, BackendBuilder};
 
@@ -34,7 +34,7 @@ pub trait ConnectionHandler {
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: Backend<ZookeeperAuthority, Self::UpstreamDatabase, Self::Handler>,
+        backend: Backend<Self::UpstreamDatabase, Self::Handler>,
     );
 }
 
@@ -154,10 +154,10 @@ where
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-        let zk_auth = ZookeeperAuthority::new(&format!(
+        let zk_auth = Authority::from(ZookeeperAuthority::new(&format!(
             "{}/{}",
             options.zookeeper_address, options.deployment
-        ))?;
+        ))?);
 
         let rs_connect = span!(
             Level::INFO,

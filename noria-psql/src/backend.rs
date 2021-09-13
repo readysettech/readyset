@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use noria::consensus::Authority;
 use noria::DataType;
 use noria_client::backend as cl;
 use psql_srv as ps;
@@ -17,14 +16,9 @@ use crate::PostgreSqlUpstream;
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
-pub struct Backend<A: 'static + Authority>(
-    pub cl::Backend<A, PostgreSqlUpstream, PostgreSqlQueryHandler>,
-);
+pub struct Backend(pub cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>);
 
-impl<A> Backend<A>
-where
-    A: 'static + Authority,
-{
+impl Backend {
     async fn query(&mut self, query: &str) -> Result<QueryResponse, Error> {
         Ok(QueryResponse(self.0.query(query).await?))
     }
@@ -39,10 +33,7 @@ where
 }
 
 #[async_trait]
-impl<A> ps::Backend for Backend<A>
-where
-    A: 'static + Authority,
-{
+impl ps::Backend for Backend {
     type Value = Value;
     type Row = Row;
     type Resultset = Resultset;

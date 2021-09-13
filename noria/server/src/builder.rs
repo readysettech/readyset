@@ -153,10 +153,10 @@ impl Builder {
     }
 
     /// Start a server instance and return a handle to it.
-    pub fn start<A: Authority + 'static>(
+    pub fn start(
         self,
-        authority: Arc<A>,
-    ) -> impl Future<Output = Result<Handle<A>, anyhow::Error>> {
+        authority: Arc<Authority>,
+    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
         let Builder {
             listen_addr,
             external_addr,
@@ -189,18 +189,18 @@ impl Builder {
     }
 
     /// Start a local-only worker, and return a handle to it.
-    pub fn start_local(
-        self,
-    ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {
+    pub fn start_local(self) -> impl Future<Output = Result<Handle, anyhow::Error>> {
         let store = Arc::new(LocalAuthorityStore::new());
-        self.start_local_custom(Arc::new(LocalAuthority::new_with_store(store)))
+        self.start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+            store,
+        ))))
     }
 
     /// Start a local-only worker using a custom authority, and return a handle to it.
     pub fn start_local_custom(
         self,
-        authority: Arc<LocalAuthority>,
-    ) -> impl Future<Output = Result<Handle<LocalAuthority>, anyhow::Error>> {
+        authority: Arc<Authority>,
+    ) -> impl Future<Output = Result<Handle, anyhow::Error>> {
         let fut = self.start(authority);
         async move {
             #[allow(unused_mut)]

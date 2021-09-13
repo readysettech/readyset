@@ -410,7 +410,7 @@ pub use crate::handle::Handle;
 pub use crate::metrics::NoriaMetricsRecorder;
 pub use controller::migrate::materialization::FrontierStrategy;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
-pub use noria::consensus::LocalAuthority;
+pub use noria::consensus::{Authority, LocalAuthority};
 pub use noria::*;
 pub use petgraph::graph::NodeIndex;
 

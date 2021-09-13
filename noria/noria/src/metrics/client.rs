@@ -1,4 +1,3 @@
-use crate::consensus::Authority;
 use crate::metrics::MetricsDump;
 use crate::rpc_err;
 use crate::{ControllerHandle, ReadySetError, ReadySetResult};
@@ -16,18 +15,15 @@ pub struct TaggedMetricsDump {
 
 /// The MetricsClient handles operations to the metrics collection framework across
 /// a Noria deployment.
-pub struct MetricsClient<A: Authority + 'static> {
-    controller: ControllerHandle<A>,
+pub struct MetricsClient {
+    controller: ControllerHandle,
     client: reqwest::Client,
 }
 
-impl<A> MetricsClient<A>
-where
-    A: Authority,
-{
+impl MetricsClient {
     /// Instantiates a new metrics client connected to the deployment associated with
     /// `controller`.
-    pub fn new(controller: ControllerHandle<A>) -> ReadySetResult<Self> {
+    pub fn new(controller: ControllerHandle) -> ReadySetResult<Self> {
         Ok(MetricsClient {
             controller,
             client: reqwest::Client::new(),

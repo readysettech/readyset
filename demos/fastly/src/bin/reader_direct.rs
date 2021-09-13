@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mysql::chrono::Utc;
-use noria::consensus::ZookeeperAuthority;
+use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::ControllerHandle;
 use noria::DataType;
 use noria::KeyComparison;
@@ -288,9 +288,10 @@ struct NoriaExecutor {
 
 impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
-        let authority = Arc::new(ZookeeperAuthority::new(&opts.zookeeper_url.unwrap()).unwrap());
-        let mut handle: ControllerHandle<ZookeeperAuthority> =
-            ControllerHandle::new(authority).await;
+        let authority = Arc::new(Authority::from(
+            ZookeeperAuthority::new(&opts.zookeeper_url.unwrap()).unwrap(),
+        ));
+        let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
 
         // Retrieve or create a view for a reader node in a random region, or

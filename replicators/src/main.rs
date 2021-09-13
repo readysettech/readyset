@@ -138,5 +138,5 @@ async fn main() -> anyhow::Result<!> {
         DbOpts::Postgres(opts) => opts.into(),
     };
 
-    NoriaAdapter::start(opts.zookeeper_address, opts.deployment, options).await?
+    NoriaAdapter::start_zk(opts.zookeeper_address, opts.deployment, options).await?
 }

@@ -1,4 +1,3 @@
-use noria::consensus::Authority;
 use noria::results::Results;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
@@ -56,16 +55,13 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
-pub struct NoriaBackendInner<A: 'static + Authority> {
-    noria: ControllerHandle<A>,
+pub struct NoriaBackendInner {
+    noria: ControllerHandle,
     inputs: BTreeMap<String, Table>,
     outputs: BTreeMap<String, View>,
 }
 
-impl<A> Clone for NoriaBackendInner<A>
-where
-    A: 'static + Authority,
-{
+impl Clone for NoriaBackendInner {
     fn clone(&self) -> Self {
         Self {
             noria: self.noria.clone(),
@@ -84,8 +80,8 @@ macro_rules! noria_await {
     }};
 }
 
-impl<A: 'static + Authority> NoriaBackendInner<A> {
-    async fn new(mut ch: ControllerHandle<A>) -> Self {
+impl NoriaBackendInner {
+    async fn new(mut ch: ControllerHandle) -> Self {
         ch.ready().await.unwrap();
         let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
         let mut i = BTreeMap::new();
@@ -185,8 +181,8 @@ pub enum QueryResult {
     },
 }
 
-pub struct NoriaConnector<A: 'static + Authority> {
-    inner: NoriaBackendInner<A>,
+pub struct NoriaConnector {
+    inner: NoriaBackendInner,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
     /// global cache of view endpoints and prepared statements
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
@@ -197,7 +193,7 @@ pub struct NoriaConnector<A: 'static + Authority> {
     region: Option<String>,
 }
 
-impl<A: 'static + Authority> Clone for NoriaConnector<A> {
+impl Clone for NoriaConnector {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -210,9 +206,9 @@ impl<A: 'static + Authority> Clone for NoriaConnector<A> {
     }
 }
 
-impl<A: 'static + Authority> NoriaConnector<A> {
+impl NoriaConnector {
     pub async fn new(
-        ch: ControllerHandle<A>,
+        ch: ControllerHandle,
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
@@ -513,7 +509,7 @@ impl<A: 'static + Authority> NoriaConnector<A> {
     }
 }
 
-impl<A: 'static + Authority> NoriaConnector<A> {
+impl NoriaConnector {
     async fn get_or_create_view(
         &mut self,
         q: &nom_sql::SelectStatement,

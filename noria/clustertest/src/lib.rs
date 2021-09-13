@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use docker::{kill_mysql, kill_zookeeper, start_mysql, start_zookeeper};
 use futures::executor;
 use mysql::prelude::Queryable;
-use noria::consensus::ZookeeperAuthority;
+use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
 use server::{NoriaMySQLRunner, NoriaServerRunner, ProcessHandle};
@@ -165,9 +165,9 @@ pub struct MySQLAdapterHandle {
 /// A handle to a deployment created with `start_multi_process`.
 pub struct DeploymentHandle {
     /// A handle to the current controller of the deployment.
-    pub handle: ControllerHandle<ZookeeperAuthority>,
+    pub handle: ControllerHandle,
     /// Metrics client for aggregating metrics across the deployment.
-    pub metrics: MetricsClient<ZookeeperAuthority>,
+    pub metrics: MetricsClient,
     /// Map from a noria server's address to a handle to the server.
     pub noria_server_handles: HashMap<Url, ServerHandle>,
     /// The name of the deployment, cluster resources are prefixed
@@ -297,7 +297,7 @@ impl Drop for DeploymentHandle {
 
 // Queries the number of workers every half second until `max_wait`.
 async fn wait_until_worker_count(
-    handle: &mut ControllerHandle<ZookeeperAuthority>,
+    handle: &mut ControllerHandle,
     max_wait: Duration,
     num_workers: usize,
 ) -> Result<()> {
@@ -501,13 +501,14 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
     }
 
     let zookeeper_connect_str = format!("{}/{}", &zookeeper_addr, &params.name);
-    let authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
+    let authority = Authority::from(ZookeeperAuthority::new(zookeeper_connect_str.as_str())?);
     let mut handle = ControllerHandle::new(authority).await;
     wait_until_worker_count(&mut handle, Duration::from_secs(15), params.servers.len()).await?;
 
     // Duplicate the authority and handle creation as the metrics client
     // owns its own handle.
-    let metrics_authority = ZookeeperAuthority::new(zookeeper_connect_str.as_str())?;
+    let metrics_authority =
+        Authority::from(ZookeeperAuthority::new(zookeeper_connect_str.as_str())?);
     let metrics_handle = ControllerHandle::new(metrics_authority).await;
     let metrics = MetricsClient::new(metrics_handle).unwrap();
 

@@ -1,14 +1,14 @@
 mod populate;
 
 use clap::value_t_or_exit;
-use noria::{Builder, Handle, LocalAuthority};
+use noria::{Builder, Handle};
 use slog::info;
 
 pub struct Backend {
     blacklist: Vec<String>,
     _r: String,
     log: slog::Logger,
-    g: Handle<LocalAuthority>,
+    g: Handle,
 }
 
 async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
