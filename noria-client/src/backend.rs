@@ -11,7 +11,6 @@ use tokio::sync::mpsc;
 use tracing::{error, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
-use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
@@ -195,11 +194,11 @@ impl BackendBuilder {
         Self::default()
     }
 
-    pub fn build<A: 'static + Authority, DB, Handler>(
+    pub fn build<DB, Handler>(
         self,
-        noria: NoriaConnector<A>,
+        noria: NoriaConnector,
         upstream: Option<DB>,
-    ) -> Backend<A, DB, Handler> {
+    ) -> Backend<DB, Handler> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
         let prepared_count = 0;
@@ -273,14 +272,14 @@ impl BackendBuilder {
     }
 }
 
-pub struct Backend<A: 'static + Authority, DB, Handler> {
+pub struct Backend<DB, Handler> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
     // all queries previously prepared, mapped by their ID
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     /// Noria connector used for reads, and writes when no upstream DB is present
-    noria: NoriaConnector<A>,
+    noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
     upstream: Option<DB>,
     slowlog: bool,
@@ -364,9 +363,8 @@ where
 /// 5. If we got a non-retry related error that's not a MySQL error code already, convert it to the
 ///    most appropriate MySQL error code and write that back to the caller without dropping the
 ///    connection.
-impl<A, DB, Handler> Backend<A, DB, Handler>
+impl<DB, Handler> Backend<DB, Handler>
 where
-    A: 'static + Authority,
     DB: 'static + UpstreamDatabase,
     Handler: 'static + QueryHandler,
 {

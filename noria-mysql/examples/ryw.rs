@@ -5,7 +5,7 @@ use std::{
 };
 
 use nom_sql::SelectStatement;
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
 use noria_client::{
     backend::{
         noria_connector::{self, NoriaConnector},
@@ -29,7 +29,8 @@ async fn main() {
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let zk_addr = "127.0.0.1:2181";
     let deployment = "ryw";
-    let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap();
+    let zk_auth =
+        Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap());
 
     let mut ch = ControllerHandle::new(zk_auth).await;
 
@@ -39,7 +40,7 @@ async fn main() {
 
     let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
-    let mut b: Backend<_, _, MySqlQueryHandler> = BackendBuilder::new()
+    let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()
         .require_authentication(false)
         .enable_ryw(true)
         .build(noria, upstream);

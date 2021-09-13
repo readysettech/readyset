@@ -14,7 +14,8 @@ use tracing::{info, warn};
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
 use super::{
-    Authority, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload, WorkerDescriptor,
+    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    WorkerDescriptor,
 };
 use super::{WorkerId, CONTROLLER_KEY, WORKER_PATH, WORKER_PREFIX};
 use crate::errors::internal_err;
@@ -161,7 +162,7 @@ impl ZookeeperAuthority {
     }
 }
 
-impl Authority for ZookeeperAuthority {
+impl AuthorityControl for ZookeeperAuthority {
     fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let path = match self.zk.create(
             CONTROLLER_KEY,

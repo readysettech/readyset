@@ -21,8 +21,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    Authority, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload, WorkerDescriptor,
-    WorkerId,
+    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    WorkerDescriptor, WorkerId,
 };
 use super::{CONTROLLER_KEY, WORKER_PATH};
 use crate::errors::internal_err;
@@ -185,7 +185,7 @@ impl LocalAuthority {
     }
 }
 
-impl Authority for LocalAuthority {
+impl AuthorityControl for LocalAuthority {
     fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let mut store_inner = self.store.inner_lock()?;
 

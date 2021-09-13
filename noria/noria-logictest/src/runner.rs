@@ -20,7 +20,7 @@ use mysql_async as mysql;
 use tokio_postgres as pgsql;
 
 use nom_sql::SelectStatement;
-use noria::consensus::{LocalAuthority, LocalAuthorityStore};
+use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::ControllerHandle;
 use noria_client::backend::{BackendBuilder, NoriaConnector};
 use noria_client::UpstreamDatabase;
@@ -218,7 +218,9 @@ impl TestScript {
     /// Run the test script on Noria server
     pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
         let authority_store = Arc::new(LocalAuthorityStore::new());
-        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+        let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+            authority_store,
+        )));
         let mut noria_handle = self.start_noria_server(opts, Arc::clone(&authority)).await;
         let (adapter_task, db_url) = self.setup_adapter(opts, authority).await;
 
@@ -244,7 +246,7 @@ impl TestScript {
     pub async fn run_on_database(
         &self,
         conn: &mut DatabaseConnection,
-        mut noria: Option<ControllerHandle<LocalAuthority>>,
+        mut noria: Option<ControllerHandle>,
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
 
@@ -396,11 +398,11 @@ impl TestScript {
         Ok(())
     }
 
-    async fn start_noria_server<A: 'static + noria::consensus::Authority>(
+    async fn start_noria_server(
         &self,
         run_opts: &RunOptions,
-        authority: Arc<A>,
-    ) -> noria_server::Handle<A> {
+        authority: Arc<Authority>,
+    ) -> noria_server::Handle {
         let mut retry: usize = 0;
         loop {
             retry += 1;
@@ -431,10 +433,10 @@ impl TestScript {
         }
     }
 
-    async fn setup_adapter<A: 'static + noria::consensus::Authority>(
+    async fn setup_adapter(
         &self,
         run_opts: &RunOptions,
-        authority: Arc<A>,
+        authority: Arc<Authority>,
     ) -> (tokio::task::JoinHandle<()>, DatabaseURL) {
         let database_type = run_opts.database_type;
 
@@ -456,7 +458,7 @@ impl TestScript {
         };
         let addr = listener.local_addr().unwrap();
 
-        let ch = ControllerHandle::<A>::new(authority).await;
+        let ch = ControllerHandle::new(authority).await;
 
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
@@ -478,7 +480,7 @@ impl TestScript {
 
                     BackendBuilder::new()
                         .require_authentication(false)
-                        .build::<A, _, $handler>(noria, upstream)
+                        .build::<_, $handler>(noria, upstream)
                 }};
             }
 

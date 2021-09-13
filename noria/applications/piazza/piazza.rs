@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_variables)]
 use clap::value_t_or_exit;
-use noria::{Builder, DataType, Handle, LocalAuthority, ReuseConfigType};
+use noria::{Builder, DataType, Handle, ReuseConfigType};
 use std::collections::HashMap;
 use std::fs::File;
 
@@ -12,7 +12,7 @@ mod populate;
 use crate::populate::Populate;
 
 pub struct Backend {
-    g: Handle<LocalAuthority>,
+    g: Handle,
 }
 
 #[derive(PartialEq)]

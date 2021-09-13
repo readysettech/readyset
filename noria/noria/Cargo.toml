@@ -57,6 +57,7 @@ bytes = "1.0.1"
 
 # consensus/
 zookeeper = "0.5.3"
+enum_dispatch = "0.3.7"
 
 # channel/
 bufstream = "0.1.3"

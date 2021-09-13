@@ -15,32 +15,32 @@ use stream_cancel::Trigger;
 use tokio::sync::mpsc::Sender;
 
 /// A handle to a controller that is running in the same process as this one.
-pub struct Handle<A: Authority + 'static> {
+pub struct Handle {
     /// Has a valid controller handle on `new` and is set to None if the
     /// controller has been shutdown.
-    pub c: Option<ControllerHandle<A>>,
+    pub c: Option<ControllerHandle>,
     #[allow(dead_code)]
     event_tx: Option<Sender<HandleRequest>>,
     kill: Option<Trigger>,
     descriptor: ControllerDescriptor,
 }
 
-impl<A: Authority> Deref for Handle<A> {
-    type Target = ControllerHandle<A>;
+impl Deref for Handle {
+    type Target = ControllerHandle;
     fn deref(&self) -> &Self::Target {
         self.c.as_ref().unwrap()
     }
 }
 
-impl<A: Authority> DerefMut for Handle<A> {
+impl DerefMut for Handle {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.c.as_mut().unwrap()
     }
 }
 
-impl<A: Authority + 'static> Handle<A> {
+impl Handle {
     pub(super) fn new(
-        authority: Arc<A>,
+        authority: Arc<Authority>,
         event_tx: Sender<HandleRequest>,
         kill: Trigger,
         descriptor: ControllerDescriptor,
@@ -164,7 +164,7 @@ impl<A: Authority + 'static> Handle<A> {
     }
 }
 
-impl<A: Authority> Drop for Handle<A> {
+impl Drop for Handle {
     fn drop(&mut self) {
         self.shutdown();
     }

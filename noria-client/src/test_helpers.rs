@@ -84,9 +84,7 @@ pub trait Adapter: Send {
 
     fn recreate_database();
 
-    async fn run_backend<A>(backend: Backend<A, Self::Upstream, Self::Handler>, s: TcpStream)
-    where
-        A: 'static + Authority;
+    async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
 }
 
 pub fn setup<A>(
@@ -112,7 +110,8 @@ where
     let n = deployment.name.clone();
     let b = barrier.clone();
     thread::spawn(move || {
-        let authority = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap();
+        let authority =
+            Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap());
         let mut builder = Builder::for_tests();
         if !partial {
             builder.disable_partial();
@@ -137,7 +136,9 @@ where
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap();
+    let zk_auth = Authority::from(
+        ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap(),
+    );
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let ch = rt.block_on(ControllerHandle::new(zk_auth));

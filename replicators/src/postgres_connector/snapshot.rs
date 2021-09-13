@@ -1,6 +1,6 @@
 use super::PostgresPosition;
 use futures::{pin_mut, StreamExt};
-use noria::{consensus::Authority, ReadySetError, ReadySetResult};
+use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
@@ -10,10 +10,10 @@ use tracing::{debug, info, info_span, trace, Instrument};
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
 
-pub struct PostgresReplicator<'a, A: 'static + Authority> {
+pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
     pub(crate) transaction: pgsql::Transaction<'a>,
-    pub(crate) noria: &'a mut noria::ControllerHandle<A>,
+    pub(crate) noria: &'a mut noria::ControllerHandle,
     /// If Some then only snapshot those tables, otherwise will snapshot all tables
     pub(crate) tables: Option<Vec<String>>,
 }
@@ -273,12 +273,12 @@ impl TableDescription {
     }
 }
 
-impl<'a, A: 'static + Authority> PostgresReplicator<'a, A> {
+impl<'a> PostgresReplicator<'a> {
     pub async fn new(
         client: &'a mut pgsql::Client,
-        noria: &'a mut noria::ControllerHandle<A>,
+        noria: &'a mut noria::ControllerHandle,
         tables: Option<Vec<String>>,
-    ) -> ReadySetResult<PostgresReplicator<'a, A>> {
+    ) -> ReadySetResult<PostgresReplicator<'a>> {
         let transaction = client
             .build_transaction()
             .deferrable(true)

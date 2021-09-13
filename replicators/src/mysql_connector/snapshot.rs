@@ -1,7 +1,7 @@
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::{consensus::Authority, ReadySetResult};
+use noria::ReadySetResult;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use tracing::{debug, info, info_span};
@@ -172,9 +172,9 @@ impl MySqlReplicator {
     /// # Arguments
     /// * `noria`: The target Noria deployment
     /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
-    pub async fn replicate_to_noria<A: Authority>(
+    pub async fn replicate_to_noria(
         mut self,
-        noria: &mut noria::ControllerHandle<A>,
+        noria: &mut noria::ControllerHandle,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         let result = match self
@@ -198,9 +198,9 @@ impl MySqlReplicator {
     /// is that some `CREATE TABLE` or `CREATE VIEW` statements may be missed if they happen to
     /// execute at the narrow timeframe of us reading the tables list, and us reading the binlog
     /// offset.
-    async fn replicate_to_noria_with_table_locks<A: Authority>(
+    async fn replicate_to_noria_with_table_locks(
         &mut self,
-        noria: &mut noria::ControllerHandle<A>,
+        noria: &mut noria::ControllerHandle,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         // Start a transaction with `REPEATABLE READ` isolation level
@@ -238,9 +238,9 @@ impl MySqlReplicator {
     /// This method aquires a global read lock using `FLUSH TABLES WITH READ LOCK`, which is
     /// the recommended MySQL method of obtaining a snapshot, however it is not available on
     /// Amazon RDS.
-    async fn replicate_to_noria_with_global_lock<A: Authority>(
+    async fn replicate_to_noria_with_global_lock(
         &mut self,
-        noria: &mut noria::ControllerHandle<A>,
+        noria: &mut noria::ControllerHandle,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         // We must hold the locking connection open until replication is finished,
@@ -270,10 +270,7 @@ impl MySqlReplicator {
     }
 
     /// Copy all base tables into noria
-    async fn dump_tables<A: Authority>(
-        &mut self,
-        noria: &mut noria::ControllerHandle<A>,
-    ) -> ReadySetResult<()> {
+    async fn dump_tables(&mut self, noria: &mut noria::ControllerHandle) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
 
         // For each table we spawn a new task to parallelize the replication process somewhat

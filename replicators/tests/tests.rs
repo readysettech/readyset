@@ -1,7 +1,7 @@
 use mysql_async::prelude::Queryable;
 use noria::DataType as D;
 use noria::{
-    consensus::{LocalAuthority, LocalAuthorityStore},
+    consensus::{Authority, LocalAuthority, LocalAuthorityStore},
     ControllerHandle, DataType, ReadySetResult,
 };
 use noria_server::Builder;
@@ -94,8 +94,8 @@ const RECONNECT_RESULT: &[&[DataType]] = &[
 
 struct TestHandle {
     url: String,
-    noria: noria_server::Handle<LocalAuthority>,
-    authority: Arc<LocalAuthority>,
+    noria: noria_server::Handle,
+    authority: Arc<Authority>,
     // We spin a whole runtime for the replication task because the tokio postgres
     // connection spawns a background task we can only terminate by dropping the runtime
     replication_rt: Option<tokio::runtime::Runtime>,
@@ -152,13 +152,15 @@ impl DbConnection {
 impl TestHandle {
     async fn start_noria(url: String) -> ReadySetResult<TestHandle> {
         let authority_store = Arc::new(LocalAuthorityStore::new());
-        let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
+        let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+            authority_store,
+        )));
         TestHandle::start_with_authority(url, authority).await
     }
 
     async fn start_with_authority(
         url: String,
-        authority: Arc<LocalAuthority>,
+        authority: Arc<Authority>,
     ) -> ReadySetResult<TestHandle> {
         let noria = Builder::for_tests()
             .start(Arc::clone(&authority))
@@ -177,8 +179,8 @@ impl TestHandle {
         Ok(handle)
     }
 
-    async fn controller(&self) -> ControllerHandle<LocalAuthority> {
-        ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await
+    async fn controller(&self) -> ControllerHandle {
+        ControllerHandle::new(Arc::clone(&self.authority)).await
     }
 
     async fn stop(mut self) {
@@ -195,7 +197,7 @@ impl TestHandle {
 
     async fn start_repl(&mut self) -> ReadySetResult<()> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let controller = ControllerHandle::<LocalAuthority>::new(Arc::clone(&self.authority)).await;
+        let controller = ControllerHandle::new(Arc::clone(&self.authority)).await;
 
         let _ = runtime.spawn(NoriaAdapter::start_with_url(
             self.url.clone(),

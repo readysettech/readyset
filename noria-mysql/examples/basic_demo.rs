@@ -1,7 +1,7 @@
 use anyhow::Result;
 use maplit::hashmap;
 use nom_sql::SelectStatement;
-use noria::{ControllerHandle, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
 use noria_client::backend::noria_connector::{self, NoriaConnector};
 use noria_client::backend::{BackendBuilder, QueryResult};
 use noria_client::Backend;
@@ -15,7 +15,10 @@ async fn main() -> Result<()> {
     let deployment = "myapp".to_owned();
     let zk_addr = "127.0.0.1:2181";
 
-    let zk_auth = ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment))?;
+    let zk_auth = Authority::from(ZookeeperAuthority::new(&format!(
+        "{}/{}",
+        zk_addr, deployment
+    ))?);
     let ch = ControllerHandle::new(zk_auth).await;
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
@@ -29,7 +32,7 @@ async fn main() -> Result<()> {
     }));
     let require_authentication = false;
 
-    let mut b: Backend<_, _, MySqlQueryHandler> = BackendBuilder::new()
+    let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()
         .slowlog(slowlog)
         .users(users.clone())
         .require_authentication(require_authentication)

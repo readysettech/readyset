@@ -37,7 +37,7 @@ impl ConnectionHandler for MysqlHandler {
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: noria_client::Backend<noria::ZookeeperAuthority, MySqlUpstream, MySqlQueryHandler>,
+        backend: noria_client::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
         if let Err(e) = MysqlIntermediary::run_on_tcp(Backend(backend), stream).await {
             match e {

@@ -6,7 +6,7 @@ use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    consensus::{self, Authority},
+    consensus::{Authority, AuthorityControl, ZookeeperAuthority},
     RecipeSpec,
 };
 use crate::{
@@ -42,8 +42,8 @@ pub struct ControllerDescriptor {
     pub nonce: u64,
 }
 
-struct Controller<A> {
-    authority: Arc<A>,
+struct Controller {
+    authority: Arc<Authority>,
     client: hyper::Client<hyper::client::HttpConnector>,
 }
 
@@ -62,10 +62,7 @@ impl ControllerRequest {
     }
 }
 
-impl<A> Service<ControllerRequest> for Controller<A>
-where
-    A: 'static + Authority,
-{
+impl Service<ControllerRequest> for Controller {
     type Response = hyper::body::Bytes;
     type Error = ReadySetError;
 
@@ -167,20 +164,14 @@ where
 /// on them).
 // TODO: this should be renamed to NoriaHandle, or maybe just Connection, since it also provides
 // reads and writes, which aren't controller actions!
-pub struct ControllerHandle<A>
-where
-    A: 'static + Authority,
-{
-    handle: Buffer<Controller<A>, ControllerRequest>,
+pub struct ControllerHandle {
+    handle: Buffer<Controller, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     tracer: tracing::Dispatch,
 }
 
-impl<A> Clone for ControllerHandle<A>
-where
-    A: 'static + Authority,
-{
+impl Clone for ControllerHandle {
     fn clone(&self) -> Self {
         ControllerHandle {
             handle: self.handle.clone(),
@@ -191,18 +182,18 @@ where
     }
 }
 
-impl ControllerHandle<consensus::ZookeeperAuthority> {
+impl ControllerHandle {
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
     pub async fn from_zk(zookeeper_address: &str) -> ReadySetResult<Self> {
-        let auth = consensus::ZookeeperAuthority::new(zookeeper_address)?;
+        let auth = Authority::ZookeeperAuthority(ZookeeperAuthority::new(zookeeper_address)?);
         Ok(ControllerHandle::new(auth).await)
     }
 }
 
 // this alias is needed to work around -> impl Trait capturing _all_ lifetimes by default
 // the A parameter is needed so it gets captured into the impl Trait
-type RpcFuture<'a, A: 'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
+type RpcFuture<'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
 
 /// The size of the [`Buffer`][0] to use for requests to the [`ControllerHandle`].
 ///
@@ -211,9 +202,9 @@ type RpcFuture<'a, A: 'a, R: 'a> = impl Future<Output = ReadySetResult<R>> + 'a;
 /// set to. Number of cores, perhaps?
 const CONTROLLER_BUFFER_SIZE: usize = 8;
 
-impl<A: Authority + 'static> ControllerHandle<A> {
+impl ControllerHandle {
     #[doc(hidden)]
-    pub fn make(authority: Arc<A>) -> Self {
+    pub fn make(authority: Arc<Authority>) -> Self {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
         ControllerHandle {
@@ -252,10 +243,7 @@ impl<A: Authority + 'static> ControllerHandle<A> {
     /// stored in the given `authority`.
     ///
     /// You *probably* want to use `ControllerHandle::from_zk` instead.
-    pub async fn new<I: Into<Arc<A>>>(authority: I) -> Self
-    where
-        A: Send + 'static,
-    {
+    pub async fn new<I: Into<Arc<Authority>>>(authority: I) -> Self {
         Self::make(authority.into())
     }
 
@@ -413,21 +401,20 @@ impl<A: Authority + 'static> ControllerHandle<A> {
 
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
     #[doc(hidden)]
-    pub fn rpc<'a, Q, R>(&'a mut self, path: &'static str, r: Q) -> RpcFuture<'a, A, R>
+    pub fn rpc<'a, Q, R>(&'a mut self, path: &'static str, r: Q) -> RpcFuture<'a, R>
     where
         for<'de> R: Deserialize<'de>,
         R: Send + 'static,
         Q: Serialize,
     {
         // Needed b/c of https://github.com/rust-lang/rust/issues/65442
-        async fn rpc_inner<A, R>(
-            ch: &mut ControllerHandle<A>,
+        async fn rpc_inner<R>(
+            ch: &mut ControllerHandle,
             req: ControllerRequest,
             path: &'static str,
         ) -> ReadySetResult<R>
         where
             for<'de> R: Deserialize<'de>,
-            A: Authority + 'static,
         {
             let body: hyper::body::Bytes = ch
                 .handle

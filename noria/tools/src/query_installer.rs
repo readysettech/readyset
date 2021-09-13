@@ -1,4 +1,4 @@
-use noria::consensus::ZookeeperAuthority;
+use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::ControllerHandle;
 
 // This exists for testing purposes. It is an easy script to install a noria recipe. It assumes the deployment
@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
                 SELECT * FROM employees;
         ";
 
-    let authority = ZookeeperAuthority::new("127.0.0.1:2181/myapp")?;
+    let authority = Authority::from(ZookeeperAuthority::new("127.0.0.1:2181/myapp")?);
     let mut noria = ControllerHandle::new(authority).await;
 
     println!("Waiting for noria");

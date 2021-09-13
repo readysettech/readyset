@@ -15,7 +15,8 @@ use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use noria_server::{
-    Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId, ZookeeperAuthority,
+    Authority, Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId,
+    ZookeeperAuthority,
 };
 
 #[cfg(not(target_env = "msvc"))]
@@ -194,8 +195,9 @@ fn main() -> anyhow::Result<()> {
         install_global_recorder(bufrec).unwrap();
     }
 
-    let authority =
-        ZookeeperAuthority::new(&format!("{}/{}", &opts.zookeeper, &opts.deployment)).unwrap();
+    let authority = Authority::from(
+        ZookeeperAuthority::new(&format!("{}/{}", &opts.zookeeper, &opts.deployment)).unwrap(),
+    );
     let mut builder = Builder::default();
     builder.set_listen_addr(opts.address);
     if opts.memory > 0 {

@@ -6,6 +6,7 @@
 /// There are comments below showing example functions and documentation that are
 /// a draft for where this trait will go.
 use anyhow::Error;
+use enum_dispatch::enum_dispatch;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -66,7 +67,8 @@ pub struct WorkerDescriptor {
     pub volume_id: Option<VolumeId>,
 }
 
-pub trait Authority: Send + Sync {
+#[enum_dispatch]
+pub trait AuthorityControl: Send + Sync {
     /// Attempt to become leader with a specific payload. The payload should be something that can
     /// be deserialized to get the information on how to connect to the leader. If it is successful
     /// the this will return Some(payload), otherwise None and another instance has become leader.
@@ -164,6 +166,14 @@ pub trait Authority: Send + Sync {
     // Run this instead of heartbeat if you are the leader to get updates about other workers and
     // to confirm this worker is still the leader.
     //fn leader_heartbeat(&self) -> Result<AuthorityLeaderHeartbeatResponse, Error>;
+}
+
+/// Enum that dispatches calls to the `AuthorityControl` trait to
+/// the respective variant.
+#[enum_dispatch(AuthorityControl)]
+pub enum Authority {
+    ZookeeperAuthority,
+    LocalAuthority,
 }
 
 // Currently unimplemented draft types for the above Trait

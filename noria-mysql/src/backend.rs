@@ -13,7 +13,6 @@ use msql_srv::{
     ColumnFlags, InitWriter, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
 };
 use mysql_async::consts::StatusFlags;
-use noria::consensus::Authority;
 use noria::errors::internal_err;
 use noria::{internal, DataType, ReadySetError};
 use noria_client::backend::noria_connector;
@@ -103,15 +102,12 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
 }
 
 #[derive(Deref, DerefMut)]
-pub struct Backend<A: 'static + Authority>(
-    pub noria_client::Backend<A, MySqlUpstream, MySqlQueryHandler>,
-);
+pub struct Backend(pub noria_client::Backend<MySqlUpstream, MySqlQueryHandler>);
 
 #[async_trait]
-impl<W, A> MysqlShim<W> for Backend<A>
+impl<W> MysqlShim<W> for Backend
 where
     W: AsyncWrite + Unpin + Send + 'static,
-    A: 'static + Authority,
 {
     type Error = Error;
 

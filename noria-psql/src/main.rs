@@ -27,7 +27,7 @@ impl ConnectionHandler for PsqlHandler {
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: cl::Backend<noria::ZookeeperAuthority, PostgreSqlUpstream, PostgreSqlQueryHandler>,
+        backend: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
     ) {
         let backend = Backend(backend);
         run_backend(backend, stream).await;
