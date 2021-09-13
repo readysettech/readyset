@@ -641,13 +641,6 @@ fn decimal_or_numeric(i: &[u8]) -> IResult<&[u8], SqlType> {
     }
 }
 
-fn double_precision(i: &[u8]) -> IResult<&[u8], SqlType> {
-    let (i, _) = tag_no_case("double")(i)?;
-    let (i, _) = multispace1(i)?;
-    let (i, _) = tag_no_case("precision")(i)?;
-    Ok((i, SqlType::Double))
-}
-
 fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlType> {
     move |i| {
         alt((
@@ -661,9 +654,15 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                 SqlType::DateTime(fsp)
             }),
             map(tag_no_case("date"), |_| SqlType::Date),
-            double_precision,
             map(
-                tuple((tag_no_case("double"), multispace0, opt_signed)),
+                tuple((
+                    tag_no_case("double"),
+                    opt(preceded(multispace1, tag_no_case("precision"))),
+                    multispace0,
+                    opt(precision),
+                    multispace0,
+                    opt_signed,
+                )),
                 |_| SqlType::Double,
             ),
             map(
@@ -1379,6 +1378,14 @@ mod tests {
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
+        }
+
+        #[test]
+        fn double_with_lens() {
+            let qs = b"double(16,12)";
+            let res = type_identifier(Dialect::MySQL)(qs);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Double);
         }
     }
 
