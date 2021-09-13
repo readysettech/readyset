@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
@@ -96,8 +97,8 @@ pub struct Options {
     /// Analyze coverage of queries during execution, and save a report of coverage on exit.
     ///
     /// Implies --race-reads
-    #[clap(long, requires("upstream-db-url"))]
-    coverage_analysis: bool,
+    #[clap(long, env = "COVERAGE_ANALYSIS", requires("upstream-db-url"))]
+    coverage_analysis: Option<PathBuf>,
 
     /// Allow database connections authenticated as this user. Ignored if
     /// --no-require-authentication is passed
@@ -193,7 +194,10 @@ where
                 .unwrap();
         }
 
-        let query_coverage_info = options.coverage_analysis.then(QueryCoverageInfoRef::new);
+        let query_coverage_info = options
+            .coverage_analysis
+            .as_ref()
+            .map(|f| QueryCoverageInfoRef::new(f.clone()));
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
@@ -204,7 +208,7 @@ where
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
-                .race_reads(options.race_reads || options.coverage_analysis)
+                .race_reads(options.race_reads || options.coverage_analysis.is_some())
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
                 .dialect(self.dialect)
@@ -245,6 +249,10 @@ where
                 connection.in_scope(|| debug!("disconnected"));
             };
             rt.handle().spawn(fut);
+        }
+
+        if let Some(qci) = query_coverage_info.as_ref() {
+            rt.block_on(qci.save())?;
         }
 
         drop(ch);

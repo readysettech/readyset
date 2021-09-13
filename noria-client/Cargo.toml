@@ -33,6 +33,8 @@ zookeeper = "0.5.4"
 noria-server = { path = "../noria/server/" }
 maplit = "1.0.2"
 readyset-logging = { path = "../readyset-logging" }
+serde = "1.0.130"
+serde_json = "1.0.67"
 
 [lib]
 path = "src/lib.rs"
