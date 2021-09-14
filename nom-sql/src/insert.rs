@@ -36,7 +36,7 @@ impl fmt::Display for InsertStatement {
                 " ({})",
                 fields
                     .iter()
-                    .map(|col| col.name.to_owned())
+                    .map(|col| escape_if_keyword(&col.name))
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;
@@ -310,6 +310,15 @@ mod tests {
                     ..Default::default()
                 }
             );
+        }
+
+        #[test]
+        fn stringify_insert_with_reserved_keyword_col() {
+            let orig = b"INSERT INTO users (`id`, `name`, `key`) VALUES (1, 'bob', 1);";
+            let parsed = test_parse!(insertion(Dialect::MySQL), orig);
+            let stringified = parsed.to_string();
+            let parsed_again = test_parse!(insertion(Dialect::MySQL), stringified.as_bytes());
+            assert_eq!(parsed, parsed_again);
         }
     }
 
