@@ -34,6 +34,8 @@ pub mod parser;
 
 #[macro_use]
 mod dialect;
+#[macro_use]
+mod macros;
 
 mod alter;
 mod case;
