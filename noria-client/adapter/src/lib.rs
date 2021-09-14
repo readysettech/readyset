@@ -170,17 +170,29 @@ where
         rs_connect.in_scope(|| info!("Connected"));
 
         let ctrlc = tokio::signal::ctrl_c();
+        let mut sigterm = {
+            let _guard = rt.enter();
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap()
+        };
         let mut listener = Box::pin(futures_util::stream::select(
             TcpListenerStream::new(listener),
-            ctrlc
-                .map(|r| {
-                    if let Err(e) = r {
-                        Err(e)
-                    } else {
-                        Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
-                    }
-                })
-                .into_stream(),
+            futures_util::stream::select(
+                ctrlc
+                    .map(|r| {
+                        if let Err(e) = r {
+                            Err(e)
+                        } else {
+                            Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
+                        }
+                    })
+                    .into_stream(),
+                sigterm
+                    .recv()
+                    .map(futures_util::stream::iter)
+                    .into_stream()
+                    .flatten()
+                    .map(|_| Err(io::Error::new(io::ErrorKind::Interrupted, "got SIGTERM"))),
+            ),
         ));
 
         if options.prometheus_metrics {
