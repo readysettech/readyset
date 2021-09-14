@@ -383,6 +383,7 @@ impl DataType {
             (_, Some(Bigint(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
             (_, Some(Bigint(_)), Int(_)) => convert_numeric!(self, i64, i32),
             (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
+            (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
             (_, Some(Float), Float) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
@@ -3066,8 +3067,10 @@ mod tests {
             ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
                 #[proptest]
                 fn $name(source: $to) {
+                    let input = <$from>::try_from(source);
+                    prop_assume!(input.is_ok());
                     assert_eq!(
-                        *DataType::from(<$from>::from(source))
+                        *DataType::from(input.unwrap())
                             .coerce_to(&$sql_type)
                             .unwrap(),
                         DataType::from(source)
@@ -3090,6 +3093,7 @@ mod tests {
             UnsignedSmallint(None)
         );
         int_conversion!(bigint_to_int, i64, i32, Int(None));
+        int_conversion!(bigint_to_unsigned_bigint, i64, u64, UnsignedBigint(None));
 
         macro_rules! real_conversion {
             ($name: ident, $from: ty, $to: ty, $sql_type: expr) => {
