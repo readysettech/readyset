@@ -28,7 +28,7 @@ use lazy_static::lazy_static;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
 use noria::{
-    consensus::{Authority, AuthorityControl, STATE_KEY},
+    consensus::{Authority, AuthorityControl},
     RecipeSpec,
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
@@ -1316,23 +1316,20 @@ impl ControllerInner {
                     }
 
                     if authority
-                        .read_modify_write(
-                            STATE_KEY,
-                            |state: Option<ControllerState>| match state {
-                                None => Err(()),
-                                Some(mut state) => {
-                                    state.node_restrictions = self.node_restrictions.clone();
-                                    state.recipe_version = self.recipe.version();
-                                    state.recipes.push(add_txt.to_string());
-                                    if let Some(offset) = &add_txt_spec.replication_offset {
-                                        offset
-                                            .try_max_into(&mut state.replication_offset)
-                                            .map_err(|_| ())?;
-                                    }
-                                    Ok(state)
+                        .update_controller_state(|state: Option<ControllerState>| match state {
+                            None => Err(()),
+                            Some(mut state) => {
+                                state.node_restrictions = self.node_restrictions.clone();
+                                state.recipe_version = self.recipe.version();
+                                state.recipes.push(add_txt.to_string());
+                                if let Some(offset) = &add_txt_spec.replication_offset {
+                                    offset
+                                        .try_max_into(&mut state.replication_offset)
+                                        .map_err(|_| ())?;
                                 }
-                            },
-                        )
+                                Ok(state)
+                            }
+                        })
                         .is_err()
                     {
                         noria::internal!("failed to persist recipe extension");
@@ -1371,9 +1368,8 @@ impl ControllerInner {
                     Ok(x) => {
                         self.replication_offset = r_txt_spec.replication_offset.clone();
 
-                        let install_result = authority.read_modify_write(
-                            STATE_KEY,
-                            |state: Option<ControllerState>| {
+                        let install_result =
+                            authority.update_controller_state(|state: Option<ControllerState>| {
                                 match state {
                                     None => Err(()),
                                     Some(mut state) => {
@@ -1387,8 +1383,7 @@ impl ControllerInner {
                                         Ok(state)
                                     }
                                 }
-                            },
-                        );
+                            });
 
                         if let Err(e) = install_result {
                             noria::internal!("failed to persist recipe installation, {}", e)
@@ -1416,7 +1411,7 @@ impl ControllerInner {
         self.replication_offset = offset.clone();
 
         authority
-            .read_modify_write::<_, ControllerState, _>(STATE_KEY, |state| match state {
+            .update_controller_state::<_, ControllerState, _>(|state| match state {
                 Some(mut state) => {
                     state.replication_offset = offset.clone();
                     Ok(state)

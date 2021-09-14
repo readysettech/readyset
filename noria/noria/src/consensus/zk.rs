@@ -13,16 +13,21 @@ use serde::Serialize;
 use tracing::{info, warn};
 use zookeeper::{Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper};
 
+use super::WorkerId;
 use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor,
 };
-use super::{WorkerId, CONTROLLER_KEY, WORKER_PATH, WORKER_PREFIX};
 use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
 use backoff::backoff::Backoff;
 use backoff::exponential::ExponentialBackoff;
 use backoff::SystemClock;
+
+pub const CONTROLLER_KEY: &str = "/controller";
+pub const STATE_KEY: &str = "/state";
+pub const WORKER_PATH: &str = "/workers";
+pub const WORKER_PREFIX: &str = "/workers/guid-";
 
 struct EventWatcher;
 impl Watcher for EventWatcher {
@@ -331,6 +336,14 @@ impl AuthorityControl for ZookeeperAuthority {
                 Err(e) => bail!(e),
             }
         }
+    }
+
+    fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    where
+        F: FnMut(Option<P>) -> Result<P, E>,
+        P: Serialize + DeserializeOwned,
+    {
+        self.read_modify_write(STATE_KEY, f)
     }
 
     fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {

@@ -24,8 +24,11 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
-use super::{CONTROLLER_KEY, WORKER_PATH};
 use crate::errors::internal_err;
+
+pub const CONTROLLER_KEY: &str = "/controller";
+pub const STATE_KEY: &str = "/state";
+pub const WORKER_PATH: &str = "/workers";
 
 struct LocalAuthorityStoreInner {
     keys: BTreeMap<String, Vec<u8>>,
@@ -336,6 +339,14 @@ impl AuthorityControl for LocalAuthority {
                 .insert(path.to_owned(), serde_json::to_vec(&p)?);
         }
         Ok(r)
+    }
+
+    fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    where
+        F: FnMut(Option<P>) -> Result<P, E>,
+        P: Serialize + DeserializeOwned,
+    {
+        self.read_modify_write(STATE_KEY, f)
     }
 
     fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
