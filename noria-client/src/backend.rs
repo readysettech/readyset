@@ -4,10 +4,8 @@ use std::fmt::Debug;
 use std::time;
 use std::{collections::HashMap, str::FromStr};
 
-use futures::FutureExt;
 use metrics::histogram;
 use nom_sql::Dialect;
-use tokio::sync::mpsc;
 use tracing::{error, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
@@ -164,7 +162,7 @@ pub enum PreparedStatement {
 pub struct BackendBuilder {
     slowlog: bool,
     dialect: Dialect,
-    race_reads: bool,
+    mirror_reads: bool,
     mirror_ddl: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
@@ -178,7 +176,7 @@ impl Default for BackendBuilder {
         BackendBuilder {
             slowlog: false,
             dialect: Dialect::MySQL,
-            race_reads: false,
+            mirror_reads: false,
             mirror_ddl: false,
             users: Default::default(),
             require_authentication: true,
@@ -210,7 +208,7 @@ impl BackendBuilder {
             upstream,
             slowlog: self.slowlog,
             dialect: self.dialect,
-            race_reads: self.race_reads,
+            mirror_reads: self.mirror_reads,
             mirror_ddl: self.mirror_ddl,
             users: self.users,
             require_authentication: self.require_authentication,
@@ -232,8 +230,8 @@ impl BackendBuilder {
         self
     }
 
-    pub fn race_reads(mut self, race_reads: bool) -> Self {
-        self.race_reads = race_reads;
+    pub fn mirror_reads(mut self, mirror_reads: bool) -> Self {
+        self.mirror_reads = mirror_reads;
         self
     }
 
@@ -285,9 +283,9 @@ pub struct Backend<DB, Handler> {
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
-    /// If set to true and a MySQL backend is configured for fallback, all reads will be performed
-    /// simultaneously in Noria and MySQL, with the first successful result being returned.
-    race_reads: bool,
+    /// If set to true and a backend is configured for fallback, all reads will be performed
+    /// in both Noria and against upstream, with the upstream result always being returned.
+    mirror_reads: bool,
     /// Map from username to password for all users allowed to connect to the db
     pub users: HashMap<String, String>,
     pub require_authentication: bool,
@@ -471,63 +469,32 @@ where
         }
     }
 
-    /// Executes the given read against both noria and the upstream database in simultaneous racing
-    /// tasks, returning the result of the first query that completes successfully, or the error
-    /// from the upstream database if both fail.
+    /// Executes the given read against both noria and the upstream database, returning
+    /// the result from the upstream database regardless of outcome.
     ///
     /// If fallback is not configured, returns an error
-    pub async fn race_read(
+    pub async fn mirror_read(
         &mut self,
         q: nom_sql::SelectStatement,
         query_str: String,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        let url = self
+        let connector = self
             .upstream
-            .as_ref()
-            .ok_or_else(|| internal_err("race_read called without fallback configured"))?
-            .url()
-            .to_owned();
-        let mut upstream = DB::connect(url).await?;
-        let mut noria = self.noria.clone();
+            .as_mut()
+            .ok_or_else(|| internal_err("mirror_read called without fallback configured"))?;
 
-        macro_rules! grab_err {
-            ($sender: expr) => {
-                |result| async move {
-                    match result {
-                        Ok(res) => Ok(res),
-                        Err(e) => {
-                            // TODO(grfn): Also log the error, especially if it came from noria
-                            $sender.send(e).await.unwrap();
-                            Err(())
-                        }
-                    }
-                }
-            };
-        }
+        // TODO: Record upstream query duration on success.
+        let upstream_res = connector
+            .handle_read(query_str)
+            .await
+            .map(QueryResult::Upstream);
 
-        let (noria_err_sender, mut noria_err) = mpsc::channel(1);
-        let noria_read = tokio::spawn(async move {
-            noria
-                .handle_select(q, use_params, ticket)
-                .then(grab_err!(noria_err_sender))
-                .await
-        });
-        let (upstream_err_sender, mut upstream_err) = mpsc::channel(1);
-        let upstream_read = tokio::spawn(async move {
-            upstream
-                .handle_read(&query_str)
-                .then(grab_err!(upstream_err_sender))
-                .await
-        });
-        let errs = tokio::spawn(async move { tokio::join!(noria_err.recv(), upstream_err.recv()) });
+        // TODO: Record noria query duration on success or set noria error on failure.
+        let _ = self.noria.handle_select(q, use_params, ticket).await;
 
-        tokio::select! {
-            Ok(Ok(noria_res)) = noria_read => Ok(QueryResult::Noria(noria_res)),
-            Ok(Ok(upstream_res)) = upstream_read => Ok(QueryResult::Upstream(upstream_res)),
-            Ok((_, Some(e))) = errs => Err(e)
-        }
+        upstream_res
     }
 
     /// Executes the given read against noria, and on failure sends the read to fallback instead.
@@ -912,8 +879,8 @@ where
             match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = std::time::Instant::now();
-                    let res = if self.race_reads {
-                        self.race_read(q, query.to_owned(), use_params, self.ticket.clone())
+                    let res = if self.mirror_reads {
+                        self.mirror_read(q, query.to_owned(), use_params, self.ticket.clone())
                             .await
                     } else {
                         self.cascade_read(q, query, use_params, self.ticket.clone())
