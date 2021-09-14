@@ -9,21 +9,19 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
+use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
     ws_sep_comma, IndexType, TableKey,
 };
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::table_options;
+use crate::expression::expression;
 use crate::keywords::escape_if_keyword;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, SelectStatement};
 use crate::table::Table;
-use crate::Dialect;
-use crate::{
-    column::{column_specification, Column, ColumnSpecification},
-    ColumnConstraint,
-};
+use crate::{ColumnConstraint, Dialect};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::combinator::{map, opt};
@@ -145,6 +143,7 @@ pub fn index_col_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<
 pub fn key_specification(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         alt((
+            check_constraint(dialect),
             full_text_key(dialect),
             primary_key(dialect),
             unique(dialect),
@@ -307,6 +306,46 @@ fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> 
     }
 }
 
+fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+    move |i| {
+        let (i, name) = map(
+            opt(preceded(
+                terminated(tag_no_case("constraint"), multispace1),
+                opt(terminated(
+                    map(dialect.identifier(), ToOwned::to_owned),
+                    multispace1,
+                )),
+            )),
+            Option::flatten,
+        )(i)?;
+        let (i, _) = tag_no_case("check")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, expr) = delimited(
+            terminated(tag("("), multispace0),
+            expression(dialect),
+            preceded(multispace0, tag(")")),
+        )(i)?;
+        let (i, enforced) = opt(preceded(
+            multispace1,
+            terminated(
+                map(opt(terminated(tag_no_case("not"), multispace1)), |n| {
+                    n.is_none()
+                }),
+                tag_no_case("enforced"),
+            ),
+        ))(i)?;
+
+        Ok((
+            i,
+            TableKey::CheckConstraint {
+                name,
+                expr,
+                enforced,
+            },
+        ))
+    }
+}
+
 // Parse rule for a comma-separated list.
 pub fn key_specification_list(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<TableKey>> {
     move |i| many1(terminated(key_specification(dialect), opt(ws_sep_comma)))(i)
@@ -424,6 +463,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                             target_columns: target_column,
                             index_name,
                         },
+                        constraint => constraint,
                     }
                 })
                 .collect()
@@ -549,6 +589,7 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
 #[cfg(test)]
 mod tests {
     use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
+    use crate::{BinaryOperator, Expression};
 
     use super::*;
     use crate::column::Column;
@@ -965,6 +1006,62 @@ mod tests {
                 index_type: Some(IndexType::BTree),
             }])
         );
+    }
+
+    #[test]
+    fn check_constraint_no_name() {
+        let qs: &[&[u8]] = &[b"CHECK (x > 1)", b"CONSTRAINT CHECK (x > 1)"];
+        for q in qs {
+            let res = test_parse!(key_specification(Dialect::MySQL), q);
+            assert_eq!(
+                res,
+                TableKey::CheckConstraint {
+                    name: None,
+                    expr: Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column("x".into())),
+                        op: BinaryOperator::Greater,
+                        rhs: Box::new(Expression::Literal(1.into())),
+                    },
+                    enforced: None
+                }
+            )
+        }
+    }
+
+    #[test]
+    fn check_constraint_with_name() {
+        let qstr = b"CONSTRAINT foo CHECK (x > 1)";
+        let res = test_parse!(key_specification(Dialect::MySQL), qstr);
+        assert_eq!(
+            res,
+            TableKey::CheckConstraint {
+                name: Some("foo".to_owned()),
+                expr: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column("x".into())),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expression::Literal(1.into())),
+                },
+                enforced: None
+            }
+        )
+    }
+
+    #[test]
+    fn check_constraint_not_enforced() {
+        let qstr = b"CONSTRAINT foo CHECK (x > 1) NOT ENFORCED";
+        let res = test_parse!(key_specification(Dialect::MySQL), qstr);
+        assert_eq!(
+            res,
+            TableKey::CheckConstraint {
+                name: Some("foo".to_owned()),
+                expr: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Column("x".into())),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expression::Literal(1.into())),
+                },
+                enforced: Some(false)
+            }
+        )
     }
 
     mod mysql {
