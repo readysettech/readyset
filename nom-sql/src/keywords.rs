@@ -90,6 +90,7 @@ fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("FULLTEXT"), keyword_follow_char),
         terminated(tag_no_case("GLOB"), keyword_follow_char),
         terminated(tag_no_case("GROUP"), keyword_follow_char),
+        terminated(tag_no_case("GROUPS"), keyword_follow_char),
         terminated(tag_no_case("HAVING"), keyword_follow_char),
         terminated(tag_no_case("ILIKE"), keyword_follow_char),
         terminated(tag_no_case("IF"), keyword_follow_char),
@@ -97,12 +98,12 @@ fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("IMMEDIATE"), keyword_follow_char),
         terminated(tag_no_case("IN"), keyword_follow_char),
         terminated(tag_no_case("INDEX"), keyword_follow_char),
-        terminated(tag_no_case("INDEXED"), keyword_follow_char),
     ))(i)
 }
 
 fn keyword_i_to_o(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("INDEXED"), keyword_follow_char),
         terminated(tag_no_case("INITIALLY"), keyword_follow_char),
         terminated(tag_no_case("INNER"), keyword_follow_char),
         terminated(tag_no_case("INSERT"), keyword_follow_char),
@@ -123,12 +124,12 @@ fn keyword_i_to_o(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("NOT"), keyword_follow_char),
         terminated(tag_no_case("NOTNULL"), keyword_follow_char),
         terminated(tag_no_case("NULL"), keyword_follow_char),
-        terminated(tag_no_case("OF"), keyword_follow_char),
     ))(i)
 }
 
 fn keyword_o_to_s(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("OF"), keyword_follow_char),
         terminated(tag_no_case("OFFSET"), keyword_follow_char),
         terminated(tag_no_case("ON"), keyword_follow_char),
         terminated(tag_no_case("OR"), keyword_follow_char),
@@ -149,12 +150,12 @@ fn keyword_o_to_s(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("RIGHT"), keyword_follow_char),
         terminated(tag_no_case("ROLLBACK"), keyword_follow_char),
         terminated(tag_no_case("ROW"), keyword_follow_char),
-        terminated(tag_no_case("SAVEPOINT"), keyword_follow_char),
     ))(i)
 }
 
-fn keyword_s_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_s_to_w(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("SAVEPOINT"), keyword_follow_char),
         terminated(tag_no_case("SELECT"), keyword_follow_char),
         terminated(tag_no_case("SET"), keyword_follow_char),
         terminated(tag_no_case("TABLE"), keyword_follow_char),
@@ -174,6 +175,11 @@ fn keyword_s_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("VIRTUAL"), keyword_follow_char),
         terminated(tag_no_case("WHEN"), keyword_follow_char),
         terminated(tag_no_case("WHERE"), keyword_follow_char),
+    ))(i)
+}
+
+fn keyword_w_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
         terminated(tag_no_case("WITH"), keyword_follow_char),
         terminated(tag_no_case("WITHOUT"), keyword_follow_char),
     ))(i)
@@ -187,7 +193,8 @@ pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
         keyword_e_to_i,
         keyword_i_to_o,
         keyword_o_to_s,
-        keyword_s_to_z,
+        keyword_s_to_w,
+        keyword_w_to_z,
     ))(i)
 }
 
