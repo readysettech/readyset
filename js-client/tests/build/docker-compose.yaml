@@ -42,7 +42,8 @@ services:
       #   32768	60999
       - "32768-60999"
     environment:
-      ZOOKEEPER_ADDRESS: zookeeper:2181
+      AUTHORITY_ADDRESS: zookeeper:2181
+      AUTHORITY: "zookeeper"
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: jstests
@@ -62,7 +63,8 @@ services:
   node:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/node:15.12.0
     environment:
-      ZOOKEEPER_ADDRESS: zookeeper:2181
+      AUTHORITY_ADDRESS: zookeeper:2181
+      AUTHORITY: "zookeeper"
       NORIA_DEPLOYMENT: jstests
     links:
       - mysql

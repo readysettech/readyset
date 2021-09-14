@@ -15,7 +15,8 @@ resource "aws_instance" "server" {
     REGION            = data.aws_region.current.name
     SETUP_DATA_VOLUME = file("${path.module}/files/setup-data-volume.sh")
     SHARDS            = var.server_shards
-    ZOOKEEPER_ADDRESS = join(",", formatlist("%s:2181", aws_instance.zookeeper.*.private_ip))
+    AUTHORITY_ADDRESS = join(",", formatlist("%s:2181", aws_instance.zookeeper.*.private_ip))
+    AUTHORITY         = "zookeeper"
   })
 
   vpc_security_group_ids = concat(

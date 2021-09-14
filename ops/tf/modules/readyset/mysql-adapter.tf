@@ -39,7 +39,8 @@ resource "aws_launch_template" "mysql_adapter" {
   user_data = base64encode(templatefile("${path.module}/files/mysql-adapter-init.sh", {
     MYSQL_URL         = local.mysql_url
     DEPLOYMENT        = var.deployment
-    ZOOKEEPER_ADDRESS = join(",", formatlist("%s:2181", aws_instance.zookeeper.*.private_ip))
+    AUTHORITY_ADDRESS = join(",", formatlist("%s:2181", aws_instance.zookeeper.*.private_ip))
+    AUTHORITY         = "zookeeper"
   }))
 
   vpc_security_group_ids = concat(

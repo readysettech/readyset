@@ -24,7 +24,8 @@ use tracing::{debug, info, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
-use noria::{consensus::Authority, ControllerHandle, ReadySetError, ZookeeperAuthority};
+use noria::consensus::{Authority, ConsulAuthority};
+use noria::{ControllerHandle, ReadySetError, ZookeeperAuthority};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::{Backend, BackendBuilder};
 
@@ -72,14 +73,19 @@ pub struct Options {
     #[clap(long, env = "NORIA_DEPLOYMENT")]
     deployment: String,
 
-    /// IP:PORT for Zookeeper
+    /// Authority connection string.
+    // TODO(justin): The default_value should depend on the value of authority.
     #[clap(
         long,
         short = 'z',
-        env = "ZOOKEEPER_ADDRESS",
+        env = "AUTHORITY_ADDRESS",
         default_value = "127.0.0.1:2181"
     )]
-    zookeeper_address: String,
+    authority_address: String,
+
+    /// The authority to use. Possible values: zookeeper, consul.
+    #[clap(long, env = "AUTHORITY", default_value = "zookeeper")]
+    authority: String,
 
     /// Log slow queries (> 5ms)
     #[clap(long)]
@@ -157,19 +163,29 @@ where
         let rs_connect = span!(
             Level::INFO,
             "Connecting to ReadySet server",
-            %options.zookeeper_address,
+            %options.authority_address,
             %options.deployment
         );
 
-        let zookeeper_address = options.zookeeper_address.clone();
+        let authority = options.authority.clone();
+        let authority_address = options.authority_address.clone();
         let deployment = options.deployment.clone();
         let ch = rt.block_on(async {
-            let zk_auth = Authority::from(
-                ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment)).await?,
-            );
+            let authority = match authority.as_str() {
+                "zookeeper" => Authority::from(
+                    ZookeeperAuthority::new(&format!("{}/{}", &authority_address, &deployment))
+                        .await
+                        .unwrap(),
+                ),
+                "consul" => Authority::from(
+                    ConsulAuthority::new(&format!("http://{}/{}", &authority_address, &deployment))
+                        .unwrap(),
+                ),
+                other => unreachable!("Invalid authority type: {}", other),
+            };
 
             Ok::<ControllerHandle, ReadySetError>(
-                ControllerHandle::new(zk_auth)
+                ControllerHandle::new(authority)
                     .instrument(rs_connect.clone())
                     .await,
             )

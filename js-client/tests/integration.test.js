@@ -1,9 +1,10 @@
 const { Client } = require("../lib/index");
 const process = require("process");
 
+// TODO(ENG-611): js-client support for consul.
 const CONFIG = {
   deployment: process.env.NORIA_DEPLOYMENT,
-  zookeeperAddress: process.env.ZOOKEEPER_ADDRESS,
+  zookeeperAddress: process.env.AUTHORITY_ADDRESS,
 };
 
 const EMPLOYEES = [
