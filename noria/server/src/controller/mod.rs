@@ -12,7 +12,7 @@ use launchpad::select;
 use noria::consensus::{AuthorityWorkerHeartbeatResponse, WorkerId};
 use noria::ControllerDescriptor;
 use noria::{
-    consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor, STATE_KEY},
+    consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor},
     ReplicationOffset,
 };
 use noria::{internal, ReadySetError};
@@ -506,8 +506,7 @@ impl AuthorityLeaderElectionState {
             }
 
             // We are the new leader, attempt to update the leader state with our state.
-            let state = self.authority.read_modify_write(
-                STATE_KEY,
+            let state = self.authority.update_controller_state(
                 |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                     match state {
                         None => Ok(ControllerState {
@@ -522,7 +521,7 @@ impl AuthorityLeaderElectionState {
                             // configuration.
                             assert_eq!(
                                 state.config, self.config,
-                                "Config in Zk is not compatible with requested config!"
+                                "Config in authority is not compatible with requested config!"
                             );
                             state.config = self.config.clone();
                             Ok(state)

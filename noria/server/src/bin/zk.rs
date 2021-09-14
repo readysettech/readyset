@@ -1,5 +1,5 @@
 use anyhow::bail;
-use noria::consensus::{CONTROLLER_KEY, STATE_KEY};
+use noria::consensus::zk::{CONTROLLER_KEY, STATE_KEY};
 use serde_json::Value;
 use std::process;
 use std::time::Duration;
