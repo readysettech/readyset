@@ -774,7 +774,7 @@ mod tests {
           id int,
           group_id int,
           primary key (id),
-          constraint users_group foreign key (group_id) references groups (id),
+          constraint users_group foreign key (group_id) references `groups` (id),
         )";
 
         let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
