@@ -8,10 +8,9 @@ use launchpad::select;
 use mysql_async as mysql;
 use noria::consistency::Timestamp;
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
-use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, ZookeeperAuthority};
+use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
-use std::fmt::Display;
 use std::str::FromStr;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, warn, Instrument};
@@ -83,14 +82,10 @@ impl FromStr for AdapterOpts {
 }
 
 impl NoriaAdapter {
-    pub async fn start_zk<S1: Display, S2: Display>(
-        zookeeper_addr: S1,
-        deployment: S2,
+    pub async fn start_with_authority(
+        authority: Authority,
         options: AdapterOpts,
     ) -> ReadySetResult<!> {
-        let authority = Authority::from(
-            ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment)).await?,
-        );
         let noria = noria::ControllerHandle::new(authority).await;
         NoriaAdapter::start_inner(noria, options, None).await
     }
