@@ -392,6 +392,11 @@ pub enum TableKey {
         target_table: Table,
         target_columns: Vec<Column>,
     },
+    CheckConstraint {
+        name: Option<String>,
+        expr: Expression,
+        enforced: Option<bool>,
+    },
 }
 
 impl fmt::Display for TableKey {
@@ -486,6 +491,27 @@ impl fmt::Display for TableKey {
                         .map(|c| escape_if_keyword(&c.name))
                         .join(", "),
                 )
+            }
+            TableKey::CheckConstraint {
+                name,
+                expr,
+                enforced,
+            } => {
+                write!(f, "CONSTRAINT",)?;
+                if let Some(name) = name {
+                    write!(f, " {}", name)?;
+                }
+
+                write!(f, " CHECK {}", expr)?;
+
+                if let Some(enforced) = enforced {
+                    if !enforced {
+                        write!(f, " NOT")?;
+                    }
+                    write!(f, " ENFORCED")?;
+                }
+
+                Ok(())
             }
         }
     }
