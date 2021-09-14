@@ -1,8 +1,11 @@
-use std::collections::{hash_map::Entry, HashSet};
 use std::fmt;
 use std::fmt::Debug;
 use std::time;
 use std::{collections::HashMap, str::FromStr};
+use std::{
+    collections::{hash_map::Entry, HashSet},
+    time::Instant,
+};
 
 use metrics::histogram;
 use nom_sql::Dialect;
@@ -16,7 +19,7 @@ use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError, ReadyS
 use noria_client_metrics::recorded::SqlQueryType;
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
-use crate::coverage::QueryCoverageInfoRef;
+use crate::coverage::{MaybeExecuteEvent, MaybePrepareEvent, QueryCoverageInfoRef};
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{rewrite, QueryHandler, UpstreamDatabase};
 
@@ -250,7 +253,7 @@ impl BackendBuilder {
 pub struct Backend<DB, Handler> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
-    // all queries previously prepared, mapped by their ID
+    // all queries previously prepared on noria, mapped by their ID.
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     /// Noria connector used for reads, and writes when no upstream DB is present
@@ -432,24 +435,73 @@ where
     /// Executes the given read against both noria and the upstream database, returning
     /// the result from the upstream database regardless of outcome.
     ///
-    /// If fallback is not configured, returns an error
-    pub async fn mirror_read(
+    /// If fallback is not configured, returns an error.
+    async fn mirror_read(
         &mut self,
         q: nom_sql::SelectStatement,
         query_str: String,
         use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
+        event: &mut MaybeExecuteEvent,
     ) -> Result<QueryResult<DB>, DB::Error> {
         let connector = self
             .upstream
             .as_mut()
             .ok_or_else(|| internal_err("mirror_read called without fallback configured"))?;
 
+        let mut handle = event.start_timer();
         // TODO: Record upstream query duration on success.
-        let upstream_res = connector.query(query_str).await.map(QueryResult::Upstream);
+        let upstream_res = connector.query(query_str).await.map(|r| {
+            handle.set_upstream_duration();
+            QueryResult::Upstream(r)
+        });
+        handle = event.start_timer();
+        match self.noria.handle_select(q, use_params, ticket).await {
+            Ok(_) => {
+                handle.set_noria_duration();
+            }
+            Err(e) => {
+                event.set_noria_error(&e);
+                error!(error = %e, "Error received from noria during mirror_read()");
+            }
+        };
 
-        // TODO: Record noria query duration on success or set noria error on failure.
-        let _ = self.noria.handle_select(q, use_params, ticket).await;
+        upstream_res
+    }
+
+    /// Executes the given prepare select against both noria, and the upstream database, returning
+    /// the result from the upstream database regardless of outcome.
+    ///
+    /// If fallback is not configured, returns an error.
+    async fn mirror_prepare(
+        &mut self,
+        q: nom_sql::SelectStatement,
+        query: &str,
+        event: &mut MaybePrepareEvent,
+    ) -> Result<PrepareResult<DB>, DB::Error> {
+        let connector = self
+            .upstream
+            .as_mut()
+            .ok_or(ReadySetError::FallbackNoConnector)?;
+        let mut handle = event.start_timer();
+        let upstream_res = connector.prepare(query).await.map(|r| {
+            handle.set_upstream_duration();
+            PrepareResult::Upstream(r)
+        });
+        handle = event.start_timer();
+        match self
+            .noria
+            .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
+            .await
+        {
+            Ok(_) => {
+                handle.set_noria_duration();
+            }
+            Err(e) => {
+                event.set_noria_error(&e);
+                error!(error = %e, "Error received from noria during mirror_prepare()");
+            }
+        };
 
         upstream_res
     }
@@ -488,7 +540,7 @@ where
     /// Executes the given prepare select against noria, and on failure sends the prepare to
     /// fallback. cascape_prepare will return a result or a mysql_async error (which could be a
     /// mysql server error) if fallback is configured.
-    pub async fn cascade_prepare(
+    async fn cascade_prepare(
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
@@ -516,12 +568,17 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
-    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
-        // the updated count will serve as the id for the prepared statement
+    async fn prepare_inner(
+        &mut self,
+        query: &str,
+        event: &mut MaybePrepareEvent,
+    ) -> Result<PrepareResult<DB>, DB::Error> {
+        //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
         let span = span!(Level::DEBUG, "prepare", query);
         let _g = span.enter();
+        let mut handle = event.start_timer();
 
         if self.is_in_tx() {
             warn!("In transaction, sending query to fallback");
@@ -531,6 +588,7 @@ where
                 .map(PrepareResult::Upstream);
             if let Ok(ref result) = res {
                 self.store_prep_statement(result);
+                handle.set_upstream_duration();
             }
             return res;
         }
@@ -539,14 +597,18 @@ where
         let parsed_query = match res {
             Ok((parsed_query, _)) => parsed_query,
             Err(e) => {
+                drop(handle);
+                event.set_noria_error(&e);
                 if self.upstream.is_some() {
                     error!(error = %e, "Error received from noria, sending query to fallback");
+                    handle = event.start_timer();
                     let res = self
                         .prepare_fallback(query)
                         .await
                         .map(PrepareResult::Upstream);
                     if let Ok(ref result) = res {
                         self.store_prep_statement(result);
+                        handle.set_upstream_duration();
                     }
                     return res;
                 } else {
@@ -557,10 +619,18 @@ where
         };
 
         let res = match parsed_query {
-            nom_sql::SqlQuery::Select(ref stmt) => self.cascade_prepare(stmt.clone(), query).await,
+            nom_sql::SqlQuery::Select(ref stmt) => {
+                if self.mirror_reads {
+                    self.mirror_prepare(stmt.clone(), query, event).await
+                } else {
+                    self.cascade_prepare(stmt.clone(), query).await
+                }
+            }
             nom_sql::SqlQuery::Insert(_) => {
                 if let Some(ref mut upstream) = self.upstream {
-                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
+                    handle.set_upstream_duration();
+                    res
                 } else {
                     Ok(PrepareResult::Noria(
                         self.noria
@@ -591,7 +661,10 @@ where
             | nom_sql::SqlQuery::CompoundSelect(..)
             | nom_sql::SqlQuery::Delete(..) => {
                 if let Some(ref mut upstream) = self.upstream {
-                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                    upstream.prepare(query).await.map(|r| {
+                        handle.set_upstream_duration();
+                        PrepareResult::Upstream(r)
+                    })
                 } else {
                     // For now we only support prepare deletes over fallback.
                     error!("unsupported query");
@@ -611,48 +684,60 @@ where
         res
     }
 
-    /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
-    /// belonging to the calling `Backend` struct.
-    // TODO(andrew, justin): add RYW support for executing prepared queries
-    pub async fn execute(
+    /// Prepares `query` to be executed later using the reader/writer belonging
+    /// to the calling `Backend` struct and adds the prepared query
+    /// to the calling struct's map of prepared queries with a unique id.
+    pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
+        let mut maybe_prepare_event = MaybePrepareEvent::new(self.mirror_reads);
+        let res = self.prepare_inner(query, &mut maybe_prepare_event).await;
+        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_prepare_event.into()) {
+            info.query_prepared(query.to_string(), e, self.prepared_count);
+        }
+        res
+    }
+
+    async fn execute_inner(
         &mut self,
         id: u32,
         params: Vec<DataType>,
+        prepared_statement: &PreparedStatement,
+        event: &mut MaybeExecuteEvent,
     ) -> Result<QueryResult<DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
         let start = time::Instant::now();
-
-        let prepared_statement = self
-            .prepared_statements
-            .get(&id)
-            .cloned()
-            .ok_or(PreparedStatementMissing { statement_id: id })?;
+        let mut handle = event.start_timer();
 
         match prepared_statement {
             PreparedStatement::Upstream(id) => {
-                let upstream = self
-                    .upstream
-                    .as_mut()
-                    .ok_or(ReadySetError::FallbackNoConnector)?;
-                return upstream
-                    .execute(id, params)
+                let upstream = match self.upstream.as_mut() {
+                    Some(u) => u,
+                    None => {
+                        let err = ReadySetError::FallbackNoConnector;
+                        event.set_noria_error(&err);
+                        return Err(err.into());
+                    }
+                };
+                let res = upstream
+                    .execute(*id, params)
                     .await
                     .map(QueryResult::Upstream);
+                handle.set_upstream_duration();
+                res
             }
             PreparedStatement::Noria(statement_id) => {
-                let prep: SqlQuery = self
-                    .prepared_queries
-                    .get(&statement_id)
-                    .cloned()
-                    .ok_or(PreparedStatementMissing { statement_id })?;
+                let prep: SqlQuery = self.prepared_queries.get(statement_id).cloned().ok_or(
+                    PreparedStatementMissing {
+                        statement_id: *statement_id,
+                    },
+                )?;
                 let res = match prep {
                     SqlQuery::Select(_) => {
                         let try_read = self
                             .noria
                             .execute_prepared_select(
-                                statement_id,
+                                *statement_id,
                                 params.clone(),
                                 self.ticket.clone(),
                             )
@@ -660,18 +745,26 @@ where
                         // fallback on failure, however we must extract the original query because
                         // it was not prepared on the underlying db
                         match try_read {
-                            Ok(read) => Ok(QueryResult::Noria(read)),
+                            Ok(read) => {
+                                handle.set_noria_duration();
+                                Ok(QueryResult::Noria(read))
+                            }
                             Err(e) => {
+                                drop(handle);
+                                event.set_noria_error(&e);
                                 if let Some(ref mut upstream) = self.upstream {
                                     error!(error = %e, "Error received from noria during execute, sending query to fallback");
                                     // TODO(DAN): The prepared statement id should be returned to
                                     // the backend so that it can be stored
                                     let UpstreamPrepare { statement_id, .. } =
                                         upstream.prepare(&prep.to_string()).await?;
-                                    upstream
+                                    handle = event.start_timer();
+                                    let res = upstream
                                         .execute(statement_id, params)
                                         .await
-                                        .map(QueryResult::Upstream)
+                                        .map(QueryResult::Upstream);
+                                    handle.set_upstream_duration();
+                                    res
                                 } else {
                                     error!("{}", e);
                                     Err(e.into())
@@ -681,29 +774,41 @@ where
                     }
                     SqlQuery::Insert(ref _q) => {
                         if let Some(ref mut upstream) = self.upstream {
-                            upstream
-                                .execute(statement_id, params)
+                            let res = upstream
+                                .execute(*statement_id, params)
                                 .await
-                                .map(QueryResult::Upstream)
+                                .map(QueryResult::Upstream);
+                            handle.set_upstream_duration();
+                            res
                         } else {
                             Ok(QueryResult::Noria(
                                 self.noria
-                                    .execute_prepared_insert(statement_id, params)
-                                    .await?,
+                                    .execute_prepared_insert(*statement_id, params)
+                                    .await
+                                    .map_err(|e| {
+                                        event.set_noria_error(&e);
+                                        e
+                                    })?,
                             ))
                         }
                     }
                     SqlQuery::Update(ref _q) => {
                         if let Some(ref mut upstream) = self.upstream {
-                            upstream
-                                .execute(statement_id, params)
+                            let res = upstream
+                                .execute(*statement_id, params)
                                 .await
-                                .map(QueryResult::Upstream)
+                                .map(QueryResult::Upstream);
+                            handle.set_upstream_duration();
+                            res
                         } else {
                             Ok(QueryResult::Noria(
                                 self.noria
-                                    .execute_prepared_update(statement_id, params)
-                                    .await?,
+                                    .execute_prepared_update(*statement_id, params)
+                                    .await
+                                    .map_err(|e| {
+                                        event.set_noria_error(&e);
+                                        e
+                                    })?,
                             ))
                         }
                     }
@@ -731,19 +836,48 @@ where
         }
     }
 
-    /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
+    /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
+    /// belonging to the calling `Backend` struct.
+    // TODO(andrew, justin): add RYW support for executing prepared queries
+    pub async fn execute(
+        &mut self,
+        id: u32,
+        params: Vec<DataType>,
+    ) -> Result<QueryResult<DB>, DB::Error> {
+        let prepared_statement = self
+            .prepared_statements
+            .get(&id)
+            .cloned()
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
+
+        let mut maybe_event = MaybeExecuteEvent::new(self.mirror_reads);
+        let res = self
+            .execute_inner(id, params, &prepared_statement, &mut maybe_event)
+            .await;
+        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_event.into()) {
+            info.prepare_executed(id, e);
+        }
+        res
+    }
+
+    async fn query_inner(
+        &mut self,
+        query: &str,
+        event: &mut MaybeExecuteEvent,
+    ) -> Result<QueryResult<DB>, DB::Error> {
         let span = span!(Level::TRACE, "query", query);
         let _g = span.enter();
 
         let start = time::Instant::now();
+        let mut handle = event.start_timer();
 
         if self.is_in_tx() {
-            let res = self.query_fallback(query).await?;
+            let res = self.query_fallback(query).await;
             if self.slowlog {
                 warn_on_slow_query(&start, query);
             }
-            return Ok(res);
+            handle.set_upstream_duration();
+            return res;
         }
 
         let parse_result = self.parse_query(query, true);
@@ -760,11 +894,12 @@ where
                 // TODO(Dan): Implement RYW for query_fallback
                 if self.upstream.is_some() {
                     error!(error = %e, "Error received from noria, sending query to fallback");
-                    let res = self.query_fallback(query).await?;
+                    let res = self.query_fallback(query).await;
                     if self.slowlog {
                         warn_on_slow_query(&start, query);
                     }
-                    return Ok(res);
+                    handle.set_upstream_duration();
+                    return res;
                 } else {
                     error!("{}", e);
                     return Err(e.into());
@@ -777,11 +912,12 @@ where
             return if self.upstream.is_some() {
                 // Fallback is enabled, so route this query to the underlying
                 // database.
-                let res = self.query_fallback(query).await?;
+                let res = self.query_fallback(query).await;
                 if self.slowlog {
                     warn_on_slow_query(&start, query);
                 }
-                Ok(res)
+                handle.set_upstream_duration();
+                res
             } else {
                 // Fallback is not enabled, so let the handler return a default result or
                 // throw an error.
@@ -797,10 +933,13 @@ where
         if let nom_sql::SqlQuery::Set(s) = &parsed_query {
             if !is_allowed_set(s) {
                 warn!(%s, "received unsupported SET statement");
-                return Err(ReadySetError::SetDisallowed {
+                let e = ReadySetError::SetDisallowed {
                     statement: parsed_query.to_string(),
+                };
+                if self.has_fallback() {
+                    event.set_noria_error(&e);
                 }
-                .into());
+                return Err(e.into());
             }
         }
 
@@ -808,9 +947,19 @@ where
             ($noria_method: ident ($stmt: expr)) => {
                 if let Some(upstream) = &mut self.upstream {
                     if self.mirror_ddl {
-                        self.noria.$noria_method($stmt).await?;
+                        if let Err(e) = self.noria.$noria_method($stmt).await {
+                            drop(handle);
+                            event.set_noria_error(&e);
+                        } else {
+                            handle.set_noria_duration();
+                        }
+                        handle = event.start_timer();
                     }
-                    Ok(QueryResult::Upstream(upstream.query(query).await?))
+                    let upstream_res = upstream.query(query).await;
+                    // TODO(peter): Implement logic to detect if results differed.
+                    handle.set_upstream_duration();
+
+                    Ok(QueryResult::Upstream(upstream_res?))
                 } else {
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
                 }
@@ -822,10 +971,16 @@ where
         let res = if let Some(ref mut upstream) = self.upstream {
             match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
-                        self.mirror_read(q, query.to_owned(), use_params, self.ticket.clone())
-                            .await
+                        self.mirror_read(
+                            q,
+                            query.to_owned(),
+                            use_params,
+                            self.ticket.clone(),
+                            event,
+                        )
+                        .await
                     } else {
                         self.cascade_read(q, query, use_params, self.ticket.clone())
                             .await
@@ -842,7 +997,7 @@ where
                 nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                 | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                 | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
 
                     // Update ticket if RYW enabled
                     let query_result = if cfg!(feature = "ryw") {
@@ -866,22 +1021,22 @@ where
                             })?;
 
                             self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
-                            query_result
+                            Ok(query_result)
                         } else {
-                            upstream.query(query).await?
+                            upstream.query(query).await
                         }
                     } else {
-                        upstream.query(query).await?
+                        upstream.query(query).await
                     };
-                    let execution_time = execution_timer.elapsed().as_micros();
+                    handle.set_upstream_duration();
 
                     measure_parse_and_execution_time(
                         parse_time,
-                        execution_time,
+                        execution_timer.elapsed().as_micros(),
                         SqlQueryType::Write,
                     );
 
-                    Ok(QueryResult::Upstream(query_result))
+                    Ok(QueryResult::Upstream(query_result?))
                 }
 
                 // Table Create / Drop (RYW not supported)
@@ -889,21 +1044,43 @@ where
                 nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
                 nom_sql::SqlQuery::CreateTable(stmt) => handle_ddl!(handle_create_table(stmt)),
                 nom_sql::SqlQuery::DropTable(_) => {
-                    unsupported!("DROP TABLE not yet supported");
+                    if self.mirror_reads {
+                        let res = upstream.query(query).await;
+                        handle.set_upstream_duration();
+                        Ok(QueryResult::Upstream(res?))
+                    } else {
+                        unsupported!("DROP TABLE not yet supported");
+                    }
                 }
                 nom_sql::SqlQuery::AlterTable(_) => {
-                    unsupported!("ALTER TABLE not yet supported");
+                    if self.mirror_reads {
+                        let res = upstream.query(query).await;
+                        handle.set_upstream_duration();
+                        Ok(QueryResult::Upstream(res?))
+                    } else {
+                        unsupported!("ALTER TABLE not yet supported");
+                    }
                 }
-                nom_sql::SqlQuery::Set(_) => upstream
-                    .query(&parsed_query.to_string())
-                    .await
-                    .map(QueryResult::Upstream),
+                nom_sql::SqlQuery::Set(_) => {
+                    let res = upstream
+                        .query(&parsed_query.to_string())
+                        .await
+                        .map(QueryResult::Upstream);
+                    handle.set_upstream_duration();
+                    res
+                }
                 nom_sql::SqlQuery::StartTransaction(_)
                 | nom_sql::SqlQuery::Commit(_)
                 | nom_sql::SqlQuery::Rollback(_) => {
-                    self.handle_transaction_boundaries(parsed_query).await
+                    let res = self.handle_transaction_boundaries(parsed_query).await;
+                    handle.set_upstream_duration();
+                    res
                 }
-                nom_sql::SqlQuery::CompoundSelect(_) => self.query_fallback(query).await,
+                nom_sql::SqlQuery::CompoundSelect(_) => {
+                    let res = self.query_fallback(query).await;
+                    handle.set_upstream_duration();
+                    res
+                }
             }
         } else {
             // Interacting directly with Noria writer (No RYW support)
@@ -911,7 +1088,7 @@ where
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
             Ok(QueryResult::Noria(match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
                     let res = self
                         .noria
                         .handle_select(q, use_params, self.ticket.clone())
@@ -928,7 +1105,7 @@ where
                 nom_sql::SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await?,
                 nom_sql::SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await?,
                 nom_sql::SqlQuery::Insert(q) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
                     let res = self.noria.handle_insert(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
@@ -940,7 +1117,7 @@ where
                     res?
                 }
                 nom_sql::SqlQuery::Update(q) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
                     let res = self.noria.handle_update(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
@@ -952,7 +1129,7 @@ where
                     res?
                 }
                 nom_sql::SqlQuery::Delete(q) => {
-                    let execution_timer = std::time::Instant::now();
+                    let execution_timer = Instant::now();
                     let res = self.noria.handle_delete(q).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
@@ -974,6 +1151,16 @@ where
             warn_on_slow_query(&start, query);
         }
 
+        res
+    }
+
+    /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
+        let mut maybe_event = MaybeExecuteEvent::new(self.mirror_reads);
+        let res = self.query_inner(query, &mut maybe_event).await;
+        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_event.into()) {
+            info.query_executed(query.to_string(), e);
+        }
         res
     }
 
