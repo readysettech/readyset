@@ -96,18 +96,11 @@ impl UpstreamDatabase for MySqlUpstream {
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let is_read = {
-            // TODO(DAN): This is a bad hack to determine what type of result the query will
-            // return. This method should be replaced by resultset parsing.
-            let q = query.as_ref().to_string().trim_start().to_lowercase();
-            q.starts_with("select") || q.starts_with("show") || q.starts_with("describe")
-        };
         let statement = self.conn.prep(query).await?;
         self.prepared_statements
             .insert(statement.id(), statement.clone());
         Ok(UpstreamPrepare {
             statement_id: statement.id(),
-            is_read,
             meta: StatementMeta {
                 params: statement.params().to_owned(),
                 schema: statement.columns().to_owned(),
@@ -115,8 +108,7 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    /// Executes the prepared select
-    async fn execute_read(
+    async fn execute(
         &mut self,
         id: u32,
         params: Vec<DataType>,
@@ -131,65 +123,47 @@ impl UpstreamDatabase for MySqlUpstream {
                 params,
             )
             .await?;
-        let columns = result.columns();
-        let data = result.collect().await?;
-        Ok(QueryResult::ReadResult {
-            data,
-            columns,
-            status_flags: self.conn.status(),
-        })
+        let columns = result.columns().ok_or_else(|| {
+            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
+        })?;
+
+        if columns.len() > 0 {
+            Ok(QueryResult::ReadResult {
+                data: result.collect().await?,
+                columns: Some(columns),
+                status_flags: self.conn.status(),
+            })
+        } else {
+            Ok(QueryResult::WriteResult {
+                num_rows_affected: result.affected_rows(),
+                last_inserted_id: result.last_insert_id().unwrap_or(1),
+                status_flags: self.conn.status(),
+            })
+        }
     }
 
-    async fn execute_write(
-        &mut self,
-        id: u32,
-        params: Vec<DataType>,
-    ) -> Result<Self::QueryResult, Error> {
-        let params = dt_to_value_params(params)?;
-        let statement = self.prepared_statements.get(&id).ok_or(Error::ReadySet(
-            ReadySetError::PreparedStatementMissing { statement_id: id },
-        ))?;
-        self.conn.exec_drop(statement, params).await?;
-        Ok(QueryResult::WriteResult {
-            num_rows_affected: self.conn.affected_rows(),
-            last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
-            status_flags: self.conn.status(),
-        })
-    }
-
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
         let mut result = self.conn.query_iter(query).await?;
-        let columns = result.columns();
-        let data = result.collect().await?;
-        Ok(QueryResult::ReadResult {
-            data,
-            columns,
-            status_flags: self.conn.status(),
-        })
-    }
 
-    /// Executes the given query on the mysql backend.
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        self.conn.query_drop(query).await.map_err(|e| {
-            error!("Could not execute query in mysql : {:?}", e);
-            e
+        let columns = result.columns().ok_or_else(|| {
+            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
         })?;
-        debug!(
-            "results : {:?}, {:?}",
-            self.conn.affected_rows(),
-            self.conn.last_insert_id()
-        );
-        Ok(QueryResult::WriteResult {
-            num_rows_affected: self.conn.affected_rows(),
-            last_inserted_id: self.conn.last_insert_id().unwrap_or(0),
-            status_flags: self.conn.status(),
-        })
+        if columns.len() > 0 {
+            Ok(QueryResult::ReadResult {
+                data: result.collect().await?,
+                columns: Some(columns),
+                status_flags: self.conn.status(),
+            })
+        } else {
+            Ok(QueryResult::WriteResult {
+                num_rows_affected: result.affected_rows(),
+                last_inserted_id: result.last_insert_id().unwrap_or(1),
+                status_flags: self.conn.status(),
+            })
+        }
     }
 
     /// Executes the given query on the mysql backend.

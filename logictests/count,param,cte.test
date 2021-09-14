@@ -15,27 +15,31 @@ WITH alias_3 AS (SELECT count(table_1.column_2) AS alias_2 FROM table_1) SELECT 
 ----
 0
 
+invert_no_upstream
 query  nosort
 WITH alias_3 AS (SELECT table_1.column_1 AS alias_2 FROM table_1) SELECT count(table_1.column_3) AS alias_1 FROM table_1 INNER JOIN alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
 25
 
+invert_no_upstream
 query  nosort
 WITH alias_3 AS (SELECT count(table_1.column_5) AS alias_2 FROM table_1) SELECT count(table_1.column_4) AS alias_1 FROM table_1 INNER JOIN alias_3 ON (table_1.column_5 = alias_3.alias_2)
 ----
 0
 
+invert_no_upstream
 query  nosort
 WITH alias_2 AS (SELECT count(table_1.column_6) AS alias_1 FROM table_1) SELECT table_1.column_6 AS alias_3 FROM table_1 INNER JOIN alias_2 ON (table_1.column_6 = alias_2.alias_1) WHERE (table_1.column_5 = ?)
 ? = 1
 ----
 
-
+invert_no_upstream
 query  nosort
 WITH alias_2 AS (SELECT table_1.column_6 AS alias_1 FROM table_1) SELECT table_1.column_6 AS alias_3 FROM table_1 INNER JOIN alias_2 ON (table_1.column_6 = alias_2.alias_1) WHERE (table_1.column_6 = ?)
 ? = 1
 ----
 25 values hashing to e46b666db9a624317eef8edba30b49af
+
 
 query  nosort
 WITH alias_2 AS (SELECT count(table_1.column_7) AS alias_1 FROM table_1) SELECT table_1.column_6 AS alias_3 FROM table_1 INNER JOIN alias_2 ON (table_1.column_6 = alias_2.alias_1) WHERE (table_1.column_6 = ?)
@@ -49,6 +53,7 @@ WITH alias_3 AS (SELECT count(table_1.column_9) AS alias_2 FROM table_1) SELECT 
 ----
 0
 
+invert_no_upstream
 query  nosort
 WITH alias_3 AS (SELECT table_1.column_7 AS alias_2 FROM table_1) SELECT count(table_1.column_10) AS alias_1 FROM table_1 INNER JOIN alias_3 ON (table_1.column_7 = alias_3.alias_2) WHERE (table_1.column_7 = ?)
 ? = 1

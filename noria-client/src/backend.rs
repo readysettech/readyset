@@ -128,33 +128,10 @@ pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
     }
 }
 
-//TODO(DAN): Remove in favor of determining whether a query was read or write based on the presence
-//of columns in the resultset
-/// Check whether the given query is a read or write. This method is not comprehensive
-fn is_read(query: &str) -> bool {
-    use nom::branch::alt;
-    use nom::bytes::complete::tag_no_case;
-    use nom::character::complete::multispace0;
-    use nom::sequence::tuple;
-
-    let q = query.as_bytes();
-
-    tuple::<_, _, (_, nom::error::ErrorKind), _>((
-        multispace0,
-        alt((
-            tag_no_case("select"),
-            tag_no_case("show"),
-            tag_no_case("describe"),
-        )),
-    ))(q)
-    .is_ok()
-}
-
 #[derive(Clone, Debug)]
 pub enum PreparedStatement {
-    NoriaPrepStatement(u32),
-    UpstreamPrepWrite(u32),
-    UpstreamPrepRead(u32),
+    Noria(u32),
+    Upstream(u32),
 }
 
 /// Builder for a [`Backend`]
@@ -388,14 +365,7 @@ where
             .as_mut()
             .ok_or(ReadySetError::FallbackNoConnector)?;
 
-        if is_read(query) {
-            upstream.handle_read(query).await.map(QueryResult::Upstream)
-        } else {
-            upstream
-                .handle_write(query)
-                .await
-                .map(QueryResult::Upstream)
-        }
+        upstream.query(query).await.map(QueryResult::Upstream)
     }
 
     /// Should only be called with a nom_sql::SqlQuery that is of type StartTransaction, Commit, or
@@ -442,28 +412,18 @@ where
         match prepare {
             PrepareResult::Noria(Select { statement_id, .. })
             | PrepareResult::Noria(Insert { statement_id, .. }) => {
-                self.prepared_statements.insert(
-                    self.prepared_count,
-                    PreparedStatement::NoriaPrepStatement(*statement_id),
-                );
+                self.prepared_statements
+                    .insert(self.prepared_count, PreparedStatement::Noria(*statement_id));
             }
             PrepareResult::Noria(Update { statement_id, .. }) => {
                 self.prepared_statements.insert(
                     self.prepared_count,
-                    PreparedStatement::NoriaPrepStatement(*statement_id as u32),
+                    PreparedStatement::Noria(*statement_id as u32),
                 );
             }
-            PrepareResult::Upstream(UpstreamPrepare {
-                statement_id,
-                is_read,
-                ..
-            }) => {
+            PrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
                 self.prepared_statements.insert(self.prepared_count, {
-                    if *is_read {
-                        PreparedStatement::UpstreamPrepRead(*statement_id)
-                    } else {
-                        PreparedStatement::UpstreamPrepWrite(*statement_id)
-                    }
+                    PreparedStatement::Upstream(*statement_id)
                 });
             }
         }
@@ -486,10 +446,7 @@ where
             .ok_or_else(|| internal_err("mirror_read called without fallback configured"))?;
 
         // TODO: Record upstream query duration on success.
-        let upstream_res = connector
-            .handle_read(query_str)
-            .await
-            .map(QueryResult::Upstream);
+        let upstream_res = connector.query(query_str).await.map(QueryResult::Upstream);
 
         // TODO: Record noria query duration on success or set noria error on failure.
         let _ = self.noria.handle_select(q, use_params, ticket).await;
@@ -517,10 +474,7 @@ where
                 match self.upstream {
                     Some(ref mut connector) => {
                         error!(error = %e, "Error received from noria, sending query to fallback");
-                        connector
-                            .handle_read(query_str)
-                            .await
-                            .map(QueryResult::Upstream)
+                        connector.query(query_str).await.map(QueryResult::Upstream)
                     }
                     None => {
                         error!("{}", e);
@@ -677,27 +631,17 @@ where
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         match prepared_statement {
-            PreparedStatement::UpstreamPrepRead(id) => {
+            PreparedStatement::Upstream(id) => {
                 let upstream = self
                     .upstream
                     .as_mut()
                     .ok_or(ReadySetError::FallbackNoConnector)?;
                 return upstream
-                    .execute_read(id, params)
+                    .execute(id, params)
                     .await
                     .map(QueryResult::Upstream);
             }
-            PreparedStatement::UpstreamPrepWrite(id) => {
-                let upstream = self
-                    .upstream
-                    .as_mut()
-                    .ok_or(ReadySetError::FallbackNoConnector)?;
-                return upstream
-                    .execute_write(id, params)
-                    .await
-                    .map(QueryResult::Upstream);
-            }
-            PreparedStatement::NoriaPrepStatement(statement_id) => {
+            PreparedStatement::Noria(statement_id) => {
                 let prep: SqlQuery = self
                     .prepared_queries
                     .get(&statement_id)
@@ -725,7 +669,7 @@ where
                                     let UpstreamPrepare { statement_id, .. } =
                                         upstream.prepare(&prep.to_string()).await?;
                                     upstream
-                                        .execute_read(statement_id, params)
+                                        .execute(statement_id, params)
                                         .await
                                         .map(QueryResult::Upstream)
                                 } else {
@@ -738,7 +682,7 @@ where
                     SqlQuery::Insert(ref _q) => {
                         if let Some(ref mut upstream) = self.upstream {
                             upstream
-                                .execute_write(statement_id, params)
+                                .execute(statement_id, params)
                                 .await
                                 .map(QueryResult::Upstream)
                         } else {
@@ -752,7 +696,7 @@ where
                     SqlQuery::Update(ref _q) => {
                         if let Some(ref mut upstream) = self.upstream {
                             upstream
-                                .execute_write(statement_id, params)
+                                .execute(statement_id, params)
                                 .await
                                 .map(QueryResult::Upstream)
                         } else {
@@ -866,7 +810,7 @@ where
                     if self.mirror_ddl {
                         self.noria.$noria_method($stmt).await?;
                     }
-                    Ok(QueryResult::Upstream(upstream.handle_write(query).await?))
+                    Ok(QueryResult::Upstream(upstream.query(query).await?))
                 } else {
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
                 }
@@ -924,10 +868,10 @@ where
                             self.ticket = Some(Timestamp::join(current_ticket, &new_timestamp));
                             query_result
                         } else {
-                            upstream.handle_write(query).await?
+                            upstream.query(query).await?
                         }
                     } else {
-                        upstream.handle_write(query).await?
+                        upstream.query(query).await?
                     };
                     let execution_time = execution_timer.elapsed().as_micros();
 
@@ -951,7 +895,7 @@ where
                     unsupported!("ALTER TABLE not yet supported");
                 }
                 nom_sql::SqlQuery::Set(_) => upstream
-                    .handle_write(&parsed_query.to_string())
+                    .query(&parsed_query.to_string())
                     .await
                     .map(QueryResult::Upstream),
                 nom_sql::SqlQuery::StartTransaction(_)

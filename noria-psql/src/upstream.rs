@@ -6,7 +6,7 @@ use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use pgsql::types::Type;
-use pgsql::{Config, Row};
+use pgsql::{Config, GenericResult, Row};
 use psql_srv::Column;
 use tokio_postgres as pgsql;
 use tracing::{info, info_span};
@@ -104,29 +104,31 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let statement_id = self.statement_id_counter;
         self.prepared_statements.insert(statement_id, statement);
 
-        Ok(UpstreamPrepare {
-            statement_id,
-            meta,
-            // TODO(dan): Fill this in based on the returned results
-            is_read: false,
-        })
+        Ok(UpstreamPrepare { statement_id, meta })
     }
 
-    async fn handle_read<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
+    async fn query<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
     {
-        let data = self.client.query(query.as_ref(), &[]).await?;
-        Ok(QueryResult::Read { data })
-    }
+        let results = self.client.generic_query(query.as_ref(), &[]).await?;
+        let mut results = results.into_iter().peekable();
 
-    async fn handle_write<'a, S>(&'a mut self, query: S) -> Result<Self::QueryResult, Error>
-    where
-        S: AsRef<str> + Send + Sync + 'a,
-    {
-        Ok(QueryResult::Write {
-            num_rows_affected: self.client.execute(query.as_ref(), &[]).await?,
-        })
+        // If results starts with a command complete then return a write result.
+        // This could happen if a write returns no results, which is fine
+        //
+        // Otherwise return all the rows we get and ignore the command complete at the end
+        if let Some(GenericResult::NumRows(n)) = results.peek() {
+            Ok(QueryResult::Write {
+                num_rows_affected: *n,
+            })
+        } else {
+            let mut data = Vec::new();
+            while let Some(GenericResult::Row(r)) = results.next() {
+                data.push(r);
+            }
+            Ok(QueryResult::Read { data })
+        }
     }
 
     async fn handle_ryw_write<'a, S>(
@@ -139,7 +141,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         unsupported!("Read-Your-Write not yet implemented for PostgreSQL")
     }
 
-    async fn execute_read(
+    async fn execute(
         &mut self,
         statement_id: u32,
         params: Vec<DataType>,
@@ -148,28 +150,31 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .prepared_statements
             .get(&statement_id)
             .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(QueryResult::Read {
-            data: self
-                .client
-                .query_raw(statement, params)
-                .await?
-                .try_collect()
-                .await?,
-        })
-    }
 
-    async fn execute_write(
-        &mut self,
-        statement_id: u32,
-        params: Vec<DataType>,
-    ) -> Result<Self::QueryResult, Error> {
-        let statement = self
-            .prepared_statements
-            .get(&statement_id)
-            .ok_or(ReadySetError::PreparedStatementMissing { statement_id })?;
-        Ok(QueryResult::Write {
-            num_rows_affected: self.client.execute_raw(statement, params).await?,
-        })
+        let results: Vec<GenericResult> = self
+            .client
+            .generic_query_raw(statement, params)
+            .await?
+            .try_collect()
+            .await?;
+
+        let mut results = results.into_iter().peekable();
+
+        // If results starts with a command complete then return a write result.
+        // This could happen if a write returns no results, which is fine
+        //
+        // Otherwise return all the rows we get and ignore the command complete at the end
+        if let Some(GenericResult::NumRows(n)) = results.peek() {
+            Ok(QueryResult::Write {
+                num_rows_affected: *n,
+            })
+        } else {
+            let mut data = Vec::new();
+            while let Some(GenericResult::Row(r)) = results.next() {
+                data.push(r);
+            }
+            Ok(QueryResult::Read { data })
+        }
     }
 
     /// Handle starting a transaction with the upstream database.
