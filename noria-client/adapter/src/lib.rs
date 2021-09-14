@@ -89,10 +89,9 @@ pub struct Options {
     #[clap(long)]
     no_require_authentication: bool,
 
-    /// Make all reads run as two parallel threads, one against Noria and one against MySQL,
-    /// returning the first successful result
+    /// Make all reads run against Noria and upstream, returning the upstream result.
     #[clap(long, requires("upstream-db-url"))]
-    race_reads: bool,
+    mirror_reads: bool,
 
     /// Analyze coverage of queries during execution, and save a report of coverage on exit.
     ///
@@ -220,7 +219,7 @@ where
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
-                .race_reads(options.race_reads || options.coverage_analysis.is_some())
+                .mirror_reads(options.mirror_reads || options.coverage_analysis.is_some())
                 .users(users.clone())
                 .require_authentication(!options.no_require_authentication)
                 .dialect(self.dialect)

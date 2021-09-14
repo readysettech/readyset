@@ -9,8 +9,8 @@ mod common;
 use common::setup;
 
 #[test]
-fn race_reads_with_supported_query() {
-    let d = Deployment::new("race_reads_with_supported_query");
+fn mirror_reads_with_supported_query() {
+    let d = Deployment::new("mirror_reads_with_supported_query");
     let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
@@ -29,8 +29,8 @@ fn race_reads_with_supported_query() {
 
 #[test]
 #[ignore] // waiting on fallback for prepared statements
-fn race_reads_with_unsupported_query() {
-    let d = Deployment::new("race_reads_with_unsupported_query");
+fn mirror_reads_with_unsupported_query() {
+    let d = Deployment::new("mirror_reads_with_unsupported_query");
     let opts = setup(&d, true);
     let mut conn = mysql::Conn::new(opts).unwrap();
 
