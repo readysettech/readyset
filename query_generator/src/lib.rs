@@ -625,7 +625,7 @@ impl From<CreateTableStatement> for TableSpec {
             .flatten()
             .flat_map(|k| match k {
                     TableKey::PrimaryKey(ks)
-                    | TableKey::UniqueKey(_, ks)
+                    | TableKey::UniqueKey { columns: ks, .. }
                       // HACK(grfn): To get foreign keys filled, we just mark them as unique, which
                       // given that we (currently) generate the same number of rows for each table
                       // means we're coincidentally guaranteed to get values matching the other side

@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
-    ws_sep_comma, TableKey,
+    ws_sep_comma, IndexType, TableKey,
 };
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::table_options;
@@ -241,51 +241,69 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
-fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
-    // TODO: add branching to correctly parse whitespace after `unique`
-    move |i| {
-        let (remaining_input, (_, _, _, name, _, columns)) = tuple((
-            tag_no_case("unique"),
-            opt(preceded(
-                multispace1,
-                alt((tag_no_case("key"), tag_no_case("index"))),
-            )),
-            multispace0,
-            opt(dialect.identifier()),
-            multispace0,
-            delimited(
-                tag("("),
-                delimited(multispace0, index_col_list(dialect), multispace0),
-                tag(")"),
-            ),
-        ))(i)?;
+fn index_type(i: &[u8]) -> IResult<&[u8], IndexType> {
+    alt((
+        map(tag_no_case("btree"), |_| IndexType::BTree),
+        map(tag_no_case("hash"), |_| IndexType::Hash),
+    ))(i)
+}
 
-        match name {
-            Some(name) => {
-                let n = String::from(name);
-                Ok((remaining_input, TableKey::UniqueKey(Some(n), columns)))
-            }
-            None => Ok((remaining_input, TableKey::UniqueKey(None, columns))),
-        }
+fn using_index(i: &[u8]) -> IResult<&[u8], IndexType> {
+    let (i, _) = multispace1(i)?;
+    let (i, _) = tag_no_case("using")(i)?;
+    let (i, _) = multispace1(i)?;
+    index_type(i)
+}
+
+fn unique(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
+    move |i| {
+        let (i, _) = tag_no_case("unique")(i)?;
+        let (i, _) = opt(preceded(
+            multispace1,
+            alt((tag_no_case("key"), tag_no_case("index"))),
+        ))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, name) = opt(dialect.identifier())(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, columns) = delimited(
+            tag("("),
+            delimited(multispace0, index_col_list(dialect), multispace0),
+            tag(")"),
+        )(i)?;
+        let (i, index_type) = opt(using_index)(i)?;
+
+        Ok((
+            i,
+            TableKey::UniqueKey {
+                name: name.map(|n| n.into()),
+                columns,
+                index_type,
+            },
+        ))
     }
 }
 
 fn key_or_index(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        let (remaining_input, (_, _, name, _, columns)) = tuple((
-            alt((tag_no_case("key"), tag_no_case("index"))),
-            multispace0,
-            dialect.identifier(),
-            multispace0,
-            delimited(
-                tag("("),
-                delimited(multispace0, index_col_list(dialect), multispace0),
-                tag(")"),
-            ),
-        ))(i)?;
+        let (i, _) = alt((tag_no_case("key"), tag_no_case("index")))(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, name) = map(dialect.identifier(), String::from)(i)?;
+        let (i, _) = multispace0(i)?;
+        let (i, columns) = delimited(
+            tag("("),
+            delimited(multispace0, index_col_list(dialect), multispace0),
+            tag(")"),
+        )(i)?;
+        let (i, index_type) = opt(using_index)(i)?;
 
-        let n = String::from(name);
-        Ok((remaining_input, TableKey::Key(n, columns)))
+        Ok((
+            i,
+            TableKey::Key {
+                name,
+                columns,
+                index_type,
+            },
+        ))
     }
 }
 
@@ -372,13 +390,27 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                         TableKey::PrimaryKey(columns) => {
                             TableKey::PrimaryKey(attach_names(columns))
                         }
-                        TableKey::UniqueKey(name, columns) => {
-                            TableKey::UniqueKey(name, attach_names(columns))
-                        }
+                        TableKey::UniqueKey {
+                            name,
+                            columns,
+                            index_type,
+                        } => TableKey::UniqueKey {
+                            name,
+                            columns: attach_names(columns),
+                            index_type,
+                        },
                         TableKey::FulltextKey(name, columns) => {
                             TableKey::FulltextKey(name, attach_names(columns))
                         }
-                        TableKey::Key(name, columns) => TableKey::Key(name, attach_names(columns)),
+                        TableKey::Key {
+                            name,
+                            columns,
+                            index_type,
+                        } => TableKey::Key {
+                            name,
+                            columns: attach_names(columns),
+                            index_type,
+                        },
                         TableKey::ForeignKey {
                             name,
                             columns: column,
@@ -646,10 +678,11 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![TableKey::UniqueKey(
-                    Some(String::from("id_k")),
-                    vec![Column::from("users.id")],
-                ),]),
+                keys: Some(vec![TableKey::UniqueKey {
+                    name: Some(String::from("id_k")),
+                    columns: vec![Column::from("users.id")],
+                    index_type: None
+                },]),
                 ..Default::default()
             }
         );
@@ -914,6 +947,26 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn key_with_index_type() {
+        let res = test_parse!(
+            creation(Dialect::MySQL),
+            b"CREATE TABLE users (
+                  age INTEGER,
+                  KEY age_key (age) USING BTREE
+              )"
+        );
+        assert_eq!(
+            res.keys,
+            Some(vec![TableKey::Key {
+                name: "age_key".into(),
+                columns: vec!["users.age".into()],
+                index_type: Some(IndexType::BTree),
+            }])
+        );
+    }
+
     mod mysql {
         use crate::{ColumnConstraint, Literal, SqlType};
 
@@ -1136,26 +1189,34 @@ mod tests {
                             Some("index_comments_on_comment".into()),
                             vec![Column::from("comments.comment")]
                         ),
-                        TableKey::Key(
-                            "confidence_idx".into(),
-                            vec![Column::from("comments.confidence")]
-                        ),
-                        TableKey::UniqueKey(
-                            Some("short_id".into()),
-                            vec![Column::from("comments.short_id")]
-                        ),
-                        TableKey::Key(
-                            "story_id_short_id".into(),
-                            vec![
+                        TableKey::Key {
+                            name: "confidence_idx".into(),
+                            columns: vec![Column::from("comments.confidence")],
+                            index_type: None
+                        },
+                        TableKey::UniqueKey {
+                            name: Some("short_id".into()),
+                            columns: vec![Column::from("comments.short_id")],
+                            index_type: None
+                        },
+                        TableKey::Key {
+                            name: "story_id_short_id".into(),
+                            columns: vec![
                                 Column::from("comments.story_id"),
                                 Column::from("comments.short_id")
-                            ]
-                        ),
-                        TableKey::Key("thread_id".into(), vec![Column::from("comments.thread_id")]),
-                        TableKey::Key(
-                            "index_comments_on_user_id".into(),
-                            vec![Column::from("comments.user_id")]
-                        ),
+                            ],
+                            index_type: None
+                        },
+                        TableKey::Key {
+                            name: "thread_id".into(),
+                            columns: vec![Column::from("comments.thread_id")],
+                            index_type: None,
+                        },
+                        TableKey::Key {
+                            name: "index_comments_on_user_id".into(),
+                            columns: vec![Column::from("comments.user_id")],
+                            index_type: None
+                        },
                         TableKey::PrimaryKey(vec![Column {
                             name: "id".into(),
                             table: Some("comments".into()),
@@ -1498,26 +1559,34 @@ mod tests {
                             Some("index_comments_on_comment".into()),
                             vec![Column::from("comments.comment")]
                         ),
-                        TableKey::Key(
-                            "confidence_idx".into(),
-                            vec![Column::from("comments.confidence")]
-                        ),
-                        TableKey::UniqueKey(
-                            Some("short_id".into()),
-                            vec![Column::from("comments.short_id")]
-                        ),
-                        TableKey::Key(
-                            "story_id_short_id".into(),
-                            vec![
+                        TableKey::Key {
+                            name: "confidence_idx".into(),
+                            columns: vec![Column::from("comments.confidence")],
+                            index_type: None
+                        },
+                        TableKey::UniqueKey {
+                            name: Some("short_id".into()),
+                            columns: vec![Column::from("comments.short_id")],
+                            index_type: None,
+                        },
+                        TableKey::Key {
+                            name: "story_id_short_id".into(),
+                            columns: vec![
                                 Column::from("comments.story_id"),
                                 Column::from("comments.short_id")
-                            ]
-                        ),
-                        TableKey::Key("thread_id".into(), vec![Column::from("comments.thread_id")]),
-                        TableKey::Key(
-                            "index_comments_on_user_id".into(),
-                            vec![Column::from("comments.user_id")]
-                        ),
+                            ],
+                            index_type: None
+                        },
+                        TableKey::Key {
+                            name: "thread_id".into(),
+                            columns: vec![Column::from("comments.thread_id")],
+                            index_type: None
+                        },
+                        TableKey::Key {
+                            name: "index_comments_on_user_id".into(),
+                            columns: vec![Column::from("comments.user_id")],
+                            index_type: None
+                        },
                         TableKey::PrimaryKey(vec![Column {
                             name: "id".into(),
                             table: Some("comments".into()),

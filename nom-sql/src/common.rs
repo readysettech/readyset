@@ -356,12 +356,35 @@ impl Literal {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum IndexType {
+    BTree,
+    Hash,
+}
+
+impl Display for IndexType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IndexType::BTree => write!(f, "BTREE"),
+            IndexType::Hash => write!(f, "HASH"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
-    UniqueKey(Option<String>, Vec<Column>),
+    UniqueKey {
+        name: Option<String>,
+        columns: Vec<Column>,
+        index_type: Option<IndexType>,
+    },
     FulltextKey(Option<String>, Vec<Column>),
-    Key(String, Vec<Column>),
+    Key {
+        name: String,
+        columns: Vec<Column>,
+        index_type: Option<IndexType>,
+    },
     ForeignKey {
         name: Option<String>,
         index_name: Option<String>,
@@ -386,7 +409,11 @@ impl fmt::Display for TableKey {
                         .join(", ")
                 )
             }
-            TableKey::UniqueKey(name, columns) => {
+            TableKey::UniqueKey {
+                name,
+                columns,
+                index_type,
+            } => {
                 write!(f, "UNIQUE KEY ")?;
                 if let Some(ref name) = *name {
                     write!(f, "{} ", escape_if_keyword(name))?;
@@ -399,7 +426,11 @@ impl fmt::Display for TableKey {
                         .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
-                )
+                )?;
+                if let Some(index_type) = index_type {
+                    write!(f, " USING {}", index_type)?;
+                }
+                Ok(())
             }
             TableKey::FulltextKey(name, columns) => {
                 write!(f, "FULLTEXT KEY ")?;
@@ -416,7 +447,11 @@ impl fmt::Display for TableKey {
                         .join(", ")
                 )
             }
-            TableKey::Key(name, columns) => {
+            TableKey::Key {
+                name,
+                columns,
+                index_type,
+            } => {
                 write!(f, "KEY {} ", escape_if_keyword(name))?;
                 write!(
                     f,
@@ -426,7 +461,11 @@ impl fmt::Display for TableKey {
                         .map(|c| escape_if_keyword(&c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
-                )
+                )?;
+                if let Some(index_type) = index_type {
+                    write!(f, " USING {}", index_type)?;
+                }
+                Ok(())
             }
             TableKey::ForeignKey {
                 name,
