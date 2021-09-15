@@ -20,7 +20,7 @@ services:
       POSTGRES_PASSWORD: root
     # doesn't actually depend on zookeeper, but I can't figure out a way to have
     # a depends_on with multiple health check relationships, so chaining them to ensure
-    # readyset-server waits on both zookeeper and mysql for fallback.
+    # readyset-server waits on both zookeeper and postgres for fallback.
     depends_on:
       zookeeper:
         condition: service_healthy
