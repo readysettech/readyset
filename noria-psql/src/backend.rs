@@ -77,7 +77,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
     fn try_from(v: ParamRef) -> Result<Self, Self::Error> {
         match v.0 {
             ps::Value::Null => Ok(DataType::None),
-            ps::Value::Bool(_) => Err(ps::Error::Unsupported("Value Bool".to_string())),
+            ps::Value::Bool(b) => Ok(DataType::from(*b)),
             ps::Value::Char(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Varchar(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Int(v) => Ok((*v).into()),

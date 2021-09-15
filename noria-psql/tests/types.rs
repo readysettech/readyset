@@ -89,7 +89,7 @@ mod types {
 
     // https://docs.rs/tokio-postgres/0.7.2/tokio_postgres/types/trait.ToSql.html#types
     test_types! {
-        #[ignore] bool_bool("bool", bool);
+        bool_bool("bool", bool);
         #[ignore] char_i8("char", i8);
         #[ignore] smallint_i16("smallint", i16);
         int_i32("integer", i32);
