@@ -6,7 +6,7 @@ SERVER-IMAGE-NAME:=$(REGISTRY)/readyset-server
 
 ADAPTER-MYSQL-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
 
-ADAPTER-PSQL-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
+ADAPTER-PSQL-IMAGE-NAME:=$(REGISTRY)/readyset-psql
 
 build-basic: 
 	docker build -t $(BASIC-IMAGE-NAME):latest -f build/Dockerfile .
