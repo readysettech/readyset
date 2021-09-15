@@ -444,7 +444,7 @@ fn make_field_description(
         Type::INT4 => TYPLEN_4,
         Type::INT8 => TYPLEN_8,
         Type::FLOAT4 => TYPLEN_4,
-        Type::FLOAT8 => TYPLEN_8,
+        Type::FLOAT8 | Type::NUMERIC => TYPLEN_8,
         Type::TIMESTAMP => TYPLEN_8,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
