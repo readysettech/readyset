@@ -74,7 +74,7 @@ WSGI_APPLICATION = 'readyset_django.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
+        'ENGINE': os.environ['DATABASE_ENGINE'],
         'NAME': os.environ['RS_DATABASE'],
         'USER': os.environ['RS_USERNAME'],
         'PASSWORD': os.environ['RS_PASSWORD'],

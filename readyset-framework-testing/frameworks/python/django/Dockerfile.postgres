@@ -1,16 +1,16 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
+FROM python:3.9-alpine3.12
 
-RUN apk add --no-cache mariadb-connector-c
+RUN apk add --no-cache postgresql-client
 
 ADD src/requirements.txt /src/requirements.txt
 RUN \
-	apk add --no-cache --virtual .build-deps gcc libc-dev mariadb-dev && \
+	apk add --no-cache --virtual .build-deps gcc libc-dev postgresql-dev && \
 	pip install --no-cache-dir -r /src/requirements.txt && \
-	pip install --no-cache-dir mysqlclient && \
+	pip install --no-cache-dir psycopg2 && \
 	apk del .build-deps
 
 ADD src /src
 WORKDIR /src
-ENV DATABASE_ENGINE=django.db.backends.mysql
+ENV DATABASE_ENGINE=django.db.backends.postgresql
 ENTRYPOINT ["sh", "-c", "python manage.py makemigrations && python manage.py migrate && python manage.py shell < test.py"]
 

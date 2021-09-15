@@ -44,5 +44,7 @@ frameworks:
       expect_success: false
     - name: 'rust/sqlx'
       expect_success: false
-  postgres: []
+  postgres:
+    - name: 'python/django'
+      expect_success: false
 
