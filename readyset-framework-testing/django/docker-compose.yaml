@@ -1,0 +1,96 @@
+version: "3.8"
+services:
+  zookeeper:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  upstream:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres:13.0
+    cap_add:
+      - SYS_NICE #CAP_SYS_NICE
+    expose:
+      - 5432
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+    # doesn't actually depend on zookeeper, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # readyset-server waits on both zookeeper and mysql for fallback.
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: "pg_isready"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+  readyset-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      ZOOKEEPER_ADDRESS: zookeeper:2181
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: frameworktests
+      REPLICATION_URL: postgresql://root:root@upstream/test
+      RUST_LOG: TRACE
+    links:
+      - upstream
+      - zookeeper
+    depends_on:
+      upstream:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-psql:latest
+    expose:
+      - 3333
+    environment:
+      ZOOKEEPER_ADDRESS: zookeeper:2181
+      LISTEN_ADDRESS: 0.0.0.0:3333
+      NORIA_DEPLOYMENT: frameworktests
+      UPSTREAM_DB_URL: postgresql://root:root@upstream/test
+      RUST_LOG: TRACE
+    links:
+      - readyset-server
+      - upstream
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h127.0.0.1", "--port=3333"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      readyset-server:
+        condition: service_healthy
+  test:
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/postgres/python/django"
+    depends_on:
+      db:
+        condition: service_healthy
+    links:
+      - db
+    environment:
+      FRAMEWORK: python/sqlalchemy
+      RS_USERNAME: root
+      RS_PASSWORD: root
+      RS_DATABASE: test
+      RS_HOST: db
+      RS_PORT: 3333
+      RS_NUM_SHARDS: 1
+      RS_DIALECT: postgres13
