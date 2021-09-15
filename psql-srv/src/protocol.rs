@@ -147,6 +147,10 @@ impl Protocol {
                     channel.set_start_up_complete();
                     Ok(Response::Messages(smallvec![
                         AuthenticationOk,
+                        BackendMessage::ParameterStatus {
+                            parameter_name: "client_encoding".to_owned(),
+                            parameter_value: "UTF8".to_owned(),
+                        },
                         BackendMessage::ready_for_query_idle(),
                     ]))
                 }
@@ -681,6 +685,10 @@ mod tests {
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Messages(smallvec![
                 BackendMessage::AuthenticationOk,
+                BackendMessage::ParameterStatus {
+                    parameter_name: "client_encoding".to_owned(),
+                    parameter_value: "UTF8".to_owned(),
+                },
                 BackendMessage::ready_for_query_idle()
             ])
         );
