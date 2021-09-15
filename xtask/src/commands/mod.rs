@@ -1,3 +1,4 @@
+pub(crate) mod bisect;
 pub(crate) mod install_commit_msg_hook;
 pub(crate) mod install_docker_credential_ecr_login;
 pub(crate) mod pre_cache;

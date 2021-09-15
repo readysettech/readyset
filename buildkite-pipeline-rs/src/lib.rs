@@ -454,7 +454,7 @@ pub struct InputStep {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Default, Serialize, Deserialize)]
 pub struct BuildAttributes {
     pub branch: Option<String>,
     pub commit: Option<String>,
@@ -481,6 +481,10 @@ impl Default for SkipStep {
 pub struct TriggerStep {
     #[serde(rename = "trigger")]
     pub pipeline: String,
+
+    pub label: Option<String>,
+
+    pub key: Option<String>,
 
     pub build: Option<BuildAttributes>,
 
@@ -538,6 +542,12 @@ impl<'de> Deserialize<'de> for Step {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
     pub steps: Vec<Step>,
+}
+
+impl From<Vec<Step>> for Pipeline {
+    fn from(steps: Vec<Step>) -> Self {
+        Self { steps }
+    }
 }
 
 #[cfg(test)]

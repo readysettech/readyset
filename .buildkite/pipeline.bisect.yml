@@ -1,0 +1,23 @@
+steps:
+  - label: ":rust: :docker: Build xtask image"
+    key: build-runtime-image
+    command: .buildkite/build_image.sh xtask/Dockerfile xtask
+    plugins:
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':git: Start bisect'
+    depends_on: build-runtime-image
+    plugins:
+      - docker#v3.8.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/xtask:${BUILDKITE_COMMIT}"
+          shell: false
+          propagate-environment: true
+          environment:
+          - BUILDKITE_API_TOKEN
+          - RUST_LOG=debug
+          command: ["bisect", "start"]
+      - ecr#v2.5.0:
+          login: true
+          retries: 3

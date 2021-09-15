@@ -126,3 +126,17 @@ steps:
       queue: t3a-small
 STEPS
 }
+
+resource "buildkite_pipeline" "bisect" {
+  name           = "bisect"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.bisect.yml"
+    label: ":pipeline:"
+    agents:
+      queue: t3a-small
+STEPS
+}

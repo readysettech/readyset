@@ -19,6 +19,7 @@ enum Subcommand {
         #[clap(flatten)]
         opts: commands::presigned_docker_image_urls::Opts,
     },
+    Bisect(Box<commands::bisect::BisectCommand>),
 }
 
 #[derive(Clap, Debug)]
@@ -45,7 +46,7 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .pretty()
         .without_time()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("xtask=info".parse()?))
+        .with_env_filter(EnvFilter::from_default_env().add_directive("xtask=debug".parse()?))
         .init();
 
     let opts = Opts::parse();
@@ -59,5 +60,6 @@ fn main() -> Result<()> {
             commands::presigned_docker_image_urls::run(opts)
         }
         Subcommand::PreCache => commands::pre_cache::run(),
+        Subcommand::Bisect(opts) => commands::bisect::run(*opts),
     }
 }

@@ -60,4 +60,9 @@ resource "aws_ecr_repository_policy" "mirror_primary" {
   policy     = data.aws_iam_policy_document.mirror.json
 }
 
+resource "aws_ecr_repository" "xtask" {
+  name                 = "xtask"
+  image_tag_mutability = "MUTABLE"
+}
+
 # TODO: Import our existing repositories
