@@ -360,6 +360,12 @@ impl DataType {
             }};
         }
 
+        macro_rules! convert_boolean {
+            ($val: expr) => {{
+                Ok(Cow::Owned(DataType::from($val != 0)))
+            }};
+        }
+
         use SqlType::*;
         match (self, self.sql_type(), ty) {
             (_, None, _) => Ok(Cow::Borrowed(self)),
@@ -384,6 +390,10 @@ impl DataType {
             (_, Some(Bigint(_)), Int(_)) => convert_numeric!(self, i64, i32),
             (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
             (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
+            (Self::Int(n), _, Bool) => convert_boolean!(*n),
+            (Self::UnsignedInt(n), _, Bool) => convert_boolean!(*n),
+            (Self::BigInt(n), _, Bool) => convert_boolean!(*n),
+            (Self::UnsignedBigInt(n), _, Bool) => convert_boolean!(*n),
             (_, Some(Float), Float) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
@@ -1654,6 +1664,7 @@ impl ToSql for DataType {
         match self {
             Self::None => None::<i8>.to_sql(ty, out),
             Self::Int(x) => x.to_sql(ty, out),
+            Self::UnsignedInt(x) if *ty == Type::BOOL => (*x != 0).to_sql(ty, out),
             Self::UnsignedInt(x) => x.to_sql(ty, out),
             Self::BigInt(x) => x.to_sql(ty, out),
             Self::UnsignedBigInt(x) => (*x as i64).to_sql(ty, out),
@@ -3171,5 +3182,26 @@ mod tests {
             let result = input.coerce_to(&SqlType::Json).unwrap();
             assert_eq!(&input, result.as_ref());
         }
+
+        macro_rules! bool_conversion {
+            ($name: ident, $ty: ty) => {
+                #[proptest]
+                fn $name(input: $ty) {
+                    let input_dt = DataType::from(input);
+                    let result = input_dt.coerce_to(&SqlType::Bool).unwrap();
+                    let expected = DataType::from(input != 0);
+                    assert_eq!(result.as_ref(), &expected);
+                }
+            };
+        }
+
+        bool_conversion!(i8_to_bool, i8);
+        bool_conversion!(u8_to_bool, u8);
+        bool_conversion!(i16_to_bool, i16);
+        bool_conversion!(u16_to_bool, u16);
+        bool_conversion!(i32_to_bool, i32);
+        bool_conversion!(u32_to_bool, u32);
+        bool_conversion!(i64_to_bool, i64);
+        bool_conversion!(u64_to_bool, u64);
     }
 }
