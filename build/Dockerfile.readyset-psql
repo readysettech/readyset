@@ -33,6 +33,6 @@ RUN if [ -n "$release" ]; then strip target/release/noria-psql; else strip targe
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/debian:bullseye-slim
 RUN apt-get update
 # We install mariadb-client so we have access to psqladmin for healthchecks
-RUN apt-get install -y libssl-dev mariadb-client
+RUN apt-get install -y libssl-dev postgresql-client
 COPY --from=builder /workdir/target/*/noria-psql /bin/noria-psql
 CMD noria-psql --no-require-authentication
