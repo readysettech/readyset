@@ -151,6 +151,10 @@ impl Protocol {
                             parameter_name: "client_encoding".to_owned(),
                             parameter_value: "UTF8".to_owned(),
                         },
+                        BackendMessage::ParameterStatus {
+                            parameter_name: "DateStyle".to_owned(),
+                            parameter_value: "ISO".to_owned(),
+                        },
                         BackendMessage::ready_for_query_idle(),
                     ]))
                 }
@@ -688,6 +692,10 @@ mod tests {
                 BackendMessage::ParameterStatus {
                     parameter_name: "client_encoding".to_owned(),
                     parameter_value: "UTF8".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "DateStyle".to_owned(),
+                    parameter_value: "ISO".to_owned(),
                 },
                 BackendMessage::ready_for_query_idle()
             ])
