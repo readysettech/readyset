@@ -155,6 +155,10 @@ impl Protocol {
                             parameter_name: "DateStyle".to_owned(),
                             parameter_value: "ISO".to_owned(),
                         },
+                        BackendMessage::ParameterStatus {
+                            parameter_name: "TimeZone".to_owned(),
+                            parameter_value: "UTC".to_owned(),
+                        },
                         BackendMessage::ready_for_query_idle(),
                     ]))
                 }
@@ -696,6 +700,10 @@ mod tests {
                 BackendMessage::ParameterStatus {
                     parameter_name: "DateStyle".to_owned(),
                     parameter_value: "ISO".to_owned(),
+                },
+                BackendMessage::ParameterStatus {
+                    parameter_name: "TimeZone".to_owned(),
+                    parameter_value: "UTC".to_owned(),
                 },
                 BackendMessage::ready_for_query_idle()
             ])
