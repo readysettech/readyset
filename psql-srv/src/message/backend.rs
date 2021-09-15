@@ -41,6 +41,11 @@ pub enum BackendMessage<R> {
     ParameterDescription {
         parameter_data_types: Vec<Type>,
     },
+    #[allow(dead_code)]
+    ParameterStatus {
+        parameter_name: String,
+        parameter_value: String,
+    },
     ParseComplete,
     ReadyForQuery {
         status: u8,

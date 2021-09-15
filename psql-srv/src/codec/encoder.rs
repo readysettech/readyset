@@ -21,6 +21,7 @@ const ID_COMMAND_COMPLETE: u8 = b'C';
 const ID_DATA_ROW: u8 = b'D';
 const ID_ERROR_RESPONSE: u8 = b'E';
 const ID_PARAMETER_DESCRIPTION: u8 = b't';
+const ID_PARAMETER_STATUS: u8 = b'S';
 const ID_PARSE_COMPLETE: u8 = b'1';
 const ID_READY_FOR_QUERY: u8 = b'Z';
 const ID_ROW_DESCRIPTION: u8 = b'T';
@@ -189,6 +190,16 @@ where
             for t in parameter_data_types {
                 put_type(t, dst)?;
             }
+        }
+
+        ParameterStatus {
+            parameter_name,
+            parameter_value,
+        } => {
+            put_u8(ID_PARAMETER_STATUS, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_str(&parameter_name, dst);
+            put_str(&parameter_value, dst);
         }
 
         ParseComplete => {
