@@ -48,6 +48,8 @@ impl TryFrom<Value> for ps::Value {
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
+            (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
+            (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
             (t, dt) => {
                 error!(
                     psql_type = %t,
