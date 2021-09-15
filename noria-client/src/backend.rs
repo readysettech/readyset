@@ -548,11 +548,17 @@ where
                 // Check if we have fallback setup. If not, we need to return this error,
                 // otherwise, we transition to fallback.
                 match self.upstream {
-                    Some(ref mut connector) => connector
-                        .handle_read(query_str)
-                        .await
-                        .map(QueryResult::Upstream),
-                    None => Err(e.into()),
+                    Some(ref mut connector) => {
+                        error!(error = %e, "Error received from noria, sending query to fallback");
+                        connector
+                            .handle_read(query_str)
+                            .await
+                            .map(QueryResult::Upstream)
+                    }
+                    None => {
+                        error!("{}", e);
+                        Err(e.into())
+                    }
                 }
             }
         }
@@ -572,13 +578,17 @@ where
             .await
         {
             Ok(res) => Ok(PrepareResult::Noria(res)),
-            Err(e) => match self.upstream {
-                Some(_) => self
-                    .prepare_fallback(query)
-                    .await
-                    .map(PrepareResult::Upstream),
-                None => Err(e.into()),
-            },
+            Err(e) => {
+                if self.upstream.is_some() {
+                    error!(error = %e, "Error received from noria, sending query to fallback");
+                    self.prepare_fallback(query)
+                        .await
+                        .map(PrepareResult::Upstream)
+                } else {
+                    error!("{}", e);
+                    Err(e.into())
+                }
+            }
         }
     }
 
@@ -586,13 +596,14 @@ where
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
     pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
-        //the updated count will serve as the id for the prepared statement
+        // the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
         let span = span!(Level::DEBUG, "prepare", query);
         let _g = span.enter();
 
         if self.is_in_tx() {
+            warn!("In transaction, sending query to fallback");
             let res = self
                 .prepare_fallback(query)
                 .await
@@ -608,6 +619,7 @@ where
             Ok((parsed_query, _)) => parsed_query,
             Err(e) => {
                 if self.upstream.is_some() {
+                    error!(error = %e, "Error received from noria, sending query to fallback");
                     let res = self
                         .prepare_fallback(query)
                         .await
@@ -617,6 +629,7 @@ where
                     }
                     return res;
                 } else {
+                    error!("{}", e);
                     return Err(e.into());
                 }
             }
@@ -739,6 +752,7 @@ where
                             Ok(read) => Ok(QueryResult::Noria(read)),
                             Err(e) => {
                                 if let Some(ref mut upstream) = self.upstream {
+                                    error!(error = %e, "Error received from noria during execute, sending query to fallback");
                                     // TODO(DAN): The prepared statement id should be returned to
                                     // the backend so that it can be stored
                                     let UpstreamPrepare { statement_id, .. } =
@@ -748,6 +762,7 @@ where
                                         .await
                                         .map(QueryResult::Upstream)
                                 } else {
+                                    error!("{}", e);
                                     Err(e.into())
                                 }
                             }
@@ -833,12 +848,14 @@ where
                 }
                 // TODO(Dan): Implement RYW for query_fallback
                 if self.upstream.is_some() {
+                    error!(error = %e, "Error received from noria, sending query to fallback");
                     let res = self.query_fallback(query).await?;
                     if self.slowlog {
                         warn_on_slow_query(&start, query);
                     }
                     return Ok(res);
                 } else {
+                    error!("{}", e);
                     return Err(e.into());
                 }
             }
