@@ -4,7 +4,9 @@ BASIC-IMAGE-NAME:=$(REGISTRY)/readyset-build
 
 SERVER-IMAGE-NAME:=$(REGISTRY)/readyset-server
 
-ADAPTER-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
+ADAPTER-MYSQL-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
+
+ADAPTER-PSQL-IMAGE-NAME:=$(REGISTRY)/readyset-mysql
 
 build-basic: 
 	docker build -t $(BASIC-IMAGE-NAME):latest -f build/Dockerfile .
@@ -12,8 +14,11 @@ build-basic:
 build-server: 
 	docker build -t $(SERVER-IMAGE-NAME):latest -f build/Dockerfile.readyset-server .
 
-build-adapter: 
-	docker build -t $(ADAPTER-IMAGE-NAME):latest -f build/Dockerfile.readyset-mysql .
+build-mysql-adapter:
+	docker build -t $(ADAPTER-MYSQL-IMAGE-NAME):latest -f build/Dockerfile.readyset-mysql .
+
+build-psql-adapter:
+	docker build -t $(ADAPTER-PSQL-IMAGE-NAME):latest -f build/Dockerfile.readyset-psql .
 
 push-basic: 
 	docker push $(BASIC-IMAGE-NAME):latest
@@ -21,8 +26,11 @@ push-basic:
 push-server: 
 	docker push $(SERVER-IMAGE-NAME):latest
 
-push-adapter: 
-	docker push $(ADAPTER-IMAGE-NAME):latest
+push-mysql-adapter:
+	docker push $(ADAPTER-MYSQL-IMAGE-NAME):latest
+
+push-psql-adapter:
+	docker push $(ADAPTER-PSQL-IMAGE-NAME):latest
 
 nightly-tests:
 	cargo run --bin noria-logictest -- verify logictests/generated
