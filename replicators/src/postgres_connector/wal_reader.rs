@@ -230,7 +230,11 @@ impl wal::TupleData {
                     let str = String::from_utf8_lossy(&text);
 
                     let val = match spec.data_type {
-                        PGType::BOOL => DataType::UnsignedInt(str.parse::<bool>()? as _),
+                        PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
+                            "t" => true as _,
+                            "f" => false as _,
+                            _ => return Err(WalError::BoolParseError),
+                        }),
                         PGType::INT2 | PGType::INT4 => DataType::Int(str.parse()?),
                         PGType::OID => DataType::UnsignedInt(str.parse()?),
                         PGType::INT8 => DataType::BigInt(str.parse()?),
