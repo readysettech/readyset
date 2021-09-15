@@ -15,7 +15,7 @@ RUN chmod a+x /bin/sccache
 
 RUN mkdir -p ~/.cargo
 ENV RUSTC_WRAPPER /bin/sccache
-RUN printf '[build]\nrustc-wrapper=/bin/sccache\n' > ~/.cargo/config
+RUN printf '[build]\nrustc-wrapper=/bin/sccache\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ~/.cargo/config
 
 RUN apt-get update
 RUN apt-get install -y \
