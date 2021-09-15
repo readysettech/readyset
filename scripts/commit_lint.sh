@@ -37,30 +37,35 @@ body_wrapped() {
   awk '{ if(length($0) > 80) { exit 1  }  }' <<<"${body}"
 }
 
+failed() {
+  .buildkite/set_gerrit_status.sh failed
+  exit 1
+}
+
 sha="${BUILDKITE_COMMIT}"
 
 echo "Linting: ${sha}"
 if ! second_line_empty "${sha}"; then
   echo >&2 "Second line not empty: '$CURRENT_SUBJECT' (${sha})"
-  exit 1
+  failed
 fi
 
 if ! proper_subject_length "${sha}"; then
   echo >&2 "Subject longer than 80 characters: '$CURRENT_SUBJECT' (${sha})"
-  exit 1
+  failed
 fi
 
 if ! contains_body "${sha}"; then
   echo >&2 "Commit (${sha}) is missing a body"
   echo >&2 "All commit messages should have a body describing the purpose of the change, etc."
   echo >&2 "To format a commit message with a body, add a blank line after the subject of your commit, then write a longer description of the commit wrapped to 80 characters"
-  exit 1
+  failed
 fi
 
 if ! body_wrapped "${sha}"; then
   echo >&2 "At least one line in commit body more than 80 characters: '$CURRENT_SUBJECT' (${sha})"
   echo >&2 "Note that commit bodies need to be hard-wrapped to 80 characters"
-  exit 1
+  failed
 fi
 
 echo 'Success!'

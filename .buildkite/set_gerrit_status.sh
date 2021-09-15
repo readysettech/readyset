@@ -7,12 +7,29 @@ if [ -z ${GERRIT_CHANGE_ID+x} ] && [ -z ${GERRIT_PATCHSET+x} ]; then
     exit 0
 fi
 
-if [ "$(buildkite-agent meta-data get 'failure')" = 0 ]; then
-    verified="1"
-    verb="passed"
+if [ "$#" -ge 1 ]; then
+    case "$1" in
+        failed)
+            verified="-1"
+            verb="failed"
+            ;;
+        passed)
+            verified="1"
+            verb="passed"
+            ;;
+        *)
+            echo "Usage: $0 [<failed|passed>]"
+            exit 1
+            ;;
+    esac
 else
-    verified="-1"
-    verb="failed"
+    if [ "$(buildkite-agent meta-data get 'failure')" = 0 ]; then
+        verified="1"
+        verb="passed"
+    else
+        verified="-1"
+        verb="failed"
+    fi
 fi
 
 msg="Build of patchset $GERRIT_PATCHSET $verb: $BUILDKITE_BUILD_URL"
