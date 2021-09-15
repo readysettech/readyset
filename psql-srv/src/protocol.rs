@@ -12,6 +12,7 @@ use crate::response::Response;
 use crate::value::Value;
 use crate::{Backend, Column, PrepareResponse, QueryResponse::*};
 use postgres_types::Type;
+use smallvec::smallvec;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -144,10 +145,10 @@ impl Protocol {
                     backend.on_init(database.borrow()).await?;
                     self.state = State::Ready;
                     channel.set_start_up_complete();
-                    Ok(Response::Message2(
+                    Ok(Response::Messages(smallvec![
                         AuthenticationOk,
                         BackendMessage::ready_for_query_idle(),
-                    ))
+                    ]))
                 }
 
                 m => Err(Error::UnsupportedMessage(m)),
@@ -257,7 +258,7 @@ impl Protocol {
                             .prepared_statements
                             .get(name.borrow() as &str)
                             .ok_or_else(|| Error::MissingPreparedStatement(name.to_string()))?;
-                        Ok(Response::Message2(
+                        Ok(Response::Messages(smallvec![
                             ParameterDescription {
                                 parameter_data_types: param_schema.clone(),
                             },
@@ -267,7 +268,7 @@ impl Protocol {
                                     .map(|i| make_field_description(i, TRANSFER_FORMAT_PLACEHOLDER))
                                     .collect::<Result<Vec<FieldDescription>, Error>>()?,
                             },
-                        ))
+                        ]))
                     }
                 },
 
@@ -336,10 +337,10 @@ impl Protocol {
                                 unreachable!("Select is handled as a special case above.")
                             }
                         };
-                        Ok(Response::Message2(
+                        Ok(Response::Messages(smallvec![
                             CommandComplete { tag },
                             BackendMessage::ready_for_query_idle(),
-                        ))
+                        ]))
                     }
                 }
 
@@ -398,10 +399,10 @@ impl Protocol {
                 self.state = State::Error;
                 Ok(Response::Message(make_error_response(error)))
             }
-            _ => Ok(Response::Message2(
+            _ => Ok(Response::Messages(smallvec![
                 make_error_response(error),
                 BackendMessage::ready_for_query_idle(),
-            )),
+            ])),
         }
     }
 }
@@ -678,10 +679,10 @@ mod tests {
         // A StartupMessage with a database specified is accepted.
         assert_eq!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message2(
+            Response::Messages(smallvec![
                 BackendMessage::AuthenticationOk,
                 BackendMessage::ready_for_query_idle()
-            )
+            ])
         );
         // The database has been set on the backend.
         assert_eq!(backend.database.unwrap(), "database_name");
@@ -871,12 +872,12 @@ mod tests {
         };
         assert_eq!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message2(
+            Response::Messages(smallvec![
                 CommandComplete {
                     tag: CommandCompleteTag::Delete(5)
                 },
                 BackendMessage::ready_for_query_idle()
-            )
+            ])
         );
         assert_eq!(backend.last_query.unwrap(), "DELETE * FROM test;");
     }
@@ -1302,7 +1303,7 @@ mod tests {
         };
         assert_eq!(
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Message2(
+            Response::Messages(smallvec![
                 ParameterDescription {
                     parameter_data_types: vec![Type::FLOAT8, Type::INT4]
                 },
@@ -1328,7 +1329,7 @@ mod tests {
                         },
                     ],
                 }
-            )
+            ])
         );
     }
 
@@ -1611,14 +1612,14 @@ mod tests {
                 protocol.on_error::<Backend>(Error::InternalError("error requested".to_string()))
             )
             .unwrap(),
-            Response::Message2(
+            Response::Messages(smallvec![
                 ErrorResponse {
                     severity: ErrorSeverity::Error,
                     sqlstate: SqlState::INTERNAL_ERROR,
                     message: "internal error: error requested".to_string()
                 },
                 BackendMessage::ready_for_query_idle()
-            )
+            ])
         );
     }
 

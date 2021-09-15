@@ -3,6 +3,7 @@ use crate::error::Error;
 use crate::message::{BackendMessage, CommandCompleteTag, TransferFormat};
 use crate::value::Value;
 use futures::prelude::*;
+use smallvec::SmallVec;
 use std::convert::TryInto;
 use std::sync::Arc;
 
@@ -10,10 +11,12 @@ use std::sync::Arc;
 /// request. The response will be sent to the frontend as a sequence of zero or more
 /// `BackendMessage`s.
 #[derive(Debug, PartialEq)]
+#[warn(variant_size_differences)]
 pub enum Response<R, S> {
     Empty,
     Message(BackendMessage<R>),
-    Message2(BackendMessage<R>, BackendMessage<R>),
+    /// Send multiple messages at once
+    Messages(SmallVec<[BackendMessage<R>; 2]>),
 
     /// `Select` is the most complex variant, containing data rows to be sent to the frontend in
     /// response to a select query.
@@ -40,9 +43,16 @@ where
 
             Message(m) => sink.send(m).await,
 
-            Message2(m1, m2) => {
-                sink.feed(m1).await?;
-                sink.send(m2).await
+            Messages(ms) => {
+                let num_messages = ms.len();
+                for (i, m) in ms.into_iter().enumerate() {
+                    if i == num_messages - 1 {
+                        sink.send(m).await?;
+                    } else {
+                        sink.feed(m).await?
+                    }
+                }
+                Ok(())
             }
 
             Select {
@@ -85,6 +95,7 @@ mod tests {
 
     use super::*;
     use crate::value::Value as DataValue;
+    use smallvec::smallvec;
     use std::convert::TryFrom;
     use tokio_test::block_on;
 
@@ -133,10 +144,10 @@ mod tests {
 
     #[test]
     fn write_message2() {
-        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Message2(
+        let response = Response::<Vec<Value>, Vec<Vec<Value>>>::Messages(smallvec![
             BackendMessage::BindComplete,
             BackendMessage::CloseComplete,
-        );
+        ]);
         let validating_sink = sink::unfold(0, |i, m: BackendMessage<Vec<Value>>| {
             async move {
                 match i {
