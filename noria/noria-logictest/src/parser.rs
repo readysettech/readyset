@@ -62,7 +62,19 @@ named!(
     )
 );
 
-named!(conditional<Conditional>, alt!(skipif | onlyif));
+named!(
+    invert_no_upstream<Conditional>,
+    do_parse!(
+        _constructor: tag!("invert_no_upstream")
+            >> opt!(comment)
+            >> (Conditional::InvertNoUpstream)
+    )
+);
+
+named!(
+    conditional<Conditional>,
+    alt!(skipif | onlyif | invert_no_upstream)
+);
 named!(
     conditionals<Vec<Conditional>>,
     many0!(terminated!(conditional, line_ending))
@@ -436,6 +448,11 @@ mod tests {
         assert_eq!(
             conditional(b"onlyif mysql").unwrap().1,
             Conditional::OnlyIf("mysql".to_string())
+        );
+
+        assert_eq!(
+            conditional(b"invert_no_upstream").unwrap().1,
+            Conditional::InvertNoUpstream
         );
     }
 

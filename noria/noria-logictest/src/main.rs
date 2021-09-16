@@ -376,7 +376,7 @@ impl Verify {
             expected_result,
         } in InputFiles::try_from(&self.input_opts)?
         {
-            let script = TestScript::read(name.clone(), data)
+            let mut script = TestScript::read(name.clone(), data)
                 .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
             let run_opts: RunOptions = self.into();
             let result = Arc::clone(&result);
@@ -518,7 +518,7 @@ impl Fuzz {
             TestRunner::new(self.into())
         };
 
-        let result = runner.run(&self.test_script_strategy(), move |test_script| {
+        let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
             rt.block_on(test_script.run(RunOptions {

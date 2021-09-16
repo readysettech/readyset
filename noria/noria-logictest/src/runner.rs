@@ -28,7 +28,9 @@ use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use noria_server::{Builder, ReuseConfigType};
 
-use crate::ast::{Query, QueryResults, Record, SortMode, Statement, StatementResult, Value};
+use crate::ast::{
+    Conditional, Query, QueryResults, Record, SortMode, Statement, StatementResult, Value,
+};
 use crate::parser;
 use crate::upstream::{DatabaseConnection, DatabaseType, DatabaseURL};
 
@@ -143,7 +145,7 @@ impl TestScript {
         &self.path
     }
 
-    pub async fn run(&self, opts: RunOptions) -> anyhow::Result<()> {
+    pub async fn run(&mut self, opts: RunOptions) -> anyhow::Result<()> {
         println!(
             "==> {} {}",
             "Running test script".bold(),
@@ -276,10 +278,27 @@ impl TestScript {
                         None
                     };
 
-                    self.run_query(query, conn)
-                        .await
-                        .with_context(|| format!("Running query {}", query.query))?;
+                    // Failure from noria on a FailNoUpstream query is considered a pass. Passing
+                    // is considered a failure.
+                    let invert_result = query.conditionals.contains(&Conditional::InvertNoUpstream)
+                        && opts.replication_url.is_none();
 
+                    match self
+                        .run_query(query, conn)
+                        .await
+                        .with_context(|| format!("Running query {}", query.query))
+                    {
+                        Ok(_) => {
+                            if invert_result {
+                                return Err(anyhow!("Expected failure: {}", query.query));
+                            }
+                        }
+                        Err(e) => {
+                            if !invert_result {
+                                return Err(e);
+                            }
+                        }
+                    }
                     if let Some((label, start_time)) = timer {
                         let duration = start_time.elapsed();
                         println!(
