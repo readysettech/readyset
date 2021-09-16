@@ -39,6 +39,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::VARCHAR, ref v @ DataType::TinyText(_)) => {
                 Ok(ps::Value::Varchar(from_tiny_text(v)?))
             }
+            (Type::INT2, DataType::Int(v)) => Ok(ps::Value::Smallint(v as _)),
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
             (Type::INT8, DataType::UnsignedBigInt(v)) => Ok(ps::Value::Bigint(v as _)),

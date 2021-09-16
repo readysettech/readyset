@@ -1663,6 +1663,7 @@ impl ToSql for DataType {
     ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
         match self {
             Self::None => None::<i8>.to_sql(ty, out),
+            Self::Int(x) if *ty == Type::INT2 => (*x as i16).to_sql(ty, out),
             Self::Int(x) => x.to_sql(ty, out),
             Self::UnsignedInt(x) if *ty == Type::BOOL => (*x != 0).to_sql(ty, out),
             Self::UnsignedInt(x) => x.to_sql(ty, out),
