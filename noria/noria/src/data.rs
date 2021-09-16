@@ -394,7 +394,7 @@ impl DataType {
             (Self::UnsignedInt(n), _, Bool) => convert_boolean!(*n),
             (Self::BigInt(n), _, Bool) => convert_boolean!(*n),
             (Self::UnsignedBigInt(n), _, Bool) => convert_boolean!(*n),
-            (_, Some(Float), Float) => Ok(Cow::Borrowed(self)),
+            (_, Some(Float), Float | Real) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
                 let actual_len = <&str>::try_from(self)?.len();
