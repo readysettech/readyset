@@ -91,7 +91,7 @@ mod types {
     test_types! {
         bool_bool("bool", bool);
         #[ignore] char_i8("char", i8);
-        #[ignore] smallint_i16("smallint", i16);
+        smallint_i16("smallint", i16);
         int_i32("integer", i32);
         #[ignore] oid_u32("oid", u32);
         bigint_i64("bigint", i64);
