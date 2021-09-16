@@ -233,7 +233,7 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
 
     let mut ctx = TestHandle::start_noria(url.to_string()).await?;
     // Allow some time to snapshot
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     ctx.check_results("Snapshot", SNAPSHOT_RESULT).await?;
 
     for (test_name, test_query, test_results) in TESTS {
