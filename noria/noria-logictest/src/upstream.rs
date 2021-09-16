@@ -194,6 +194,8 @@ impl DatabaseConnection {
     }
 
     pub async fn run_script(&mut self, script: &TestScript) -> anyhow::Result<()> {
-        script.run_on_database(self, None).await
+        script
+            .run_on_database(&Default::default(), self, None)
+            .await
     }
 }

@@ -268,6 +268,10 @@ struct Verify {
     /// .fail.test to .test
     #[clap(long)]
     rename_passing: bool,
+
+    /// Collect timing of all named queries
+    #[clap(long)]
+    time: bool,
 }
 
 #[derive(Default)]
@@ -454,6 +458,7 @@ impl From<&Verify> for RunOptions {
             enable_reuse: verify.enable_reuse,
             upstream_database_url: verify.database_url().cloned(),
             replication_url: verify.replication_url.clone(),
+            time: verify.time,
             ..Default::default()
         }
     }
