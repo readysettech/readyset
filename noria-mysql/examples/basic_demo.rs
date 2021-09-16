@@ -15,10 +15,8 @@ async fn main() -> Result<()> {
     let deployment = "myapp".to_owned();
     let zk_addr = "127.0.0.1:2181";
 
-    let zk_auth = Authority::from(ZookeeperAuthority::new(&format!(
-        "{}/{}",
-        zk_addr, deployment
-    ))?);
+    let zk_auth =
+        Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).await?);
     let ch = ControllerHandle::new(zk_auth).await;
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();

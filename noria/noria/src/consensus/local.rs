@@ -17,6 +17,7 @@ use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use anyhow::{anyhow, bail, Error};
+use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -188,8 +189,9 @@ impl LocalAuthority {
     }
 }
 
+#[async_trait]
 impl AuthorityControl for LocalAuthority {
-    fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
+    async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
         let mut store_inner = self.store.inner_lock()?;
 
         if !store_inner.keys.contains_key(CONTROLLER_KEY) {
@@ -209,7 +211,7 @@ impl AuthorityControl for LocalAuthority {
         }
     }
 
-    fn surrender_leadership(&self) -> Result<(), Error> {
+    async fn surrender_leadership(&self) -> Result<(), Error> {
         let mut store_inner = self.store.inner_lock()?;
 
         assert!(store_inner.keys.remove(CONTROLLER_KEY).is_some());
@@ -222,7 +224,7 @@ impl AuthorityControl for LocalAuthority {
         Ok(())
     }
 
-    fn get_leader(&self) -> Result<LeaderPayload, Error> {
+    async fn get_leader(&self) -> Result<LeaderPayload, Error> {
         let mut store_inner = self.store.inner_lock()?;
         while !store_inner.keys.contains_key(CONTROLLER_KEY) {
             store_inner = self.store.inner_wait(store_inner)?;
@@ -245,7 +247,7 @@ impl AuthorityControl for LocalAuthority {
         }
     }
 
-    fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
+    async fn try_get_leader(&self) -> Result<GetLeaderResult, Error> {
         let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
             let inner = self.inner_read()?;
             if let Some(epoch) = inner.known_leader_epoch {
@@ -278,40 +280,15 @@ impl AuthorityControl for LocalAuthority {
         false
     }
 
-    fn watch_leader(&self) -> Result<(), Error> {
+    async fn watch_leader(&self) -> Result<(), Error> {
         unreachable!("LocalAuthority does not support `watch_leader`.");
     }
 
-    fn watch_workers(&self) -> Result<(), Error> {
+    async fn watch_workers(&self) -> Result<(), Error> {
         unreachable!("LocalAuthority does not support `watch_workers`.");
     }
 
-    fn await_new_leader(&self) -> Result<Option<LeaderPayload>, Error> {
-        let is_same_epoch = |leader_epoch: u64| -> Result<bool, Error> {
-            let inner = self.inner_read()?;
-            if let Some(epoch) = inner.known_leader_epoch {
-                Ok(leader_epoch == epoch)
-            } else {
-                Ok(false)
-            }
-        };
-        let mut store_inner = self.store.inner_lock()?;
-        while is_same_epoch(store_inner.leader_epoch)?
-            && store_inner.keys.contains_key(CONTROLLER_KEY)
-        {
-            store_inner = self.store.inner_wait(store_inner)?;
-        }
-
-        let mut inner = self.inner_write()?;
-        inner.known_leader_epoch = Some(store_inner.leader_epoch);
-
-        Ok(store_inner
-            .keys
-            .get(CONTROLLER_KEY)
-            .and_then(|data| serde_json::from_slice(data).ok()))
-    }
-
-    fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
+    async fn try_read<P>(&self, path: &str) -> Result<Option<P>, Error>
     where
         P: DeserializeOwned,
     {
@@ -322,10 +299,11 @@ impl AuthorityControl for LocalAuthority {
             .and_then(|data| serde_json::from_slice(data).ok()))
     }
 
-    fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
+    async fn read_modify_write<F, P, E>(&self, path: &str, mut f: F) -> Result<Result<P, E>, Error>
     where
-        F: FnMut(Option<P>) -> Result<P, E>,
-        P: Serialize + DeserializeOwned,
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send,
     {
         let mut store_inner = self.store.inner_lock()?;
 
@@ -341,20 +319,21 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
-    fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    async fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
     where
-        F: FnMut(Option<P>) -> Result<P, E>,
-        P: Serialize + DeserializeOwned,
+        F: Send + FnMut(Option<P>) -> Result<P, E>,
+        P: Send + Serialize + DeserializeOwned,
+        E: Send,
     {
-        self.read_modify_write(STATE_KEY, f)
+        self.read_modify_write(STATE_KEY, f).await
     }
 
-    fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
         let store_inner = self.store.inner_lock()?;
         Ok(store_inner.keys.get(path).cloned())
     }
 
-    fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
+    async fn register_worker(&self, payload: WorkerDescriptor) -> Result<Option<WorkerId>, Error>
     where
         WorkerDescriptor: Serialize,
     {
@@ -372,7 +351,10 @@ impl AuthorityControl for LocalAuthority {
         Err(anyhow!("Error registering worker"))
     }
 
-    fn worker_heartbeat(&self, id: WorkerId) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
+    async fn worker_heartbeat(
+        &self,
+        id: WorkerId,
+    ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
         let store_inner = self.store.inner_lock()?;
         let path = WORKER_PATH.to_string() + "/" + &id;
         Ok(if store_inner.keys.contains_key(&path) {
@@ -382,7 +364,7 @@ impl AuthorityControl for LocalAuthority {
         })
     }
 
-    fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
+    async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
         let store_inner = self.store.inner_lock()?;
         let worker_prefix = WORKER_PATH.to_string();
 
@@ -398,7 +380,7 @@ impl AuthorityControl for LocalAuthority {
             .collect())
     }
 
-    fn worker_data(
+    async fn worker_data(
         &self,
         worker_ids: Vec<WorkerId>,
     ) -> Result<HashMap<WorkerId, WorkerDescriptor>, Error> {
@@ -427,21 +409,22 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    #[test]
-    fn it_works() {
+    #[tokio::test]
+    async fn it_works() {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-        assert!(authority.try_read::<u32>("/a").unwrap().is_none());
+        assert!(authority.try_read::<u32>("/a").await.unwrap().is_none());
         assert_eq!(
             authority
                 .read_modify_write("/a", |arg: Option<u32>| -> Result<u32, u32> {
                     assert!(arg.is_none());
                     Ok(12)
                 })
+                .await
                 .unwrap(),
             Ok(12)
         );
-        assert_eq!(authority.try_read("/a").unwrap(), Some(12));
+        assert_eq!(authority.try_read("/a").await.unwrap(), Some(12));
 
         let payload = LeaderPayload {
             controller_uri: url::Url::parse("http://a").unwrap(),
@@ -449,24 +432,24 @@ mod tests {
         };
         let leader_payload = payload.clone();
         assert_eq!(
-            authority.become_leader(payload.clone()).unwrap(),
+            authority.become_leader(payload.clone()).await.unwrap(),
             Some(payload)
         );
-        assert_eq!(authority.get_leader().unwrap(), leader_payload);
+        assert_eq!(authority.get_leader().await.unwrap(), leader_payload);
         {
             let authority = authority.clone();
             let payload = LeaderPayload {
                 controller_uri: url::Url::parse("http://b").unwrap(),
                 nonce: 2,
             };
-            thread::spawn(move || authority.become_leader(payload));
+            let _ = authority.become_leader(payload).await;
         }
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(authority.get_leader().unwrap(), leader_payload);
+        assert_eq!(authority.get_leader().await.unwrap(), leader_payload);
     }
 
-    #[test]
-    fn retrieve_workers() {
+    #[tokio::test]
+    async fn retrieve_workers() {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
 
@@ -478,34 +461,40 @@ mod tests {
             volume_id: None,
         };
 
-        let workers = authority.get_workers().unwrap();
+        let workers = authority.get_workers().await.unwrap();
         assert!(workers.is_empty());
 
-        let worker_id = authority.register_worker(worker.clone()).unwrap().unwrap();
-        let workers = authority.get_workers().unwrap();
+        let worker_id = authority
+            .register_worker(worker.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let workers = authority.get_workers().await.unwrap();
         assert_eq!(workers.len(), 1);
         assert!(workers.contains(&worker_id));
         assert_eq!(
-            authority.worker_heartbeat(worker_id.clone()).unwrap(),
+            authority.worker_heartbeat(worker_id.clone()).await.unwrap(),
             AuthorityWorkerHeartbeatResponse::Alive
         );
         assert_eq!(
             worker,
-            authority.worker_data(vec![worker_id.clone()]).unwrap()[&worker_id]
+            authority
+                .worker_data(vec![worker_id.clone()])
+                .await
+                .unwrap()[&worker_id]
         );
 
-        let worker_id = authority.register_worker(worker).unwrap().unwrap();
-        let workers = authority.get_workers().unwrap();
+        let worker_id = authority.register_worker(worker).await.unwrap().unwrap();
+        let workers = authority.get_workers().await.unwrap();
         assert_eq!(workers.len(), 2);
         assert!(workers.contains(&worker_id));
     }
 
-    #[test]
-    fn test_register_deregister() {
+    #[tokio::test]
+    async fn test_register_deregister() {
         let authority_store = Arc::new(LocalAuthorityStore::new());
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store.clone()));
 
-        println!("hi");
         let worker = WorkerDescriptor {
             worker_uri: Url::parse("http://127.0.0.1").unwrap(),
             reader_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234),
@@ -513,14 +502,16 @@ mod tests {
             reader_only: false,
             volume_id: None,
         };
-        println!("wtf");
-        authority.register_worker(worker.clone()).unwrap().unwrap();
-        let workers = authority.get_workers().unwrap();
+        authority
+            .register_worker(worker.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let workers = authority.get_workers().await.unwrap();
         assert_eq!(workers.len(), 1);
-        println!("hi");
         drop(authority);
         let authority = Arc::new(LocalAuthority::new_with_store(authority_store));
-        let workers = authority.get_workers().unwrap();
+        let workers = authority.get_workers().await.unwrap();
         assert_eq!(workers.len(), 0);
     }
 }

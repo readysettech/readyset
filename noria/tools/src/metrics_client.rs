@@ -4,7 +4,7 @@ use noria::ControllerHandle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let authority = Authority::from(ZookeeperAuthority::new("127.0.0.1:2181/myapp")?);
+    let authority = Authority::from(ZookeeperAuthority::new("127.0.0.1:2181/myapp").await?);
     let noria = ControllerHandle::new(authority).await;
 
     let mut client = MetricsClient::new(noria).unwrap();

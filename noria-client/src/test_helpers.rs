@@ -110,8 +110,6 @@ where
     let n = deployment.name.clone();
     let b = barrier.clone();
     thread::spawn(move || {
-        let authority =
-            Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n)).unwrap());
         let mut builder = Builder::for_tests();
         if !partial {
             builder.disable_partial();
@@ -122,7 +120,15 @@ where
         let rt = tokio::runtime::Runtime::new().unwrap();
         // NOTE(malte): important to assign to a variable here, since otherwise the handle gets
         // dropped immediately and the Noria instance quits.
-        let _handle = rt.block_on(builder.start(Arc::new(authority))).unwrap();
+        let _handle = rt.block_on(async {
+            let authority = Authority::from(
+                ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), n))
+                    .await
+                    .unwrap(),
+            );
+
+            builder.start(Arc::new(authority)).await.unwrap()
+        });
         b.wait();
         loop {
             thread::sleep(Duration::from_millis(1000));
@@ -136,12 +142,16 @@ where
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let zk_auth = Authority::from(
-        ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name)).unwrap(),
-    );
-
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let ch = rt.block_on(ControllerHandle::new(zk_auth));
+    let ch = rt.block_on(async {
+        let zk_auth = Authority::from(
+            ZookeeperAuthority::new(&format!("{}/{}", zk_addr(), deployment.name))
+                .await
+                .unwrap(),
+        );
+
+        ControllerHandle::new(zk_auth).await
+    });
 
     // no need for a barrier here since accept() acts as one
     thread::spawn(move || {

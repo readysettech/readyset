@@ -92,11 +92,11 @@ impl Service<ControllerRequest> for Controller {
                     );
                 }
                 if url.is_none() {
-                    // TODO: don't do blocking things here...
                     // TODO: cache this value?
-                    let descriptor: ControllerDescriptor = auth.get_leader().map_err(|e| {
-                        internal_err(format!("failed to get current leader: {}", e))
-                    })?;
+                    let descriptor: ControllerDescriptor =
+                        auth.get_leader().await.map_err(|e| {
+                            internal_err(format!("failed to get current leader: {}", e))
+                        })?;
 
                     url = Some(descriptor.controller_uri.join(path)?);
                 }
@@ -186,7 +186,7 @@ impl ControllerHandle {
     /// Fetch information about the current Soup controller from Zookeeper running at the given
     /// address, and create a `ControllerHandle` from that.
     pub async fn from_zk(zookeeper_address: &str) -> ReadySetResult<Self> {
-        let auth = Authority::ZookeeperAuthority(ZookeeperAuthority::new(zookeeper_address)?);
+        let auth = Authority::ZookeeperAuthority(ZookeeperAuthority::new(zookeeper_address).await?);
         Ok(ControllerHandle::new(auth).await)
     }
 }

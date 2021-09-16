@@ -195,9 +195,6 @@ fn main() -> anyhow::Result<()> {
         install_global_recorder(bufrec).unwrap();
     }
 
-    let authority = Authority::from(
-        ZookeeperAuthority::new(&format!("{}/{}", &opts.zookeeper, &opts.deployment)).unwrap(),
-    );
     let mut builder = Builder::default();
     builder.set_listen_addr(opts.address);
     if opts.memory > 0 {
@@ -252,8 +249,17 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .thread_name("worker")
         .build()?;
+
+    let zookeeper_addr = opts.zookeeper;
+    let deployment = opts.deployment;
     let external_port = opts.external_port;
     let mut handle = rt.block_on(async move {
+        let authority = Authority::from(
+            ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment))
+                .await
+                .unwrap(),
+        );
+
         let external_addr = external_addr.await.unwrap_or_else(|err| {
             eprintln!("Error obtaining external IP address: {}", err);
             process::exit(1)

@@ -21,7 +21,6 @@ use serde::{Deserialize, Serialize};
 use slog::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -39,8 +38,8 @@ pub(crate) mod sql; // crate viz for tests
 
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-/// Amount of time to park the thread for if we are watching on the authority.
-const THREAD_PARK_DURATION: Duration = Duration::from_secs(5);
+/// Amount of time to wait for watches on the authority.
+const WATCH_DURATION: Duration = Duration::from_secs(5);
 
 /// A set of placement restrictions applied to a domain
 /// that a dataflow node is in. Each base table node can have
@@ -416,7 +415,7 @@ impl ControllerOuter {
         if self.inner.is_some() {
             self.stop_replication_task().await;
 
-            if let Err(e) = self.authority.surrender_leadership() {
+            if let Err(e) = self.authority.surrender_leadership().await {
                 error!(self.log, "failed to surrender leadership");
                 internal!("failed to surrender leadership: {}", e)
             }
@@ -432,7 +431,6 @@ struct AuthorityLeaderElectionState {
     authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     config: Config,
-    handle: tokio::runtime::Handle,
     /// True if we are eligible to become the leader.
     leader_eligible: bool,
     /// True if we are the current leader.
@@ -445,7 +443,6 @@ impl AuthorityLeaderElectionState {
         authority: Arc<Authority>,
         descriptor: ControllerDescriptor,
         config: Config,
-        handle: tokio::runtime::Handle,
         region: Option<String>,
     ) -> Self {
         // We are eligible to be a leader if we are in the primary region.
@@ -460,7 +457,6 @@ impl AuthorityLeaderElectionState {
             authority,
             descriptor,
             config,
-            handle,
             leader_eligible: can_be_leader,
             is_leader: false,
         }
@@ -470,22 +466,20 @@ impl AuthorityLeaderElectionState {
         self.is_leader
     }
 
-    fn maybe_watch_leader(&self) -> anyhow::Result<()> {
-        if self.authority.can_watch() {
-            self.authority.watch_leader()?;
-        }
-        Ok(())
+    async fn watch_leader(&self) -> anyhow::Result<()> {
+        self.authority.watch_leader().await
     }
 
-    fn update_leader_state(&mut self) -> anyhow::Result<()> {
+    async fn update_leader_state(&mut self) -> anyhow::Result<()> {
         let mut should_attempt_leader_election = false;
-        match self.authority.try_get_leader()? {
+        match self.authority.try_get_leader().await? {
             // The leader has changed, inform the worker.
             GetLeaderResult::NewLeader(payload) => {
                 self.is_leader = false;
                 let authority_update = AuthorityUpdate::LeaderChange(payload);
-                self.handle
-                    .block_on(self.event_tx.send(authority_update))
+                self.event_tx
+                    .send(authority_update)
+                    .await
                     .map_err(|_| format_err!("send failed"))?;
             }
 
@@ -499,46 +493,48 @@ impl AuthorityLeaderElectionState {
             // If we fail to become the leader restart, go back to checking for a new leader.
             if self
                 .authority
-                .become_leader(self.descriptor.clone())?
+                .become_leader(self.descriptor.clone())
+                .await?
                 .is_none()
             {
                 return Ok(());
             }
 
             // We are the new leader, attempt to update the leader state with our state.
-            let state = self.authority.update_controller_state(
-                |state: Option<ControllerState>| -> Result<ControllerState, ()> {
-                    match state {
-                        None => Ok(ControllerState {
-                            config: self.config.clone(),
-                            recipe_version: 0,
-                            recipes: vec![],
-                            replication_offset: None,
-                            node_restrictions: HashMap::new(),
-                        }),
-                        Some(mut state) => {
-                            // check that running config is compatible with the new
-                            // configuration.
-                            assert_eq!(
-                                state.config, self.config,
-                                "Config in authority is not compatible with requested config!"
-                            );
-                            state.config = self.config.clone();
-                            Ok(state)
+            let state = self
+                .authority
+                .update_controller_state(
+                    |state: Option<ControllerState>| -> Result<ControllerState, ()> {
+                        match state {
+                            None => Ok(ControllerState {
+                                config: self.config.clone(),
+                                recipe_version: 0,
+                                recipes: vec![],
+                                replication_offset: None,
+                                node_restrictions: HashMap::new(),
+                            }),
+                            Some(mut state) => {
+                                // check that running config is compatible with the new
+                                // configuration.
+                                assert_eq!(
+                                    state.config, self.config,
+                                    "Config in authority is not compatible with requested config!"
+                                );
+                                state.config = self.config.clone();
+                                Ok(state)
+                            }
                         }
-                    }
-                },
-            )?;
+                    },
+                )
+                .await?;
             if state.is_err() {
                 return Ok(());
             }
 
             // Notify our worker that we have won the leader election.
-            self.handle
-                .block_on(
-                    self.event_tx
-                        .send(AuthorityUpdate::WonLeaderElection(state.unwrap())),
-                )
+            self.event_tx
+                .send(AuthorityUpdate::WonLeaderElection(state.unwrap()))
+                .await
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
         }
 
@@ -554,7 +550,6 @@ struct AuthorityWorkerState {
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<Authority>,
     descriptor: WorkerDescriptor,
-    handle: tokio::runtime::Handle,
     worker_id: Option<WorkerId>,
     active_workers: HashMap<WorkerId, WorkerDescriptor>,
 }
@@ -564,41 +559,39 @@ impl AuthorityWorkerState {
         event_tx: Sender<AuthorityUpdate>,
         authority: Arc<Authority>,
         descriptor: WorkerDescriptor,
-        handle: tokio::runtime::Handle,
     ) -> Self {
         Self {
             event_tx,
             authority,
             descriptor,
-            handle,
             worker_id: None,
             active_workers: HashMap::new(),
         }
     }
 
-    fn register(&mut self) -> anyhow::Result<()> {
-        self.worker_id = self.authority.register_worker(self.descriptor.clone())?;
+    async fn register(&mut self) -> anyhow::Result<()> {
+        self.worker_id = self
+            .authority
+            .register_worker(self.descriptor.clone())
+            .await?;
         Ok(())
     }
 
-    fn heartbeat(&self) -> anyhow::Result<AuthorityWorkerHeartbeatResponse> {
+    async fn heartbeat(&self) -> anyhow::Result<AuthorityWorkerHeartbeatResponse> {
         if let Some(id) = &self.worker_id {
-            return self.authority.worker_heartbeat(id.clone());
+            return self.authority.worker_heartbeat(id.clone()).await;
         }
 
         Ok(AuthorityWorkerHeartbeatResponse::Failed)
     }
 
-    fn maybe_watch_workers(&self) -> anyhow::Result<()> {
-        if self.authority.can_watch() {
-            self.authority.watch_workers()?;
-        }
-        Ok(())
+    async fn watch_workers(&self) -> anyhow::Result<()> {
+        self.authority.watch_workers().await
     }
 
-    fn update_worker_state(&mut self) -> anyhow::Result<()> {
+    async fn update_worker_state(&mut self) -> anyhow::Result<()> {
         // Retrieve the worker ids of current workers.
-        let workers = self.authority.get_workers()?;
+        let workers = self.authority.get_workers().await?;
 
         let failed_workers: Vec<_> = self
             .active_workers
@@ -624,11 +617,9 @@ impl AuthorityWorkerState {
             .collect();
 
         if !failed_descriptors.is_empty() {
-            self.handle
-                .block_on(
-                    self.event_tx
-                        .send(AuthorityUpdate::FailedWorkers(failed_descriptors)),
-                )
+            self.event_tx
+                .send(AuthorityUpdate::FailedWorkers(failed_descriptors))
+                .await
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
         }
 
@@ -639,16 +630,14 @@ impl AuthorityWorkerState {
 
         // Get the descriptors of the new workers, adding them to the
         // active workers set.
-        let new_descriptor_map = self.authority.worker_data(new_workers)?;
+        let new_descriptor_map = self.authority.worker_data(new_workers).await?;
         let new_descriptors: Vec<WorkerDescriptor> = new_descriptor_map.values().cloned().collect();
         self.active_workers.extend(new_descriptor_map);
 
         if !new_descriptors.is_empty() {
-            self.handle
-                .block_on(
-                    self.event_tx
-                        .send(AuthorityUpdate::NewWorkers(new_descriptors)),
-                )
+            self.event_tx
+                .send(AuthorityUpdate::NewWorkers(new_descriptors))
+                .await
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
         }
 
@@ -656,13 +645,12 @@ impl AuthorityWorkerState {
     }
 }
 
-fn authority_inner(
+async fn authority_inner(
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    handle: tokio::runtime::Handle,
     region: Option<String>,
 ) -> anyhow::Result<()> {
     let span = info_span!("authority");
@@ -673,70 +661,72 @@ fn authority_inner(
         authority.clone(),
         descriptor,
         config,
-        handle.clone(),
         region,
     );
 
     let mut worker_state =
-        AuthorityWorkerState::new(event_tx, authority.clone(), worker_descriptor, handle);
+        AuthorityWorkerState::new(event_tx, authority.clone(), worker_descriptor);
 
     // Register the current server as a worker in the system.
-    worker_state.register().context("Registering worker")?;
+    worker_state
+        .register()
+        .await
+        .context("Registering worker")?;
     loop {
         leader_election_state
             .update_leader_state()
+            .await
             .context("Updating leader state")?;
         // TODO(justin): Handle detected as failed.
-        worker_state.heartbeat()?;
+        worker_state.heartbeat().await?;
 
         if leader_election_state.is_leader() {
             worker_state
                 .update_worker_state()
+                .await
                 .context("Updating worker state")?;
         }
 
-        let mut error_watching = false;
-        if let Err(e) = leader_election_state.maybe_watch_leader() {
-            tracing::warn!(error = %e, "failure creating leader watch");
-            error_watching = true;
-        }
-        if let Err(e) = worker_state.maybe_watch_workers() {
-            tracing::warn!(error = %e, "failure creating worker watch");
-            error_watching = true;
-        }
-
-        if !error_watching && authority.can_watch() {
-            std::thread::park_timeout(THREAD_PARK_DURATION);
+        if authority.can_watch() {
+            select! {
+                watch_result = leader_election_state.watch_leader() => {
+                    if let Err(e) = watch_result {
+                        tracing::warn!(error = %e, "failure creating worker watch");
+                    }
+                },
+                watch_result = worker_state.watch_workers() => {
+                    if let Err(e) = watch_result {
+                        tracing::warn!(error = %e, "failure creating worker watch");
+                    }
+                },
+                () = tokio::time::sleep(WATCH_DURATION) => {}
+            };
         } else {
-            sleep(LEADER_STATE_CHECK_INTERVAL);
+            tokio::time::sleep(LEADER_STATE_CHECK_INTERVAL).await;
         }
     }
 }
 
-pub(crate) fn authority_runner(
+pub(crate) async fn authority_runner(
     event_tx: Sender<AuthorityUpdate>,
     authority: Arc<Authority>,
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    handle: tokio::runtime::Handle,
     region: Option<String>,
 ) -> anyhow::Result<()> {
-    std::thread::Builder::new()
-        .name("srv-authority".to_owned())
-        .spawn(move || {
-            if let Err(e) = authority_inner(
-                event_tx.clone(),
-                authority,
-                descriptor,
-                worker_descriptor,
-                config,
-                handle.clone(),
-                region,
-            ) {
-                let _ = handle.block_on(event_tx.send(AuthorityUpdate::AuthorityError(e)));
-            }
-        })?;
+    if let Err(e) = authority_inner(
+        event_tx.clone(),
+        authority,
+        descriptor,
+        worker_descriptor,
+        config,
+        region,
+    )
+    .await
+    {
+        let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
+    }
     Ok(())
 }
 

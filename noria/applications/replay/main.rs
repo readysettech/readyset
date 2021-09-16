@@ -301,7 +301,7 @@ async fn main() {
 
     let zk_address = args.value_of("zookeeper-address").unwrap();
     let authority = Arc::new(Authority::from(
-        ZookeeperAuthority::new(zk_address).unwrap(),
+        ZookeeperAuthority::new(zk_address).await.unwrap(),
     ));
 
     if !args.is_present("use-existing-data") {
