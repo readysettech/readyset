@@ -1498,7 +1498,6 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store,
     )));
-    let mut g = Builder::default();
     let mut g = Builder::for_tests();
     g.set_persistence(persistence_parameters);
     let mut g = g.start(authority.clone()).await.unwrap();

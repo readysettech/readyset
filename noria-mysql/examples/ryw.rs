@@ -29,8 +29,11 @@ async fn main() {
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
     let zk_addr = "127.0.0.1:2181";
     let deployment = "ryw";
-    let zk_auth =
-        Authority::from(ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment)).unwrap());
+    let zk_auth = Authority::from(
+        ZookeeperAuthority::new(&format!("{}/{}", zk_addr, deployment))
+            .await
+            .unwrap(),
+    );
 
     let mut ch = ControllerHandle::new(zk_auth).await;
 

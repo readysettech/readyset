@@ -88,10 +88,9 @@ impl NoriaAdapter {
         deployment: S2,
         options: AdapterOpts,
     ) -> ReadySetResult<!> {
-        let authority = Authority::from(ZookeeperAuthority::new(&format!(
-            "{}/{}",
-            zookeeper_addr, deployment
-        ))?);
+        let authority = Authority::from(
+            ZookeeperAuthority::new(&format!("{}/{}", zookeeper_addr, deployment)).await?,
+        );
         let noria = noria::ControllerHandle::new(authority).await;
         NoriaAdapter::start_inner(noria, options, None).await
     }

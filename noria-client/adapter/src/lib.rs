@@ -24,7 +24,7 @@ use tracing::{debug, info, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
-use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
+use noria::{consensus::Authority, ControllerHandle, ReadySetError, ZookeeperAuthority};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::{Backend, BackendBuilder};
 
@@ -154,18 +154,26 @@ where
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
 
-        let zk_auth = Authority::from(ZookeeperAuthority::new(&format!(
-            "{}/{}",
-            options.zookeeper_address, options.deployment
-        ))?);
-
         let rs_connect = span!(
             Level::INFO,
             "Connecting to ReadySet server",
             %options.zookeeper_address,
             %options.deployment
         );
-        let ch = rt.block_on(ControllerHandle::new(zk_auth).instrument(rs_connect.clone()));
+
+        let zookeeper_address = options.zookeeper_address.clone();
+        let deployment = options.deployment.clone();
+        let ch = rt.block_on(async {
+            let zk_auth = Authority::from(
+                ZookeeperAuthority::new(&format!("{}/{}", zookeeper_address, deployment)).await?,
+            );
+
+            Ok::<ControllerHandle, ReadySetError>(
+                ControllerHandle::new(zk_auth)
+                    .instrument(rs_connect.clone())
+                    .await,
+            )
+        })?;
         rs_connect.in_scope(|| info!("Connected"));
 
         let ctrlc = tokio::signal::ctrl_c();

@@ -284,7 +284,8 @@ impl ControllerInner {
             }
             (Method::POST, "/set_replication_offset") => {
                 let body = bincode::deserialize(&body)?;
-                let ret = self.set_replication_offset(authority, body)?;
+                let ret =
+                    futures::executor::block_on(self.set_replication_offset(authority, body))?;
                 return_serialized!(ret);
             }
             (Method::POST, "/replicate_readers") => {
@@ -1312,12 +1313,16 @@ impl ControllerInner {
                         offset.try_max_into(&mut self.replication_offset)?
                     }
 
-                    if authority
-                        .update_controller_state(|state: Option<ControllerState>| match state {
+                    let node_restrictions = self.node_restrictions.clone();
+                    let recipe_version = self.recipe.version();
+                    // TODO(justin): Change this and migration functions to async and remove nexted
+                    // executors.
+                    if futures::executor::block_on(authority.update_controller_state(
+                        |state: Option<ControllerState>| match state {
                             None => Err(()),
                             Some(mut state) => {
-                                state.node_restrictions = self.node_restrictions.clone();
-                                state.recipe_version = self.recipe.version();
+                                state.node_restrictions = node_restrictions.clone();
+                                state.recipe_version = recipe_version;
                                 state.recipes.push(add_txt.to_string());
                                 if let Some(offset) = &add_txt_spec.replication_offset {
                                     offset
@@ -1326,8 +1331,9 @@ impl ControllerInner {
                                 }
                                 Ok(state)
                             }
-                        })
-                        .is_err()
+                        },
+                    ))
+                    .is_err()
                     {
                         noria::internal!("failed to persist recipe extension");
                     }
@@ -1365,13 +1371,15 @@ impl ControllerInner {
                     Ok(x) => {
                         self.replication_offset = r_txt_spec.replication_offset.clone();
 
-                        let install_result =
+                        let node_restrictions = self.node_restrictions.clone();
+                        let recipe_version = self.recipe.version();
+                        let install_result = futures::executor::block_on(
                             authority.update_controller_state(|state: Option<ControllerState>| {
                                 match state {
                                     None => Err(()),
                                     Some(mut state) => {
-                                        state.node_restrictions = self.node_restrictions.clone();
-                                        state.recipe_version = self.recipe.version();
+                                        state.node_restrictions = node_restrictions.clone();
+                                        state.recipe_version = recipe_version;
                                         state.recipes = vec![r_txt.to_string()];
                                         // When installing a recipe, the new replication offset overwrites the existing
                                         // offset entirely
@@ -1380,7 +1388,8 @@ impl ControllerInner {
                                         Ok(state)
                                     }
                                 }
-                            });
+                            }),
+                        );
 
                         if let Err(e) = install_result {
                             noria::internal!("failed to persist recipe installation, {}", e)
@@ -1400,7 +1409,7 @@ impl ControllerInner {
         }
     }
 
-    fn set_replication_offset(
+    async fn set_replication_offset(
         &mut self,
         authority: &Arc<Authority>,
         offset: Option<ReplicationOffset>,
@@ -1415,6 +1424,7 @@ impl ControllerInner {
                 }
                 None => Err(internal_err("Empty state")),
             })
+            .await
             .map_err(|_| internal_err("Unable to update state"))??;
 
         Ok(())

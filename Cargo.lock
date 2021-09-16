@@ -493,9 +493,12 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fe17f59a06fe8b87a6fc8bf53bb70b3aba76d7685f432487a68cd5552853625"
 dependencies = [
+ "futures-core",
  "getrandom 0.2.3",
  "instant",
+ "pin-project 1.0.8",
  "rand 0.8.4",
+ "tokio 1.11.0",
 ]
 
 [[package]]
@@ -3501,6 +3504,7 @@ dependencies = [
  "assert_approx_eq",
  "assert_infrequent",
  "async-bincode",
+ "async-trait",
  "backoff",
  "bincode",
  "bufstream",
@@ -3543,7 +3547,7 @@ dependencies = [
  "url",
  "vec1",
  "vec_map",
- "zookeeper",
+ "zookeeper-async",
 ]
 
 [[package]]
@@ -4019,6 +4023,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_enum"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9bd055fb730c4f8f4f57d45d35cd6b3f0980535b056dc7ff119cee6a66ed6f"
+dependencies = [
+ "derivative",
+ "num_enum_derive",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "486ea01961c4a818096de679a8b740b26d9033146ac5291b1c98557658f8cdd9"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "number_prefix"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4483,6 +4509,16 @@ dependencies = [
  "lazy_static",
  "term 0.5.2",
  "unicode-width",
+]
+
+[[package]]
+name = "proc-macro-crate"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebace6889caf889b4d3f76becee12e90353f2b8c7d875534a71e5742f8f6f83"
+dependencies = [
+ "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -7044,6 +7080,25 @@ dependencies = [
  "mio-extras",
  "snowflake",
  "zookeeper_derive",
+]
+
+[[package]]
+name = "zookeeper-async"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12dfa610215c352f0aa2d9a7a800ad9bbb26d4da219e50fd842d74c52c2a879b"
+dependencies = [
+ "async-trait",
+ "byteorder",
+ "bytes 1.1.0",
+ "derive_more",
+ "futures 0.3.17",
+ "lazy_static",
+ "num_enum",
+ "snowflake",
+ "tokio 1.11.0",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

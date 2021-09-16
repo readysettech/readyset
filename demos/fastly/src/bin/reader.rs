@@ -289,7 +289,9 @@ struct NoriaExecutor {
 impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
         let authority = Arc::new(Authority::from(
-            ZookeeperAuthority::new(&opts.zookeeper_url.unwrap()).unwrap(),
+            ZookeeperAuthority::new(&opts.zookeeper_url.unwrap())
+                .await
+                .unwrap(),
         ));
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
@@ -557,44 +559,42 @@ impl Reader {
         let (tx, rx) = unbounded_channel();
         let http_client = reqwest::Client::new();
 
-        let mut threads: Vec<_> = (0..self.threads)
-            .map(|_| {
-                let thread_tx = tx.clone();
-                tokio::spawn(async move {
-                    // Create the thread query generator.
-                    let factory: Box<dyn QueryGenerator + Send> = match self.distribution {
-                        Dist::Uniform => Box::new(QueryFactory::new(
-                            Uniform::new(0, self.user_table_rows as u64),
-                            self.user_offset,
-                        )),
-                        Dist::Zipf => Box::new(QueryFactory::new(
-                            zipf::ZipfDistribution::new(self.user_table_rows - 1, self.alpha)
-                                .unwrap(),
-                            self.user_offset,
-                        )),
-                    };
+        let mut threads: Vec<_> = Vec::with_capacity(self.threads as usize);
+        for _ in 0..self.threads {
+            let thread_tx = tx.clone();
+            // Create the thread query exector.
+            let executor: QueryExecutor = match self.database_type {
+                DatabaseType::Noria => {
+                    QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
+                }
+                DatabaseType::MySql => {
+                    QueryExecutor::MySql(MySqlExecutor::init(self.mysql_opts.clone()).await)
+                }
+            };
 
-                    // Create the thread query exector.
-                    let executor: QueryExecutor = match self.database_type {
-                        DatabaseType::Noria => {
-                            QueryExecutor::Noria(NoriaExecutor::init(self.noria_opts.clone()).await)
-                        }
-                        DatabaseType::MySql => {
-                            QueryExecutor::MySql(MySqlExecutor::init(self.mysql_opts.clone()).await)
-                        }
-                    };
+            threads.push(tokio::spawn(async move {
+                // Create the thread query generator.
+                let factory: Box<dyn QueryGenerator + Send> = match self.distribution {
+                    Dist::Uniform => Box::new(QueryFactory::new(
+                        Uniform::new(0, self.user_table_rows as u64),
+                        self.user_offset,
+                    )),
+                    Dist::Zipf => Box::new(QueryFactory::new(
+                        zipf::ZipfDistribution::new(self.user_table_rows - 1, self.alpha).unwrap(),
+                        self.user_offset,
+                    )),
+                };
 
-                    self.generate_queries(
-                        factory,
-                        query_issue_interval,
-                        thread_tx,
-                        executor,
-                        &self.run_for,
-                    )
-                    .await
-                })
-            })
-            .collect();
+                self.generate_queries(
+                    factory,
+                    query_issue_interval,
+                    thread_tx,
+                    executor,
+                    &self.run_for,
+                )
+                .await
+            }));
+        }
 
         // The original tx channel is never used.
         drop(tx);

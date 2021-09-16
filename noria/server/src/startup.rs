@@ -214,15 +214,20 @@ pub(super) async fn start_instance(
         volume_id,
     };
 
-    crate::controller::authority_runner(
+    tokio::spawn(maybe_abort_on_panic!(crate::controller::authority_runner(
         authority_tx,
         authority.clone(),
         our_descriptor.clone(),
         worker_descriptor,
         config,
-        tokio::runtime::Handle::current(),
         region,
-    )?;
+    )
+    .map_err(move |e| {
+        error!(error = %e, "AuthorityRunner failed");
+        if abort_on_task_failure {
+            process::abort()
+        }
+    })));
 
     tokio::spawn(maybe_abort_on_panic!(controller.run().map_err(move |e| {
         error!(error = %e, "ControllerOuter failed");
@@ -278,13 +283,20 @@ impl Service<Request<Body>> for NoriaServer {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::GET, path) if path.starts_with("/zookeeper/") => {
-                let res = match self.authority.try_read_raw(&format!("/{}", &path[11..])) {
-                    Ok(Some(data)) => res
-                        .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(data)),
-                    _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
+                let zookeeper_path = path.to_owned();
+                let authority = self.authority.clone();
+                Box::pin(async move {
+                    let res = match authority
+                        .try_read_raw(&format!("/{}", &zookeeper_path["/zookeeper/".len()..]))
+                        .await
+                    {
+                        Ok(Some(data)) => res
+                            .header(CONTENT_TYPE, "application/json")
+                            .body(hyper::Body::from(data)),
+                        _ => res.status(StatusCode::NOT_FOUND).body(hyper::Body::empty()),
+                    };
+                    Ok(res.unwrap())
+                })
             }
             (&Method::GET, "/prometheus") => {
                 let body =

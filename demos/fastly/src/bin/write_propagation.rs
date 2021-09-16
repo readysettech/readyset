@@ -111,6 +111,7 @@ impl Writer {
         sender: Sender<WriterThreadUpdate>,
         schema: DatabaseSchema,
         run_for: &Option<u32>,
+        mut ch: ControllerHandle,
     ) -> anyhow::Result<()> {
         let mut next_report = Instant::now() + REPORTING_INTERVAL;
         let mut writer_update = WriterThreadUpdate {
@@ -120,9 +121,6 @@ impl Writer {
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-        let zk_auth = Authority::from(ZookeeperAuthority::new(&self.zookeeper_url).unwrap());
-        let mut ch = ControllerHandle::new(zk_auth).await;
-
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
         let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
@@ -333,17 +331,20 @@ impl Writer {
         let http_client = reqwest::Client::new();
 
         // Spawn a thread for articles
-        let mut threads: Vec<_> = (0..self.threads)
-            .map(|_| {
-                let schema = fastly_schema.clone();
-                let articles = current_articles.clone();
-                let thread_tx = tx.clone();
-                tokio::spawn(async move {
-                    self.generate_writes(articles, thread_tx, schema, &self.run_for)
-                        .await
-                })
-            })
-            .collect();
+        let mut threads: Vec<_> = Vec::with_capacity(self.threads as usize);
+        for _ in 0..self.threads {
+            let schema = fastly_schema.clone();
+            let articles = current_articles.clone();
+            let thread_tx = tx.clone();
+            let zk_auth =
+                Authority::from(ZookeeperAuthority::new(&self.zookeeper_url).await.unwrap());
+            let ch = ControllerHandle::new(zk_auth).await;
+
+            threads.push(tokio::spawn(async move {
+                self.generate_writes(articles, thread_tx, schema, &self.run_for, ch)
+                    .await
+            }))
+        }
         threads.push(tokio::spawn(async move {
             self.process_updates(rx, http_client).await
         }));

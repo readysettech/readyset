@@ -13,9 +13,9 @@ struct AddQuery {
 
 impl AddQuery {
     pub async fn run(&'static self) -> anyhow::Result<()> {
-        let authority = Arc::new(Authority::from(ZookeeperAuthority::new(
-            &self.zookeeper_url,
-        )?));
+        let authority = Arc::new(Authority::from(
+            ZookeeperAuthority::new(&self.zookeeper_url).await?,
+        ));
 
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
