@@ -50,6 +50,9 @@ pub enum Conditional {
     SkipIf(String),
     /// Only run this [`Statement`] or [`Query`] on the database engine with the given name.
     OnlyIf(String),
+    /// Invert the ['Query'] result if no upstream connector is present. Pass becomes fail, fail
+    /// becomes pass. Ignored for ['Statement'].
+    InvertNoUpstream,
 }
 
 impl Display for Conditional {
@@ -57,6 +60,7 @@ impl Display for Conditional {
         match self {
             Conditional::SkipIf(engine) => write!(f, "skipif {}", engine),
             Conditional::OnlyIf(engine) => write!(f, "onlyif {}", engine),
+            Conditional::InvertNoUpstream => write!(f, "invertupstream"),
         }
     }
 }
