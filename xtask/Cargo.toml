@@ -19,3 +19,5 @@ which = "4.2"
 aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.17-alpha", package = "aws-config" }
 aws-sdk-s3 = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.17-alpha", package = "aws-sdk-s3" }
 tokio = {version = "1", features=["full"]}
+cargo_metadata = "0.14"
+camino = "1.0"
