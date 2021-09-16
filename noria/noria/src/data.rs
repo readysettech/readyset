@@ -1676,7 +1676,10 @@ impl ToSql for DataType {
         }
     }
 
-    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
+    accepts!(
+        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP, FLOAT4,
+        FLOAT8
+    );
 
     to_sql_checked!();
 }

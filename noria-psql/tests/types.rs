@@ -95,8 +95,8 @@ mod types {
         int_i32("integer", i32);
         #[ignore] oid_u32("oid", u32);
         bigint_i64("bigint", i64);
-        #[ignore] real_f32("real", f32);
-        #[ignore] double_f64("double precision", f64);
+        real_f32("real", f32);
+        double_f64("double precision", f64);
         text_string("text", String);
     }
 }
