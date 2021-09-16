@@ -9,7 +9,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 use anyhow::{anyhow, bail, Context};
@@ -76,6 +76,7 @@ pub struct RunOptions {
     pub replication_url: Option<String>,
     pub enable_reuse: bool,
     pub verbose: bool,
+    pub time: bool,
 }
 
 impl Default for RunOptions {
@@ -85,6 +86,7 @@ impl Default for RunOptions {
             upstream_database_url: None,
             enable_reuse: false,
             verbose: false,
+            time: false,
             replication_url: None,
             database_type: DatabaseType::MySQL,
         }
@@ -164,7 +166,7 @@ impl TestScript {
                 .await
                 .with_context(|| "connecting to upstream database")?;
 
-            self.run_on_database(&mut conn, None).await?;
+            self.run_on_database(&opts, &mut conn, None).await?;
         } else {
             if let Some(replication_url) = &opts.replication_url {
                 self.recreate_test_database(&replication_url.parse()?)
@@ -229,7 +231,7 @@ impl TestScript {
             .await
             .with_context(|| "connecting to adapter")?;
 
-        self.run_on_database(&mut conn, noria_handle.c.clone())
+        self.run_on_database(opts, &mut conn, noria_handle.c.clone())
             .await?;
 
         // After all tests are done, stop the adapter
@@ -245,6 +247,7 @@ impl TestScript {
 
     pub async fn run_on_database(
         &self,
+        opts: &RunOptions,
         conn: &mut DatabaseConnection,
         mut noria: Option<ControllerHandle>,
     ) -> anyhow::Result<()> {
@@ -267,9 +270,26 @@ impl TestScript {
                         tokio::time::sleep(Duration::from_millis(250)).await;
                     }
 
+                    let timer = if opts.time {
+                        query.label.clone().map(|label| (label, Instant::now()))
+                    } else {
+                        None
+                    };
+
                     self.run_query(query, conn)
                         .await
-                        .with_context(|| format!("Running query {}", query.query))?
+                        .with_context(|| format!("Running query {}", query.query))?;
+
+                    if let Some((label, start_time)) = timer {
+                        let duration = start_time.elapsed();
+                        println!(
+                            "{} {} {} {}",
+                            "  > Query".bold(),
+                            label.blue(),
+                            "ran in".bold(),
+                            humantime::format_duration(duration).to_string().blue()
+                        );
+                    }
                 }
                 Record::HashThreshold(_) => {}
                 Record::Halt { .. } => break,
