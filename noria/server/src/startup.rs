@@ -96,7 +96,6 @@ pub(super) async fn start_instance(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    log: slog::Logger,
     region: Option<String>,
     replicator_url: Option<String>,
     reader_only: bool,
@@ -193,7 +192,6 @@ pub(super) async fn start_instance(
     };
 
     let controller = ControllerOuter {
-        log: log.new(slog::o!("module" => "controller")),
         inner: None,
         authority: authority.clone(),
         worker_tx,

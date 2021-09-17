@@ -54,14 +54,10 @@ async fn main() {
                 .default_value("none")
                 .help("Disable purging"),
         )
-        .arg(Arg::with_name("verbose").long("verbose").short("v"))
         .get_matches();
 
     let runtime = value_t_or_exit!(args, "time", u64);
     let mut builder = Builder::default();
-    if args.is_present("verbose") {
-        builder.log_with(noria::logger_pls());
-    }
 
     builder.set_persistence(PersistenceParameters {
         mode: DurabilityMode::MemoryOnly,

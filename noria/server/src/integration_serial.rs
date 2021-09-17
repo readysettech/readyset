@@ -222,7 +222,6 @@ async fn reader_replication() {
         cluster_name,
         Some(DEFAULT_SHARDING),
         true,
-        true,
         w1_authority,
         None,
         false,
@@ -238,7 +237,6 @@ async fn reader_replication() {
     let _w2 = build_custom(
         "reader_replication",
         Some(DEFAULT_SHARDING),
-        true,
         false,
         w2_authority,
         None,

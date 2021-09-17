@@ -3749,7 +3749,6 @@ dependencies = [
  "proptest",
  "psql-srv",
  "query_generator",
- "slog",
  "tempfile",
  "tokio 1.11.0",
  "tokio-postgres 0.7.2 (git+https://github.com/readysettech/rust-postgres.git)",

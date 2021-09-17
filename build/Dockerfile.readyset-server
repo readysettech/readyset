@@ -35,4 +35,4 @@ WORKDIR app
 RUN apt-get update
 RUN apt-get install -y libssl-dev curl
 COPY --from=builder /workdir/target/*/noria-server /bin/noria-server
-ENTRYPOINT ["/bin/noria-server", "--prometheus-metrics", "-v"]
+ENTRYPOINT ["/bin/noria-server", "--prometheus-metrics"]

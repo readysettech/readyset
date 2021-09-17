@@ -54,8 +54,6 @@ async fn make(
     // set up graph
     let mut b = Builder::default();
 
-    let main_log = noria::logger_pls();
-    b.log_with(main_log);
     if disable_partial {
         b.disable_partial();
     }

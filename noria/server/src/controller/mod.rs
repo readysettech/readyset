@@ -18,13 +18,12 @@ use noria::{
 use noria::{internal, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use slog::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::info_span;
+use tracing::{error, info, info_span, warn};
 use url::Url;
 
 mod domain_handle;
@@ -166,8 +165,6 @@ pub enum HandleRequest {
 /// A wrapper for a potential controller, also handling leader elections, HTTP requests that aren't
 /// destined for the worker, and requests originated from this server instance's `Handle`.
 pub struct ControllerOuter {
-    /// `slog` logging thingie.
-    pub(crate) log: slog::Logger,
     /// If we're the leader, the actual controller.
     pub(crate) inner: Option<ControllerInner>,
     /// The `Authority` structure used for leadership elections & such state.
@@ -251,7 +248,7 @@ impl ControllerOuter {
         };
 
         if reply_tx.send(ret).is_err() {
-            warn!(self.log, "client hung up");
+            warn!("client hung up");
         }
         Ok(())
     }
@@ -265,7 +262,7 @@ impl ControllerOuter {
                     .map(|ctrl| !ctrl.workers.is_empty())
                     .unwrap_or(false);
                 if tx.send(done).is_err() {
-                    warn!(self.log, "readiness query sender hung up!");
+                    warn!("readiness query sender hung up!");
                 }
             }
             HandleRequest::PerformMigration { func, done_tx } => {
@@ -276,7 +273,7 @@ impl ControllerOuter {
                     })
                     .await;
                 if done_tx.send(ret).is_err() {
-                    warn!(self.log, "handle-based migration sender hung up!");
+                    warn!("handle-based migration sender hung up!");
                 }
             }
         }
@@ -300,7 +297,7 @@ impl ControllerOuter {
         let url = match &self.replicator_url {
             Some(url) => url.to_string(),
             None => {
-                info!(self.log, "No primary instance specified");
+                info!("No primary instance specified");
                 return;
             }
         };
@@ -330,7 +327,7 @@ impl ControllerOuter {
                 .await?;
             }
             AuthorityUpdate::WonLeaderElection(state) => {
-                info!(self.log, "won leader election, creating ControllerInner");
+                info!("won leader election, creating ControllerInner");
                 self.inner = Some(ControllerInner::new(
                     state.clone(),
                     self.our_descriptor.controller_uri.clone(),
@@ -381,7 +378,7 @@ impl ControllerOuter {
                         self.handle_handle_request(req).await?;
                     }
                     else {
-                        info!(self.log, "ControllerOuter shutting down after request handle dropped");
+                        info!("ControllerOuter shutting down after request handle dropped");
                         break;
                     }
                 }
@@ -390,14 +387,14 @@ impl ControllerOuter {
                         self.handle_controller_request(req).await?;
                     }
                     else {
-                        info!(self.log, "ControllerOuter shutting down after HTTP handle dropped");
+                        info!("ControllerOuter shutting down after HTTP handle dropped");
                         break;
                     }
                 }
                 req = self.authority_rx.recv() => {
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
-                        None if self.inner.is_some() => info!(self.log, "leadership campaign terminated normally"),
+                        None if self.inner.is_some() => info!("leadership campaign terminated normally"),
                         // this shouldn't ever happen: if the leadership campaign thread fails,
                         // it should send a `CampaignError` that we handle above first before
                         // ever hitting this bit
@@ -406,7 +403,7 @@ impl ControllerOuter {
                     }
                 }
                 _ = shutdown_stream.next() => {
-                    info!(self.log, "ControllerOuter shutting down after valve shut");
+                    info!("ControllerOuter shutting down after valve shut");
                     break;
                 }
             }
@@ -414,9 +411,9 @@ impl ControllerOuter {
         if self.inner.is_some() {
             self.stop_replication_task().await;
 
-            if let Err(e) = self.authority.surrender_leadership().await {
-                error!(self.log, "failed to surrender leadership");
-                internal!("failed to surrender leadership: {}", e)
+            if let Err(error) = self.authority.surrender_leadership().await {
+                error!(%error, "failed to surrender leadership");
+                internal!("failed to surrender leadership: {}", error)
             }
         }
         Ok(())

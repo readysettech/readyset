@@ -29,7 +29,6 @@ async fn main() {
     // set up Soup via recipe
     let mut builder = Builder::default();
 
-    builder.log_with(noria_server::logger_pls());
     builder.set_persistence(persistence_params);
 
     let mut blender = builder.start_local().await.unwrap();

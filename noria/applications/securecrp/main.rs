@@ -15,14 +15,10 @@ pub struct Backend {
 impl Backend {
     pub async fn new(partial: bool, _shard: bool, reuse: &str) -> Backend {
         let mut cb = Builder::default();
-        let log = noria::logger_pls();
-        let blender_log = log.clone();
 
         if !partial {
             cb.disable_partial();
         }
-
-        cb.log_with(blender_log);
 
         match reuse {
             "finkelstein" => cb.set_reuse(Some(ReuseConfigType::Finkelstein)),

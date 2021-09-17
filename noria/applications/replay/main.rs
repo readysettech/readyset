@@ -40,16 +40,8 @@ QUERY query_c8: SELECT * FROM TableRow WHERE c8 = ?;
 QUERY query_c9: SELECT * FROM TableRow WHERE c9 = ?;
 ";
 
-async fn build_graph(
-    authority: Arc<Authority>,
-    persistence: PersistenceParameters,
-    verbose: bool,
-) -> Handle {
+async fn build_graph(authority: Arc<Authority>, persistence: PersistenceParameters) -> Handle {
     let mut builder = Builder::default();
-    if verbose {
-        builder.log_with(noria::logger_pls());
-    }
-
     builder.set_persistence(persistence);
     builder.set_sharding(None);
     builder.start(authority).await.unwrap()
@@ -306,7 +298,7 @@ async fn main() {
 
     if !args.is_present("use-existing-data") {
         clear_zookeeper(zk_address);
-        let mut g = build_graph(authority.clone(), persistence.clone(), verbose).await;
+        let mut g = build_graph(authority.clone(), persistence.clone()).await;
         if use_secondary {
             g.install_recipe(SECONDARY_RECIPE).await.unwrap();
         } else {
@@ -338,7 +330,7 @@ async fn main() {
     }
 
     // Recover the previous graph and perform reads:
-    let mut g = build_graph(authority, persistence, verbose).await;
+    let mut g = build_graph(authority, persistence).await;
     // Flush disk cache:
     Command::new("sync")
         .spawn()
