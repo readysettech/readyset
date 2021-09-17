@@ -15,9 +15,9 @@ use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
-use slog::{debug, info, trace};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
+use tracing::{debug, info, trace};
 use vec1::Vec1;
 
 pub(super) struct Plan<'a> {
@@ -331,7 +331,7 @@ impl<'a> Plan<'a> {
             // technically redundant because path.len() > 1, but still
             invariant!(!segments.is_empty());
 
-            info!(self.m.log, "domain replay path is {:?}", segments; "tag" => tag);
+            info!(%tag, "domain replay path is {:?}", segments);
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;
@@ -362,8 +362,12 @@ impl<'a> Plan<'a> {
                             }
                         }
                         if generated {
-                            info!(self.m.log, "telling domain about generated columns {:?} on {}",
-                                cols, first.0.index(); "domain" => domain.index());
+                            info!(
+                                domain = %domain.index(),
+                                "telling domain about generated columns {:?} on {}",
+                                cols,
+                                first.0.index()
+                            );
 
                             #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                             self.dmp.add_message(
@@ -561,7 +565,7 @@ impl<'a> Plan<'a> {
                                 }
                             };
 
-                            debug!(self.m.log, "picked source selection policy"; "policy" => ?selection, "tag" => tag);
+                            debug!(policy = ?selection, %tag, "picked source selection policy");
                             #[allow(clippy::indexing_slicing)] // checked by invariant!() earlier
                             {
                                 *trigger = TriggerEndpoint::End(selection, segments[0].0);
@@ -630,7 +634,7 @@ impl<'a> Plan<'a> {
                     }
                 }
 
-                trace!(self.m.log, "telling domain about replay path"; "domain" => domain.index());
+                trace!(domain = %domain.index(), "telling domain about replay path");
                 self.dmp.add_message(domain, setup)?;
             }
 

@@ -15,12 +15,12 @@ use maplit::hashmap;
 use noria::{internal, invariant, ReadySetError};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use slog::{crit, debug, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
 mod plan;
@@ -68,8 +68,6 @@ enum IndexObligation {
 
 #[derive(Clone)]
 pub(in crate::controller) struct Materializations {
-    log: Logger,
-
     /// Nodes that are (fully or partially) materialized.
     have: HashMap<NodeIndex, Indices>,
     /// Nodes materialized since the last time `commit()` was invoked.
@@ -95,10 +93,8 @@ pub(in crate::controller) struct Materializations {
 
 impl Materializations {
     /// Create a new set of materializations.
-    pub(in crate::controller) fn new(logger: &Logger) -> Self {
+    pub(in crate::controller) fn new() -> Self {
         Materializations {
-            log: logger.new(o!()),
-
             have: HashMap::default(),
             added: HashMap::default(),
             new_readers: HashSet::default(),
@@ -114,11 +110,6 @@ impl Materializations {
 
             tag_generator: Arc::new(AtomicUsize::default()),
         }
-    }
-
-    #[allow(unused)]
-    pub(in crate::controller) fn set_logger(&mut self, logger: &Logger) {
-        self.log = logger.new(o!());
     }
 
     /// Disable partial materialization for all new materializations.
@@ -141,6 +132,8 @@ impl Materializations {
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
     fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) -> ReadySetResult<()> {
+        let span = info_span!("materializations:extend");
+        let _g = span.enter();
         // this code used to be a mess, and will likely be a mess this time around too.
         // but, let's try to start out in a principled way...
         //
@@ -224,9 +217,11 @@ impl Materializations {
             }
 
             for (ni, obligation) in indices {
-                trace!(self.log, "new indexing obligation";
-                           "node" => ni.index(),
-                           "obligation" => ?obligation,);
+                trace!(
+                    node = %ni.index(),
+                    obligation = ?obligation,
+                    "new indexing obligation"
+                );
 
                 match obligation {
                     IndexObligation::Replay(index) => {
@@ -310,19 +305,21 @@ impl Materializations {
                 );
 
                 // hoist index to parent
-                trace!(self.log, "hoisting indexing obligations";
-                       "for" => mi.index(),
-                       "to" => parent.index());
+                trace!(
+                    for_node = %mi.index(),
+                    to_node  = %parent.index(),
+                    "hoisting indexing obligations"
+                );
                 mi = parent;
                 indices = map_indices(m, mi, &indices).unwrap();
                 m = &graph[mi];
             }
 
             for columns in indices {
-                info!(self.log,
-                    "adding lookup index to view";
-                    "node" => ni.index(),
-                    "columns" => ?columns,
+                info!(
+                    node = %ni.index(),
+                    ?columns,
+                    "adding lookup index to view"
                 );
 
                 if self.have.entry(mi).or_default().insert(columns.clone()) {
@@ -382,7 +379,7 @@ impl Materializations {
             }
 
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
-                warn!(self.log, "full because required"; "node" => ni.index());
+                warn!(node = %ni.index(), "full because required");
                 able = false;
             }
 
@@ -392,7 +389,7 @@ impl Materializations {
                     != self.have.get(&ni).map(|i| i.len()).unwrap_or(0)
                 && !self.partial.contains(&ni)
             {
-                warn!(self.log, "cannot turn full into partial"; "node" => ni.index());
+                warn!(node = %ni.index(), "cannot turn full into partial");
                 able = false;
             }
 
@@ -411,7 +408,7 @@ impl Materializations {
                     // materialized child -- don't need to keep walking along this path
                     if !self.partial.contains(&child) {
                         // child is full, so we can't be partial
-                        warn!(self.log, "full because descendant is full"; "node" => ni.index(), "child" => child.index());
+                        warn!(node = %ni.index(), child = %child.index(), "full because descendant is full");
                         stack.clear();
                         able = false
                     }
@@ -419,7 +416,7 @@ impl Materializations {
                     // reader child (which is effectively materialized)
                     if !self.partial.contains(&child) {
                         // reader is full, so we can't be partial
-                        warn!(self.log, "full because reader below is full"; "node" => ni.index(), "reader" => child.index());
+                        warn!(node = %ni.index(), reader = %child.index(), "full because reader below is full");
                         stack.clear();
                         able = false
                     }
@@ -454,9 +451,8 @@ impl Materializations {
                         match cols {
                             None => {
                                 warn!(
-                                    self.log,
-                                    "full because node before {} requested full replay",
-                                    node.index()
+                                    node = %node.index(),
+                                    "full because node before requested full replay",
                                 );
                                 able = false;
                                 break 'attempt;
@@ -474,9 +470,8 @@ impl Materializations {
                                     break;
                                 }
                                 if i == 0 && n_to_skip == 0 {
-                                    let log = &self.log;
                                     self.have.entry(node).or_insert_with(|| {
-                                        warn!(log, "forcing materialization for node {} with generated columns", node.index());
+                                        warn!(node = %node.index(), "forcing materialization for node with generated columns");
                                         HashSet::new()
                                     });
 
@@ -493,7 +488,7 @@ impl Materializations {
             if able {
                 // we can do partial if we add all those indices!
                 self.partial.insert(ni);
-                warn!(self.log, "using partial materialization for {}", ni.index());
+                warn!(node = %ni.index(), "using partial materialization");
                 for (mi, indices) in add {
                     let m = replay_obligations.entry(mi).or_default();
                     for index in indices {
@@ -513,10 +508,10 @@ impl Materializations {
                     let new_index = m.insert(index.clone());
 
                     if new_index {
-                        info!(self.log,
-                          "adding index to view to enable partial";
-                          "on" => ni.index(),
-                          "columns" => ?index,
+                        info!(
+                          on = %ni.index(),
+                          columns = ?index,
+                          "adding index to view to enable partial"
                         );
                     }
 
@@ -601,9 +596,11 @@ impl Materializations {
 
                 if let Some(pi) = any_partial(self, graph, ni) {
                     println!("{}", graphviz(graph, true, self));
-                    crit!(self.log, "partial materializations above full materialization";
-                              "full" => ni.index(),
-                              "partial" => pi.index());
+                    error!(
+                        full = %ni.index(),
+                        partial = %pi.index(),
+                        "partial materializations above full materialization"
+                    );
                     internal!(
                         "partial materializations ({:?}) above full materialization ({:?})",
                         pi.index(),
@@ -709,17 +706,18 @@ impl Materializations {
                                                 // never happen.
                                                 // This code should probably just be taken out soon.
                                                 println!("{}", graphviz(graph, true, self));
-                                                crit!(self.log, "partially overlapping partial indices";
-                                                          "parent" => node.index(),
-                                                          "pcols" => ?index,
-                                                          "child" => ni.index(),
-                                                          "cols" => ?columns,
-                                                          "conflict" => not_shared,
+                                                error!(
+                                                    parent = %node.index(),
+                                                    pcols = ?index,
+                                                    child = %ni.index(),
+                                                    cols = ?columns,
+                                                    conflict = not_shared,
+                                                    "partially lapping partial indices"
                                                 );
                                                 internal!(
-                                        "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
-                                        node.index(), index, &self.have[&node], ni.index(), columns
-                                        );
+                                                    "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
+                                                    node.index(), index, &self.have[&node], ni.index(), columns
+                                                );
                                             }
                                         }
                                     } else if self.have.contains_key(&ni) {
@@ -783,12 +781,13 @@ impl Materializations {
                         {
                             // another column in the merger's parent resolved to the source column!
                             //println!("{}", graphviz(graph, &self));
-                            crit!(self.log, "attempting to merge sharding by aliased column";
-                                      "parent" => mat_anc.index(),
-                                      "aliased" => res,
-                                      "sharded" => parent.index(),
-                                      "alias" => c,
-                                      "shard" => col,
+                            error!(
+                                parent = %mat_anc.index(),
+                                aliased = ?res,
+                                sharded = %parent.index(),
+                                alias = c,
+                                shard = col,
+                                "attempting to merge sharding by aliased column"
                             );
                             internal!("attempting to merge sharding by aliased column (parent {:?}, aliased {:?}, sharded {:?}, alias {:?}, shard {:?})", mat_anc.index(), res, parent.index(), c, col)
                         }
@@ -811,8 +810,7 @@ impl Materializations {
                         continue;
                     }
                     if !self.have.contains_key(&pi) {
-                        warn!(self.log, "no associated state with purged node";
-                              "node" => ni.index());
+                        warn!(node = %ni.index(), "no associated state with purged node");
                         continue;
                     }
                     invariant!(
@@ -894,11 +892,10 @@ impl Materializations {
                         {
                             // node was previously materialized!
                             println!("{}", graphviz(graph, true, self));
-                            crit!(
-                                self.log,
-                                "attempting to make old non-materialized node with children partial";
-                                "node" => node.index(),
-                                "child" => child.index(),
+                            error!(
+                                node = %node.index(),
+                                child = %child.index(),
+                                "attempting to make old non-materialized node with children partial"
                             );
                             internal!("attempting to make old non-materialized node ({:?}) with child ({:?}) partial", node.index(), child.index());
                         }
@@ -909,26 +906,31 @@ impl Materializations {
                     }
                 }
 
-                warn!(self.log, "materializing existing non-materialized node";
-                      "node" => node.index(),
-                      "cols" => ?index_on);
+                warn!(
+                    node = %node.index(),
+                    cols = ?index_on,
+                    "materializing existing non-materialized node"
+                );
             }
 
             let n = &graph[node];
             if self.partial.contains(&node) {
-                info!(self.log, "adding partial index to existing {:?}", n;
-                      "node" => node.index(),
-                      "cols" => ?index_on);
+                info!(
+                    node = %node.index(),
+                    cols = ?index_on,
+                    "adding partial index to existing {:?}", n
+                );
             }
-            let log = self.log.new(o!("node" => node.index()));
-            let log = mem::replace(&mut self.log, log);
             // We attempt to maintain the invariant that the materialization planner is always run
             // for every new added index, because replays might need to be done (or replay paths
             // set up, if we're partial).
             // This is somewhat wasteful in some (fully materialized) cases, but it's a lot easier
             // to reason about if all the replay decisions happen in the planner.
-            self.setup(node, &mut index_on, graph, dmp)?;
-            self.log = log;
+            {
+                let span = info_span!("reconstructing node", node = %node.index());
+                let _guard = span.enter();
+                self.setup(node, &mut index_on, graph, dmp)?;
+            }
             index_on.clear();
         }
 
@@ -954,7 +956,7 @@ impl Materializations {
             // acknowledge the change. this is important so that we don't ready a child in a
             // different domain before the parent has been readied. it's also important to avoid us
             // returning before the graph is actually fully operational.
-            trace!(self.log, "readying node"; "node" => ni.index());
+            trace!(node = %ni.index(), "readying node");
             dmp.add_message(
                 n.domain(),
                 DomainRequest::Ready {
@@ -963,12 +965,13 @@ impl Materializations {
                     index: index_on,
                 },
             )?;
-            trace!(self.log, "node ready"; "node" => ni.index());
+            trace!(node = %ni.index(), "node ready");
 
             if reconstructed {
-                info!(self.log, "reconstruction completed";
-                "ms" => start.elapsed().as_millis(),
-                "node" => ni.index(),
+                info!(
+                    ms = %start.elapsed().as_millis(),
+                    node = %ni.index(),
+                    "reconstruction completed"
                 );
             }
         }
@@ -992,17 +995,17 @@ impl Materializations {
 
         if has_state {
             if self.partial.contains(&ni) {
-                debug!(self.log, "new partially-materialized node: {:?}", n);
+                debug!("new partially-materialized node: {:?}", n);
             } else {
-                debug!(self.log, "new fully-materalized node: {:?}", n);
+                debug!("new fully-materalized node: {:?}", n);
             }
         } else {
-            debug!(self.log, "new stateless node: {:?}", n);
+            debug!("new stateless node: {:?}", n);
         }
 
         if n.is_base() {
             // a new base must be empty, so we can materialize it immediately
-            info!(self.log, "no need to replay empty new base"; "node" => ni.index());
+            info!(node = %ni.index(), "no need to replay empty new base");
             assert!(!self.partial.contains(&ni));
             return Ok(());
         }
@@ -1016,16 +1019,17 @@ impl Materializations {
         }
 
         if !has_state {
-            debug!(self.log, "no need to replay non-materialized view"; "node" => ni.index());
+            debug!(node = %ni.index(), "no need to replay non-materialized view");
             return Ok(());
         }
 
         // we have a parent that has data, so we need to replay and reconstruct
-        info!(self.log, "beginning reconstruction of {:?}", n);
-        let log = self.log.new(o!("node" => ni.index()));
-        let log = mem::replace(&mut self.log, log);
-        self.setup(ni, index_on, graph, dmp)?;
-        self.log = log;
+        {
+            let span = info_span!("reconstructing node", node = %ni.index());
+            let _guard = span.enter();
+            info!("beginning reconstruction of {:?}", n);
+            self.setup(ni, index_on, graph, dmp)?;
+        }
 
         // NOTE: the state has already been marked ready by the replay completing, but we want to
         // wait for the domain to finish replay, which the ready executed by the outer commit()
@@ -1069,12 +1073,14 @@ impl Materializations {
         self.paths.get_mut(&ni).unwrap().extend(paths);
 
         if !pending.is_empty() {
-            trace!(self.log, "all domains ready for replay");
+            trace!("all domains ready for replay");
             // prepare for, start, and wait for replays
             for pending in pending {
                 // tell the first domain to start playing
-                info!(self.log, "telling root domain to start replay";
-                   "domain" => pending.source_domain.index());
+                info!(
+                    domain = %pending.source_domain.index(),
+                    "telling root domain to start replay"
+                );
 
                 dmp.add_message(
                     pending.source_domain,
@@ -1086,9 +1092,9 @@ impl Materializations {
             }
             // and then wait for the last domain to receive all the records
             let target = graph[ni].domain();
-            info!(self.log,
-               "waiting for done message from target";
-               "domain" => target.index(),
+            info!(
+               domain = %target.index(),
+               "waiting for done message from target"
             );
             dmp.add_message(target, DomainRequest::QueryReplayDone)?;
         }
