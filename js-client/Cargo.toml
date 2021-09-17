@@ -15,7 +15,6 @@ noria-client = { path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }
 noria = { path = "../noria/noria/" }
 nom-sql = { path = "../nom-sql" }
-slog = "2.4.0"
 zookeeper = "0.5.4"
 tokio = { version = "1.8.1", features = ["full"] }
 maplit = "1.0.2"

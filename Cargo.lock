@@ -2475,7 +2475,6 @@ dependencies = [
  "noria-client",
  "noria-mysql",
  "serde_json",
- "slog",
  "tokio 1.11.0",
  "zookeeper",
 ]
