@@ -60,4 +60,4 @@ resource "aws_ecr_repository_policy" "mirror_primary" {
   policy     = data.aws_iam_policy_document.mirror.json
 }
 
-// TODO: Import our existing repositories
+# TODO: Import our existing repositories
