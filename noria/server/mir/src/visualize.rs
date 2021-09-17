@@ -1,25 +1,36 @@
 use itertools::Itertools;
-use std::collections::HashMap;
-use std::fmt::{self, Write};
+use std::collections::{HashMap, VecDeque};
+use std::fmt::{self, Display};
 
 use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
 use dataflow::ops::grouped::extremum::Extremum as ExtremumKind;
 use dataflow::ops::union;
 
+use crate::column::Column;
 use crate::node::node_inner::MirNodeInner;
 use crate::node::MirNode;
 use crate::query::MirQuery;
 
+pub struct GraphVizzed<'a, T: ?Sized>(&'a T);
+
+impl<'a, T> Display for GraphVizzed<'a, T>
+where
+    T: GraphViz,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.graphviz_fmt(f)
+    }
+}
+
 pub trait GraphViz {
-    fn to_graphviz(&self) -> Result<String, fmt::Error>;
+    fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result;
+    fn to_graphviz(&self) -> GraphVizzed<Self> {
+        GraphVizzed(self)
+    }
 }
 
 impl GraphViz for MirQuery {
-    fn to_graphviz(&self) -> Result<String, fmt::Error> {
-        use std::collections::VecDeque;
-
-        let mut out = String::new();
-
+    fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // starting at the roots, print nodes in topological order
         let mut node_queue = VecDeque::new();
         node_queue.extend(self.roots.iter().cloned());
@@ -28,8 +39,8 @@ impl GraphViz for MirQuery {
             in_edge_counts.insert(n.borrow().versioned_name(), 0);
         }
 
-        out.write_str("digraph {\n")?;
-        out.write_str("node [shape=record, fontsize=10]\n")?;
+        f.write_str("digraph {\n")?;
+        f.write_str("node [shape=record, fontsize=10]\n")?;
 
         while !node_queue.is_empty() {
             let n = node_queue.pop_front().unwrap();
@@ -37,16 +48,16 @@ impl GraphViz for MirQuery {
 
             let vn = n.borrow().versioned_name();
             writeln!(
-                out,
+                f,
                 "\"{}\" [label=\"{{ {} | {} }}\"]",
                 vn,
                 vn,
-                n.borrow().to_graphviz()?,
+                n.borrow().to_graphviz(),
             )?;
 
             for child in n.borrow().children.iter() {
                 let nd = child.borrow().versioned_name();
-                writeln!(out, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
+                writeln!(f, "\"{}\" -> \"{}\"", n.borrow().versioned_name(), nd)?;
                 let in_edges = if in_edge_counts.contains_key(&nd) {
                     in_edge_counts[&nd]
                 } else {
@@ -60,20 +71,16 @@ impl GraphViz for MirQuery {
                 in_edge_counts.insert(nd, in_edges - 1);
             }
         }
-        out.write_str("}\n")?;
-
-        Ok(out)
+        f.write_str("}\n")
     }
 }
 
 impl GraphViz for MirNode {
-    fn to_graphviz(&self) -> Result<String, fmt::Error> {
-        let mut out = String::new();
-
+    fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
-            out,
+            f,
             "{} | {}",
-            self.inner.to_graphviz()?,
+            self.inner.to_graphviz(),
             self.columns
                 .iter()
                 .map(|c| match c.table {
@@ -82,17 +89,12 @@ impl GraphViz for MirNode {
                 })
                 .collect::<Vec<_>>()
                 .join(",\\n"),
-        )?;
-        Ok(out)
+        )
     }
 }
 
 impl GraphViz for MirNodeInner {
-    fn to_graphviz(&self) -> Result<String, fmt::Error> {
-        use crate::column::Column;
-
-        let mut out = String::new();
-
+    fn graphviz_fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let print_col = |c: &Column| -> String {
             match c.table {
                 None => c.name.clone(),
@@ -119,7 +121,7 @@ impl GraphViz for MirNodeInner {
                     .map(|c| print_col(c))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "{} | γ: {}", op_string, group_cols)?;
+                write!(f, "{} | γ: {}", op_string, group_cols)
             }
             MirNodeInner::Base {
                 ref column_specs,
@@ -127,7 +129,7 @@ impl GraphViz for MirNodeInner {
                 ..
             } => {
                 write!(
-                    out,
+                    f,
                     "B | {} | ⚷: {}",
                     column_specs
                         .iter()
@@ -138,7 +140,7 @@ impl GraphViz for MirNodeInner {
                         .map(|c| c.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
-                )?;
+                )
             }
             MirNodeInner::Extremum {
                 ref on,
@@ -154,14 +156,11 @@ impl GraphViz for MirNodeInner {
                     .map(|c| print_col(c))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "{} | γ: {}", op_string, group_cols)?;
+                write!(f, "{} | γ: {}", op_string, group_cols)
             }
-            MirNodeInner::Filter { ref conditions, .. } => {
-                write!(out, "σ: {}", conditions)?;
-            }
-            MirNodeInner::Identity => {
-                write!(out, "≡")?;
-            }
+            MirNodeInner::Filter { ref conditions, .. } => write!(f, "σ: {}", conditions),
+
+            MirNodeInner::Identity => write!(f, "≡"),
             MirNodeInner::Join {
                 ref on_left,
                 ref on_right,
@@ -173,18 +172,17 @@ impl GraphViz for MirNodeInner {
                     .map(|(l, r)| format!("{}:{}", print_col(l), print_col(r)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "⋈  | on: {}", jc)?;
+                write!(f, "⋈  | on: {}", jc)
             }
-            MirNodeInner::JoinAggregates => {
-                write!(out, "AGG ⋈")?;
-            }
+            MirNodeInner::JoinAggregates => write!(f, "AGG ⋈"),
+
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
                     .map(|k| print_col(k))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "Leaf | ⚷: {}", key_cols)?;
+                write!(f, "Leaf | ⚷: {}", key_cols)
             }
             MirNodeInner::LeftJoin {
                 ref on_left,
@@ -197,7 +195,7 @@ impl GraphViz for MirNodeInner {
                     .map(|(l, r)| format!("{}:{}", print_col(l), print_col(r)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "⋉  | on: {}", jc)?;
+                write!(f, "⋉  | on: {}", jc)
             }
             MirNodeInner::Latest { ref group_by } => {
                 let key_cols = group_by
@@ -205,7 +203,7 @@ impl GraphViz for MirNodeInner {
                     .map(|k| print_col(k))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "⧖ | γ: {}", key_cols)?;
+                write!(f, "⧖ | γ: {}", key_cols)
             }
             MirNodeInner::Project {
                 ref emit,
@@ -213,7 +211,7 @@ impl GraphViz for MirNodeInner {
                 ref expressions,
             } => {
                 write!(
-                    out,
+                    f,
                     "π: {}",
                     emit.iter()
                         .map(|c| print_col(c))
@@ -228,10 +226,10 @@ impl GraphViz for MirNodeInner {
                                 .map(|&(ref n, ref e)| format!("{}: {}", n, e))
                         )
                         .join(", ")
-                )?;
+                )
             }
             MirNodeInner::Reuse { ref node } => {
-                write!(out, "Reuse | using: {}", node.borrow().versioned_name(),)?;
+                write!(f, "Reuse | using: {}", node.borrow().versioned_name(),)
             }
             MirNodeInner::Distinct { ref group_by } => {
                 let key_cols = group_by
@@ -239,13 +237,13 @@ impl GraphViz for MirNodeInner {
                     .map(|k| print_col(k))
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(out, "Distinct | γ: {}", key_cols)?;
+                write!(f, "Distinct | γ: {}", key_cols)
             }
             MirNodeInner::TopK {
                 ref order, ref k, ..
             } => {
                 write!(
-                    out,
+                    f,
                     "TopK [k: {}; {}]",
                     k,
                     order
@@ -256,7 +254,7 @@ impl GraphViz for MirNodeInner {
                             .collect::<Vec<_>>()
                             .join(", "))
                         .unwrap_or_else(|| "".into())
-                )?;
+                )
             }
             MirNodeInner::Union {
                 ref emit,
@@ -276,7 +274,7 @@ impl GraphViz for MirNodeInner {
                     })
                     .join(&format!(" {} ", symbol));
 
-                write!(out, "{}", cols)?;
+                write!(f, "{}", cols)
             }
             MirNodeInner::ParamFilter {
                 ref col,
@@ -284,14 +282,13 @@ impl GraphViz for MirNodeInner {
                 ref operator,
             } => {
                 write!(
-                    out,
+                    f,
                     "σφ | col: {}, emit_key: {}, operator: {}",
                     print_col(col),
                     print_col(emit_key),
                     operator
-                )?;
+                )
             }
         }
-        Ok(out)
     }
 }
