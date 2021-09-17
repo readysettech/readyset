@@ -384,10 +384,7 @@ impl ControllerInner {
                 }
 
                 info!(self.log, "Restoring graph configuration");
-                self.recipe = Recipe::with_version(
-                    recipe_version + 1 - recipes.len(),
-                    Some(self.log.clone()),
-                );
+                self.recipe = Recipe::with_version(recipe_version + 1 - recipes.len());
                 for r in recipes {
                     if let Err(e) = self
                         .recipe
@@ -600,7 +597,7 @@ impl ControllerInner {
             None
         };
 
-        let mut recipe = Recipe::blank(Some(log.clone()));
+        let mut recipe = Recipe::blank();
         match state.config.reuse {
             Some(reuse) => recipe.enable_reuse(reuse),
             None => recipe.disable_reuse(),
@@ -1288,7 +1285,7 @@ impl ControllerInner {
             Err(ref e) => {
                 crit!(self.log, "failed to apply recipe: {}", e);
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
-                let recipe = mem::replace(&mut self.recipe, Recipe::blank(None));
+                let recipe = mem::replace(&mut self.recipe, Recipe::blank());
                 self.recipe = recipe.revert();
             }
         }
@@ -1303,7 +1300,7 @@ impl ControllerInner {
     ) -> Result<ActivationResult, ReadySetError> {
         let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
-        let new = mem::replace(&mut self.recipe, Recipe::blank(None));
+        let new = mem::replace(&mut self.recipe, Recipe::blank());
         let add_txt = add_txt_spec.recipe;
 
         match new.extend(add_txt) {
@@ -1360,10 +1357,10 @@ impl ControllerInner {
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
 
-        match Recipe::from_str(r_txt, Some(self.log.clone())) {
+        match Recipe::from_str(r_txt) {
             Ok(r) => {
                 let _old = self.recipe.clone();
-                let old = mem::replace(&mut self.recipe, Recipe::blank(None));
+                let old = mem::replace(&mut self.recipe, Recipe::blank());
                 let new = old
                     .replace(r)
                     .map_err(|e| internal_err(format!("recipe replace failed: {}", e)))?;
