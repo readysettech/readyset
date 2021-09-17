@@ -811,12 +811,6 @@ impl SqlToMirConverter {
                 distinct,
             ),
             CountStar => {
-                // XXX(malte): there is no "over" column, but our aggregation operators' API
-                // requires one to be specified, so we earlier rewrote it to use the last parent
-                // column (see passes/count_star_rewrite.rs). However, this isn't *entirely*
-                // faithful to COUNT(*) semantics, because COUNT(*) is supposed to count all
-                // rows including those with NULL values, and we don't have a mechanism to do that
-                // (but we also don't have a NULL value, so maybe we're okay).
                 internal!("COUNT(*) should have been rewritten earlier!")
             }
             Count {
