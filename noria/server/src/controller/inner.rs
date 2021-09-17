@@ -584,7 +584,7 @@ impl ControllerInner {
             node::special::Source,
         ));
 
-        let mut materializations = Materializations::new(&log);
+        let mut materializations = Materializations::new();
         if !state.config.partial_enabled {
             materializations.disable_partial()
         }
@@ -804,7 +804,6 @@ impl ControllerInner {
     #[allow(unused)]
     fn log_with(&mut self, log: slog::Logger) {
         self.log = log;
-        self.materializations.set_logger(&self.log);
     }
 
     /// Perform a new query schema migration.
