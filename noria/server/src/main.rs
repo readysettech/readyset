@@ -158,10 +158,14 @@ struct Opts {
     /// Volume associated with the server.
     #[clap(long)]
     volume_id: Option<VolumeId>,
+
+    #[clap(flatten)]
+    logging: readyset_logging::Options,
 }
 
 fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
+    opts.logging.init()?;
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())
