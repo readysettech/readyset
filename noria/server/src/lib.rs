@@ -460,14 +460,6 @@ impl Default for Config {
     }
 }
 
-/// Just give me a damn terminal logger
-pub fn logger_pls() -> slog::Logger {
-    use slog::{o, Drain, Logger};
-    use slog_term::term_full;
-    use std::sync::Mutex;
-    Logger::root(Mutex::new(term_full()).fuse(), o!())
-}
-
 use futures_util::sink::Sink;
 use std::{
     pin::Pin,
