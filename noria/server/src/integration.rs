@@ -39,7 +39,6 @@ use vec1::vec1;
 async fn it_completes() {
     let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
-    builder.log_with(crate::logger_pls());
     builder.set_persistence(get_persistence_params("it_completes"));
     let g = builder.start_local().await.unwrap();
 
@@ -292,7 +291,7 @@ async fn sharded_shuffle() {
 #[tokio::test(flavor = "multi_thread")]
 async fn broad_recursing_upquery() {
     let nshards = 16;
-    let mut g = build("bru", Some(nshards), false).await;
+    let mut g = build("bru", Some(nshards)).await;
 
     // our goal here is to have a recursive upquery such that both levels of the upquery require
     // contacting _all_ shards. in this setting, any miss at the leaf requires the upquery to go to
@@ -1094,7 +1093,6 @@ async fn it_recovers_persisted_bases() {
 
     {
         let mut g = Builder::for_tests();
-        g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         let mut g = g.start(authority.clone()).await.unwrap();
         sleep().await;
@@ -1131,7 +1129,6 @@ async fn it_recovers_persisted_bases() {
 
     let mut g = Builder::for_tests();
     g.set_persistence(persistence_params);
-    g.log_with(crate::logger_pls());
     let mut g = g.start(authority.clone()).await.unwrap();
     sleep().await;
     {
@@ -1168,7 +1165,6 @@ async fn it_recovers_persisted_bases_with_volume_id() {
 
     {
         let mut g = Builder::for_tests();
-        g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
         let mut g = g.start(authority.clone()).await.unwrap();
@@ -1206,7 +1202,6 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     let mut g = Builder::for_tests();
     g.set_persistence(persistence_params);
     g.set_volume_id("ef731j2".into());
-    g.log_with(crate::logger_pls());
     let mut g = g.start(authority.clone()).await.unwrap();
     sleep().await;
     {
@@ -1239,7 +1234,6 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
 
     {
         let mut g = Builder::for_tests();
-        g.log_with(crate::logger_pls());
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
         let mut g = g.start(authority.clone()).await.unwrap();
@@ -1275,7 +1269,6 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
     let authority = Arc::new(Authority::from(LocalAuthority::new()));
     g.set_persistence(persistence_params);
     g.set_volume_id("j3131t8".into());
-    g.log_with(crate::logger_pls());
     let mut g = g.start(authority.clone()).await.unwrap();
     let getter = g.view("CarPrice").await;
     // This throws an error because there is no worker to place the domain on.
@@ -1401,7 +1394,6 @@ async fn table_connection_churn() {
     let mut builder = Builder::for_tests();
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("connection_churn"));
-    // builder.log_with(crate::logger_pls());
     let mut g = builder.start(authority.clone()).await.unwrap();
 
     g.install_recipe("CREATE TABLE A (id int, PRIMARY KEY(id));")
@@ -3130,12 +3122,9 @@ async fn recipe_activates_and_migrates_with_join() {
     assert_eq!(g.outputs().await.unwrap().len(), 1);
 }
 
-async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, log: bool) {
-    use crate::logger_pls;
+async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) {
     use std::fs::File;
     use std::io::Read;
-
-    let logger = if log { Some(logger_pls()) } else { None };
 
     // set up graph
     let mut g = if shard {
@@ -3225,12 +3214,12 @@ async fn finkelstein1982_queries() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tpc_w() {
-    test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true, false).await;
+    test_queries("tpc-w", "tests/tpc-w-queries.txt", true, true).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lobsters() {
-    test_queries("lobsters", "tests/lobsters-schema.txt", false, false, false).await;
+    test_queries("lobsters", "tests/lobsters-schema.txt", false, false).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3238,7 +3227,6 @@ async fn soupy_lobsters() {
     test_queries(
         "soupy_lobsters",
         "tests/soupy-lobsters-schema.txt",
-        false,
         false,
         false,
     )
@@ -3252,7 +3240,6 @@ async fn mergeable_lobsters() {
         "tests/mergeable-lobsters-schema.sql",
         false,
         false,
-        false,
     )
     .await;
 }
@@ -3262,7 +3249,6 @@ async fn filter_aggregate_lobsters() {
     test_queries(
         "filter_aggregate_lobsters",
         "tests/filter-aggregate-lobsters-schema.sql",
-        false,
         false,
         false,
     )
@@ -4830,7 +4816,6 @@ async fn test_view_includes_replicas() {
     let mut w1 = build_custom(
         cluster_name,
         Some(DEFAULT_SHARDING),
-        false,
         true,
         w1_authority,
         Some("r1".try_into().unwrap()),
@@ -4847,7 +4832,6 @@ async fn test_view_includes_replicas() {
     let _w2 = build_custom(
         "view_includes_replicas",
         Some(DEFAULT_SHARDING),
-        false,
         false,
         w2_authority,
         Some("r2".try_into().unwrap()),
@@ -4933,7 +4917,7 @@ async fn test_view_includes_replicas() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overlapping_indices() {
-    let mut g = start_simple_logging("overlapping_indices").await;
+    let mut g = start_simple("overlapping_indices").await;
 
     // this creates an aggregation operator indexing on [0, 1], and then a TopK child on [1]
     g.install_recipe(
@@ -6458,7 +6442,6 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         cluster_name,
         Some(DEFAULT_SHARDING),
         true,
-        true,
         w1_authority,
         None,
         true,
@@ -6482,7 +6465,6 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
     let _w2 = build_custom(
         cluster_name,
         Some(DEFAULT_SHARDING),
-        true,
         false,
         w2_authority,
         None,
@@ -6499,7 +6481,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_straddled_columns() {
-    let mut g = start_simple_logging("join_straddled_columns").await;
+    let mut g = start_simple("join_straddled_columns").await;
 
     g.install_recipe(
         "CREATE TABLE a (a1 int, a2 int);
@@ -6551,8 +6533,6 @@ async fn join_straddled_columns() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn replicate_to_unavailable_worker() {
-    use crate::logger_pls;
-
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let w1_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store.clone(),
@@ -6563,7 +6543,6 @@ async fn replicate_to_unavailable_worker() {
     let cluster_name = "replicate_to_non_existent_worker";
 
     let mut builder = Builder::for_tests();
-    builder.log_with(logger_pls());
     builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params(cluster_name));
 

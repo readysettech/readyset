@@ -29,8 +29,6 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     // set up graph
     let mut b = Builder::default();
     let log = noria::logger_pls();
-    let blender_log = log.clone();
-    b.log_with(blender_log);
     if !sharding {
         b.set_sharding(None);
     }

@@ -32,7 +32,6 @@ async fn main() {
 
     // set up Soup via recipe
     let mut builder = Builder::default();
-    builder.log_with(noria::logger_pls());
     builder.set_persistence(persistence_params);
     builder.set_memory_limit(100 * 1024, Duration::from_millis(1000));
 

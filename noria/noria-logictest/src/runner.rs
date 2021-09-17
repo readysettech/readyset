@@ -1,4 +1,3 @@
-use slog::o;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -96,14 +95,6 @@ impl Default for RunOptions {
 }
 
 impl RunOptions {
-    fn logger(&self) -> slog::Logger {
-        if self.verbose {
-            noria_server::logger_pls()
-        } else {
-            slog::Logger::root(slog::Discard, o!())
-        }
-    }
-
     fn db_name(&self) -> &str {
         self.upstream_database_url
             .as_ref()
@@ -447,7 +438,6 @@ impl TestScript {
             retry += 1;
 
             let mut builder = Builder::for_tests();
-            builder.log_with(run_opts.logger());
 
             if run_opts.enable_reuse {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))

@@ -2,7 +2,6 @@ use crate::handle::Handle;
 use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
 use dataflow::PersistenceParameters;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use slog::o;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -16,7 +15,6 @@ pub struct Builder {
     memory_check_frequency: Option<time::Duration>,
     listen_addr: IpAddr,
     external_addr: SocketAddr,
-    log: slog::Logger,
     region: Option<String>,
     replicator_url: Option<String>,
     reader_only: bool,
@@ -30,7 +28,6 @@ impl Default for Builder {
             config: Config::default(),
             listen_addr: "127.0.0.1".parse().unwrap(),
             external_addr: "127.0.0.1:6033".parse().unwrap(),
-            log: slog::Logger::root(slog::Discard, o!()),
             memory_limit: None,
             memory_check_frequency: None,
             region: None,
@@ -103,11 +100,6 @@ impl Builder {
         self.external_addr = external_addr;
     }
 
-    /// Set the logger that the derived worker should use. By default, it uses `slog::Discard`.
-    pub fn log_with(&mut self, log: slog::Logger) {
-        self.log = log;
-    }
-
     /// Set the reuse policy for all subsequent migrations
     pub fn set_reuse(&mut self, reuse_type: Option<ReuseConfigType>) {
         self.config.reuse = reuse_type;
@@ -163,7 +155,6 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            ref log,
             region,
             replicator_url,
             reader_only,
@@ -171,7 +162,6 @@ impl Builder {
         } = self;
 
         let config = config.clone();
-        let log = log.clone();
 
         crate::startup::start_instance(
             authority,
@@ -180,7 +170,6 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            log,
             region,
             replicator_url,
             reader_only,

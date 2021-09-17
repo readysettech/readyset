@@ -130,10 +130,6 @@ struct Opts {
     #[clap(long, default_value = "1024")]
     metrics_queue_len: usize,
 
-    /// Enable verbose log output
-    #[clap(long, short = 'v')]
-    verbose: bool,
-
     /// The region where the controller is hosted
     #[clap(long, env = "NORIA_PRIMARY_REGION")]
     primary_region: Option<String>,
@@ -166,7 +162,6 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
-    let log = noria_server::logger_pls();
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())
@@ -239,10 +234,6 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(url) = opts.replication_url {
         builder.set_replicator_url(url);
-    }
-
-    if opts.verbose {
-        builder.log_with(log);
     }
 
     let rt = tokio::runtime::Builder::new_multi_thread()

@@ -33,30 +33,22 @@ pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 
 /// Builds a local worker.
 pub async fn start_simple(prefix: &str) -> Handle {
-    build(prefix, Some(DEFAULT_SHARDING), false).await
+    build(prefix, Some(DEFAULT_SHARDING)).await
 }
 
 #[allow(dead_code)]
 /// Builds a lock worker without sharding.
 pub async fn start_simple_unsharded(prefix: &str) -> Handle {
-    build(prefix, None, false).await
-}
-
-#[allow(dead_code)]
-/// Builds a local worker with DEFAULT_SHARDING shards and
-/// logging.
-pub async fn start_simple_logging(prefix: &str) -> Handle {
-    build(prefix, Some(DEFAULT_SHARDING), true).await
+    build(prefix, None).await
 }
 
 /// Builds a custom local worker with log prefix `prefix`,
 /// with optional sharding and logging.
-pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle {
+pub async fn build(prefix: &str, sharding: Option<usize>) -> Handle {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
         sharding,
-        log,
         true,
         Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
@@ -71,17 +63,12 @@ pub async fn build(prefix: &str, sharding: Option<usize>, log: bool) -> Handle {
 pub async fn build_custom(
     prefix: &str,
     sharding: Option<usize>,
-    log: bool,
     controller: bool,
     authority: Arc<Authority>,
     region: Option<String>,
     reader_only: bool,
 ) -> Handle {
-    use crate::logger_pls;
     let mut builder = Builder::for_tests();
-    if log {
-        builder.log_with(logger_pls());
-    }
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
 
