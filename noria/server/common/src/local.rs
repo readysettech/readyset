@@ -121,17 +121,6 @@ impl Tag {
     }
 }
 
-impl slog::Value for Tag {
-    fn serialize(
-        &self,
-        _rec: &slog::Record,
-        key: slog::Key,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        serializer.emit_arguments(key, &format_args!("{}", self))
-    }
-}
-
 impl std::fmt::Display for Tag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

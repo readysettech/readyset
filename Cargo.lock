@@ -3661,7 +3661,6 @@ dependencies = [
  "noria",
  "petgraph",
  "serde",
- "slog",
  "tuple",
  "vec1",
 ]
