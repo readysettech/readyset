@@ -5,7 +5,7 @@ use dataflow::prelude::*;
 use nom_sql::{Column, ColumnSpecification, SqlType};
 use noria::{ColumnBase, ColumnSchema};
 use ops::NodeOperator;
-use slog::{error, trace};
+use tracing::{error, trace};
 
 type Path<'a> = &'a [(
     petgraph::graph::NodeIndex,
@@ -18,15 +18,12 @@ fn type_for_internal_column(
     next_node_on_path: NodeIndex,
     recipe: &Recipe,
     graph: &Graph,
-    log: &slog::Logger,
 ) -> ReadySetResult<Option<SqlType>> {
     // column originates at internal view: literal, aggregation output
     match *(node.as_internal().ok_or(ReadySetError::NonInternalNode)?) {
         NodeOperator::Project(ref o) => o.column_type(column_index, |parent_col| {
-            Ok(
-                column_schema(graph, next_node_on_path, recipe, parent_col, log)?
-                    .map(ColumnSchema::take_type),
-            )
+            Ok(column_schema(graph, next_node_on_path, recipe, parent_col)?
+                .map(ColumnSchema::take_type))
         }),
         NodeOperator::Aggregation(ref grouped_op) => {
             // computed column is always emitted last
@@ -36,18 +33,14 @@ fn type_for_internal_column(
                 } else {
                     // if none, output column type is same as over column type
                     // use type of the "over" column
-                    Ok(column_schema(
-                        graph,
-                        next_node_on_path,
-                        recipe,
-                        grouped_op.over_column(),
-                        log,
-                    )?
-                    .map(ColumnSchema::take_type))
+                    Ok(
+                        column_schema(graph, next_node_on_path, recipe, grouped_op.over_column())?
+                            .map(ColumnSchema::take_type),
+                    )
                 }
             } else {
                 Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                    column_schema(graph, next_node_on_path, recipe, column_index)?
                         .map(ColumnSchema::take_type),
                 )
             }
@@ -56,12 +49,12 @@ fn type_for_internal_column(
             // use type of the "over" column
             if column_index == node.fields().len() - 1 {
                 Ok(
-                    column_schema(graph, next_node_on_path, recipe, o.over_column(), log)?
+                    column_schema(graph, next_node_on_path, recipe, o.over_column())?
                         .map(ColumnSchema::take_type),
                 )
             } else {
                 Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                    column_schema(graph, next_node_on_path, recipe, column_index)?
                         .map(ColumnSchema::take_type),
                 )
             }
@@ -72,7 +65,7 @@ fn type_for_internal_column(
                 Ok(Some(SqlType::Text))
             } else {
                 Ok(
-                    column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                    column_schema(graph, next_node_on_path, recipe, column_index)?
                         .map(ColumnSchema::take_type),
                 )
             }
@@ -89,7 +82,7 @@ fn type_for_internal_column(
         | NodeOperator::Filter(_)
         | NodeOperator::TopK(_) => {
             Ok(
-                column_schema(graph, next_node_on_path, recipe, column_index, log)?
+                column_schema(graph, next_node_on_path, recipe, column_index)?
                     .map(ColumnSchema::take_type),
             )
         }
@@ -100,7 +93,6 @@ fn trace_column_type_on_path(
     path: Path,
     graph: &Graph,
     recipe: &Recipe,
-    log: &slog::Logger,
 ) -> ReadySetResult<Option<SqlType>> {
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
@@ -124,7 +116,7 @@ fn trace_column_type_on_path(
                     _ => internal!("Base node {:?} has non-Table schema: {:?}", ni, schema),
                 }
             } else {
-                error!(log, "no schema for base '{}'", base);
+                error!(table_name = %base, "no schema for base table");
                 Ok(None)
             }
         } else {
@@ -136,7 +128,6 @@ fn trace_column_type_on_path(
                 parent_node_index,
                 recipe,
                 graph,
-                log,
             )
         }
     } else {
@@ -173,10 +164,8 @@ pub(super) fn column_schema(
     view: NodeIndex,
     recipe: &Recipe,
     column_index: usize,
-    log: &slog::Logger,
 ) -> ReadySetResult<Option<ColumnSchema>> {
     trace!(
-        log,
         "tracing provenance of {} on {} for schema",
         column_index,
         view.index()
@@ -187,8 +176,8 @@ pub(super) fn column_schema(
     let mut col_type = None;
     let mut col_base = None;
     for ref p in paths {
-        trace!(log, "considering path {:?}", p);
-        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe, log)? {
+        trace!("considering path {:?}", p);
+        if let t @ Some(_) = trace_column_type_on_path(p, graph, recipe)? {
             col_type = t;
             col_base = get_base_for_column(p, graph, recipe)?;
         }

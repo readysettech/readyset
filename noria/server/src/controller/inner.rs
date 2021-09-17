@@ -1028,16 +1028,14 @@ impl ControllerInner {
             .unwrap_or_else(|| (0..n.fields().len()).collect());
 
         let projected_schema = (0..n.fields().len())
-            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i, &self.log))
+            .map(|i| schema::column_schema(&self.ingredients, view_ni, &self.recipe, i))
             .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
             .collect::<Option<Vec<_>>>();
 
         let returned_schema = returned_cols
             .iter()
-            .map(|idx| {
-                schema::column_schema(&self.ingredients, view_ni, &self.recipe, *idx, &self.log)
-            })
+            .map(|idx| schema::column_schema(&self.ingredients, view_ni, &self.recipe, *idx))
             .collect::<Result<Vec<_>, ReadySetError>>()?
             .into_iter()
             .collect::<Option<Vec<_>>>();
