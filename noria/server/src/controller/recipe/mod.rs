@@ -140,10 +140,7 @@ impl Recipe {
             aliases: HashMap::default(),
             version: 0,
             prior: None,
-            inc: match log {
-                None => Some(SqlIncorporator::default()),
-                Some(ref log) => Some(SqlIncorporator::new(log.clone())),
-            },
+            inc: Some(SqlIncorporator::new()),
             log: match log {
                 None => slog::Logger::root(slog::Discard, o!()),
                 Some(log) => log,
@@ -278,10 +275,7 @@ impl Recipe {
             })
             .collect::<HashMap<_, _>>();
 
-        let inc = match log {
-            None => SqlIncorporator::default(),
-            Some(ref log) => SqlIncorporator::new(log.clone()),
-        };
+        let inc = SqlIncorporator::new();
 
         let log = match log {
             None => slog::Logger::root(slog::Discard, o!()),
