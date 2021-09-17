@@ -97,10 +97,8 @@ impl Default for SqlIncorporator {
 impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
     pub(super) fn new(log: slog::Logger) -> Self {
-        let lc = log.clone();
         SqlIncorporator {
             log,
-            mir_converter: SqlToMirConverter::with_logger(lc),
             ..Default::default()
         }
     }
