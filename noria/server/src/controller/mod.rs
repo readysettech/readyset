@@ -332,7 +332,6 @@ impl ControllerOuter {
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!(self.log, "won leader election, creating ControllerInner");
                 self.inner = Some(ControllerInner::new(
-                    self.log.clone(),
                     state.clone(),
                     self.our_descriptor.controller_uri.clone(),
                 ));

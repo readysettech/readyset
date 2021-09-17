@@ -35,14 +35,13 @@ use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use reqwest::Url;
-use slog::{crit, debug, error, info, trace, warn};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{cell, time};
-use tracing::info_span;
+use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
@@ -93,8 +92,6 @@ pub struct ControllerInner {
 
     quorum: usize,
     controller_uri: Url,
-
-    log: slog::Logger,
 }
 
 pub(super) fn graphviz(
@@ -321,12 +318,7 @@ impl ControllerInner {
             volume_id,
         } = desc;
 
-        info!(
-            self.log,
-            "received registration payload from worker: {} (reader address {})",
-            worker_uri,
-            reader_addr
-        );
+        info!(%worker_uri, %reader_addr, "received registration payload from worker");
 
         let ws = Worker::new(worker_uri.clone(), region, reader_only, volume_id);
 
@@ -347,22 +339,20 @@ impl ControllerInner {
 
         // Can't send this as we are on the controller thread right now and it also
         // has to receive this.
-        if let Err(e) = futures_executor::block_on(
+        if let Err(error) = futures_executor::block_on(
             ws.rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses)),
         ) {
             error!(
-                    self.log,
-                    "Worker could not be reached and was not updated on domain information. Address: {:?} | Error: {:?}",
-                    worker_uri,
-                    e
-                );
+                %worker_uri,
+                %error,
+                "Worker could not be reached and was not updated on domain information",
+            );
         }
 
         self.workers.insert(worker_uri.clone(), ws);
         self.read_addrs.insert(worker_uri, reader_addr);
 
         info!(
-            self.log,
             "now have {} of {} required workers",
             self.workers.len(),
             self.quorum
@@ -374,8 +364,7 @@ impl ControllerInner {
                 assert_eq!(self.recipe.version(), 0);
                 if recipes.len() > recipe_version + 1 {
                     // TODO(eta): this is a terrible stopgap hack
-                    crit!(
-                        self.log,
+                    error!(
                         "{} recipes but recipe version is at {}",
                         recipes.len(),
                         recipe_version
@@ -383,7 +372,7 @@ impl ControllerInner {
                     recipe_version = recipes.len() + 1;
                 }
 
-                info!(self.log, "Restoring graph configuration");
+                info!("Restoring graph configuration");
                 self.recipe = Recipe::with_version(recipe_version + 1 - recipes.len());
                 for r in recipes {
                     if let Err(e) = self
@@ -394,7 +383,7 @@ impl ControllerInner {
                         .and_then(|r| self.apply_recipe(r))
                     {
                         // TODO(eta): is this the best thing to do?
-                        crit!(self.log, "Failed to restore recipe: {}", e);
+                        error!(error = %e, "Failed to restore recipe");
                     }
                 }
             }
@@ -410,7 +399,7 @@ impl ControllerInner {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = Vec::new();
         for wi in failed {
-            info!(self.log, "handling failure of worker {:?}", wi);
+            info!(worker = ?wi, "handling failure of worker");
             affected_nodes.extend(self.get_failed_nodes(&wi));
         }
 
@@ -481,13 +470,17 @@ impl ControllerInner {
         for query_name in &spec.queries {
             node_indexes.push((
                 query_name,
-                self.recipe
-                    .node_addr_for(query_name)
-                    .map_err(|e| {
-                        warn!(self.log, "Reader replication failed: no node was found for query '{:?}'. Error: {:?}",
-                        query_name, e);
-                        bad_request_err(format!("Reader replication failed: no node was found for query '{:?}'", query_name))
-                    })?,
+                self.recipe.node_addr_for(query_name).map_err(|e| {
+                    warn!(
+                        error = %e,
+                        %query_name,
+                        "Reader replication failed: no node was found for query",
+                    );
+                    bad_request_err(format!(
+                        "Reader replication failed: no node was found for query '{:?}'",
+                        query_name
+                    ))
+                })?,
             ));
         }
 
@@ -573,7 +566,7 @@ impl ControllerInner {
     }
 
     /// Construct `ControllerInner` with a specified listening interface
-    pub(super) fn new(log: slog::Logger, state: ControllerState, controller_uri: Url) -> Self {
+    pub(super) fn new(state: ControllerState, controller_uri: Url) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
         let source = g.add_node(node::Node::new(
@@ -615,7 +608,6 @@ impl ControllerInner {
             recipe,
             node_restrictions: state.node_restrictions,
             quorum: state.config.quorum,
-            log,
 
             domains: Default::default(),
             domain_nodes: Default::default(),
@@ -660,8 +652,6 @@ impl ControllerInner {
         shard_workers: Vec<WorkerIdentifier>,
         nodes: Vec<(NodeIndex, bool)>,
     ) -> ReadySetResult<DomainHandle> {
-        use tracing::{error, info};
-
         // Reader nodes are always assigned to their own domains, so it's good enough to see
         // if any of its nodes is a reader.
         // We check for *any* node (and not *all*) since a reader domain has a reader node and an
@@ -796,21 +786,12 @@ impl ControllerInner {
         })
     }
 
-    /// Set the `Logger` to use for internal log messages.
-    ///
-    /// By default, all log messages are discarded.
-    #[allow(unused)]
-    fn log_with(&mut self, log: slog::Logger) {
-        self.log = log;
-    }
-
     /// Perform a new query schema migration.
     // crate viz for tests
     pub(crate) fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
     where
         F: FnOnce(&mut Migration) -> T,
     {
-        use tracing::info;
         let span = info_span!("migrate");
         let _g = span.enter();
         info!("starting migration");
@@ -1059,7 +1040,7 @@ impl ControllerInner {
             .node_weight(ni)
             .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
 
-        trace!(self.log, "creating table"; "for" => base);
+        trace!(%base, "creating table");
 
         let mut key = node
             .get_base()
@@ -1140,8 +1121,7 @@ impl ControllerInner {
 
     /// Get statistics about the time spent processing different parts of the graph.
     fn get_statistics(&mut self) -> ReadySetResult<GraphStats> {
-        trace!(self.log, "asked to get statistics");
-        let log = &self.log;
+        trace!("asked to get statistics");
         let workers = &self.workers;
         // TODO: request stats from domains in parallel.
         let domains = self
@@ -1149,7 +1129,7 @@ impl ControllerInner {
             .iter_mut()
             // TODO(eta): error handling impl adds overhead
             .map(|(&di, s)| {
-                trace!(log, "requesting stats from domain"; "di" => di.index());
+                trace!(di = %di.index(), "requesting stats from domain");
                 Ok(
                     s.send_to_healthy_blocking(DomainRequest::GetStatistics, workers)?
                         .into_iter()
@@ -1222,10 +1202,7 @@ impl ControllerInner {
             }
         }
 
-        warn!(
-            self.log,
-            "flushed {} bytes of partial domain state", total_evicted
-        );
+        warn!(total_evicted, "flushed partial domain state");
 
         Ok(total_evicted)
     }
@@ -1270,11 +1247,17 @@ impl ControllerInner {
                             .count(),
                         0
                     );
+                    let name = self
+                        .ingredients
+                        .node_weight(base)
+                        .ok_or_else(|| ReadySetError::NodeNotFound {
+                            index: base.index(),
+                        })?
+                        .name();
                     debug!(
-                        self.log,
-                        "Removing base \"{}\"",
-                        self.ingredients.node_weight(base).ok_or_else(|| ReadySetError::NodeNotFound { index: base.index() })?.name();
-                        "node" => base.index(),
+                        %name,
+                        node = %base.index(),
+                        "Removing base",
                     );
                     // now drop the (orphaned) base
                     self.remove_nodes(vec![base].as_slice())?;
@@ -1283,7 +1266,7 @@ impl ControllerInner {
                 self.recipe = new;
             }
             Err(ref e) => {
-                crit!(self.log, "failed to apply recipe: {}", e);
+                error!(error = %e, "failed to apply recipe");
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
                 let recipe = mem::replace(&mut self.recipe, Recipe::blank());
                 self.recipe = recipe.revert();
@@ -1343,7 +1326,7 @@ impl ControllerInner {
             },
             Err((old, e)) => {
                 // need to restore the old recipe
-                crit!(self.log, "failed to extend recipe: {:?}", e);
+                error!(error = %e, "failed to extend recipe");
                 self.recipe = old;
                 Err(e)
             }
@@ -1399,9 +1382,9 @@ impl ControllerInner {
                     }
                 }
             }
-            Err(e) => {
-                crit!(self.log, "failed to parse recipe: {:?}", e);
-                noria::internal!("failed to parse recipe: {:?}", e);
+            Err(error) => {
+                error!(%error, "failed to parse recipe");
+                noria::internal!("failed to parse recipe: {}", error);
             }
         }
     }
@@ -1460,9 +1443,8 @@ impl ControllerInner {
         }
 
         info!(
-            self.log,
-            "Computing removals for removing node {}",
-            leaf.index()
+            node = %leaf.index(),
+            "Computing removals for removing node",
         );
 
         let nchildren = self
@@ -1497,10 +1479,9 @@ impl ControllerInner {
             #[allow(clippy::indexing_slicing)]
             {
                 debug!(
-                    self.log,
-                    "Removing query leaf \"{}\"", self.ingredients[leaf].name();
-                    "node" => leaf.index(),
-                    "really" => reader.index(),
+                    node = %leaf.index(),
+                    really = %reader.index(),
+                    "Removing query leaf \"{}\"", self.ingredients[leaf].name()
                 );
             }
             removals.push(reader);
@@ -1557,7 +1538,7 @@ impl ControllerInner {
                 .node_weight_mut(*ni)
                 .ok_or_else(|| ReadySetError::NodeNotFound { index: ni.index() })?;
             node.remove();
-            debug!(self.log, "Removed node {}", ni.index());
+            debug!(node = %ni.index(), "Removed node");
             domain_removals
                 .entry(node.domain())
                 .or_insert_with(Vec::new)
@@ -1567,9 +1548,8 @@ impl ControllerInner {
         // Send messages to domains
         for (domain, nodes) in domain_removals {
             trace!(
-                self.log,
-                "Notifying domain {} of node removals",
-                domain.index(),
+                domain_index = %domain.index(),
+                "Notifying domain of node removals",
             );
 
             self.domains
