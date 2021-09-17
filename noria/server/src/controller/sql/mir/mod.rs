@@ -6,8 +6,8 @@ use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
-use slog::{debug, error, info, o, trace, warn};
 use std::convert::TryFrom;
+use tracing::{debug, error, info, trace, warn};
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
@@ -111,7 +111,6 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
 pub(super) struct SqlToMirConverter {
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
     current: HashMap<String, usize>,
-    log: slog::Logger,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
 }
@@ -121,7 +120,6 @@ impl Default for SqlToMirConverter {
         SqlToMirConverter {
             base_schemas: HashMap::default(),
             current: HashMap::default(),
-            log: slog::Logger::root(slog::Discard, o!()),
             nodes: HashMap::default(),
             schema_version: 0,
         }
@@ -129,13 +127,6 @@ impl Default for SqlToMirConverter {
 }
 
 impl SqlToMirConverter {
-    pub(super) fn with_logger(log: slog::Logger) -> Self {
-        SqlToMirConverter {
-            log,
-            ..Default::default()
-        }
-    }
-
     fn get_view(&self, view_name: &str) -> Result<MirNodeRef, ReadySetError> {
         self.current
             .get(view_name)
@@ -372,13 +363,10 @@ impl SqlToMirConverter {
     }
 
     pub(super) fn remove_base(&mut self, name: &str, mq: &MirQuery) -> ReadySetResult<()> {
-        info!(self.log, "Removing base {} from SqlTomirconverter", name);
+        info!(%name, "Removing base node");
         self.remove_query(name, mq)?;
         if self.base_schemas.remove(name).is_none() {
-            warn!(
-                self.log,
-                "Attempted to remove non-existant base node {} from SqlToMirconverter", name
-            );
+            warn!(%name, "Attempted to remove non-existent base node");
         }
         Ok(())
     }
@@ -443,18 +431,16 @@ impl SqlToMirConverter {
             existing_schemas.reverse();
 
             #[allow(clippy::never_loop)]
-            for (existing_sv, ref schema) in existing_schemas {
+            for (existing_version, ref schema) in existing_schemas {
                 // TODO(malte): check the keys too
                 if &schema[..] == cols {
                     // exact match, so reuse the existing base node
                     info!(
-                        self.log,
-                        "base table for {} already exists with identical \
-                         schema in version {}; reusing it.",
-                        name,
-                        existing_sv
+                        %name,
+                        %existing_version,
+                        "base table already exists with identical schema; reusing it.",
                     );
-                    let node_key = (String::from(name), existing_sv);
+                    let node_key = (String::from(name), existing_version);
                     let existing_node = self.nodes.get(&node_key).cloned().ok_or_else(|| {
                         internal_err(format!("could not find MIR node {:?} for reuse", node_key))
                     })?;
@@ -465,11 +451,9 @@ impl SqlToMirConverter {
                     //     column set, or
                     //  2) give up and just make a new node
                     info!(
-                        self.log,
-                        "base table for {} already exists in version {}, \
-                         but has a different schema!",
-                        name,
-                        existing_sv
+                        %name,
+                        %existing_version,
+                        "base table already exists, but has a different schema!",
                     );
 
                     // Find out if this is a simple case of adding or removing a column
@@ -495,14 +479,12 @@ impl SqlToMirConverter {
                         && (!columns_added.is_empty() || !columns_removed.is_empty())
                     {
                         error!(
-                            self.log,
-                            "base {}: add columns {:?}, remove columns {:?} over v{}",
-                            name,
-                            columns_added,
-                            columns_removed,
-                            existing_sv
+                            %name,
+                            ?columns_added,
+                            ?columns_removed,
+                            %existing_version
                         );
-                        let node_key = (String::from(name), existing_sv);
+                        let node_key = (String::from(name), existing_version);
                         let existing_node =
                             self.nodes.get(&node_key).cloned().ok_or_else(|| {
                                 internal_err(format!(
@@ -550,7 +532,7 @@ impl SqlToMirConverter {
                             columns_removed,
                         ));
                     } else {
-                        info!(self.log, "base table has complex schema change");
+                        info!("base table has complex schema change");
                         break;
                     }
                 }
@@ -587,14 +569,9 @@ impl SqlToMirConverter {
             match **pk {
                 TableKey::PrimaryKey(ref key_cols) => {
                     debug!(
-                        self.log,
-                        "Assigning primary key ({}) for base {}",
-                        key_cols
-                            .iter()
-                            .map(|c| c.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        name
+                        %name,
+                        primary_key = %key_cols.iter().map(|c| c.name.as_str()).join(", "),
+                        "Assigning primary key for base",
                     );
                     MirNode::new(
                         name,
@@ -707,12 +684,7 @@ impl SqlToMirConverter {
         duplicate_mode: union::DuplicateMode,
     ) -> ReadySetResult<MirNodeRef> {
         invariant!(ancestors.len() > 1, "union must have more than 1 ancestors");
-        trace!(
-            self.log,
-            "Added union node {} with columns {:?}",
-            name,
-            columns
-        );
+        trace!(%name, ?columns, "Added union node");
         let emit = ancestors.iter().map(|_| columns.clone()).collect();
 
         Ok(MirNode::new(
@@ -735,12 +707,7 @@ impl SqlToMirConverter {
         conditions: Expression,
     ) -> MirNodeRef {
         let fields = parent.borrow().columns().to_vec();
-        trace!(
-            self.log,
-            "Added filter node {} with condition {:?}",
-            name,
-            conditions
-        );
+        trace!(%name, %conditions, "Added filter node");
         MirNode::new(
             name,
             self.schema_version,
@@ -1017,7 +984,7 @@ impl SqlToMirConverter {
                 project: fields.clone(),
             },
         };
-        trace!(self.log, "Added join node {:?}", inner);
+        trace!(?inner, "Added join node");
         Ok(MirNode::new(
             name,
             self.schema_version,
@@ -1041,7 +1008,7 @@ impl SqlToMirConverter {
             .collect::<Vec<Column>>();
 
         let inner = MirNodeInner::JoinAggregates;
-        trace!(self.log, "Added join node {:?}", inner);
+        trace!(?inner, "Added join node");
         Ok(MirNode::new(
             name,
             self.schema_version,
@@ -1255,7 +1222,7 @@ impl SqlToMirConverter {
                         let right =
                             self.make_predicate_nodes(name, parent, rhs, nc + left.len())?;
 
-                        debug!(self.log, "Creating union node for `or` predicate");
+                        debug!("Creating union node for `or` predicate");
 
                         invariant!(!left.is_empty());
                         invariant!(!right.is_empty());
@@ -1912,10 +1879,7 @@ impl SqlToMirConverter {
                 nodes_added.push(leaf_node);
             }
 
-            debug!(
-                self.log,
-                "Added final MIR node for query named \"{}\"", name
-            );
+            debug!(%name, "Added final MIR node for query");
         }
         // finally, we output all the nodes we generated
         Ok(nodes_added)
