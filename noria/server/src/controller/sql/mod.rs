@@ -593,16 +593,12 @@ impl SqlIncorporator {
             .mir_converter
             .named_query_to_mir(query_name, query, &qg, is_leaf)?;
 
-        trace!(
-            self.log,
-            "Unoptimized MIR:\n{}",
-            og_mir.to_graphviz().unwrap()
-        );
+        trace!(self.log, "Unoptimized MIR:\n{}", og_mir.to_graphviz());
 
         // run MIR-level optimizations
         let mut mir = og_mir.optimize();
 
-        trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz().unwrap());
+        trace!(self.log, "Optimized MIR:\n{}", mir.to_graphviz());
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
         let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
@@ -718,18 +714,10 @@ impl SqlIncorporator {
             .mir_converter
             .named_query_to_mir(query_name, query, &qg, is_leaf)?;
 
-        trace!(
-            self.log,
-            "Original MIR:\n{}",
-            new_query_mir.to_graphviz().unwrap()
-        );
+        trace!(self.log, "Original MIR:\n{}", new_query_mir.to_graphviz());
 
         let new_opt_mir = new_query_mir.optimize();
-        trace!(
-            self.log,
-            "Optimized MIR:\n{}",
-            new_opt_mir.to_graphviz().unwrap()
-        );
+        trace!(self.log, "Optimized MIR:\n{}", new_opt_mir.to_graphviz());
 
         // compare to existing query MIR and reuse prefix
         let mut reused_mir = new_opt_mir;
