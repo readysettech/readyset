@@ -1,2 +1,2 @@
 [alias]
-xtask = "run --package xtask --"
+substrate = "run --package readyset-substrate --"

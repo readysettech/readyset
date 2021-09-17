@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 use anyhow::Result;
 use clap::{AppSettings, Clap};
 use tracing_subscriber::EnvFilter;

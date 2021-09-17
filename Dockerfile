@@ -35,8 +35,9 @@ RUN set -eux; \
 
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as runtime
 WORKDIR /workdir
+ENV SUBSTRATE_ROOT /workdir/ops/substrate
 
-COPY --from=builder /workdir/target/debug/xtask /usr/local/bin/xtask
+COPY --from=builder /workdir/target/debug/readyset-substrate /usr/local/bin/readyset-substrate
 COPY --from=fetcher /usr/local/bin/* /usr/local/bin/
 
 RUN set -eux; \
@@ -44,4 +45,4 @@ RUN set -eux; \
     unzip awscliv2.zip; \
     ./aws/install -i /usr/local/aws-cli -b /usr/local/bin
 
-ENTRYPOINT [ "xtask" ]
+ENTRYPOINT [ "readyset-substrate" ]

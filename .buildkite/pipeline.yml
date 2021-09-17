@@ -1,5 +1,5 @@
 steps:
-  - label: ":docker: Build Substrate Rust Build Image"
+  - label: ":docker: Build Rust Build Image"
     key: build-rust-build-image
     commands:
       - "echo --- :docker: Building build image"
@@ -94,7 +94,5 @@ steps:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
           shell: false
           propagate-environment: true
-          environment:
-            - "RUST_LOG=xtask=debug"
       - ecr#v2.2.0:
           login: true

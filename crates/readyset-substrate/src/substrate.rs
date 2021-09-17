@@ -43,9 +43,21 @@ pub(crate) struct DeployModuleLocator {
     region: String,
 }
 
+fn substrate_root() -> PathBuf {
+    match std::env::var("SUBSTRATE_ROOT") {
+        Ok(substrate_root) => Path::new(&substrate_root).to_path_buf(),
+        Err(_) => Path::new("ops/substrate").to_path_buf(),
+    }
+}
+
+fn root_modules_path() -> PathBuf {
+    let substrate_root = substrate_root();
+    substrate_root.join("root-modules")
+}
+
 impl ModuleLocator for ServiceModuleLocator {
     fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = PathBuf::from("root-modules");
+        let mut path: PathBuf = root_modules_path();
         if !path.is_dir() {
             bail!("Cannot find root modules path")
         }
@@ -88,7 +100,7 @@ impl ModuleLocator for ServiceModuleLocator {
 
 impl ModuleLocator for AdminModuleLocator {
     fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = PathBuf::from("root-modules");
+        let mut path: PathBuf = root_modules_path();
         if !path.is_dir() {
             bail!("Cannot find root modules path")
         }
@@ -125,7 +137,7 @@ impl ModuleLocator for AdminModuleLocator {
 
 impl ModuleLocator for DeployModuleLocator {
     fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = PathBuf::from("root-modules");
+        let mut path: PathBuf = root_modules_path();
         if !path.is_dir() {
             bail!("Cannot find root modules path")
         }
@@ -147,10 +159,6 @@ impl ModuleLocator for DeployModuleLocator {
     fn to_args(&self) -> Vec<String> {
         vec![self.region.clone()]
     }
-}
-
-fn root_modules_path() -> PathBuf {
-    Path::new("root-modules").to_path_buf()
 }
 
 // TODO: In one scan over the directory, generate all the different module locators. As such, this
