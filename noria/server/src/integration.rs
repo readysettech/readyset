@@ -1590,7 +1590,7 @@ async fn it_works_with_simple_arithmetic() {
     g.migrate(|mig| {
         let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                    QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;";
-        let mut recipe = Recipe::from_str(sql, None).unwrap();
+        let mut recipe = Recipe::from_str(sql).unwrap();
         recipe.activate(mig).unwrap();
     })
     .await;
@@ -3081,7 +3081,7 @@ async fn recipe_activates() {
     let mut g = start_simple("recipe_activates").await;
     g.migrate(|mig| {
         let r_txt = "CREATE TABLE b (a text, c text, x text);\n";
-        let mut r = Recipe::from_str(r_txt, None).unwrap();
+        let mut r = Recipe::from_str(r_txt).unwrap();
         assert_eq!(r.version(), 0);
         assert_eq!(r.expressions().len(), 1);
         assert_eq!(r.prior(), None);
@@ -3146,7 +3146,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool, 
 
     // move needed for some funny lifetime reason
     g.migrate(move |mig| {
-        let mut r = Recipe::blank(logger);
+        let mut r = Recipe::blank();
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }
