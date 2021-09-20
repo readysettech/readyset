@@ -1,0 +1,138 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Readyset
+Parameters:
+  ReadysetAdapterInstanceType:
+    Type: String
+    Description: The EC2 instance type to use for adapter instances.
+    Default: t3.small
+  ReadysetAdapterNodes:
+    Type: String
+    Description: Number of Adapter nodes to create
+  KeyPair:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  PrivateSubnet1ID:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2ID:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet3ID:
+    Type: AWS::EC2::Subnet::Id
+  VPCID:
+    Description: VPC ID
+    Type: "AWS::EC2::VPC::Id"
+  VPCCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    AllowedPattern: >-
+      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+Mappings:
+  AWSAMIRegionMap:
+    us-east-2:
+      MYSQLADAPTER: ami-00294ee57b7ae6277
+Resources:
+  ReadysetMySQLAdapterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ""
+  ReadysetMySQLAdapterProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ReadysetMySQLAdapterRole
+  ReadysetMySQLAdapterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to the adapter and SSH from inside the VPC
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  ReadysetDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections from Readyset to RDS
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ReadysetMySQLAdapterSecurityGroup
+  ReadysetMySQLAdapterTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Protocol: TCP
+      Port: 3306
+      VpcId: !Ref VPCID
+  ReadysetMySQLAdapterLC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      InstanceType: !Ref ReadysetAdapterInstanceType
+      AssociatePublicIpAddress: false
+      SecurityGroups:
+        - !Ref ReadysetMySQLAdapterSecurityGroup
+      KeyName: !Ref KeyPair
+      ImageId: !FindInMap
+        - AWSAMIRegionMap
+        - !Ref "AWS::Region"
+        - MYSQLADAPTER
+      IamInstanceProfile: !Ref ReadysetMySQLAdapterProfile
+  ReadysetMySQLAdapterASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchConfigurationName: !Ref ReadysetMySQLAdapterLC
+      MaxSize: !Ref ReadysetAdapterNodes
+      MinSize: !Ref ReadysetAdapterNodes
+      TargetGroupARNs:
+        - !Ref ReadysetMySQLAdapterTargetGroup
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+        - !Ref PrivateSubnet3ID
+      Tags:
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref "AWS::StackName"
+              - Readyset-MySQL-Adapter
+          PropagateAtLaunch: true
+  ReadysetMySQLAdapterNLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: "network"
+      Scheme: "internal"
+      Subnets:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+        - !Ref PrivateSubnet3ID
+  ReadysetMySQLAdapterListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Protocol: TCP
+      Port: 3306
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ReadysetMySQLAdapterTargetGroup
+      LoadBalancerArn: !Ref ReadysetMySQLAdapterNLB
+Outputs:
+  ReadysetDBSecurityGroup:
+    Value: !Ref ReadysetDBSecurityGroup
+    Description: Attach this Security Group to the RDS instance

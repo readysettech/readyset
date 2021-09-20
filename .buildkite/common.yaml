@@ -261,7 +261,7 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-# --- OPS STEPS ----#
+# --- BEGIN INTERNAL OPS STEPS --- #
   - label: ':docker: Build readyset-ops image'
     key: build-ops-image
     commands:
@@ -338,6 +338,32 @@ steps:
     env:
       ONLY_VALIDATE: 1
       PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
+
+  # --- END INTERNAL OPS STEPS --- #
+
+  # --- BEGIN CLOUDFORMATION STEPS --- #
+  - label: ':docker: Build readyset-ops-cfn image'
+    key: build-ops-cfn-image
+    commands:
+      - cd ops
+      - ../.buildkite/build_image.sh build/Dockerfile readyset-ops-cfn
+    plugins:
+      ecr#v2.2.0:
+        login: true
+
+  - label: ':aws-cloudformation: Lint with taskcat :cat:'
+    depends_on:
+    - build-ops-cfn-image
+    commands:
+    - cd /workdir/ops/cfn
+    - taskcat lint
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops-cfn:latest
+    - ecr#v2.2.0:
+        login: true
+
+  # --- END CLOUDFORMATION STEPS --- #
 
   - key: list-frameworks
     label: "List frameworks"

@@ -72,7 +72,7 @@ steps:
               exclude:
                 - "ops/**"
 
-            # --- START OPS STEPS --- #
+            # --- START INTERNAL OPS STEPS --- #
             - label: ':docker: Build readyset-ops image'
               include:
                 - "ops/**"
@@ -96,7 +96,17 @@ steps:
             - label: ':pipeline: Upload Packer linting steps'
               include:
                 - "ops/images/**"
-            # --- END OPS STEPS --- #
+            # --- END INTERNAL OPS STEPS --- #
+
+            # --- START CLOUDFORMATION STEPS --- #
+            - label: ':docker: Build readyset-ops-cfn image'
+              include:
+                - "ops/cfn"
+
+            - label: ':aws-cloudformation: Lint with taskcat :cat:'
+              include:
+                - "ops/cfn"
+            # --- END CLOUDFORMATIOn STEPS --- #
 
             # --- START JS CLIENT STEPS --- #
             - label: ':docker: Build prettier image'
