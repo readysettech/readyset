@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{cell, time};
 use tokio::sync::Notify;
-use tracing::{debug, error, info, info_span, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::Vec1;
 
 /// Number of concurrent requests to make when making multiple simultaneous requests to domains (eg
@@ -253,7 +253,8 @@ impl Leader {
                 return_serialized!(self.graphviz(true));
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
-                return_serialized!(self.get_statistics()?);
+                let ret = futures::executor::block_on(self.get_statistics())?;
+                return_serialized!(ret);
             }
             _ => {}
         }
@@ -266,7 +267,8 @@ impl Leader {
 
         match (method, path.as_ref()) {
             (Method::GET, "/flush_partial") => {
-                return_serialized!(self.flush_partial()?);
+                let ret = futures::executor::block_on(self.flush_partial())?;
+                return_serialized!(ret);
             }
             (Method::POST, "/inputs") => return_serialized!(self.inputs()),
             (Method::POST, "/outputs") => return_serialized!(self.outputs()),
@@ -337,12 +339,12 @@ impl Leader {
             }
             (Method::POST, "/extend_recipe") => {
                 let body = bincode::deserialize(&body)?;
-                let ret = self.extend_recipe(authority, body)?;
+                let ret = futures::executor::block_on(self.extend_recipe(authority, body))?;
                 return_serialized!(ret);
             }
             (Method::POST, "/install_recipe") => {
                 let body = bincode::deserialize(&body)?;
-                let ret = self.install_recipe(authority, body)?;
+                let ret = futures::executor::block_on(self.install_recipe(authority, body))?;
                 return_serialized!(ret);
             }
             (Method::POST, "/set_replication_offset") => {
@@ -353,26 +355,26 @@ impl Leader {
             }
             (Method::POST, "/replicate_readers") => {
                 let body = bincode::deserialize(&body)?;
-                let ret = self.replicate_readers(body)?;
+                let ret = futures::executor::block_on(self.replicate_readers(body))?;
                 return_serialized!(ret);
             }
             (Method::POST, "/get_info") => return_serialized!(self.get_info()?),
             (Method::POST, "/remove_node") => {
                 let body = bincode::deserialize(&body)?;
-                let ret = self.remove_nodes(vec![body].as_slice())?;
+                let ret = futures::executor::block_on(self.remove_nodes(vec![body].as_slice()))?;
                 return_serialized!(ret);
             }
             (Method::POST, "/replication_offset") => {
                 // this method can't be `async` since `Leader` isn't Send because `Graph`
                 // isn't Send :(
-                let res = futures_executor::block_on(self.replication_offset())?;
+                let res = futures::executor::block_on(self.replication_offset())?;
                 return_serialized!(res);
             }
             _ => Err(ReadySetError::UnknownEndpoint),
         }
     }
 
-    pub(super) fn handle_register_from_authority(
+    pub(super) async fn handle_register_from_authority(
         &mut self,
         desc: WorkerDescriptor,
     ) -> ReadySetResult<()> {
@@ -405,12 +407,13 @@ impl Leader {
 
         // Can't send this as we are on the controller thread right now and it also
         // has to receive this.
-        if let Err(error) = futures_executor::block_on(
-            ws.rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses)),
-        ) {
+        if let Err(e) = ws
+            .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
+            .await
+        {
             error!(
                 %worker_uri,
-                %error,
+                %e,
                 "Worker could not be reached and was not updated on domain information",
             );
         }
@@ -441,16 +444,8 @@ impl Leader {
                 info!("Restoring graph configuration");
                 self.recipe = Recipe::with_version(recipe_version + 1 - recipes.len());
                 for r in recipes {
-                    if let Err(e) = self
-                        .recipe
-                        .clone()
-                        .extend(&r)
-                        .map_err(|(_, e)| e)
-                        .and_then(|r| self.apply_recipe(r))
-                    {
-                        // TODO(eta): is this the best thing to do?
-                        error!(error = %e, "Failed to restore recipe");
-                    }
+                    let recipe = self.recipe.clone().extend(&r).map_err(|(_, e)| e)?;
+                    self.apply_recipe(recipe).await?;
                 }
             }
         }
@@ -458,7 +453,7 @@ impl Leader {
         Ok(())
     }
 
-    pub(super) fn handle_failed_workers(
+    pub(super) async fn handle_failed_workers(
         &mut self,
         failed: Vec<WorkerIdentifier>,
     ) -> ReadySetResult<()> {
@@ -475,7 +470,7 @@ impl Leader {
         let (recovery, mut original) = self.recipe.make_recovery(affected_queries);
 
         // activate recipe
-        self.apply_recipe(recovery)?;
+        self.apply_recipe(recovery).await?;
 
         // we must do this *after* the migration, since the migration itself modifies the recipe in
         // `recovery`, and we currently need to clone it here.
@@ -485,7 +480,7 @@ impl Leader {
         original.set_sql_inc(tmp.sql_inc().clone());
 
         // back to original recipe, which should add the query again
-        self.apply_recipe(original)?;
+        self.apply_recipe(original).await?;
         Ok(())
     }
 
@@ -513,7 +508,7 @@ impl Leader {
         })
     }
 
-    pub(super) fn replicate_readers(
+    pub(super) async fn replicate_readers(
         &mut self,
         spec: ReaderReplicationSpec,
     ) -> ReadySetResult<ReaderReplicationResult> {
@@ -607,7 +602,8 @@ impl Leader {
                 mig.added.insert(reader_index);
                 mig.readers.insert(node_index, reader_index);
             }
-        })?;
+        })
+        .await?;
 
         // We retrieve the domain of the replicated readers.
         let mut query_information = HashMap::new();
@@ -724,7 +720,7 @@ impl Leader {
         self.persistence = params;
     }
 
-    pub(in crate::controller) fn place_domain(
+    pub(in crate::controller) async fn place_domain(
         &mut self,
         idx: DomainIndex,
         shard_workers: Vec<WorkerIdentifier>,
@@ -786,15 +782,15 @@ impl Leader {
                 w.uri
             );
 
-            let ret = futures_executor::block_on(
-                w.rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain)),
-            )
-            .map_err(|e| ReadySetError::DomainCreationFailed {
-                domain_index: idx.index(),
-                shard,
-                worker_uri: w.uri.clone(),
-                source: Box::new(e),
-            })?;
+            let ret = w
+                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
+                .await
+                .map_err(|e| ReadySetError::DomainCreationFailed {
+                    domain_index: idx.index(),
+                    shard,
+                    worker_uri: w.uri.clone(),
+                    source: Box::new(e),
+                })?;
 
             // Update the domain placement restrictions on nodes in the placed
             // domain if necessary.
@@ -844,9 +840,10 @@ impl Leader {
         for (address, w) in self.workers.iter_mut() {
             for &dd in &domain_addresses {
                 info!(worker_uri = %w.uri, "informing worker about newly placed domain");
-                if let Err(e) = futures_executor::block_on(
-                    w.rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd])),
-                ) {
+                if let Err(e) = w
+                    .rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd]))
+                    .await
+                {
                     // TODO(Fran): We need better error handling for workers
                     //   that failed before the controller noticed.
                     error!(
@@ -866,12 +863,11 @@ impl Leader {
 
     /// Perform a new query schema migration.
     // crate viz for tests
-    pub(crate) fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
+    #[instrument(level = "info", name = "migrate", skip(self, f))]
+    pub(crate) async fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
     where
         F: FnOnce(&mut Migration) -> T,
     {
-        let span = info_span!("migrate");
-        let _g = span.enter();
         info!("starting migration");
         let ingredients = self.ingredients.clone();
         let mut m = Migration {
@@ -885,7 +881,7 @@ impl Leader {
             start: time::Instant::now(),
         };
         let r = f(&mut m);
-        m.commit(self)?;
+        m.commit(self).await?;
         info!("finished migration");
         Ok(r)
     }
@@ -1198,27 +1194,20 @@ impl Leader {
     }
 
     /// Get statistics about the time spent processing different parts of the graph.
-    fn get_statistics(&mut self) -> ReadySetResult<GraphStats> {
+    async fn get_statistics(&mut self) -> ReadySetResult<GraphStats> {
         trace!("asked to get statistics");
         let workers = &self.workers;
-        // TODO: request stats from domains in parallel.
-        let domains = self
-            .domains
-            .iter_mut()
-            // TODO(eta): error handling impl adds overhead
-            .map(|(&di, s)| {
-                trace!(di = %di.index(), "requesting stats from domain");
-                Ok(
-                    s.send_to_healthy_blocking(DomainRequest::GetStatistics, workers)?
-                        .into_iter()
-                        .enumerate()
-                        .map(move |(i, s)| ((di, i), s)),
-                )
-            })
-            .collect::<ReadySetResult<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+        let mut domains = HashMap::new();
+        for (&di, s) in self.domains.iter_mut() {
+            trace!(di = %di.index(), "requesting stats from domain");
+            domains.extend(
+                s.send_to_healthy(DomainRequest::GetStatistics, workers)
+                    .await?
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(i, s)| ((di, i), s)),
+            );
+        }
 
         Ok(GraphStats { domains })
     }
@@ -1230,32 +1219,30 @@ impl Leader {
             .collect()
     }
 
-    fn flush_partial(&mut self) -> ReadySetResult<u64> {
+    async fn flush_partial(&mut self) -> ReadySetResult<u64> {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
         let workers = &self.workers;
-        let to_evict: Vec<_> = self
-            .domains
-            .iter_mut()
-            .map(|(di, s)| {
-                let to_evict: Vec<(NodeIndex, u64)> = s
-                    .send_to_healthy_blocking::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
-                        DomainRequest::GetStatistics,
-                        workers,
-                    )?
-                    .into_iter()
-                    .flat_map(move |(_, node_stats)| {
-                        node_stats
-                            .into_iter()
-                            .filter_map(|(ni, ns)| match ns.materialized {
-                                MaterializationStatus::Partial { .. } => Some((ni, ns.mem_size)),
-                                _ => None,
-                            })
-                    })
-                    .collect();
-                Ok((*di, to_evict))
-            })
-            .collect::<ReadySetResult<_>>()?;
+        let mut to_evict = Vec::new();
+        for (di, s) in self.domains.iter_mut() {
+            let domain_to_evict: Vec<(NodeIndex, u64)> = s
+                .send_to_healthy::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
+                    DomainRequest::GetStatistics,
+                    workers,
+                )
+                .await?
+                .into_iter()
+                .flat_map(move |(_, node_stats)| {
+                    node_stats
+                        .into_iter()
+                        .filter_map(|(ni, ns)| match ns.materialized {
+                            MaterializationStatus::Partial { .. } => Some((ni, ns.mem_size)),
+                            _ => None,
+                        })
+                })
+                .collect();
+            to_evict.push((*di, domain_to_evict));
+        }
 
         let mut total_evicted = 0;
         for (di, nodes) in to_evict {
@@ -1269,13 +1256,14 @@ impl Leader {
                 self.domains
                     .get_mut(&di)
                     .unwrap()
-                    .send_to_healthy_blocking::<()>(
+                    .send_to_healthy::<()>(
                         DomainRequest::Packet(Packet::Evict {
                             node: Some(na),
                             num_bytes: bytes as usize,
                         }),
                         workers,
-                    )?;
+                    )
+                    .await?;
                 total_evicted += bytes;
             }
         }
@@ -1285,9 +1273,9 @@ impl Leader {
         Ok(total_evicted)
     }
 
-    fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, ReadySetError> {
+    async fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, ReadySetError> {
         // TODO(eta): if this fails, apply the old one?
-        let r = self.migrate(|mig| new.activate(mig))?;
+        let r = self.migrate(|mig| new.activate(mig)).await?;
 
         match r {
             Ok(ref ra) => {
@@ -1310,7 +1298,7 @@ impl Leader {
                 topo_removals.reverse();
 
                 for leaf in topo_removals {
-                    self.remove_leaf(leaf)?;
+                    self.remove_leaf(leaf).await?;
                 }
 
                 // now remove bases
@@ -1338,7 +1326,7 @@ impl Leader {
                         "Removing base",
                     );
                     // now drop the (orphaned) base
-                    self.remove_nodes(vec![base].as_slice())?;
+                    self.remove_nodes(vec![base].as_slice()).await?;
                 }
 
                 self.recipe = new;
@@ -1354,10 +1342,10 @@ impl Leader {
         r
     }
 
-    fn extend_recipe(
+    async fn extend_recipe(
         &mut self,
         authority: &Arc<Authority>,
-        add_txt_spec: RecipeSpec,
+        add_txt_spec: RecipeSpec<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
         let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
@@ -1365,7 +1353,7 @@ impl Leader {
         let add_txt = add_txt_spec.recipe;
 
         match new.extend(add_txt) {
-            Ok(new) => match self.apply_recipe(new) {
+            Ok(new) => match self.apply_recipe(new).await {
                 Ok(x) => {
                     if let Some(offset) = &add_txt_spec.replication_offset {
                         offset.try_max_into(&mut self.replication_offset)?
@@ -1373,10 +1361,8 @@ impl Leader {
 
                     let node_restrictions = self.node_restrictions.clone();
                     let recipe_version = self.recipe.version();
-                    // TODO(justin): Change this and migration functions to async and remove nexted
-                    // executors.
-                    if futures::executor::block_on(authority.update_controller_state(
-                        |state: Option<ControllerState>| match state {
+                    if authority
+                        .update_controller_state(|state: Option<ControllerState>| match state {
                             None => Err(()),
                             Some(mut state) => {
                                 state.node_restrictions = node_restrictions.clone();
@@ -1389,9 +1375,9 @@ impl Leader {
                                 }
                                 Ok(state)
                             }
-                        },
-                    ))
-                    .is_err()
+                        })
+                        .await
+                        .is_err()
                     {
                         noria::internal!("failed to persist recipe extension");
                     }
@@ -1411,10 +1397,10 @@ impl Leader {
         }
     }
 
-    fn install_recipe(
+    async fn install_recipe(
         &mut self,
         authority: &Arc<Authority>,
-        r_txt_spec: RecipeSpec,
+        r_txt_spec: RecipeSpec<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
 
@@ -1425,14 +1411,14 @@ impl Leader {
                 let new = old
                     .replace(r)
                     .map_err(|e| internal_err(format!("recipe replace failed: {}", e)))?;
-                match self.apply_recipe(new) {
+                match self.apply_recipe(new).await {
                     Ok(x) => {
                         self.replication_offset = r_txt_spec.replication_offset.clone();
 
                         let node_restrictions = self.node_restrictions.clone();
                         let recipe_version = self.recipe.version();
-                        let install_result = futures::executor::block_on(
-                            authority.update_controller_state(|state: Option<ControllerState>| {
+                        let install_result = authority
+                            .update_controller_state(|state: Option<ControllerState>| {
                                 match state {
                                     None => Err(()),
                                     Some(mut state) => {
@@ -1446,8 +1432,8 @@ impl Leader {
                                         Ok(state)
                                     }
                                 }
-                            }),
-                        );
+                            })
+                            .await;
 
                         if let Err(e) = install_result {
                             noria::internal!("failed to persist recipe installation, {}", e)
@@ -1507,7 +1493,7 @@ impl Leader {
         graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
-    fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), ReadySetError> {
+    async fn remove_leaf(&mut self, mut leaf: NodeIndex) -> Result<(), ReadySetError> {
         let mut removals = vec![];
         let start = leaf;
         if self.ingredients.node_weight(leaf).is_none() {
@@ -1604,10 +1590,10 @@ impl Leader {
             removals.push(node);
         }
 
-        self.remove_nodes(removals.as_slice())
+        self.remove_nodes(removals.as_slice()).await
     }
 
-    fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), ReadySetError> {
+    async fn remove_nodes(&mut self, removals: &[NodeIndex]) -> Result<(), ReadySetError> {
         // Remove node from controller local state
         let mut domain_removals: HashMap<DomainIndex, Vec<LocalNodeIndex>> = HashMap::default();
         for ni in removals {
@@ -1636,10 +1622,8 @@ impl Leader {
                     domain_index: domain.index(),
                     shard: 0,
                 })?
-                .send_to_healthy_blocking::<()>(
-                    DomainRequest::RemoveNodes { nodes },
-                    &self.workers,
-                )?;
+                .send_to_healthy::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
+                .await?;
         }
 
         Ok(())

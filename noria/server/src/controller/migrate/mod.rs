@@ -39,7 +39,7 @@ use noria::metrics::recorded;
 use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tracing::{debug, debug_span, error, info, info_span, trace, warn};
+use tracing::{debug, debug_span, error, info, info_span, instrument, trace, warn};
 
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{
@@ -64,7 +64,7 @@ pub struct StoredDomainRequest {
     pub req: DomainRequest,
 }
 impl StoredDomainRequest {
-    pub fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub async fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
             ReadySetError::MigrationUnknownDomain {
                 domain_index: self.domain.index(),
@@ -76,17 +76,19 @@ impl StoredDomainRequest {
 
             invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
 
-            let mut is_done = |mw| -> ReadySetResult<bool> {
-                // mw passed in as parameter due to borrowck
-                Ok(dom
-                    .send_to_healthy_blocking::<bool>(DomainRequest::QueryReplayDone, mw)?
-                    .into_iter()
-                    .any(|x| x))
-            };
-
             let mut spins = 0;
+
             // FIXME(eta): this is a bit of a hack... (also, timeouts?)
-            while !is_done(&mainline.workers)? {
+            loop {
+                if dom
+                    .send_to_healthy::<bool>(DomainRequest::QueryReplayDone, &mainline.workers)
+                    .await?
+                    .into_iter()
+                    .any(|x| x)
+                {
+                    break;
+                }
+
                 spins += 1;
                 if spins == 10 {
                     warn!("waiting for setup()-initiated replay to complete");
@@ -95,9 +97,11 @@ impl StoredDomainRequest {
                 std::thread::sleep(Duration::from_millis(200));
             }
         } else if let Some(shard) = self.shard {
-            dom.send_to_healthy_shard_blocking::<()>(shard, self.req, &mainline.workers)?;
+            dom.send_to_healthy_shard::<()>(shard, self.req, &mainline.workers)
+                .await?;
         } else {
-            dom.send_to_healthy_blocking::<()>(self.req, &mainline.workers)?;
+            dom.send_to_healthy::<()>(self.req, &mainline.workers)
+                .await?;
         }
         Ok(())
     }
@@ -152,9 +156,8 @@ impl MigrationPlan {
     /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
-    pub fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
-        let span = info_span!("apply");
-        let _g = span.enter();
+    #[instrument(level = "info", name = "apply", skip(self, mainline))]
+    pub async fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let MigrationPlan {
             ingredients,
             domain_nodes,
@@ -187,7 +190,7 @@ impl MigrationPlan {
 
         let mut ret = Ok(());
 
-        if let Err(e) = dmp.apply(mainline) {
+        if let Err(e) = dmp.apply(mainline).await {
             error!(error = %e, "migration plan apply failed");
             mainline.ingredients = ingredients;
             mainline.domain_nodes = domain_nodes;
@@ -247,13 +250,15 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub fn apply(&mut self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub async fn apply(&mut self, mainline: &mut Leader) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
-            let d = mainline.place_domain(place.idx, place.shard_workers, place.nodes)?;
+            let d = mainline
+                .place_domain(place.idx, place.shard_workers, place.nodes)
+                .await?;
             mainline.domains.insert(place.idx, d);
         }
         for req in std::mem::take(&mut self.stored) {
-            req.apply(mainline)?;
+            req.apply(mainline).await?;
         }
         Ok(())
     }
@@ -561,7 +566,7 @@ impl Migration {
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
-    pub(super) fn commit(self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub(super) async fn commit(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let start = self.start;
 
         let plan = self
@@ -569,7 +574,7 @@ impl Migration {
             .map_err(|e| ReadySetError::MigrationPlanFailed {
                 source: Box::new(e),
             })?;
-        plan.apply(mainline)?;
+        plan.apply(mainline).await?;
 
         histogram!(
             recorded::CONTROLLER_MIGRATION_TIME,
