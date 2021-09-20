@@ -8,6 +8,7 @@ use crate::resultset::Resultset;
 use crate::schema::{NoriaSchema, SelectSchema};
 use crate::upstream;
 use crate::PostgreSqlUpstream;
+use psql_srv::Column;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.
@@ -95,11 +96,22 @@ impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
-            Upstream(upstream::QueryResult::Read { data: _rows }) => {
-                // TODO(grfn): Implement this
-                Err(ps::Error::Unimplemented(
-                    "Handling of pgsql select results not yet implemented".to_string(),
-                ))
+            Upstream(upstream::QueryResult::Read { data: rows }) => {
+                let schema = match rows.first() {
+                    None => vec![],
+                    Some(row) => row
+                        .columns()
+                        .iter()
+                        .map(|c| Column {
+                            name: c.name().to_owned(),
+                            col_type: c.type_().clone(),
+                        })
+                        .collect(),
+                };
+                Ok(ps::QueryResponse::Select {
+                    schema,
+                    resultset: Resultset::try_from(rows)?,
+                })
             }
             Upstream(upstream::QueryResult::Write { num_rows_affected }) => {
                 Ok(Insert(num_rows_affected))

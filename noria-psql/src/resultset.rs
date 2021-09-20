@@ -1,7 +1,9 @@
 use crate::row::Row;
 use crate::schema::{type_to_pgsql, SelectSchema};
 use noria::results::Results;
+use noria::DataType;
 use psql_srv as ps;
+use std::convert::TryFrom;
 use std::iter;
 use std::sync::Arc;
 use tokio_postgres::types::Type;
@@ -89,6 +91,39 @@ impl IntoIterator for Resultset {
                 project_fields,
                 project_field_types,
             })
+    }
+}
+
+impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
+    type Error = psql_srv::Error;
+
+    fn try_from(rows: Vec<tokio_postgres::Row>) -> Result<Self, Self::Error> {
+        let columns = match rows.first() {
+            Some(row) => row.columns(),
+            None => &[],
+        };
+        let mut result_rows = Vec::new();
+        for row in rows.iter() {
+            let mut result_row = Vec::new();
+            for i in 0..columns.len() {
+                let val: DataType = row.try_get(i).map_err(|e| {
+                    psql_srv::Error::InternalError(format!(
+                        "could not retrieve expected column index {} from row while parsing psql result: {}",
+                        i,
+                        e
+                    ))
+                })?;
+                result_row.push(val);
+            }
+            result_rows.push(result_row);
+        }
+        let column_names: Vec<String> = columns.iter().map(|c| c.name().to_owned()).collect();
+        let column_types: Vec<Type> = columns.iter().map(|c| c.type_().clone()).collect();
+        Ok(Resultset {
+            results: vec![Results::new(result_rows, Arc::from(&column_names[..]))],
+            project_fields: Arc::new((0_usize..columns.len()).collect()),
+            project_field_types: Arc::new(column_types),
+        })
     }
 }
 
