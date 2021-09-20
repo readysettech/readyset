@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b88ed554f5c30c85207dab250370cb24c180bd4606ddfa96d6318ddae2de8549 # shrinks to input = _WaitStepRoundTripArgs { val: WaitStep { continue_on_failure: false, condition: None, depends_on: None, allow_dependency_failure: false } }
