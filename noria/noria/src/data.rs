@@ -5,7 +5,7 @@ use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use derive_more::{From, Into};
 use itertools::Either;
 use serde::{Deserialize, Serialize};
-use tokio_postgres::types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
 use crate::{internal, ReadySetError, ReadySetResult};
 use nom_sql::{Double, Float, Literal, SqlType};
@@ -1683,6 +1683,43 @@ impl ToSql for DataType {
     );
 
     to_sql_checked!();
+}
+
+impl<'a> FromSql<'a> for DataType {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        macro_rules! mk_from_sql {
+            ($target:ty) => {
+                DataType::try_from(<$target>::from_sql(ty, raw)?).map_err(|e| {
+                    format!(
+                        "Could not convert Postgres type {} into a DataType. Error: {}",
+                        ty, e
+                    )
+                    .into()
+                })
+            };
+        }
+        match *ty {
+            Type::BOOL => mk_from_sql!(bool),
+            Type::CHAR => mk_from_sql!(i8),
+            Type::INT2 => mk_from_sql!(i16),
+            Type::INT4 => mk_from_sql!(i32),
+            Type::INT8 => mk_from_sql!(i64),
+            Type::TEXT => mk_from_sql!(&str),
+            Type::JSON => mk_from_sql!(&str),
+            Type::FLOAT4 => mk_from_sql!(f32),
+            Type::FLOAT8 => mk_from_sql!(f64),
+            Type::VARCHAR => mk_from_sql!(&str),
+            Type::DATE => mk_from_sql!(NaiveDateTime),
+            Type::TIME => mk_from_sql!(NaiveTime),
+            _ => Err(format!(
+                "Conversion from Postgres type '{}' to DataType is not implemented.",
+                ty
+            )
+            .into()),
+        }
+    }
+
+    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
 }
 
 impl TryFrom<DataType> for mysql_common::value::Value {
