@@ -18,6 +18,9 @@ pub enum DecodeError {
     #[error("invalid c string: {0}")]
     InvalidCStr(#[from] FromBytesWithNulError),
 
+    #[error("invalid numeric: {0}")]
+    InvalidNumeric(#[from] rust_decimal::Error),
+
     // Conversion for errors resulting from postgres_types::FromSql.
     #[error("invalid binary data value: {0}")]
     InvalidBinaryDataValue(#[from] Box<dyn std::error::Error + Send + Sync>),

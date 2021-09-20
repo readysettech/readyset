@@ -1,3 +1,6 @@
+[patch.crates-io]
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
+
 [workspace]
 members = [
     "buildkite-pipeline-rs",

@@ -22,6 +22,8 @@ use mysql_time::MysqlTime;
 use nom_sql::{Literal, SqlQuery};
 use noria::{DataType, TIMESTAMP_FORMAT};
 use pgsql::types::{accepts, to_sql_checked};
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use tokio_postgres as pgsql;
 
 /// The expected result of a statement
@@ -104,6 +106,7 @@ pub enum Type {
     Text,
     Integer,
     Real,
+    Numeric,
     Date,
     Time,
     ByteArray,
@@ -131,6 +134,7 @@ impl Display for Type {
             Self::Text => write!(f, "T"),
             Self::Integer => write!(f, "I"),
             Self::Real => write!(f, "R"),
+            Self::Numeric => write!(f, "F"), // F, as in fixed-point number
             Self::Date => write!(f, "D"),
             Self::Time => write!(f, "M"),
             Self::ByteArray => write!(f, "B"),
@@ -183,6 +187,7 @@ pub enum Value {
     Date(NaiveDateTime),
     Time(MysqlTime),
     ByteArray(Vec<u8>),
+    Numeric(Decimal),
     Null,
 }
 
@@ -243,6 +248,14 @@ impl TryFrom<Literal> for Value {
             Literal::Integer(v) => Value::Integer(v),
             Literal::Float(float) => real_value!(float.value, float.precision),
             Literal::Double(double) => real_value!(double.value, double.precision),
+            Literal::Numeric(mantissa, scale) => Decimal::try_from_i128_with_scale(mantissa, scale)
+                .map_err(|e| {
+                    anyhow::Error::msg(format!(
+                        "Could not convert literal value to NUMERIC type: {}",
+                        e
+                    ))
+                })
+                .map(Value::Numeric)?,
             Literal::String(v) => Value::Text(v),
             Literal::Blob(v) => Value::Text(String::from_utf8(v)?),
             Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
@@ -260,6 +273,13 @@ impl From<Value> for mysql::Value {
             Value::Text(x) => x.into(),
             Value::Integer(x) => x.into(),
             Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
+            Value::Numeric(d) => {
+                // FIXME(fran): This shouldn't be implemented for mysql::Value, since
+                // MySQL has it's own type `DECIMAL`, which is not supported by the library.
+                // However, it seems like the AST relies on this even when the database being used
+                // is Postgres, so we return a float to bypass that for now.
+                d.to_f64().unwrap_or(f64::MAX).into()
+            }
             Value::Null => mysql::Value::NULL,
             Value::Date(dt) => mysql::Value::from(dt),
             Value::Time(t) => mysql::Value::Time(
@@ -286,6 +306,7 @@ impl pgsql::types::ToSql for Value {
             Value::Text(x) => x.to_sql(ty, out),
             Value::Integer(x) => x.to_sql(ty, out),
             Value::Real(i, f) => (*i as f64 + ((*f as f64) / 1_000_000_000.0)).to_sql(ty, out),
+            Value::Numeric(d) => d.to_sql(ty, out),
             Value::Date(x) => x.to_sql(ty, out),
             Value::Time(x) => NaiveTime::from(*x).to_sql(ty, out),
             Value::ByteArray(array) => array.to_sql(ty, out),
@@ -313,6 +334,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::INT8 => Ok(Self::Integer(i64::from_sql(ty, raw)?)),
             Type::FLOAT4 => Ok(Self::from(f32::from_sql(ty, raw)? as f64)),
             Type::FLOAT8 => Ok(Self::from(f64::from_sql(ty, raw)?)),
+            Type::NUMERIC => Ok(Self::Numeric(Decimal::from_sql(ty, raw)?)),
             Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
             Type::DATE => Ok(Self::Date(NaiveDateTime::from_sql(ty, raw)?)),
             Type::TIME => Ok(Self::Time(NaiveTime::from_sql(ty, raw)?.into())),
@@ -320,7 +342,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
         }
     }
 
-    accepts!(BOOL, CHAR, INT2, INT4, INT8, FLOAT4, FLOAT8, TEXT, DATE, TIME);
+    accepts!(BOOL, CHAR, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, DATE, TIME);
 }
 
 impl TryFrom<DataType> for Value {
@@ -339,6 +361,7 @@ impl TryFrom<DataType> for Value {
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::Time(t) => Ok(Value::Time(*t)),
             DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
+            DataType::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
         }
     }
 }
@@ -365,6 +388,12 @@ impl Display for Value {
                 write!(f, "{}.", whole)?;
                 let frac = frac.to_string();
                 write!(f, "{}", &frac[..(cmp::min(frac.len(), 3))])
+            }
+            Self::Numeric(d) => {
+                // TODO(fran): We will probably need to extend our NUMERIC
+                //  implementation to correctly support the precision and scale,
+                //  so we can display it correctly.
+                write!(f, "{}", d)
             }
             Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
@@ -410,6 +439,7 @@ impl Value {
             Self::Text(_) => Some(Type::Text),
             Self::Integer(_) => Some(Type::Integer),
             Self::Real(_, _) => Some(Type::Real),
+            Self::Numeric(_) => Some(Type::Numeric),
             Self::Date(_) => Some(Type::Date),
             Self::Time(_) => Some(Type::Time),
             Self::ByteArray(_) => Some(Type::ByteArray),
@@ -434,6 +464,10 @@ impl Value {
                     f.trunc() as i64,
                     (f.fract() * 1_000_000_000.0).round() as _,
                 ))
+            }
+            Type::Numeric => {
+                // TODO(fran): Add support for MySQL's DECIMAL.
+                bail!("Conversion of {:?} to DECIMAL is not implemented", val)
             }
             Type::Date => Ok(Self::Date(mysql::from_value_opt(val)?)),
             Type::Time => Ok(Self::Time(match val {

@@ -13,6 +13,8 @@ use arccstr::ArcCStr;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::NaiveDateTime;
 use postgres_types::{FromSql, Type};
+use rust_decimal::prelude::FromStr;
+use rust_decimal::Decimal;
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -307,6 +309,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
         Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
         Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
+        Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
         Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
@@ -337,6 +340,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             // TODO: Ensure all values are properly parsed, including +/-0 and +/-inf.
             Ok(Value::Float(text_str.parse::<f32>()?))
         }
+        Type::NUMERIC => Ok(Value::Numeric(Decimal::from_str(text_str)?)),
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(text_str)?)),
         Type::TIMESTAMP => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
@@ -966,6 +970,24 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_numeric() {
+        let mut buf = BytesMut::new();
+        let decimal = Decimal::new(1234567890123456, 16);
+        buf.put_i32(-1); // length (placeholder)
+        decimal.to_sql(&Type::NUMERIC, &mut buf).unwrap(); // add the actual value
+        let value_len = buf.len() - 4;
+        let mut window = buf
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual length
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::NUMERIC).unwrap(),
+            DataValue::Numeric(decimal)
+        );
+    }
+
+    #[test]
     fn test_decode_binary_text() {
         let mut buf = BytesMut::new();
         buf.put_i32(6); // size
@@ -1101,6 +1123,17 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::FLOAT4).unwrap(),
             DataValue::Float(0.12345678)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_numeric() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(18); // size
+        buf.extend_from_slice(b"0.1234567890123456"); // value
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::NUMERIC).unwrap(),
+            DataValue::Numeric(Decimal::new(1234567890123456, 16))
         );
     }
 

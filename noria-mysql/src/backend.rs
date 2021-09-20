@@ -80,6 +80,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::Timestamp(ts) => rw.write_col(ts).await,
         DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()).await,
+        DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
     };
     Ok(written?)
 }

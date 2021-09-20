@@ -63,6 +63,8 @@ pub enum DataType {
     //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
     /// A byte array
     ByteArray(Arc<Vec<u8>>),
+    /// A fixed-point fractional representation.
+    Numeric(Arc<Decimal>),
 }
 
 impl Eq for DataType {}
@@ -92,6 +94,7 @@ impl fmt::Display for DataType {
                     array.iter().map(|byte| format!("{:02x}", byte)).join("")
                 )
             }
+            DataType::Numeric(ref d) => write!(f, "{}", d),
         }
     }
 }
@@ -117,6 +120,7 @@ impl fmt::Debug for DataType {
             DataType::UnsignedBigInt(n) => write!(f, "UnsignedBigInt({})", n),
             DataType::Time(ref t) => f.debug_tuple("Time").field(t.as_ref()).finish(),
             DataType::ByteArray(ref array) => write!(f, "ByteArray({:?})", array),
+            DataType::Numeric(ref d) => write!(f, "Numeric({:?})", d),
         }
     }
 }
@@ -148,6 +152,7 @@ impl DataType {
             DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
+            DataType::Numeric(_) => DataType::from(Decimal::MIN),
         }
     }
 
@@ -170,6 +175,7 @@ impl DataType {
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
             DataType::Text(_) | DataType::ByteArray(_) => unimplemented!(),
+            DataType::Numeric(_) => DataType::from(Decimal::MAX),
         }
     }
 
@@ -249,6 +255,7 @@ impl DataType {
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
             DataType::ByteArray(ref array) => !array.is_empty(),
+            DataType::Numeric(ref d) => !d.is_zero(),
         }
     }
 
@@ -308,6 +315,7 @@ impl DataType {
             Self::Timestamp(_) => Some(Timestamp),
             Self::Time(_) => Some(Time),
             Self::ByteArray(_) => Some(ByteArray),
+            Self::Numeric(_) => Some(Numeric(None)),
         }
     }
 
@@ -417,6 +425,7 @@ impl DataType {
             (Self::UnsignedBigInt(n), _, Bool) => convert_boolean!(*n),
             (_, Some(Float), Float | Real) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
+            (_, Some(Numeric(_)), Numeric(_)) => Ok(Cow::Borrowed(self)),
             (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
                 let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= (*max_len).into() {
@@ -514,6 +523,15 @@ impl DataType {
             (Self::Float(f, prec), Some(_), Double) => {
                 Ok(Cow::Owned(DataType::Double(*f as f64, *prec)))
             }
+            (Self::Float(f, _), Some(_), Numeric(_)) => rust_decimal::Decimal::from_f32(*f)
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert float to numeric due to overflow. Float value: {}",
+                        f
+                    ),
+                    None,
+                ))
+                .map(|d| Cow::Owned(DataType::from(d))),
             (
                 Self::Float(f, _),
                 Some(Float),
@@ -540,6 +558,15 @@ impl DataType {
                     ))
                 }
             }
+            (Self::Double(f, _), Some(_), Numeric(_)) => rust_decimal::Decimal::from_f64(*f)
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert double to numeric due to overflow. Double value: {}",
+                        f
+                    ),
+                    None,
+                ))
+                .map(|d| Cow::Owned(DataType::from(d))),
             (Self::Double(f, _), Some(_), Bigint(_)) => {
                 Ok(Cow::Owned(DataType::BigInt(f.round() as i64)))
             }
@@ -557,6 +584,69 @@ impl DataType {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
             )),
+            (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_)) => d
+                .to_i32()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to int due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|i| Cow::Owned(DataType::Int(i))),
+            (Self::Numeric(d), Some(_), Float) => d
+                .to_f32()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to float due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|f| Cow::Owned(DataType::Float(f, u8::MAX))),
+            (Self::Numeric(d), Some(_), Double) => d.to_f64()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to double due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|f| Cow::Owned(DataType::Double(f, u8::MAX))),
+            (Self::Numeric(d), Some(_), Bigint(_)) => d
+                .to_i64()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to big int due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|i| Cow::Owned(DataType::BigInt(i))),
+            (
+                Self::Numeric(d),
+                Some(Numeric(_)),
+                UnsignedTinyint(_) | UnsignedSmallint(_) | UnsignedInt(_),
+            ) => d
+                .to_u32()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to unsigned int due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|i| Cow::Owned(DataType::UnsignedInt(i))),
+            (Self::Numeric(d), Some(Numeric(_)), UnsignedBigint(_)) => d
+                .to_u64()
+                .ok_or_else(|| mk_err(
+                    format!(
+                        "Could not convert numeric to unsigned big int due to overflow. Numeric value: {}",
+                        d
+                    ),
+                    None,
+                ))
+                .map(|i| Cow::Owned(DataType::UnsignedBigInt(i))),
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Tinyint(_)) => {
                 <&str>::try_from(self)?
                     .parse::<i8>()
@@ -739,6 +829,13 @@ impl PartialEq for DataType {
                 // Eq
                 fa.to_bits() == (fb as f32).to_bits() && pa == pb
             }
+            (&DataType::Float(fa, _), &DataType::Numeric(ref d)) => {
+                // We need to compare the *bit patterns* of the floats so that our Hash matches our
+                // Eq
+                d.to_f32()
+                    .map(|df| fa.to_bits() == df.to_bits())
+                    .unwrap_or(false)
+            }
             (&DataType::Double(fa, pa), &DataType::Double(fb, pb)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
@@ -748,6 +845,17 @@ impl PartialEq for DataType {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
                 fa.to_bits() == (fb as f64).to_bits() && pa == pb
+            }
+            (&DataType::Double(fa, _), &DataType::Numeric(ref d)) => {
+                // We need to compare the *bit patterns* of the floats so that our Hash matches our
+                // Eq
+                d.to_f64()
+                    .map(|df| fa.to_bits() == df.to_bits())
+                    .unwrap_or(false)
+            }
+            (&DataType::Numeric(ref da), &DataType::Numeric(ref db)) => da == db,
+            (&DataType::Numeric(_), &DataType::Float(_, _) | &DataType::Double(_, _)) => {
+                other == self
             }
             (
                 &DataType::Timestamp(_) | &DataType::Time(_),
@@ -766,7 +874,10 @@ impl PartialEq for DataType {
 }
 
 use crate::errors::internal_err;
+use launchpad::arbitrary::arbitrary_decimal;
 use mysql_time::MysqlTime;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::Decimal;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -838,8 +949,22 @@ impl Ord for DataType {
             }
             (&DataType::Float(fa, _), &DataType::Float(fb, _)) => fa.total_cmp(&fb),
             (&DataType::Float(fa, _), &DataType::Double(fb, _)) => fa.total_cmp(&(fb as f32)),
+            (&DataType::Float(fa, _), &DataType::Numeric(ref d)) => d
+                .to_f32()
+                .as_ref()
+                .map(|fb| fa.total_cmp(fb))
+                .unwrap_or(Ordering::Less),
             (&DataType::Double(fa, _), &DataType::Float(fb, _)) => fa.total_cmp(&(fb as f64)),
             (&DataType::Double(fa, _), &DataType::Double(fb, _)) => fa.total_cmp(&fb),
+            (&DataType::Double(fa, _), &DataType::Numeric(ref d)) => d
+                .to_f64()
+                .as_ref()
+                .map(|fb| fa.total_cmp(fb))
+                .unwrap_or(Ordering::Less),
+            (&DataType::Numeric(ref da), &DataType::Numeric(ref db)) => da.cmp(db),
+            (&DataType::Numeric(_), &DataType::Float(_, _) | &DataType::Double(_, _)) => {
+                other.cmp(self).reverse()
+            }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
             (&DataType::None, &DataType::None) => Ordering::Equal,
@@ -866,6 +991,17 @@ impl Ord for DataType {
 
                 (a as f64).total_cmp(&b)
             }
+            // Convert ints to f32 and cmp against Float.
+            (&DataType::Int(..), &DataType::Numeric(ref b))
+            | (&DataType::UnsignedInt(..), &DataType::Numeric(ref b))
+            | (&DataType::BigInt(..), &DataType::Numeric(ref b))
+            | (&DataType::UnsignedBigInt(..), &DataType::Numeric(ref b)) => {
+                // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
+                #[allow(clippy::unwrap_used)]
+                let a: i128 = <i128>::try_from(self).unwrap();
+
+                Decimal::from(a).cmp(b)
+            }
             // order Ints, Reals, Text, Timestamps, None
             (&DataType::Int(..), _)
             | (&DataType::UnsignedInt(..), _)
@@ -891,7 +1027,13 @@ impl Ord for DataType {
 
                 a.total_cmp(&(b as f64))
             }
-            (&DataType::Double(..) | &DataType::Float(..), _) => Ordering::Greater,
+            (&DataType::Numeric(_), &DataType::Int(..))
+            | (&DataType::Numeric(_), &DataType::UnsignedInt(..))
+            | (&DataType::Numeric(_), &DataType::BigInt(..))
+            | (&DataType::Numeric(_), &DataType::UnsignedBigInt(..)) => other.cmp(self).reverse(),
+            (&DataType::Double(..) | &DataType::Float(..) | &DataType::Numeric(_), _) => {
+                Ordering::Greater
+            }
             (&DataType::Timestamp(..) | DataType::Time(_), _) => Ordering::Greater,
             (&DataType::None, _) => Ordering::Greater,
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
@@ -938,6 +1080,7 @@ impl Hash for DataType {
             DataType::Timestamp(ts) => ts.hash(state),
             DataType::Time(ref t) => t.hash(state),
             DataType::ByteArray(ref array) => array.hash(state),
+            DataType::Numeric(ref d) => d.hash(state),
         }
     }
 }
@@ -1065,6 +1208,48 @@ impl TryFrom<f64> for DataType {
     }
 }
 
+impl From<Decimal> for DataType {
+    fn from(d: Decimal) -> Self {
+        DataType::Numeric(Arc::new(d))
+    }
+}
+
+impl<'a> TryFrom<&'a DataType> for Decimal {
+    type Error = ReadySetError;
+
+    fn try_from(dt: &'a DataType) -> Result<Self, Self::Error> {
+        match dt {
+            DataType::Int(i) => Ok(Decimal::from(*i)),
+            DataType::UnsignedInt(i) => Ok(Decimal::from(*i)),
+            DataType::BigInt(i) => Ok(Decimal::from(*i)),
+            DataType::UnsignedBigInt(i) => Ok(Decimal::from(*i)),
+            DataType::Float(value, _) => {
+                Decimal::from_f32(*value).ok_or(Self::Error::DataTypeConversionError {
+                    val: format!("{:?}", dt),
+                    src_type: "DataType".to_string(),
+                    target_type: "Decimal".to_string(),
+                    details: "".to_string(),
+                })
+            }
+            DataType::Double(value, _) => {
+                Decimal::from_f64(*value).ok_or(Self::Error::DataTypeConversionError {
+                    val: format!("{:?}", dt),
+                    src_type: "DataType".to_string(),
+                    target_type: "Decimal".to_string(),
+                    details: "".to_string(),
+                })
+            }
+            DataType::Numeric(d) => Ok(*d.as_ref()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", dt),
+                src_type: "DataType".to_string(),
+                target_type: "Decimal".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+}
+
 /// Booleans are represented as `u32`s which are equal to either 0 or 1
 impl From<bool> for DataType {
     fn from(b: bool) -> Self {
@@ -1093,6 +1278,14 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::CurrentDate => Ok(DataType::from(chrono::Local::now().naive_local().date())),
             Literal::Float(ref float) => Ok(DataType::Float(float.value, float.precision)),
             Literal::Double(ref double) => Ok(DataType::Double(double.value, double.precision)),
+            Literal::Numeric(i, s) => Decimal::try_from_i128_with_scale(*i, *s)
+                .map_err(|e| ReadySetError::DataTypeConversionError {
+                    val: format!("Mantissa: {} | Scale: {}", i, s),
+                    src_type: "Literal".to_string(),
+                    target_type: "DataType".to_string(),
+                    details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
+                })
+                .map(|d| DataType::Numeric(Arc::new(d))),
             Literal::Blob(b) => DataType::try_from(b.as_slice()),
             Literal::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
             Literal::Placeholder(_) => {
@@ -1131,6 +1324,7 @@ impl TryFrom<DataType> for Literal {
                 dt.coerce_to(&SqlType::Text)?.as_ref(),
             )?)),
             DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
+            DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
         }
     }
 }
@@ -1557,6 +1751,12 @@ impl TryFrom<&'_ DataType> for f32 {
         match *data {
             DataType::Float(f, _) => Ok(f),
             DataType::Double(f, _) => Ok(f as f32),
+            DataType::Numeric(ref d) => d.to_f32().ok_or(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "f32".to_string(),
+                details: "".to_string(),
+            }),
             DataType::UnsignedInt(i) => Ok(i as f32),
             DataType::Int(i) => Ok(i as f32),
             DataType::UnsignedBigInt(i) => Ok(i as f32),
@@ -1586,6 +1786,12 @@ impl TryFrom<&'_ DataType> for f64 {
         match *data {
             DataType::Float(f, _) => Ok(f as f64),
             DataType::Double(f, _) => Ok(f),
+            DataType::Numeric(ref d) => d.to_f64().ok_or(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "f32".to_string(),
+                details: "".to_string(),
+            }),
             DataType::UnsignedInt(i) => Ok(f64::from(i)),
             DataType::Int(i) => Ok(f64::from(i)),
             DataType::UnsignedBigInt(i) => Ok(i as f64),
@@ -1721,6 +1927,7 @@ impl ToSql for DataType {
             Self::UnsignedBigInt(x) => (*x as i64).to_sql(ty, out),
             Self::Float(x, _) => x.to_sql(ty, out),
             Self::Double(x, _) => x.to_sql(ty, out),
+            Self::Numeric(d) => d.to_sql(ty, out),
             Self::Text(_) | Self::TinyText(_) => <&str>::try_from(self).unwrap().to_sql(ty, out),
             Self::Timestamp(x) => x.to_sql(ty, out),
             Self::Time(x) => NaiveTime::from(**x).to_sql(ty, out),
@@ -1729,8 +1936,8 @@ impl ToSql for DataType {
     }
 
     accepts!(
-        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP, FLOAT4,
-        FLOAT8
+        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
+        TIME, TIMESTAMP
     );
 
     to_sql_checked!();
@@ -1763,6 +1970,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::DATE => mk_from_sql!(NaiveDateTime),
             Type::TIME => mk_from_sql!(NaiveTime),
             Type::BYTEA => mk_from_sql!(Vec<u8>),
+            Type::NUMERIC => mk_from_sql!(Decimal),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -1775,7 +1983,10 @@ impl<'a> FromSql<'a> for DataType {
         Ok(DataType::None)
     }
 
-    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
+    accepts!(
+        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
+        TIME, TIMESTAMP
+    );
 }
 
 impl TryFrom<DataType> for mysql_common::value::Value {
@@ -1792,6 +2003,9 @@ impl TryFrom<DataType> for mysql_common::value::Value {
             DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
             DataType::Float(val, _) => Ok(Value::Float(val)),
             DataType::Double(val, _) => Ok(Value::Double(val)),
+            DataType::Numeric(_) => {
+                internal!("DataType::Numeric to MySQL DECIMAL is not implemented")
+            }
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
             DataType::Timestamp(val) => Ok(val.into()),
             DataType::Time(val) => Ok(Value::Time(
@@ -1836,7 +2050,8 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Float(..), second @ &DataType::UnsignedInt(..)) |
             (first @ &DataType::Float(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Float(..), second @ &DataType::Float(..)) |
-            (first @ &DataType::Float(..), second @ &DataType::Double(..)) => {
+            (first @ &DataType::Float(..), second @ &DataType::Double(..)) |
+            (first @ &DataType::Float(..), second @ &DataType::Numeric(..)) => {
                 let a: f32 = f32::try_from(first)?;
                 let b: f32 = f32::try_from(second)?;
                 DataType::try_from(a $op b)?
@@ -1851,11 +2066,74 @@ macro_rules! arithmetic_operation (
             (first @ &DataType::Double(..), second @ &DataType::UnsignedInt(..)) |
             (first @ &DataType::Double(..), second @ &DataType::UnsignedBigInt(..)) |
             (first @ &DataType::Double(..), second @ &DataType::Double(..)) |
-            (first @ &DataType::Double(..), second @ &DataType::Float(..)) => {
+            (first @ &DataType::Double(..), second @ &DataType::Float(..)) |
+            (first @ &DataType::Double(..), second @ &DataType::Numeric(..)) => {
                 let a: f64 = f64::try_from(first)?;
                 let b: f64 = f64::try_from(second)?;
                 DataType::try_from(a $op b)?
             }
+
+            (first @ &DataType::Int(..), second @ &DataType::Numeric(..)) |
+            (first @ &DataType::BigInt(..), second @ &DataType::Numeric(..)) |
+            (first @ &DataType::UnsignedInt(..), second @ &DataType::Numeric(..)) |
+            (first @ &DataType::UnsignedBigInt(..), second @ &DataType::Numeric(..)) |
+            (first @ &DataType::Numeric(..), second @ &DataType::Int(..)) |
+            (first @ &DataType::Numeric(..), second @ &DataType::BigInt(..)) |
+            (first @ &DataType::Numeric(..), second @ &DataType::UnsignedInt(..)) |
+            (first @ &DataType::Numeric(..), second @ &DataType::UnsignedBigInt(..)) |
+            (first @ &DataType::Numeric(..), second @ &DataType::Numeric(..)) => {
+                let a: Decimal = Decimal::try_from(first)
+                    .map_err(|e| ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", first),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: e.to_string(),
+                    })?;
+                let b: Decimal = Decimal::try_from(second)
+                    .map_err(|e| ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", second),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: e.to_string(),
+                    })?;
+                DataType::from(a $op b)
+            }
+            (first @ &DataType::Numeric(..), second @ &DataType::Float(..)) => {
+                let a: Decimal = Decimal::try_from(first)
+                    .map_err(|e| ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", first),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: e.to_string(),
+                    })?;
+                let b: Decimal = f32::try_from(second).and_then(|f| Decimal::from_f32(f)
+                    .ok_or(ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", first),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: "".to_string(),
+                    }))?;
+                DataType::from(a $op b)
+            }
+            (first @ &DataType::Numeric(..), second @ &DataType::Double(..)) => {
+                let a: Decimal = Decimal::try_from(first)
+                    .map_err(|e| ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", first),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: e.to_string(),
+                    })?;
+                let b: Decimal = f64::try_from(second).and_then(|f| Decimal::from_f64(f)
+                    .ok_or(ReadySetError::DataTypeConversionError {
+                        val: format!("{:?}", first),
+                        src_type: "DataType".to_string(),
+                        target_type: "Decimal".to_string(),
+                        details: "".to_string(),
+                    }))?;
+                DataType::from(a $op b)
+            }
+
+
             (first, second) => panic!(
                 "can't {} a {:?} and {:?}",
                 stringify!($op),
@@ -2088,6 +2366,7 @@ impl Arbitrary for DataType {
                 .prop_map(Arc::new)
                 .prop_map(Time),
             any::<Vec<u8>>().prop_map(|b| DataType::ByteArray(Arc::new(b))),
+            arbitrary_decimal().prop_map(DataType::from),
         ]
         .boxed()
     }
@@ -2167,6 +2446,7 @@ mod tests {
         prop_assume!(match dt {
             DataType::Timestamp(t) if t.date().year() < 1000 || t.date().year() > 9999 => false,
             DataType::ByteArray(_) => false,
+            DataType::Numeric(_) => false,
             _ => true,
         });
 
@@ -2302,6 +2582,7 @@ mod tests {
         let a_float: DataType = DataType::try_from(8.99_f32).unwrap();
         let b_float: DataType = DataType::try_from(-8.099_f32).unwrap();
         let c_float: DataType = DataType::try_from(-0.012_345_678_f32).unwrap();
+
         assert_eq!(a_float.to_string(), "8.99");
         assert_eq!(b_float.to_string(), "-8.099");
         assert_eq!(c_float.to_string(), "-0.012345678");
@@ -2312,6 +2593,9 @@ mod tests {
         assert_eq!(a_double.to_string(), "8.99");
         assert_eq!(b_double.to_string(), "-8.099");
         assert_eq!(c_double.to_string(), "-0.012345678");
+
+        let d_float: DataType = DataType::from(Decimal::new(3141, 3));
+        assert_eq!(d_float.to_string(), "3.141");
     }
 
     #[test]
@@ -2334,8 +2618,21 @@ mod tests {
         assert_eq!(original, converted);
     }
 
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn real_to_numeric() {
+        let original: Decimal = Decimal::new(3141, 3);
+        let data_type: DataType = DataType::try_from(original).unwrap();
+        let converted: Decimal = Decimal::try_from(&data_type).unwrap();
+        assert_eq!(
+            DataType::Numeric(Arc::new(Decimal::new(3141, 3))),
+            data_type
+        );
+        assert_eq!(original, converted);
+    }
+
     macro_rules! assert_arithmetic {
-        ($left:literal $op:tt $right:literal = $expected:literal) => {
+        ($op:tt, $left:expr, $right:expr, $expected:expr) => {
             assert_eq!(
                 (&DataType::try_from($left).unwrap() $op &DataType::try_from($right).unwrap()).unwrap(),
                 DataType::try_from($expected).unwrap()
@@ -2345,15 +2642,22 @@ mod tests {
 
     #[test]
     fn add_data_types() {
-        assert_arithmetic!(1 + 2 = 3);
-        assert_arithmetic!(1.5_f32 + 2 = 3.5_f32);
-        assert_arithmetic!(1.5_f64 + 2 = 3.5_f64);
-        assert_arithmetic!(2 + 1.5_f32 = 3.5_f32);
-        assert_arithmetic!(2 + 1.5_f64 = 3.5_f64);
-        assert_arithmetic!(1.5_f32 + 2.5_f32 = 4.0_f32);
-        assert_arithmetic!(1.5_f64 + 2.5_f64 = 4.0_f64);
-        assert_arithmetic!(1.5_f32 + 2.5_f64 = 4.0_f64);
-        assert_arithmetic!(1.5_f64 + 2.5_f32 = 4.0_f64);
+        assert_arithmetic!(+, 1, 2, 3);
+        assert_arithmetic!(+, 1.5_f32, 2, 3.5_f32);
+        assert_arithmetic!(+, 1.5_f64, 2, 3.5_f64);
+        assert_arithmetic!(+, Decimal::new(15, 1), 2, Decimal::new(35, 1));
+        assert_arithmetic!(+, 2, 1.5_f32, 3.5_f32);
+        assert_arithmetic!(+, 2, 1.5_f64, 3.5_f64);
+        assert_arithmetic!(+, 2, Decimal::new(15, 1), Decimal::new(35, 1));
+        assert_arithmetic!(+, 1.5_f32, 2.5_f32, 4.0_f32);
+        assert_arithmetic!(+, 1.5_f32, 2.5_f64, 4.0_f64);
+        assert_arithmetic!(+, 1.5_f32, Decimal::new(25, 1), Decimal::new(40, 1));
+        assert_arithmetic!(+, 1.5_f64, 2.5_f32, 4.0_f64);
+        assert_arithmetic!(+, 1.5_f64, 2.5_f64, 4.0_f64);
+        assert_arithmetic!(+, 1.5_f64, Decimal::new(25, 1), Decimal::new(40, 1));
+        assert_arithmetic!(+, Decimal::new(15, 1), Decimal::new(25, 1), Decimal::new(40, 1));
+        assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f32, Decimal::new(40, 1));
+        assert_arithmetic!(+, Decimal::new(15, 1), 2.5_f64, Decimal::new(40, 1));
         assert_eq!(
             (&DataType::BigInt(1) + &DataType::BigInt(2)).unwrap(),
             3.into()
@@ -2370,15 +2674,22 @@ mod tests {
 
     #[test]
     fn subtract_data_types() {
-        assert_arithmetic!(2 - 1 = 1);
-        assert_arithmetic!(3.5_f32 - 2 = 1.5_f32);
-        assert_arithmetic!(3.5_f64 - 2 = 1.5_f64);
-        assert_arithmetic!(2 - 1.5_f32 = 0.5_f32);
-        assert_arithmetic!(2 - 1.5_f64 = 0.5_f64);
-        assert_arithmetic!(3.5_f32 - 2.0_f32 = 1.5_f32);
-        assert_arithmetic!(3.5_f64 - 2.0_f64 = 1.5_f64);
-        assert_arithmetic!(3.5_f32 - 2.0_f64 = 1.5_f64);
-        assert_arithmetic!(3.5_f64 - 2.0_f32 = 1.5_f64);
+        assert_arithmetic!(-, 2, 1, 1);
+        assert_arithmetic!(-, 3.5_f32, 2, 1.5_f32);
+        assert_arithmetic!(-, 3.5_f64, 2, 1.5_f64);
+        assert_arithmetic!(-, Decimal::new(35, 1), 2, Decimal::new(15, 1));
+        assert_arithmetic!(-, 2, 1.5_f32, 0.5_f32);
+        assert_arithmetic!(-, 2, 1.5_f64, 0.5_f64);
+        assert_arithmetic!(-, 2, Decimal::new(15, 1), Decimal::new(5, 1));
+        assert_arithmetic!(-, 3.5_f32, 2.0_f32, 1.5_f32);
+        assert_arithmetic!(-, 3.5_f32, 2.0_f64, 1.5_f64);
+        assert_arithmetic!(-, 3.5_f32, Decimal::new(20, 1), Decimal::new(15, 1));
+        assert_arithmetic!(-, 3.5_f64, 2.0_f32, 1.5_f64);
+        assert_arithmetic!(-, 3.5_f64, 2.0_f64, 1.5_f64);
+        assert_arithmetic!(-, 3.5_f64, Decimal::new(20, 1), Decimal::new(15, 1));
+        assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f32, Decimal::new(15, 1));
+        assert_arithmetic!(-, Decimal::new(35, 1), 2.0_f64, Decimal::new(15, 1));
+        assert_arithmetic!(-, Decimal::new(35, 1), Decimal::new(20, 1), Decimal::new(15, 1));
         assert_eq!(
             (&DataType::BigInt(1) - &DataType::BigInt(2)).unwrap(),
             (-1).into()
@@ -2395,15 +2706,19 @@ mod tests {
 
     #[test]
     fn multiply_data_types() {
-        assert_arithmetic!(2 * 1 = 2);
-        assert_arithmetic!(3.5_f32 * 2 = 7.0_f32);
-        assert_arithmetic!(3.5_f64 * 2 = 7.0_f64);
-        assert_arithmetic!(2 * 1.5_f32 = 3.0_f32);
-        assert_arithmetic!(2 * 1.5_f64 = 3.0_f64);
-        assert_arithmetic!(3.5_f32 * 2.0_f32 = 7.0_f32);
-        assert_arithmetic!(3.5_f64 * 2.0_f64 = 7.0_f64);
-        assert_arithmetic!(3.5_f32 * 2.0_f64 = 7.0_f64);
-        assert_arithmetic!(3.5_f64 * 2.0_f32 = 7.0_f64);
+        assert_arithmetic!(*, 2, 1, 2);
+        assert_arithmetic!(*, 3.5_f32, 2, 7.0_f32);
+        assert_arithmetic!(*, 3.5_f64, 2, 7.0_f64);
+        assert_arithmetic!(*, Decimal::new(35, 1), 2, Decimal::new(70, 1));
+        assert_arithmetic!(*, 2, 1.5_f32, 3.0_f32);
+        assert_arithmetic!(*, 2, 1.5_f64, 3.0_f64);
+        assert_arithmetic!(*, 2, Decimal::new(15, 1), Decimal::new(30, 1));
+        assert_arithmetic!(*, 3.5_f32, 2.0_f32, 7.0_f32);
+        assert_arithmetic!(*, 3.5_f32, 2.0_f64, 7.0_f64);
+        assert_arithmetic!(*, 3.5_f32, Decimal::new(20, 1), Decimal::new(70, 1));
+        assert_arithmetic!(*, 3.5_f64, 2.0_f32, 7.0_f64);
+        assert_arithmetic!(*, 3.5_f64, 2.0_f64, 7.0_f64);
+        assert_arithmetic!(*, 3.5_f64, Decimal::new(20, 1), Decimal::new(70, 1));
         assert_eq!(
             (&DataType::BigInt(1) * &DataType::BigInt(2)).unwrap(),
             2.into()
@@ -2420,15 +2735,19 @@ mod tests {
 
     #[test]
     fn divide_data_types() {
-        assert_arithmetic!(2 / 1 = 2);
-        assert_arithmetic!(7.5_f32 / 2 = 3.75_f32);
-        assert_arithmetic!(7.5_f64 / 2 = 3.75_f64);
-        assert_arithmetic!(7 / 2.5_f32 = 2.8_f32);
-        assert_arithmetic!(7 / 2.5_f64 = 2.8_f64);
-        assert_arithmetic!(3.5_f32 / 2.0_f32 = 1.75_f32);
-        assert_arithmetic!(3.5_f64 / 2.0_f64 = 1.75_f64);
-        assert_arithmetic!(3.5_f32 / 2.0_f64 = 1.75_f64);
-        assert_arithmetic!(3.5_f64 / 2.0_f32 = 1.75_f64);
+        assert_arithmetic!(/, 2, 1, 2);
+        assert_arithmetic!(/, 7.5_f32, 2, 3.75_f32);
+        assert_arithmetic!(/, 7.5_f64, 2, 3.75_f64);
+        assert_arithmetic!(/, Decimal::new(75, 1), 2, Decimal::new(375, 2));
+        assert_arithmetic!(/, 7, 2.5_f32, 2.8_f32);
+        assert_arithmetic!(/, 7, 2.5_f64, 2.8_f64);
+        assert_arithmetic!(/, 7, Decimal::new(25, 1), Decimal::new(28, 1));
+        assert_arithmetic!(/, 3.5_f32, 2.0_f32, 1.75_f32);
+        assert_arithmetic!(/, 3.5_f32, 2.0_f64, 1.75_f64);
+        assert_arithmetic!(/, 3.5_f32, Decimal::new(20, 1), Decimal::new(175, 2));
+        assert_arithmetic!(/, 3.5_f64, 2.0_f32, 1.75_f64);
+        assert_arithmetic!(/, 3.5_f64, 2.0_f64, 1.75_f64);
+        assert_arithmetic!(/, 3.5_f64, Decimal::new(20, 1), Decimal::new(175, 2));
         assert_eq!(
             (&DataType::BigInt(4) / &DataType::BigInt(2)).unwrap(),
             2.into()
@@ -2459,6 +2778,7 @@ mod tests {
         let float = DataType::Float(-0.05, 3);
         let double_from_real: DataType = DataType::try_from(-0.05_f64).unwrap();
         let double = DataType::Double(-0.05, 3);
+        let numeric = DataType::from(Decimal::new(-5, 2)); // -0.05
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
@@ -2469,6 +2789,7 @@ mod tests {
         assert_eq!(format!("{:?}", float), "Float(-0.05, 3)");
         assert_eq!(format!("{:?}", double_from_real), "Double(-0.05, 255)");
         assert_eq!(format!("{:?}", double), "Double(-0.05, 3)");
+        assert_eq!(format!("{:?}", numeric), "Numeric(-0.05)");
         assert_eq!(
             format!("{:?}", timestamp),
             "Timestamp(1970-01-01T00:00:00.042)"
@@ -2489,6 +2810,7 @@ mod tests {
         let float = DataType::Float(-8.99, 3);
         let double_from_real: DataType = DataType::try_from(-8.99_f64).unwrap();
         let double = DataType::Double(-8.99, 3);
+        let numeric = DataType::from(Decimal::new(-899, 2)); // -8.99
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
@@ -2499,6 +2821,7 @@ mod tests {
         assert_eq!(format!("{}", float), "-8.99");
         assert_eq!(format!("{}", double_from_real), "-8.99");
         assert_eq!(format!("{}", double), "-8.99");
+        assert_eq!(format!("{}", numeric), "-8.99");
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
@@ -2522,6 +2845,8 @@ mod tests {
         let double2 = DataType::Double(-8.98, 3);
         let double_from_real: DataType = DataType::try_from(-8.99_f64).unwrap();
         let double_from_real2: DataType = DataType::try_from(-8.98_f64).unwrap();
+        let numeric = DataType::from(Decimal::new(-899, 2)); // -8.99
+        let numeric2 = DataType::from(Decimal::new(-898, 2)); // -8.99
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
         let shrt = DataType::Int(5);
@@ -2545,6 +2870,7 @@ mod tests {
         assert_eq!(f(&float), f(&float));
         assert_eq!(f(&float_from_real), f(&float_from_real));
         assert_eq!(f(&double), f(&double));
+        assert_eq!(f(&numeric), f(&numeric));
         assert_eq!(f(&double_from_real), f(&double_from_real));
         assert_eq!(f(&time), f(&time));
         assert_eq!(f(&bytes), f(&bytes));
@@ -2572,6 +2898,7 @@ mod tests {
         assert_ne!(f(&txt1), f(&float_from_real));
         assert_ne!(f(&txt1), f(&double));
         assert_ne!(f(&txt1), f(&double_from_real));
+        assert_ne!(f(&txt1), f(&numeric));
         assert_ne!(f(&txt1), f(&time));
         assert_ne!(f(&txt1), f(&shrt));
         assert_ne!(f(&txt1), f(&long));
@@ -2585,6 +2912,7 @@ mod tests {
         assert_ne!(f(&txt2), f(&float_from_real));
         assert_ne!(f(&txt2), f(&double));
         assert_ne!(f(&txt2), f(&double_from_real));
+        assert_ne!(f(&txt2), f(&numeric));
         assert_ne!(f(&txt2), f(&time));
         assert_ne!(f(&txt2), f(&shrt));
         assert_ne!(f(&txt2), f(&long));
@@ -2599,6 +2927,7 @@ mod tests {
         assert_ne!(f(&text), f(&float_from_real));
         assert_ne!(f(&text), f(&double));
         assert_ne!(f(&text), f(&double_from_real));
+        assert_ne!(f(&text), f(&numeric));
         assert_ne!(f(&text), f(&time));
         assert_ne!(f(&text), f(&shrt));
         assert_ne!(f(&text), f(&long));
@@ -2609,40 +2938,48 @@ mod tests {
         assert_ne!(f(&float), f(&float2));
         assert_ne!(f(&float_from_real), f(&float_from_real2));
         assert_ne!(f(&double), f(&double2));
-        assert_ne!(f(&double), f(&double_from_real2));
-        assert_ne!(f(&double_from_real), f(&txt1));
+        assert_ne!(f(&double_from_real), f(&double_from_real2));
+        assert_ne!(f(&numeric), f(&numeric2));
         assert_ne!(f(&float), f(&txt1));
         assert_ne!(f(&float_from_real), f(&txt1));
         assert_ne!(f(&double), f(&txt1));
         assert_ne!(f(&double_from_real), f(&txt1));
+        assert_ne!(f(&numeric), f(&txt1));
         assert_ne!(f(&float), f(&txt2));
         assert_ne!(f(&float_from_real), f(&txt2));
         assert_ne!(f(&double), f(&txt2));
         assert_ne!(f(&double_from_real), f(&txt2));
+        assert_ne!(f(&numeric), f(&txt2));
         assert_ne!(f(&float), f(&text));
         assert_ne!(f(&float_from_real), f(&text));
         assert_ne!(f(&double), f(&text));
         assert_ne!(f(&double_from_real), f(&text));
+        assert_ne!(f(&numeric), f(&text));
         assert_ne!(f(&float), f(&time));
         assert_ne!(f(&float_from_real), f(&time));
         assert_ne!(f(&double), f(&time));
         assert_ne!(f(&double_from_real), f(&time));
+        assert_ne!(f(&numeric), f(&time));
         assert_ne!(f(&float), f(&shrt));
         assert_ne!(f(&float_from_real), f(&shrt));
         assert_ne!(f(&double), f(&shrt));
         assert_ne!(f(&double_from_real), f(&shrt));
+        assert_ne!(f(&numeric), f(&shrt));
         assert_ne!(f(&float), f(&long));
         assert_ne!(f(&float_from_real), f(&long));
         assert_ne!(f(&double), f(&long));
         assert_ne!(f(&double_from_real), f(&long));
+        assert_ne!(f(&numeric), f(&long));
         assert_ne!(f(&float), f(&ushrt));
         assert_ne!(f(&float_from_real), f(&ushrt));
         assert_ne!(f(&double), f(&ushrt));
         assert_ne!(f(&double_from_real), f(&ushrt));
+        assert_ne!(f(&numeric), f(&ushrt));
         assert_ne!(f(&float), f(&ulong));
         assert_ne!(f(&float_from_real), f(&ulong));
         assert_ne!(f(&double), f(&ulong));
         assert_ne!(f(&double_from_real), f(&ulong));
+        assert_ne!(f(&numeric), f(&ulong));
 
         assert_ne!(f(&time), f(&time2));
         assert_ne!(f(&time), f(&txt1));
@@ -2911,6 +3248,8 @@ mod tests {
         let double2 = DataType::Double(-8.98, 3);
         let double_from_real: DataType = DataType::try_from(-8.99_f64).unwrap();
         let double_from_real2: DataType = DataType::try_from(-8.98_f64).unwrap();
+        let numeric = DataType::from(Decimal::new(-899, 2)); // -8.99
+        let numeric2 = DataType::from(Decimal::new(-898, 2)); // -8.99
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
         let shrt = DataType::Int(5);
@@ -2936,6 +3275,7 @@ mod tests {
         assert_eq!(float_from_real.cmp(&float_from_real), Ordering::Equal);
         assert_eq!(double.cmp(&double), Ordering::Equal);
         assert_eq!(double_from_real.cmp(&double_from_real), Ordering::Equal);
+        assert_eq!(numeric.cmp(&numeric), Ordering::Equal);
         assert_eq!(time.cmp(&time), Ordering::Equal);
         assert_eq!(bytes.cmp(&bytes), Ordering::Equal);
 
@@ -2958,6 +3298,7 @@ mod tests {
         assert_ne!(txt1.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(txt1.cmp(&double), Ordering::Equal);
         assert_ne!(txt1.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(txt1.cmp(&numeric), Ordering::Equal);
         assert_ne!(txt1.cmp(&time), Ordering::Equal);
         assert_ne!(txt1.cmp(&shrt), Ordering::Equal);
         assert_ne!(txt1.cmp(&ushrt), Ordering::Equal);
@@ -2971,6 +3312,7 @@ mod tests {
         assert_ne!(txt2.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(txt2.cmp(&double), Ordering::Equal);
         assert_ne!(txt2.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(txt2.cmp(&numeric), Ordering::Equal);
         assert_ne!(txt2.cmp(&time), Ordering::Equal);
         assert_ne!(txt2.cmp(&shrt), Ordering::Equal);
         assert_ne!(txt2.cmp(&ushrt), Ordering::Equal);
@@ -2985,6 +3327,7 @@ mod tests {
         assert_ne!(text.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(text.cmp(&double), Ordering::Equal);
         assert_ne!(text.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(text.cmp(&numeric), Ordering::Equal);
         assert_ne!(text.cmp(&time), Ordering::Equal);
         assert_ne!(text.cmp(&shrt), Ordering::Equal);
         assert_ne!(text.cmp(&ushrt), Ordering::Equal);
@@ -2996,26 +3339,32 @@ mod tests {
         assert_ne!(float_from_real.cmp(&float_from_real2), Ordering::Equal);
         assert_ne!(double.cmp(&double2), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&double_from_real2), Ordering::Equal);
+        assert_ne!(numeric.cmp(&numeric2), Ordering::Equal);
         assert_ne!(float.cmp(&txt1), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&txt1), Ordering::Equal);
         assert_ne!(double.cmp(&txt1), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&txt1), Ordering::Equal);
+        assert_ne!(numeric.cmp(&txt1), Ordering::Equal);
         assert_ne!(float.cmp(&txt2), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&txt2), Ordering::Equal);
         assert_ne!(double.cmp(&txt2), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&txt2), Ordering::Equal);
+        assert_ne!(numeric.cmp(&txt2), Ordering::Equal);
         assert_ne!(float.cmp(&text), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&text), Ordering::Equal);
         assert_ne!(double.cmp(&text), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&text), Ordering::Equal);
+        assert_ne!(numeric.cmp(&text), Ordering::Equal);
         assert_ne!(float.cmp(&time), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&time), Ordering::Equal);
         assert_ne!(double.cmp(&time), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&time), Ordering::Equal);
+        assert_ne!(numeric.cmp(&time), Ordering::Equal);
         assert_ne!(float.cmp(&shrt), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&shrt), Ordering::Equal);
         assert_ne!(double.cmp(&shrt), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&shrt), Ordering::Equal);
+        assert_ne!(numeric.cmp(&shrt), Ordering::Equal);
         assert_ne!(float.cmp(&shrt), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&shrt), Ordering::Equal);
         assert_ne!(double.cmp(&shrt), Ordering::Equal);
@@ -3024,14 +3373,17 @@ mod tests {
         assert_ne!(float_from_real.cmp(&ushrt), Ordering::Equal);
         assert_ne!(double.cmp(&ushrt), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&ushrt), Ordering::Equal);
+        assert_ne!(numeric.cmp(&ushrt), Ordering::Equal);
         assert_ne!(float.cmp(&long), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&long), Ordering::Equal);
         assert_ne!(double.cmp(&long), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&long), Ordering::Equal);
+        assert_ne!(numeric.cmp(&long), Ordering::Equal);
         assert_ne!(float.cmp(&ulong), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&ulong), Ordering::Equal);
         assert_ne!(double.cmp(&ulong), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&ulong), Ordering::Equal);
+        assert_ne!(numeric.cmp(&ulong), Ordering::Equal);
         assert_ne!(float.cmp(&bytes), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&bytes), Ordering::Equal);
         assert_ne!(double.cmp(&bytes), Ordering::Equal);
@@ -3045,6 +3397,7 @@ mod tests {
         assert_ne!(time.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(time.cmp(&double), Ordering::Equal);
         assert_ne!(time.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(time.cmp(&numeric), Ordering::Equal);
         assert_ne!(time.cmp(&shrt), Ordering::Equal);
         assert_ne!(time.cmp(&ushrt), Ordering::Equal);
         assert_ne!(time.cmp(&long), Ordering::Equal);
@@ -3060,6 +3413,7 @@ mod tests {
         assert_ne!(shrt.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(shrt.cmp(&double), Ordering::Equal);
         assert_ne!(shrt.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(shrt.cmp(&numeric), Ordering::Equal);
         assert_ne!(shrt.cmp(&time), Ordering::Equal);
         assert_ne!(shrt.cmp(&long6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
@@ -3074,6 +3428,7 @@ mod tests {
         assert_ne!(ushrt.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(ushrt.cmp(&double), Ordering::Equal);
         assert_ne!(ushrt.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&numeric), Ordering::Equal);
         assert_ne!(ushrt.cmp(&time), Ordering::Equal);
         assert_ne!(ushrt.cmp(&long6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
@@ -3088,6 +3443,7 @@ mod tests {
         assert_ne!(long.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(long.cmp(&double), Ordering::Equal);
         assert_ne!(long.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(long.cmp(&numeric), Ordering::Equal);
         assert_ne!(long.cmp(&time), Ordering::Equal);
         assert_ne!(long.cmp(&shrt6), Ordering::Equal);
         assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
@@ -3102,6 +3458,7 @@ mod tests {
         assert_ne!(ulong.cmp(&float_from_real), Ordering::Equal);
         assert_ne!(ulong.cmp(&double), Ordering::Equal);
         assert_ne!(ulong.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(ulong.cmp(&numeric), Ordering::Equal);
         assert_ne!(ulong.cmp(&time), Ordering::Equal);
         assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
@@ -3129,6 +3486,8 @@ mod tests {
         let float2 = DataType::Float(0.8, 16);
         let double1 = DataType::Double(1.2, 16);
         let double2 = DataType::Double(0.8, 16);
+        let numeric1 = DataType::from(Decimal::new(12, 1));
+        let numeric2 = DataType::from(Decimal::new(8, 1));
         assert_eq!(txt1.cmp(&int1), Ordering::Greater);
         assert_eq!(int1.cmp(&txt1), Ordering::Less);
         assert_eq!(txt1.cmp(&double1), Ordering::Greater);
@@ -3138,6 +3497,9 @@ mod tests {
         assert_eq!(double1.cmp(&txt1), Ordering::Less);
         assert_eq!(double1.cmp(&int1), Ordering::Greater);
         assert_eq!(double2.cmp(&int1), Ordering::Less);
+        assert_eq!(numeric.cmp(&txt1), Ordering::Less);
+        assert_eq!(numeric1.cmp(&int1), Ordering::Greater);
+        assert_eq!(numeric2.cmp(&int1), Ordering::Less);
     }
 
     #[allow(clippy::eq_op)]
@@ -3300,7 +3662,46 @@ mod tests {
         }
 
         real_conversion!(float_to_double, f32, f64, Double);
+
+        #[proptest]
+        fn float_to_numeric(source: f32) {
+            let expected = rust_decimal::Decimal::from_f32(source);
+            if expected.is_some() {
+                assert_eq!(
+                    *DataType::try_from(source)
+                        .unwrap()
+                        .coerce_to(&SqlType::Numeric(None))
+                        .unwrap(),
+                    DataType::from(expected.unwrap())
+                );
+            } else {
+                assert!(DataType::try_from(source)
+                    .unwrap()
+                    .coerce_to(&SqlType::Numeric(None))
+                    .is_err());
+            }
+        }
+
         real_conversion!(double_to_float, f64, f32, Float);
+
+        #[proptest]
+        fn double_to_numeric(source: f64) {
+            let expected = rust_decimal::Decimal::from_f64(source);
+            if expected.is_some() {
+                assert_eq!(
+                    *DataType::try_from(source)
+                        .unwrap()
+                        .coerce_to(&SqlType::Numeric(None))
+                        .unwrap(),
+                    DataType::from(expected.unwrap())
+                );
+            } else {
+                assert!(DataType::try_from(source)
+                    .unwrap()
+                    .coerce_to(&SqlType::Numeric(None))
+                    .is_err());
+            }
+        }
 
         fn int_type() -> impl Strategy<Value = SqlType> {
             use SqlType::*;
@@ -3312,6 +3713,18 @@ mod tests {
             let double = DataType::Double(whole_part as f64, 0);
             let result = double.coerce_to(&int_type).unwrap();
             assert_eq!(i32::try_from(result.into_owned()).unwrap(), whole_part);
+        }
+
+        #[proptest]
+        fn numeric_to_int(whole_part: i32, #[strategy(int_type())] int_type: SqlType) {
+            let decimal = rust_decimal::Decimal::from_i32(whole_part);
+            prop_assume!(decimal.is_some());
+            let decimal = decimal.unwrap();
+            let result = DataType::from(decimal)
+                .coerce_to(&int_type)
+                .unwrap()
+                .into_owned();
+            assert_eq!(i32::try_from(result).unwrap(), whole_part)
         }
 
         fn unsigned_type() -> impl Strategy<Value = SqlType> {
@@ -3332,6 +3745,18 @@ mod tests {
             let double = DataType::Double(whole_part as f64, 0);
             let result = double.coerce_to(&unsigned_type).unwrap();
             assert_eq!(u32::try_from(result.into_owned()).unwrap(), whole_part);
+        }
+
+        #[proptest]
+        fn numeric_to_unsigned(whole_part: u8, #[strategy(int_type())] int_type: SqlType) {
+            let decimal = rust_decimal::Decimal::from_u8(whole_part);
+            prop_assume!(decimal.is_some());
+            let decimal = decimal.unwrap();
+            let result = DataType::from(decimal)
+                .coerce_to(&int_type)
+                .unwrap()
+                .into_owned();
+            assert_eq!(u32::try_from(result).unwrap(), whole_part as u32)
         }
 
         #[proptest]

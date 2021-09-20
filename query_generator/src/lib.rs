@@ -91,6 +91,7 @@ use nom_sql::{
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
+use rust_decimal::Decimal;
 use std::sync::Arc;
 
 /// Generate a constant value with the given [`SqlType`]
@@ -135,6 +136,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
+        SqlType::Numeric(_) => DataType::from(Decimal::new(15, 1)),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
@@ -219,6 +221,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             1.5.try_into().unwrap()
         }
+        SqlType::Numeric(_) => DataType::from(Decimal::new(15, 1)),
         SqlType::DateTime(_) | SqlType::Timestamp => {
             // Generate a random month and day within the same year.
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
@@ -291,6 +294,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Double | SqlType::Float | SqlType::Real | SqlType::Decimal(_, _) => {
             (1.5 + idx as f64).try_into().unwrap()
         }
+        SqlType::Numeric(_) => DataType::from(Decimal::new((15 + idx) as i64, 2)),
         SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
             .and_hms(12, idx as _, 30)
             .into(),

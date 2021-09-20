@@ -2,6 +2,7 @@
 
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use proptest::prelude::*;
+use rust_decimal::Decimal;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
@@ -21,6 +22,17 @@ pub fn arbitrary_naive_time() -> impl Strategy<Value = NaiveTime> {
 /// Generate an arbitrary [`Duration`] within a MySQL TIME valid range.
 pub fn arbitrary_duration() -> impl Strategy<Value = Duration> {
     (-3020399i64..3020399i64).prop_map(Duration::microseconds)
+}
+
+/// Generate an arbitrary [`Decimal`]
+pub fn arbitrary_decimal() -> impl Strategy<Value = Decimal> {
+    // Numeric range compatible with `rust_decimal::Decimal`
+    (
+        -0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_i128
+            ..0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_i128,
+        0..28_u32,
+    )
+        .prop_map(|(i, s)| Decimal::from_i128_with_scale(i, s))
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`]

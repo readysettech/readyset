@@ -30,6 +30,7 @@ pub enum WalError {
     ByteArraySyntaxError,
     ByteArrayHexParseError,
     TimestampParseError,
+    NumericParseError,
     InvalidMapping(String),
     ToastNotSupported,
     ReadySetError(noria::ReadySetError),

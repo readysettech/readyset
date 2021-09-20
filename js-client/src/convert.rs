@@ -5,6 +5,7 @@ use noria::ColumnSchema;
 use noria::{results::Results, DataType};
 use noria_client::backend::{PrepareResult, QueryResult, SelectSchema, UpstreamPrepare};
 use noria_mysql::{Error, MySqlUpstream};
+use rust_decimal::prelude::ToPrimitive;
 use std::convert::TryFrom;
 
 pub(crate) fn convert_error<'a, C>(cx: &mut C, e: Error) -> NeonResult<Handle<'a, JsError>>
@@ -118,6 +119,13 @@ where
         DataType::ByteArray(bytes) => {
             Ok(JsArrayBuffer::external(cx, bytes.as_ref().clone()).upcast::<JsValue>())
         }
+        DataType::Numeric(d) => match d.to_f64() {
+            Some(float) => Ok(cx.number(float).upcast::<JsValue>()),
+            None => cx.throw_error(format!(
+                "Could not convert NUMERIC type to JS float. Value: {}",
+                d
+            )),
+        },
     }
 }
 

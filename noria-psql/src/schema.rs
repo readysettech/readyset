@@ -98,5 +98,6 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Enum(_) => unsupported_type!(),
         SqlType::Decimal(_, _) => unsupported_type!(),
         SqlType::ByteArray => Ok(Type::BYTEA),
+        SqlType::Numeric(_) => Ok(Type::NUMERIC),
     }
 }
