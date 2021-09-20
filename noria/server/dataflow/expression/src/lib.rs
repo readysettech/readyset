@@ -13,6 +13,7 @@ use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use noria::util::like::{CaseInsensitive, CaseSensitive, LikePattern};
 use noria::{DataType, ReadySetError, ReadySetResult};
+use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,6 +386,15 @@ impl Expression {
                         DataType::UnsignedBigInt(inner) => *inner as i32,
                         DataType::Float(f, _) => f.round() as i32,
                         DataType::Double(f, _) => f.round() as i32,
+                        DataType::Numeric(ref d) => {
+                            // TODO(fran): I don't know if this is the right thing to do.
+                            d.round().to_i32().ok_or_else(|| {
+                                ReadySetError::BadRequest(format!(
+                                    "NUMERIC value {} exceeds 32-byte integer size",
+                                    d.to_string()
+                                ))
+                            })?
+                        }
                         _ => 0,
                     };
 

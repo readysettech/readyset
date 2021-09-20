@@ -18,8 +18,10 @@ mod types {
     use std::fmt::Display;
 
     use super::*;
+    use launchpad::arbitrary::arbitrary_decimal;
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
+    use rust_decimal::Decimal;
     use test_helpers::sleep;
 
     fn test_type_roundtrip<T, V>(type_name: T, val: V)
@@ -70,11 +72,11 @@ mod types {
     }
 
     macro_rules! test_types {
-        ($($(#[$meta:meta])*$test_name:ident($pg_type_name: expr, $rust_type: ty);)+) => {
-            $(test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $rust_type);)+
+        ($($(#[$meta:meta])*$test_name:ident($pg_type_name: expr, $(#[$strategy:meta])*$rust_type: ty);)+) => {
+            $(test_types!(@impl, $(#[$meta])* $test_name, $pg_type_name, $(#[$strategy])* $rust_type);)+
         };
 
-        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $rust_type: ty) => {
+        (@impl, $(#[$meta:meta])* $test_name: ident, $pg_type_name: expr, $(#[$strategy:meta])* $rust_type: ty) => {
             // these are pretty slow, so we only run a few cases at a time
             #[test_strategy::proptest(ProptestConfig {
                 cases: 5,
@@ -82,10 +84,10 @@ mod types {
             })]
             #[serial_test::serial]
             $(#[$meta])*
-            fn $test_name(val: $rust_type) {
+            fn $test_name($(#[$strategy])* val: $rust_type) {
                 test_type_roundtrip($pg_type_name, val);
             }
-        }
+        };
     }
 
     // https://docs.rs/tokio-postgres/0.7.2/tokio_postgres/types/trait.ToSql.html#types
@@ -99,5 +101,8 @@ mod types {
         #[ignore] double_f64("double precision", f64);
         #[ignore] text_string("text", String);
         #[ignore] bytea_bytes("bytea", Vec<u8>);
+        // TODO(fran): Add numeric with precision and scale when we start correctly
+        //  handling them.
+        #[ignore] numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
     }
 }

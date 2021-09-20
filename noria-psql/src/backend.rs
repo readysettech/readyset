@@ -88,6 +88,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
                 .map_err(|_| ps::Error::Unsupported(format!("f64 with value `{}`", v))),
             ps::Value::Float(v) => DataType::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
+            ps::Value::Numeric(d) => Ok(DataType::from(*d)),
             ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Timestamp(v) => Ok((*v).into()),
             ps::Value::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),

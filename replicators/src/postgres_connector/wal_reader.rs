@@ -1,5 +1,7 @@
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use noria::{ReadySetError, ReadySetResult};
+use rust_decimal::prelude::FromStr;
+use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::{collections::HashMap, convert::TryInto};
 use tokio_postgres as pgsql;
@@ -241,6 +243,9 @@ impl wal::TupleData {
                         PGType::INT8 => DataType::BigInt(str.parse()?),
                         PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
                         PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
+                        PGType::NUMERIC => Decimal::from_str(str.as_ref())
+                            .map_err(|_| WalError::NumericParseError)
+                            .map(|d| DataType::Numeric(Arc::new(d)))?,
                         PGType::JSON | PGType::TEXT | PGType::VARCHAR | PGType::CHAR => {
                             DataType::Text(str.as_ref().try_into()?)
                         }

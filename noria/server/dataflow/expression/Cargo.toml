@@ -15,6 +15,7 @@ noria = { path = "../../../noria" }
 serde = { version = "1.0.8", features = ["derive"] }
 launchpad = { path = "../../../../launchpad" }
 mysql-time = { path = "../../../../mysql-time" }
+rust_decimal = { version = "1.16" }
 
 [dev-dependencies]
 test-strategy = "0.1.1"

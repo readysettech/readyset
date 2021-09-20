@@ -326,6 +326,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Float(v) => {
             v.to_sql(&Type::FLOAT4, dst)?;
         }
+        Value::Numeric(v) => {
+            v.to_sql(&Type::NUMERIC, dst)?;
+        }
         Value::Text(v) => {
             v.to_bytes().to_sql(&Type::TEXT, dst)?;
         }
@@ -389,6 +392,9 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
             write!(dst, "{}", v)?;
         }
+        Value::Numeric(v) => {
+            write!(dst, "{}", v)?;
+        }
         Value::Text(v) => {
             dst.extend_from_slice(v.to_bytes());
         }
@@ -424,6 +430,7 @@ mod tests {
     use arccstr::ArcCStr;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
+    use rust_decimal::Decimal;
     use std::sync::Arc;
 
     struct Value(DataValue);
@@ -968,6 +975,23 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_numeric() {
+        let mut buf = BytesMut::new();
+        let decimal = Decimal::new(1234567890123456, 16);
+        put_binary_value(DataValue::Numeric(decimal), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(-1); // length (placeholder)
+        decimal.to_sql(&Type::NUMERIC, &mut exp).unwrap(); // add value
+        let value_len = exp.len() - 4;
+        let mut window = exp
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual length
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_text() {
         let mut buf = BytesMut::new();
         put_binary_value(
@@ -1103,6 +1127,17 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(10); // size
         exp.extend_from_slice(b"0.12345678"); // value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_numeric() {
+        let mut buf = BytesMut::new();
+        let decimal = Decimal::new(1234567890123456, 16);
+        put_text_value(DataValue::Numeric(decimal), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(18); // size
+        exp.extend_from_slice(b"0.1234567890123456");
         assert_eq!(buf, exp);
     }
 

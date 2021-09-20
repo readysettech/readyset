@@ -4,7 +4,8 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use launchpad::arbitrary::{
-    arbitrary_naive_time, arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time,
+    arbitrary_decimal, arbitrary_naive_time, arbitrary_positive_naive_date,
+    arbitrary_timestamp_naive_date_time,
 };
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
@@ -29,6 +30,7 @@ use crate::expression::expression;
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
+use rust_decimal::Decimal;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum SqlType {
@@ -54,6 +56,7 @@ pub enum SqlType {
     Double,
     Float,
     Real,
+    Numeric(Option<(u16, Option<u8>)>),
     Tinytext,
     Mediumtext,
     Longtext,
@@ -138,6 +141,11 @@ impl fmt::Display for SqlType {
             SqlType::Double => write!(f, "DOUBLE"),
             SqlType::Float => write!(f, "FLOAT"),
             SqlType::Real => write!(f, "REAL"),
+            SqlType::Numeric(precision) => match precision {
+                Some((prec, Some(scale))) => write!(f, "NUMERIC({}, {})", prec, scale),
+                Some((prec, _)) => write!(f, "NUMERIC({})", prec),
+                _ => write!(f, "NUMERIC"),
+            },
             SqlType::Tinytext => write!(f, "TINYTEXT"),
             SqlType::Mediumtext => write!(f, "MEDIUMTEXT"),
             SqlType::Longtext => write!(f, "LONGTEXT"),
@@ -227,6 +235,7 @@ pub enum Literal {
     /// didn't exist.
     Float(Float),
     Double(Double),
+    Numeric(i128, u32),
     String(String),
     #[weight(0)]
     Blob(Vec<u8>),
@@ -299,6 +308,9 @@ impl Display for Literal {
             Literal::Integer(i) => write!(f, "{}", i),
             Literal::Float(float) => write_real!(float.value, float.precision),
             Literal::Double(double) => write_real!(double.value, double.precision),
+            Literal::Numeric(val, scale) => {
+                write!(f, "{}", Decimal::from_i128_with_scale(*val, *scale))
+            }
             Literal::String(ref s) => {
                 write!(f, "'{}'", s.replace('\'', "''").replace('\\', "\\\\"))
             }
@@ -354,6 +366,9 @@ impl Literal {
             SqlType::Double | SqlType::Real | SqlType::Decimal(_, _) => {
                 any::<Double>().prop_map(Self::Double).boxed()
             }
+            SqlType::Numeric(_) => arbitrary_decimal()
+                .prop_map(|d| Self::Numeric(d.mantissa(), d.scale()))
+                .boxed(),
             SqlType::Date => arbitrary_positive_naive_date()
                 .prop_map(|nd| Self::String(nd.format("%Y-%m-%d").to_string()))
                 .boxed(),
@@ -707,6 +722,23 @@ pub fn precision(i: &[u8]) -> IResult<&[u8], (u8, Option<u8>)> {
     delimited(tag("("), precision_helper, tag(")"))(i)
 }
 
+pub fn numeric_precision(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+    delimited(tag("("), numeric_precision_inner, tag(")"))(i)
+}
+
+pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
+    let (remaining_input, (m, _, d)) = tuple((
+        digit1,
+        multispace0,
+        opt(preceded(tag(","), preceded(multispace0, digit1))),
+    ))(i)?;
+
+    let m = digit_as_u16(m)?.1;
+    d.map(|v| digit_as_u8(v))
+        .transpose()
+        .map(|v| (remaining_input, (m, v.map(|digit| digit.1))))
+}
+
 fn opt_signed(i: &[u8]) -> IResult<&[u8], Option<Sign>> {
     opt(alt((
         map(tag_no_case("unsigned"), |_| Sign::Unsigned),
@@ -782,6 +814,10 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                     opt_signed,
                 )),
                 |_| SqlType::Double,
+            ),
+            map(
+                tuple((tag_no_case("numeric"), multispace0, opt(numeric_precision))),
+                |t| SqlType::Numeric(t.2),
             ),
             map(
                 terminated(
@@ -1457,7 +1493,7 @@ mod tests {
     fn literal_to_string_parse_round_trip(lit: Literal) {
         prop_assume!(!matches!(
             lit,
-            Literal::Double(_) | Literal::Float(_) | Literal::ByteArray(_)
+            Literal::Double(_) | Literal::Float(_) | Literal::ByteArray(_) | Literal::Numeric(_, _)
         ));
         let s = lit.to_string();
         assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
@@ -1559,6 +1595,30 @@ mod tests {
                 };
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
+        }
+
+        #[test]
+        fn numeric() {
+            let qs = b"NUMERIC";
+            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Numeric(None));
+        }
+
+        #[test]
+        fn numeric_with_precision() {
+            let qs = b"NUMERIC(10)";
+            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, None))));
+        }
+
+        #[test]
+        fn numeric_with_precision_and_scale() {
+            let qs = b"NUMERIC(10, 20)";
+            let res = type_identifier(Dialect::PostgreSQL)(qs);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, Some(20)))));
         }
     }
 }

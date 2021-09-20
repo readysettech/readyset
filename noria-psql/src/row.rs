@@ -59,6 +59,7 @@ mod tests {
     use super::*;
     use arccstr::ArcCStr;
     use psql_srv as ps;
+    use rust_decimal::Decimal;
     use std::convert::TryFrom;
 
     fn collect_row_values(row: Row) -> Vec<ps::Value> {
@@ -95,9 +96,16 @@ mod tests {
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
                 DataType::Double(10.000000222, 9),
                 DataType::Float(8.99, 2),
+                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
             ],
-            project_fields: Arc::new(vec![0, 1, 2, 3]),
-            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
+            project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
+            project_field_types: Arc::new(vec![
+                Type::INT4,
+                Type::TEXT,
+                Type::FLOAT8,
+                Type::FLOAT4,
+                Type::NUMERIC,
+            ]),
         };
         assert_eq!(
             collect_row_values(row),
@@ -105,7 +113,8 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99)
+                ps::Value::Float(8.99),
+                ps::Value::Numeric(Decimal::new(35901234, 4)),
             ]
         );
     }
@@ -118,11 +127,18 @@ mod tests {
                 DataType::Text(ArcCStr::try_from("abcde").unwrap()),
                 DataType::Double(10.000000222, 9),
                 DataType::Float(8.99, 2),
+                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
                 DataType::Int(0),
             ],
             // Only the first three fields are specified for projection.
-            project_fields: Arc::new(vec![0, 1, 2, 3]),
-            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
+            project_fields: Arc::new(vec![0, 1, 2, 3, 4]),
+            project_field_types: Arc::new(vec![
+                Type::INT4,
+                Type::TEXT,
+                Type::FLOAT8,
+                Type::FLOAT4,
+                Type::NUMERIC,
+            ]),
         };
         assert_eq!(
             collect_row_values(row),
@@ -130,7 +146,8 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99)
+                ps::Value::Float(8.99),
+                ps::Value::Numeric(Decimal::new(35901234, 4)),
             ]
         );
     }
@@ -146,11 +163,18 @@ mod tests {
                 DataType::Int(0),
                 DataType::Double(10.000000222, 9),
                 DataType::Float(8.99, 2),
+                DataType::from(Decimal::new(35901234, 4)), // 3590.1234
                 DataType::Int(0),
             ],
             // Only some of the fields are specified for projection.
-            project_fields: Arc::new(vec![1, 2, 5, 6]),
-            project_field_types: Arc::new(vec![Type::INT4, Type::TEXT, Type::FLOAT8, Type::FLOAT4]),
+            project_fields: Arc::new(vec![1, 2, 5, 6, 7]),
+            project_field_types: Arc::new(vec![
+                Type::INT4,
+                Type::TEXT,
+                Type::FLOAT8,
+                Type::FLOAT4,
+                Type::NUMERIC,
+            ]),
         };
         assert_eq!(
             collect_row_values(row),
@@ -158,7 +182,8 @@ mod tests {
                 ps::Value::Int(43),
                 ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
                 ps::Value::Double(10.000000222),
-                ps::Value::Float(8.99)
+                ps::Value::Float(8.99),
+                ps::Value::Numeric(Decimal::new(35901234, 4)),
             ]
         );
     }

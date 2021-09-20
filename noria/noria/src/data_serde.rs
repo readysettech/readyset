@@ -1,6 +1,7 @@
 use crate::data::DataType;
 use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
+use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use serde_bytes::{ByteBuf, Bytes};
@@ -63,6 +64,9 @@ impl serde::ser::Serialize for DataType {
                 "ByteArray",
                 Bytes::new(array.as_ref()),
             ),
+            DataType::Numeric(d) => {
+                serializer.serialize_newtype_variant("DataType", 9, "Numeric", &d)
+            }
         }
     }
 }
@@ -82,6 +86,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             TinyText,
             Float,
             ByteArray,
+            Numeric,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -103,9 +108,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     6u64 => Ok(Field::TinyText),
                     7u64 => Ok(Field::Float),
                     8u64 => Ok(Field::ByteArray),
+                    9u64 => Ok(Field::Numeric),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 9",
+                        &"variant index 0 <= i < 10",
                     )),
                 }
             }
@@ -123,6 +129,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "Time" => Ok(Field::Time),
                     "TinyText" => Ok(Field::TinyText),
                     "ByteArray" => Ok(Field::ByteArray),
+                    "Numeric" => Ok(Field::Numeric),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -140,6 +147,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"Time" => Ok(Field::Time),
                     b"TinyText" => Ok(Field::TinyText),
                     b"ByteArray" => Ok(Field::ByteArray),
+                    b"Numeric" => Ok(Field::Numeric),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -251,6 +259,8 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         }
                         VariantAccess::tuple_variant(variant, 4usize, Visitor)
                     }
+                    (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
+                        .map(|d| DataType::Numeric(Arc::new(d))),
                     (Field::Text, variant) => {
                         VariantAccess::newtype_variant::<Cow<'_, [u8]>>(variant).and_then(|x| {
                             let x: &[u8] = x.borrow();
