@@ -1719,6 +1719,10 @@ impl<'a> FromSql<'a> for DataType {
         }
     }
 
+    fn from_sql_null(_: &Type) -> Result<Self, Box<dyn Error + Sync + Send>> {
+        Ok(DataType::None)
+    }
+
     accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
 }
 
