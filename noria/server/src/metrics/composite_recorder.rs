@@ -65,45 +65,45 @@ impl Clear for CompositeMetricsRecorder {
 }
 
 impl Recorder for CompositeMetricsRecorder {
-    fn register_counter(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
+    fn register_counter(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.register_counter(key.clone(), unit.clone(), description);
+            recorder.register_counter(key, unit.clone(), description);
         }
     }
 
-    fn register_gauge(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
+    fn register_gauge(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.register_gauge(key.clone(), unit.clone(), description);
+            recorder.register_gauge(key, unit.clone(), description);
         }
     }
 
-    fn register_histogram(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
+    fn register_histogram(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.register_histogram(key.clone(), unit.clone(), description);
+            recorder.register_histogram(key, unit.clone(), description);
         }
     }
 
-    fn increment_counter(&self, key: Key, value: u64) {
+    fn increment_counter(&self, key: &Key, value: u64) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.increment_counter(key.clone(), value);
+            recorder.increment_counter(key, value);
         }
     }
 
-    fn update_gauge(&self, key: Key, value: GaugeValue) {
+    fn update_gauge(&self, key: &Key, value: GaugeValue) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.update_gauge(key.clone(), value.clone());
+            recorder.update_gauge(key, value.clone());
         }
     }
 
-    fn record_histogram(&self, key: Key, value: f64) {
+    fn record_histogram(&self, key: &Key, value: f64) {
         let elements = try_poisoned!(self.elements.read());
         for recorder in elements.values() {
-            recorder.record_histogram(key.clone(), value);
+            recorder.record_histogram(key, value);
         }
     }
 }

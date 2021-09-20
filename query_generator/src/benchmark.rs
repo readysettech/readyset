@@ -189,7 +189,7 @@ pub struct Benchmark {
 
     /// Format to use when writing benchmark results to stdout. Accepted values are "table" or
     /// "json".
-    #[clap(short = 'o', default_value)]
+    #[clap(short = 'o', default_value_t)]
     output_format: OutputFormat,
 
     /// Enable verbose logging

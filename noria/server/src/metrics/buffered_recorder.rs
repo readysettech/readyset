@@ -49,12 +49,12 @@ impl<T: Recorder> BufferedRecorder<T> {
     fn process_next(&self, guard: &MutexGuard<'_, T>) -> bool {
         if let Some(op) = self.queue.pop() {
             match op {
-                MetricsOp::RegisterCounter(k, u, o) => guard.register_counter(k, u, o),
-                MetricsOp::RegisterGauge(k, u, o) => guard.register_gauge(k, u, o),
-                MetricsOp::RegisterHistogram(k, u, o) => guard.register_histogram(k, u, o),
-                MetricsOp::IncrementCounter(k, v) => guard.increment_counter(k, v),
-                MetricsOp::UpdateGauge(k, v) => guard.update_gauge(k, v),
-                MetricsOp::RecordHistogram(k, v) => guard.record_histogram(k, v),
+                MetricsOp::RegisterCounter(k, u, o) => guard.register_counter(&k, u, o),
+                MetricsOp::RegisterGauge(k, u, o) => guard.register_gauge(&k, u, o),
+                MetricsOp::RegisterHistogram(k, u, o) => guard.register_histogram(&k, u, o),
+                MetricsOp::IncrementCounter(k, v) => guard.increment_counter(&k, v),
+                MetricsOp::UpdateGauge(k, v) => guard.update_gauge(&k, v),
+                MetricsOp::RecordHistogram(k, v) => guard.record_histogram(&k, v),
             }
             true
         } else {
@@ -89,28 +89,28 @@ impl<T: Recorder> BufferedRecorder<T> {
 }
 
 impl<T: Recorder> Recorder for BufferedRecorder<T> {
-    fn register_counter(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
-        self.push_op(MetricsOp::RegisterCounter(key, unit, description))
+    fn register_counter(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
+        self.push_op(MetricsOp::RegisterCounter(key.clone(), unit, description))
     }
 
-    fn register_gauge(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
-        self.push_op(MetricsOp::RegisterGauge(key, unit, description))
+    fn register_gauge(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
+        self.push_op(MetricsOp::RegisterGauge(key.clone(), unit, description))
     }
 
-    fn register_histogram(&self, key: Key, unit: Option<Unit>, description: Option<&'static str>) {
-        self.push_op(MetricsOp::RegisterHistogram(key, unit, description))
+    fn register_histogram(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
+        self.push_op(MetricsOp::RegisterHistogram(key.clone(), unit, description))
     }
 
-    fn increment_counter(&self, key: Key, value: u64) {
-        self.push_op(MetricsOp::IncrementCounter(key, value))
+    fn increment_counter(&self, key: &Key, value: u64) {
+        self.push_op(MetricsOp::IncrementCounter(key.clone(), value))
     }
 
-    fn update_gauge(&self, key: Key, value: GaugeValue) {
-        self.push_op(MetricsOp::UpdateGauge(key, value))
+    fn update_gauge(&self, key: &Key, value: GaugeValue) {
+        self.push_op(MetricsOp::UpdateGauge(key.clone(), value))
     }
 
-    fn record_histogram(&self, key: Key, value: f64) {
-        self.push_op(MetricsOp::RecordHistogram(key, value))
+    fn record_histogram(&self, key: &Key, value: f64) {
+        self.push_op(MetricsOp::RecordHistogram(key.clone(), value))
     }
 }
 
