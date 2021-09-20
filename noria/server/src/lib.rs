@@ -397,7 +397,7 @@ mod integration_serial;
 mod integration_utils;
 pub mod metrics;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub enum ReuseConfigType {
     Finkelstein,
@@ -409,6 +409,7 @@ pub use crate::builder::Builder;
 pub use crate::handle::Handle;
 pub use crate::metrics::NoriaMetricsRecorder;
 pub use controller::migrate::materialization::FrontierStrategy;
+use controller::sql;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
 pub use noria::consensus::{Authority, LocalAuthority};
 pub use noria::*;
@@ -436,6 +437,8 @@ pub(crate) struct Config {
     pub(crate) primary_region: Option<String>,
     /// If set to true (the default), failing tokio tasks will cause a full-process abort.
     pub(crate) abort_on_task_failure: bool,
+    /// Configuration for converting SQL to MIR
+    pub(crate) mir_config: sql::mir::Config,
 }
 
 impl Default for Config {
@@ -456,6 +459,7 @@ impl Default for Config {
             reuse: None,
             primary_region: None,
             abort_on_task_failure: true,
+            mir_config: Default::default(),
         }
     }
 }

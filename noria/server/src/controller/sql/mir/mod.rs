@@ -6,6 +6,7 @@ use mir::query::MirQuery;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use tracing::{debug, error, info, trace, warn};
 
@@ -107,8 +108,29 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
     )
 }
 
+/// Configuration for how SQL is converted to MIR
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub(crate) struct Config {
+    /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node, which
+    /// currently crashes if it ever receives negative deltas that bring /// it below K records (see
+    /// [ENG-56][]). If set to `false`, the SQL conversion process to return a
+    /// [`ReadySetError::Unsupported`] (causing the adapter to send the query to fallback).
+    /// Defaults to `false`.
+    ///
+    /// [`TopK`]: MirNodeInner::TopK
+    /// [ENG-56]: https://readysettech.atlassian.net/browse/ENG-56
+    pub(crate) allow_topk: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { allow_topk: false }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SqlToMirConverter {
+    config: Config,
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
     current: HashMap<String, usize>,
     nodes: HashMap<(String, usize), MirNodeRef>,
@@ -118,6 +140,7 @@ pub(super) struct SqlToMirConverter {
 impl Default for SqlToMirConverter {
     fn default() -> Self {
         SqlToMirConverter {
+            config: Default::default(),
             base_schemas: HashMap::default(),
             current: HashMap::default(),
             nodes: HashMap::default(),
@@ -127,6 +150,11 @@ impl Default for SqlToMirConverter {
 }
 
 impl SqlToMirConverter {
+    /// Set the [`Config`]
+    pub(crate) fn set_config(&mut self, config: Config) {
+        self.config = config;
+    }
+
     fn get_view(&self, view_name: &str) -> Result<MirNodeRef, ReadySetError> {
         self.current
             .get(view_name)
@@ -1159,6 +1187,10 @@ impl SqlToMirConverter {
         order: &Option<OrderClause>,
         limit: &LimitClause,
     ) -> ReadySetResult<MirNodeRef> {
+        if !self.config.allow_topk {
+            unsupported!("TopK is not supported");
+        }
+
         let combined_columns = parent.borrow().columns().to_vec();
 
         let order = order.as_ref().map(|o| {

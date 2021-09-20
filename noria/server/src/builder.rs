@@ -105,6 +105,11 @@ impl Builder {
         self.config.reuse = reuse_type;
     }
 
+    /// Set the value of [`controller::sql::Config::allow_topk`]
+    pub fn set_allow_topk(&mut self, allow_topk: bool) {
+        self.config.mir_config.allow_topk = allow_topk;
+    }
+
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation
     /// of that field for more information
     ///

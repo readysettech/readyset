@@ -159,6 +159,10 @@ struct Opts {
     #[clap(long)]
     volume_id: Option<VolumeId>,
 
+    /// Enable (experimental, currently broken) support for TopK in dataflow
+    #[clap(long, hidden = true)]
+    enable_experimental_topk_support: bool,
+
     #[clap(flatten)]
     logging: readyset_logging::Options,
 }
@@ -210,6 +214,8 @@ fn main() -> anyhow::Result<()> {
     } else {
         builder.set_reuse(None)
     }
+
+    builder.set_allow_topk(opts.enable_experimental_topk_support);
 
     if let Some(r) = opts.region {
         builder.set_region(r);

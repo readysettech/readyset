@@ -71,6 +71,8 @@ pub async fn build_custom(
     let mut builder = Builder::for_tests();
     builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
+    // don't return unsupported errors for topk in queries
+    builder.set_allow_topk(true);
 
     if reader_only {
         builder.as_reader_only();

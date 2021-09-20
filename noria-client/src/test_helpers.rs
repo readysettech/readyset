@@ -111,6 +111,7 @@ where
     let b = barrier.clone();
     thread::spawn(move || {
         let mut builder = Builder::for_tests();
+        builder.set_allow_topk(true);
         if !partial {
             builder.disable_partial();
         }

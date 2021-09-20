@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
+use super::sql;
+
 /// The canonical SQL dialect used for central Noria server recipes. All direct clients of
 /// noria-server must use this dialect for their SQL recipes, and all adapters and client libraries
 /// must translate into this dialect as part of handling requests from users
@@ -37,6 +39,9 @@ pub(crate) struct Recipe {
     prior: Option<Box<Recipe>>,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
+    ///
+    /// NOTE: this is an Option so that we can call [`Option::take`] on it, but will
+    /// never actually be None externally.
     inc: Option<SqlIncorporator>,
 }
 
@@ -147,6 +152,10 @@ impl Recipe {
             version,
             ..Self::blank()
         }
+    }
+
+    pub(crate) fn set_mir_config(&mut self, mir_config: sql::mir::Config) {
+        self.inc.as_mut().unwrap().set_mir_config(mir_config)
     }
 
     /// Disable node reuse.
