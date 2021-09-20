@@ -55,6 +55,15 @@ pub struct Options {
     log_level: String,
 }
 
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            log_format: LogFormat::Full,
+            log_level: "info".to_owned(),
+        }
+    }
+}
+
 impl Options {
     pub fn init(&self) -> anyhow::Result<()> {
         let filter = EnvFilter::try_new(&self.log_level)?;

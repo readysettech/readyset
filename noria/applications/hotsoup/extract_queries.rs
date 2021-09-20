@@ -1,12 +1,5 @@
-extern crate clap;
-extern crate nom_sql;
-extern crate regex;
-
-extern crate noria;
-#[macro_use]
-extern crate slog;
-
 use std::path::{Path, PathBuf};
+use tracing::{info, trace};
 
 fn traverse(path: &Path) -> Vec<PathBuf> {
     use std::fs;
@@ -95,7 +88,7 @@ fn main() {
     use std::fs::File;
     use std::io::Write;
 
-    let log = noria::logger_pls();
+    readyset_logging::Options::default().init().unwrap();
 
     let matches = App::new("extract_queries")
         .version("0.1")
@@ -151,14 +144,14 @@ fn main() {
 
     let mut f = File::create(output).unwrap();
 
-    info!(log, "Writing {} valid queries...", ok.len());
+    info!("Writing {} valid queries...", ok.len());
     for (ql, q) in ok {
         assert!(write!(f, "{}: {}\n", ql, q).is_ok());
     }
 
-    info!(log, "Writing {} rejected queries...", rejected.len());
-    for (ql, q) in rejected {
-        trace!(log, "failed to parse"; "query" => &q, "name" => &ql);
-        assert!(write!(f, "# FAIL {}:\n# {}\n", ql, q).is_ok());
+    info!("Writing {} rejected queries...", rejected.len());
+    for (name, query) in rejected {
+        trace!(%name, %query, "failed to parse");
+        assert!(write!(f, "# FAIL {}:\n# {}\n", name, query).is_ok());
     }
 }

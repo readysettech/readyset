@@ -2,12 +2,11 @@ mod populate;
 
 use clap::value_t_or_exit;
 use noria::{Builder, Handle};
-use slog::info;
+use tracing::info;
 
 pub struct Backend {
     blacklist: Vec<String>,
     _r: String,
-    log: slog::Logger,
     g: Handle,
 }
 
@@ -28,7 +27,6 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
 
     // set up graph
     let mut b = Builder::default();
-    let log = noria::logger_pls();
     if !sharding {
         b.set_sharding(None);
     }
@@ -41,7 +39,6 @@ async fn make(blacklist: &str, sharding: bool, partial: bool) -> Box<Backend> {
     Box::new(Backend {
         blacklist: blacklisted_queries,
         _r: String::new(),
-        log,
         g,
     })
 }
@@ -94,12 +91,12 @@ impl Backend {
             }
         }
 
-        info!(self.log, "Ignored {} blacklisted queries", blacklisted);
+        info!("Ignored {} blacklisted queries", blacklisted);
 
         match self.g.install_recipe(&rs).await {
             Ok(ar) => {
-                info!(self.log, "{} expressions added", ar.expressions_added);
-                info!(self.log, "{} expressions removed", ar.expressions_removed);
+                info!("{} expressions added", ar.expressions_added);
+                info!("{} expressions removed", ar.expressions_removed);
             }
             Err(e) => return Err(format!("failed to activate recipe: {}", e)),
         }
@@ -116,6 +113,8 @@ async fn main() {
     use std::io::Write;
     use std::path::PathBuf;
     use std::str::FromStr;
+
+    readyset_logging::Options::default().init().unwrap();
 
     let matches = App::new("hotsoup")
         .version("0.1")
@@ -265,13 +264,13 @@ async fn main() {
         assert_eq!(sf.0, qf.0);
         let schema_version = sf.0;
         if schema_version < start_at_schema || schema_version > stop_at_schema {
-            info!(backend.log, "Skipping schema {:?}", sf.1);
+            info!("Skipping schema {:?}", sf.1);
             continue;
         }
 
         info!(
-            backend.log,
-            "Loading HotCRP schema from {:?}, queries from {:?}", sf.1, qf.1
+            "Loading HotCRP schema from {:?}, queries from {:?}",
+            sf.1, qf.1
         );
 
         let queries = if base_only {
@@ -294,7 +293,7 @@ async fn main() {
 
         // on the first auto-upgradeable schema, populate with test data
         if schema_version == populate_at_schema {
-            info!(backend.log, "Populating database!");
+            info!("Populating database!");
             populate::populate(&mut backend, dataloc, transactional)
                 .await
                 .unwrap();
