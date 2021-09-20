@@ -50,11 +50,12 @@ impl DomainHandle {
                     ident: addr.to_string(),
                 })?;
         if worker.healthy {
+            let req = req.clone();
             Ok(worker
                 .rpc(WorkerRequestKind::DomainRequest {
                     target_idx: self.idx,
                     target_shard: i,
-                    request: Box::new(req.clone()),
+                    request: Box::new(req),
                 })
                 .await
                 .map_err(|e| {
@@ -73,29 +74,10 @@ impl DomainHandle {
     ) -> ReadySetResult<Vec<T>> {
         let mut ret = Vec::with_capacity(self.shards.len());
         for shard in 0..(self.shards.len()) {
-            ret.push(
-                self.send_to_healthy_shard(shard, req.clone(), workers)
-                    .await?,
-            );
+            let request = req.clone();
+            ret.push(self.send_to_healthy_shard(shard, request, workers).await?);
         }
 
         Ok(ret)
-    }
-
-    pub(super) fn send_to_healthy_blocking<T: DeserializeOwned>(
-        &mut self,
-        req: DomainRequest,
-        workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<Vec<T>> {
-        tokio::runtime::Handle::current().block_on(self.send_to_healthy(req, workers))
-    }
-
-    pub(super) fn send_to_healthy_shard_blocking<T: DeserializeOwned>(
-        &mut self,
-        i: usize,
-        req: DomainRequest,
-        workers: &HashMap<WorkerIdentifier, Worker>,
-    ) -> ReadySetResult<T> {
-        tokio::runtime::Handle::current().block_on(self.send_to_healthy_shard(i, req, workers))
     }
 }

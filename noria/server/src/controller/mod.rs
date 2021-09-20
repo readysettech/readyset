@@ -100,12 +100,8 @@ impl Worker {
         }
     }
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
-        Ok(do_noria_rpc(
-            self.http
-                .post(self.uri.join("worker_request")?)
-                .body(hyper::Body::from(bincode::serialize(&req)?)),
-        )
-        .await?)
+        let body = hyper::Body::from(bincode::serialize(&req)?);
+        Ok(do_noria_rpc(self.http.post(self.uri.join("worker_request")?).body(body)).await?)
     }
 }
 
@@ -241,6 +237,14 @@ impl Controller {
         }
     }
 
+    fn controller_inner(&mut self) -> ReadySetResult<&mut Leader> {
+        if let Some(ref mut ci) = self.inner {
+            Ok(ci)
+        } else {
+            Err(ReadySetError::NotLeader)
+        }
+    }
+
     /// Send the provided `WorkerRequestKind` to the worker running in the same server instance as
     /// this controller wrapper, but don't bother waiting for the response.
     ///
@@ -302,12 +306,8 @@ impl Controller {
                 }
             }
             HandleRequest::PerformMigration { func, done_tx } => {
-                let ret = self
-                    .with_controller_blocking(|ctrl, _| {
-                        ctrl.migrate(move |m| func(m))??;
-                        Ok(())
-                    })
-                    .await;
+                let inner = self.controller_inner()?;
+                let ret = inner.migrate(move |m| func(m)).await?;
                 if done_tx.send(ret).is_err() {
                     warn!("handle-based migration sender hung up!");
                 }
@@ -342,18 +342,16 @@ impl Controller {
                 .await?;
             }
             AuthorityUpdate::NewWorkers(w) if self.inner.is_some() => {
+                let inner = self.controller_inner()?;
                 for worker in w {
-                    self.with_controller_blocking(|ctrl, _| {
-                        ctrl.handle_register_from_authority(worker)
-                    })
-                    .await?;
+                    inner.handle_register_from_authority(worker).await?;
                 }
             }
             AuthorityUpdate::FailedWorkers(w) if self.inner.is_some() => {
-                self.with_controller_blocking(|ctrl, _| {
-                    ctrl.handle_failed_workers(w.into_iter().map(|desc| desc.worker_uri).collect())
-                })
-                .await?;
+                let inner = self.controller_inner()?;
+                inner
+                    .handle_failed_workers(w.into_iter().map(|desc| desc.worker_uri).collect())
+                    .await?;
             }
             AuthorityUpdate::AuthorityError(e) => {
                 // the authority won't be restarted, so the controller should hard-exit
