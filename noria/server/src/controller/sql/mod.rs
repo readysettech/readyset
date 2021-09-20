@@ -31,7 +31,7 @@ use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
 use ::mir::node::node_inner::MirNodeInner;
 
-mod mir;
+pub(crate) mod mir;
 mod passes;
 mod query_graph;
 mod query_signature;
@@ -48,8 +48,9 @@ enum QueryGraphReuse<'a> {
 }
 
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
-/// the Soup graph `grap`.
-/// The incorporator shares the lifetime of the flow graph it is associated with.
+/// the dataflow graph `graph`.
+///
+/// The incorporator shares the lifetime of the dataflow graph it is associated with.
 #[derive(Clone, Debug)]
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
@@ -96,6 +97,11 @@ impl SqlIncorporator {
     /// Creates a new `SqlIncorporator` for an empty flow graph.
     pub(super) fn new() -> Self {
         Default::default()
+    }
+
+    /// Set the MIR configuration for future migrations
+    pub(crate) fn set_mir_config(&mut self, mir_config: mir::Config) {
+        self.mir_converter.set_config(mir_config);
     }
 
     /// Disable node reuse for future migrations.
@@ -3267,6 +3273,7 @@ mod tests {
         let mut g = integration_utils::start_simple("it_adds_topk").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
+            inc.set_mir_config(super::mir::Config { allow_topk: true });
             "CREATE TABLE things (id int primary key);"
                 .to_flow_parts(&mut inc, None, mig)
                 .unwrap();

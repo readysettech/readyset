@@ -595,6 +595,7 @@ impl ControllerInner {
             Some(reuse) => recipe.enable_reuse(reuse),
             None => recipe.disable_reuse(),
         }
+        recipe.set_mir_config(state.config.mir_config);
 
         ControllerInner {
             ingredients: g,

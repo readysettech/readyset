@@ -6,7 +6,7 @@
 #![allow(clippy::many_single_char_names)]
 
 use crate::controller::recipe::Recipe;
-use crate::controller::sql::SqlIncorporator;
+use crate::controller::sql::{mir, SqlIncorporator};
 use crate::get_col;
 use crate::integration_utils::*;
 use crate::{Builder, ReadySetError, ReuseConfigType};
@@ -3139,6 +3139,8 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }
+        r.set_mir_config(mir::Config { allow_topk: true });
+
         let mut f = File::open(&file).unwrap();
         let mut s = String::new();
 
