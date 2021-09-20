@@ -57,7 +57,7 @@ impl BenchmarkApplication {
         let g = builder.start_local().await.unwrap();
 
         let url = "mysql://mysqluser:mysqlpw@localhost:3306/inventory";
-        let pool = Pool::new(url).unwrap();
+        let pool = Pool::new(Opts::from_url(url).unwrap()).unwrap();
         let conn = pool.get_conn().unwrap();
 
         BenchmarkApplication { g, mysql: conn }

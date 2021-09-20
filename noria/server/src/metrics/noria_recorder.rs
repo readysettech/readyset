@@ -24,32 +24,37 @@ impl NoriaMetricsRecorder {
 }
 
 impl Recorder for NoriaMetricsRecorder {
-    fn register_counter(&self, _key: Key, _unit: Option<Unit>, _description: Option<&'static str>) {
-        // no-op
-    }
-
-    fn register_gauge(&self, _key: Key, _unit: Option<Unit>, _description: Option<&'static str>) {
-        // no-op
-    }
-
-    fn register_histogram(
+    fn register_counter(
         &self,
-        _key: Key,
+        _key: &Key,
         _unit: Option<Unit>,
         _description: Option<&'static str>,
     ) {
         // no-op
     }
 
-    fn increment_counter(&self, key: Key, value: u64) {
+    fn register_gauge(&self, _key: &Key, _unit: Option<Unit>, _description: Option<&'static str>) {
+        // no-op
+    }
+
+    fn register_histogram(
+        &self,
+        _key: &Key,
+        _unit: Option<Unit>,
+        _description: Option<&'static str>,
+    ) {
+        // no-op
+    }
+
+    fn increment_counter(&self, key: &Key, value: u64) {
         let mut counters = self.counters.borrow_mut();
-        let ent = counters.entry(key).or_default();
+        let ent = counters.entry(key.clone()).or_default();
         *ent += value;
     }
 
-    fn update_gauge(&self, key: Key, value: GaugeValue) {
+    fn update_gauge(&self, key: &Key, value: GaugeValue) {
         let mut gauges = self.gauges.borrow_mut();
-        let ent = gauges.entry(key).or_default();
+        let ent = gauges.entry(key.clone()).or_default();
         match value {
             GaugeValue::Increment(v) => {
                 *ent += v;
@@ -63,10 +68,10 @@ impl Recorder for NoriaMetricsRecorder {
         }
     }
 
-    fn record_histogram(&self, key: Key, value: f64) {
+    fn record_histogram(&self, key: &Key, value: f64) {
         // TODO(justin): Support different bounds in histogram metrics.
         let mut histograms = self.histograms.borrow_mut();
-        let ent = histograms.entry(key).or_insert_with(|| {
+        let ent = histograms.entry(key.clone()).or_insert_with(|| {
             // Define the buckets for the histogram to be power of 2s up to
             // 2^20.
             let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();

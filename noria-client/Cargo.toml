@@ -26,7 +26,7 @@ derive_more = "0.99.11"
 async-trait = "0.1.49"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
-metrics = "0.14.2"
+metrics = "0.17.0"
 noria-client-metrics = { path = "metrics" }
 futures = "0.3.16"
 zookeeper = "0.5.4"

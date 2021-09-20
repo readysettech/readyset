@@ -9,8 +9,8 @@ async-trait = "0.1"
 clap = "3.0.0-beta.2"
 futures-util = "0.3.0"
 maplit = "1.0.2"
-metrics = "0.14.2"
-metrics-exporter-prometheus = "0.3.0"
+metrics = "0.17.0"
+metrics-exporter-prometheus = "0.6.0"
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing = "0.1.26"
