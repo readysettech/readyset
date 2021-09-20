@@ -33,6 +33,7 @@ impl TryFrom<Value> for ps::Value {
         // - Type::Time
         // - Unsigned{Int,Smallint,Bigint}
         match (v.col_type, v.value) {
+            (_, DataType::None) => Ok(ps::Value::Null),
             (Type::CHAR, DataType::Text(v)) => Ok(ps::Value::Char(v)),
             (Type::CHAR, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Char(from_tiny_text(v)?)),
             (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
