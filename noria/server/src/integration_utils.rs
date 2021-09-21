@@ -33,18 +33,22 @@ pub fn get_persistence_params(prefix: &str) -> PersistenceParameters {
 
 /// Builds a local worker.
 pub async fn start_simple(prefix: &str) -> Handle {
-    build(prefix, Some(DEFAULT_SHARDING)).await
+    build(prefix, Some(DEFAULT_SHARDING), None).await
 }
 
 #[allow(dead_code)]
-/// Builds a lock worker without sharding.
+/// Builds a local worker without sharding.
 pub async fn start_simple_unsharded(prefix: &str) -> Handle {
-    build(prefix, None).await
+    build(prefix, None, None).await
 }
 
 /// Builds a custom local worker with log prefix `prefix`,
-/// with optional sharding and logging.
-pub async fn build(prefix: &str, sharding: Option<usize>) -> Handle {
+/// with optional sharding and eviction.
+pub async fn build(
+    prefix: &str,
+    sharding: Option<usize>,
+    eviction: Option<(usize, Duration)>,
+) -> Handle {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
@@ -55,6 +59,7 @@ pub async fn build(prefix: &str, sharding: Option<usize>) -> Handle {
         ))),
         None,
         false,
+        eviction,
     )
     .await
 }
@@ -67,6 +72,7 @@ pub async fn build_custom(
     authority: Arc<Authority>,
     region: Option<String>,
     reader_only: bool,
+    eviction: Option<(usize, Duration)>,
 ) -> Handle {
     let mut builder = Builder::for_tests();
     builder.set_sharding(sharding);
@@ -81,6 +87,12 @@ pub async fn build_custom(
     if region.is_some() {
         builder.set_region(region.unwrap());
     }
+
+    if let Some((limit, period)) = eviction {
+        builder.set_aggressively_update_state_sizes(true);
+        builder.set_memory_limit(limit, period);
+    }
+
     if controller {
         builder.start_local_custom(authority.clone()).await.unwrap()
     } else {

@@ -291,7 +291,7 @@ async fn sharded_shuffle() {
 #[tokio::test(flavor = "multi_thread")]
 async fn broad_recursing_upquery() {
     let nshards = 16;
-    let mut g = build("bru", Some(nshards)).await;
+    let mut g = build("bru", Some(nshards), None).await;
 
     // our goal here is to have a recursive upquery such that both levels of the upquery require
     // contacting _all_ shards. in this setting, any miss at the leaf requires the upquery to go to
@@ -4822,6 +4822,7 @@ async fn test_view_includes_replicas() {
         w1_authority,
         Some("r1".try_into().unwrap()),
         false,
+        None,
     )
     .await;
 
@@ -4838,6 +4839,7 @@ async fn test_view_includes_replicas() {
         w2_authority,
         Some("r2".try_into().unwrap()),
         false,
+        None,
     )
     .await;
 
@@ -6447,6 +6449,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         w1_authority,
         None,
         true,
+        None,
     )
     .await;
 
@@ -6471,6 +6474,7 @@ async fn assign_nonreader_domains_to_nonreader_workers() {
         w2_authority,
         None,
         false,
+        None,
     )
     .await;
 
@@ -6992,4 +6996,90 @@ async fn partial_join_on_one_parent() {
 
     let res2 = q.lookup(&[DataType::from(1i32)], true).await.unwrap();
     assert_eq!(res2.len(), 20);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aggressive_eviction() {
+    // This test is based on the Fastly demo
+    let mut g = build(
+        "aggressive_eviction",
+        None,
+        Some((15000, Duration::from_millis(4))),
+    )
+    .await;
+
+    g.install_recipe(
+        r"
+        CREATE TABLE `articles` (
+            `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `creation_time` timestamp NOT NULL DEFAULT current_timestamp(),
+            `keywords` varchar(40) NOT NULL,
+            `title` varchar(128) NOT NULL,
+            `short_text` varchar(512) NOT NULL,
+            `url` varchar(128) NOT NULL,
+        );
+
+        CREATE TABLE `users` (
+            `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY
+        );
+
+        CREATE TABLE `recommendations` (
+            `user_id` int(11) NOT NULL,
+            `article_id` int(11) NOT NULL
+        );
+
+        CREATE VIEW w AS SELECT A.id, A.title, A.keywords, A.creation_time, A.short_text, A.url FROM articles AS A, recommendations AS R WHERE ((A.id = R.article_id) AND (R.user_id = ?)) LIMIT 10;
+        ",
+    )
+    .await
+    .unwrap();
+
+    let mut users = g.table("users").await.unwrap();
+    let mut articles = g.table("articles").await.unwrap();
+    let mut recommendations = g.table("recommendations").await.unwrap();
+
+    users
+        .insert_many((0i32..30).map(|id| vec![DataType::from(id)]))
+        .await
+        .unwrap();
+
+    articles
+        .insert_many((0i32..20).map(|id| {
+            vec![
+                DataType::from(id),
+                DataType::from("2020-01-01 12:30:45"),
+                DataType::from("asdasdasd"),
+                DataType::from("asdasdsadsadas"),
+                DataType::from("asdasdasdasd"),
+                DataType::from("asdjashdkjsahd"),
+            ]
+        }))
+        .await
+        .unwrap();
+
+    recommendations
+        .insert_many((0i32..30).flat_map(|id| {
+            (0i32..20).map(move |article| vec![DataType::from(id), DataType::from(article)])
+        }))
+        .await
+        .unwrap();
+
+    let mut view = g.view("w").await.unwrap();
+
+    for i in 0..500 {
+        let offset = i % 10;
+        let keys: Vec<_> = (offset..offset + 20)
+            .map(|k| KeyComparison::Equal(vec1::Vec1::new(DataType::Int(k))))
+            .collect();
+
+        let vq = ViewQuery {
+            key_comparisons: keys.clone(),
+            block: true,
+            filter: None,
+            timestamp: None,
+        };
+
+        let r = view.raw_lookup(vq).await.unwrap();
+        assert_eq!(r.len(), keys.len());
+    }
 }
