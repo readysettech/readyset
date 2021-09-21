@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tracing::{error, warn};
 
 use super::WorkerId;
 use super::{
@@ -191,7 +192,7 @@ impl ConsulAuthority {
     }
 
     fn prefix_with_deployment(&self, path: &str) -> String {
-        self.deployment.clone() + "/" + path
+        format!("{}/{}", &self.deployment, path)
     }
 }
 
@@ -252,7 +253,7 @@ impl AuthorityControl for ConsulAuthority {
                 Ok(Some(payload))
             }
             Ok((false, _)) => Ok(None),
-            Err(_) => Err(anyhow!("Failed")),
+            Err(e) => Err(anyhow!("become_leader consul error: {}", e.to_string())),
         }
     }
 
@@ -339,7 +340,10 @@ impl AuthorityControl for ConsulAuthority {
                 Ok((None, _)) => None,
                 // The API currently throws an error that it cannot parse the json
                 // if the key does not exist.
-                Err(_) => None,
+                Err(e) => {
+                    warn!("try_read consul error: {}", e.to_string());
+                    None
+                }
             },
         )
     }
@@ -397,8 +401,6 @@ impl AuthorityControl for ConsulAuthority {
                     let as_str = serde_json::from_slice::<String>(&bytes)?;
                     Some(as_str.as_bytes().to_vec())
                 }
-                // The API currently throws an error that it cannot parse the json
-                // if the key does not exist.
                 Ok((None, _)) => None,
                 Err(e) => bail!(e.to_string()),
             },
@@ -436,7 +438,10 @@ impl AuthorityControl for ConsulAuthority {
         //TODO(justin): Consider changing this to heartbeat without a parameter.
         Ok(match self.consul.renew(&id, None).await {
             Ok(_) => AuthorityWorkerHeartbeatResponse::Alive,
-            Err(_) => AuthorityWorkerHeartbeatResponse::Failed,
+            Err(e) => {
+                error!("Authority failed to heartbeat: {}", e.to_string());
+                AuthorityWorkerHeartbeatResponse::Failed
+            }
         })
     }
 

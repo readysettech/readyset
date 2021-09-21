@@ -84,7 +84,7 @@ pub trait AuthorityControl: Send + Sync {
     /// This method is intended for clients to determine the current leader.
     async fn get_leader(&self) -> Result<LeaderPayload, Error>;
 
-    /// Non-blocking call to retrieve the leader.
+    /// Non-blocking call to retrieve a change in the authorities leader state.
     async fn try_get_leader(&self) -> Result<GetLeaderResult, Error>;
 
     /// Whether the authority can place a watch that can unpark the thread when
