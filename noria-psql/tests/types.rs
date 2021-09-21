@@ -44,6 +44,7 @@ mod types {
             .unwrap();
 
         sleep();
+        sleep();
 
         // check values coming out of noria
         let star_results = client.query("SELECT * FROM t", &[]).unwrap();
