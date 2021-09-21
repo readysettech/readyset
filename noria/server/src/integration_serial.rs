@@ -225,6 +225,7 @@ async fn reader_replication() {
         w1_authority,
         None,
         false,
+        None,
     )
     .await;
     let mut metrics_client = initialize_metrics(&mut w1).await;
@@ -241,6 +242,7 @@ async fn reader_replication() {
         w2_authority,
         None,
         false,
+        None,
     )
     .await;
 
