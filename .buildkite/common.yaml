@@ -190,6 +190,8 @@ steps:
           login: true
     env:
       SCCACHE_BUCKET: readyset-sccache
+    agents:
+      queue: c5a-4xlarge
 
   - label: 'Run logictest'
     key: logictest
