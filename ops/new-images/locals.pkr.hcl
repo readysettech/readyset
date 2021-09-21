@@ -16,6 +16,8 @@ locals {
 
   source_region = "us-east-2"
 
+  ubuntu_account_id = "099720109477"
+
   deploy_account_id = "888984949675"
   build_account_id  = "305232526136"
   # This defines what accounts besides the one it is created in which are allowed to launch the
@@ -23,4 +25,6 @@ locals {
   # there so they can be stored in the deploy account for other users.
   # TODO: Remove build account once initial testing is done as it is being used to test deployment
   ami_users = [local.deploy_account_id, local.build_account_id]
+
+  binaries_path = var.production ? "${path.root}/binaries/target/release" : "${path.root}/../../target/debug"
 }

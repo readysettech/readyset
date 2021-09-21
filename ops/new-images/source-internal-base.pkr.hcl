@@ -13,7 +13,7 @@ source "amazon-ebs" "internal-base" {
   force_delete_snapshot = local.force_delete_snapshots
 
   source_ami_filter {
-    owners      = ["099720109477"]
+    owners      = [local.ubuntu_account_id]
     most_recent = true
 
     filters = {

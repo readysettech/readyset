@@ -1,18 +1,17 @@
 locals {
-  consul_server_ami_name = format("readyset/images/%s-ssd/consul_server-%s-amd64-%s",
+  readyset_mysql_adapter_ami_name = format("readyset/images/%s-ssd/readyset-mysql-adapter-%s-amd64-%s",
     local.ami_virtualization_type,
     local.ami_version,
     local.ami_suffix
   )
 }
 
-source "amazon-ebs" "consul-server" {
+source "amazon-ebs" "readyset-mysql-adapter" {
   # Settings to allow development of images outside of CI.
   skip_create_ami       = local.skip_create_ami
   force_deregister      = local.force_degregister
   force_delete_snapshot = local.force_delete_snapshots
 
-  # TODO: Make the source AMI internal-base after making two step pipeline
   source_ami_filter {
     owners      = [local.ubuntu_account_id]
     most_recent = true
@@ -26,7 +25,8 @@ source "amazon-ebs" "consul-server" {
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
 
-  ami_name                  = local.consul_server_ami_name
+
+  ami_name                  = local.external_base_ami_name
   ssh_clear_authorized_keys = true
 
   ami_users = local.ami_users

@@ -1,5 +1,4 @@
 # Base image used for generating all images used internally.
-# Another base image will be used for generating images used by customers.
 build {
   sources = ["source.amazon-ebs.internal-base"]
 

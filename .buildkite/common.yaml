@@ -294,6 +294,7 @@ steps:
     depends_on:
     - build-ops-image
     commands:
+    - .buildkite/confirm-binaries-for-packer.sh
     - cd /workdir/ops/new-images
     - packer fmt -check -diff .
     - packer init .
@@ -324,6 +325,7 @@ steps:
     - ops-packer-lint
     - ops-shellcheck
     commands:
+    - .buildkite/confirm-binaries-for-packer.sh
     - cd /workdir/ops/new-images
     - packer init .
     - packer build .

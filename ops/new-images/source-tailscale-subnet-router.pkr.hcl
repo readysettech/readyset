@@ -15,7 +15,7 @@ source "amazon-ebs" "tailscale-subnet-router" {
 
   # TODO: Make the source AMI internal-base after making two step pipeline
   source_ami_filter {
-    owners      = ["099720109477"]
+    owners      = [local.ubuntu_account_id]
     most_recent = true
 
     filters = {

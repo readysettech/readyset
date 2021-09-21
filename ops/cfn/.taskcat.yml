@@ -8,4 +8,4 @@ tests:
   readyset:
     parameters:
       ReadysetAdapterNodes: 3
-    template: templates/readyset-template.yaml
+    template: templates/readyset-mysql-template.yaml
