@@ -56,8 +56,6 @@ where
         + Send,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    type Error = io::Error;
-
     async fn on_prepare(
         &mut self,
         query: &str,
