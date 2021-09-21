@@ -11,7 +11,7 @@ locals {
   secrets_bucket_objects_arn = "${local.secrets_bucket_arn}/*"
 
   buildkite_agent_token_secret_name          = "buildkite/AGENT_TOKEN"
-  buildkite_agent_token_parameter_store_path = "/aws/reference/secretmanager/${local.buildkite_agent_token_secret_name}"
+  buildkite_agent_token_parameter_store_path = "/aws/reference/secretsmanager/${local.buildkite_agent_token_secret_name}"
 }
 
 # TODO: Support multi region better by setting up replication
@@ -57,22 +57,30 @@ resource "aws_s3_bucket_public_access_block" "artifacts" {
   restrict_public_buckets = true
 }
 
-data "aws_iam_policy_document" "buildkite_agent_token" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "AWS"
-      identifiers = [for queue in var.buildkite_queues : "arn:aws:iam::${local.account_id}:role/buildkite-${queue}-Role"]
-    }
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["*"]
-  }
-}
+# data "aws_iam_policy_document" "buildkite_agent_token" {
+#   statement {
+#     effect = "Allow"
+#     principals {
+#       type        = "AWS"
+#       identifiers = [for queue in var.buildkite_queues : "arn:aws:iam::${local.account_id}:role/buildkite-${queue}-Role"]
+#     }
+#     actions   = ["secretsmanager:GetSecretValue"]
+#     resources = ["*"]
+#   }
+# }
 
+# AWS Secret Manager policies must point at roles that already exist. Because of
+# this, leave the policy out of the configuration for now until we take over
+# more of the IAM roles for Buildkite.
 resource "aws_secretsmanager_secret" "buildkite_agent_token" {
   # We only want to set up the secrets manager in us-east-2 and replicate to other regions
   count = local.region_name == "us-east-2" ? 1 : 0
   name  = local.buildkite_agent_token_secret_name
 
-  policy = data.aws_iam_policy_document.buildkite_agent_token.json
+  # policy = data.aws_iam_policy_document.buildkite_agent_token.json
+  lifecycle {
+    ignore_changes = [
+      policy
+    ]
+  }
 }

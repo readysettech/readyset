@@ -18,8 +18,8 @@ variable "buildkite_queue" {
   type        = string
   default     = "default"
   validation {
-    condition     = length(var.buildkite_queue) > 0
-    error_message = "Queue name must not be empty."
+    condition     = can(regex("^[a-zA-Z][-a-zA-Z0-9]+$", var.buildkite_queue))
+    error_message = "Queue name is used for stack name so must be a valid stack name."
   }
 }
 

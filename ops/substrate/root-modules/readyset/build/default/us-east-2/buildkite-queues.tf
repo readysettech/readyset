@@ -4,11 +4,11 @@ module "buildkite_queue_shared" {
   buildkite_queues = ["c5a_4xlarge"]
 }
 
-module "buildkite_queue_c5a_4xlarge" {
+module "buildkite_queue_c5a-4xlarge" {
   source      = "../../../../../modules/buildkite-queue/regional"
   environment = "build"
 
-  buildkite_queue = "c5a_4xlarge"
+  buildkite_queue = "c5a-4xlarge"
 
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
 

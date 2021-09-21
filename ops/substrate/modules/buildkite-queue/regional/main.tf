@@ -23,7 +23,8 @@ data "aws_subnets" "public_subnets" {
 resource "aws_cloudformation_stack" "main" {
   name = local.stack_name
 
-  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/latest/aws-stack.yml"
+  # TODO: Upgrade this to latest when possible
+  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/5.5.1/aws-stack.yml"
 
   capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
   parameters = {
