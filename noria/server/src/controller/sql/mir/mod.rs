@@ -12,6 +12,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
+use crate::controller::sql::query_utils::extract_limit;
 use nom_sql::{
     BinaryOperator, ColumnSpecification, CompoundSelectOperator, CreateTableStatement, Expression,
     FieldDefinitionExpression, FunctionExpression, LimitClause, Literal, OrderClause,
@@ -1200,12 +1201,13 @@ impl SqlToMirConverter {
                 .collect()
         });
 
-        if limit.offset != 0 {
-            unsupported!(
-                "TopK nodes don't support OFFSET yet ({} supplied)",
-                limit.offset
-            )
+        if let Some(offset) = &limit.offset {
+            if offset != &Expression::Literal(0.into()) {
+                unsupported!("TopK nodes don't support OFFSET yet ({} supplied)", offset)
+            }
         }
+
+        let k = extract_limit(limit)?;
 
         // make the new operator and record its metadata
         Ok(MirNode::new(
@@ -1215,7 +1217,7 @@ impl SqlToMirConverter {
             MirNodeInner::TopK {
                 order,
                 group_by: group_by.into_iter().cloned().collect(),
-                k: limit.limit as usize,
+                k,
                 offset: 0,
             },
             vec![parent],
@@ -1873,7 +1875,7 @@ impl SqlToMirConverter {
                                 .map(|(col, ot)| (col.into(), ot))
                                 .collect()
                         }),
-                        limit: st.limit.as_ref().map(|lc| lc.limit as usize),
+                        limit: st.limit.as_ref().map(extract_limit).transpose()?,
                         returned_cols: Some({
                             let mut cols = st.fields
                                 .iter()

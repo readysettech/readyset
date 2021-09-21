@@ -1,7 +1,10 @@
 use std::convert::TryFrom;
 
 pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
-use nom_sql::{BinaryOperator, Column, Expression, FunctionExpression, InValue};
+use nom_sql::{
+    BinaryOperator, Column, Expression, FunctionExpression, InValue, LimitClause, Literal,
+};
+use noria::{unsupported, ReadySetResult};
 
 #[must_use]
 pub(crate) fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, String)> {
@@ -105,5 +108,19 @@ impl TryFrom<BinaryOperator> for LogicalOp {
             BinaryOperator::Or => Ok(Self::Or),
             _ => Err(value),
         }
+    }
+}
+
+pub(crate) fn extract_limit(limit: &LimitClause) -> ReadySetResult<usize> {
+    if let Expression::Literal(Literal::Integer(k)) = limit.limit {
+        if k < 0 {
+            unsupported!("Invalid value for limit: {}", k);
+        }
+        Ok(k as usize)
+    } else {
+        unsupported!(
+            "Only literal limits are supported ({} supplied)",
+            limit.limit
+        );
     }
 }

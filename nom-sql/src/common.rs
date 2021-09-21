@@ -977,11 +977,6 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
     }
 }
 
-// Parse an unsigned integer.
-pub fn unsigned_number(i: &[u8]) -> IResult<&[u8], u64> {
-    map_res(map_res(digit1, str::from_utf8), u64::from_str)(i)
-}
-
 pub(crate) fn eof<I: Copy + InputLength, E: ParseError<I>>(input: I) -> IResult<I, I, E> {
     if input.input_len() == 0 {
         Ok((input, input))
