@@ -426,7 +426,7 @@ named!(infix(&[u8]) -> TokenTree, complete!(alt!(
 )));
 
 named!(prefix(&[u8]) -> TokenTree, map!(alt!(
-    tag_no_case!("not") => { |_| UnaryOperator::Not }
+    complete!(tag_no_case!("not")) => { |_| UnaryOperator::Not }
 ), TokenTree::Prefix));
 
 named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, alt!(
@@ -596,8 +596,8 @@ named_with_dialect!(in_rhs(dialect) -> InValue, alt!(
 named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
     lhs: call!(in_lhs(dialect))
         >> multispace1
-        >> not: opt!(terminated!(tag_no_case!("not"), multispace1))
-        >> tag_no_case!("in")
+        >> not: opt!(terminated!(complete!(tag_no_case!("not")), multispace1))
+        >> complete!(tag_no_case!("in"))
         >> multispace0
         >> char!('(')
         >> multispace0
@@ -629,12 +629,12 @@ named_with_dialect!(pub(crate) between_max(dialect) -> Expression, alt!(
 named_with_dialect!(between_expr(dialect) -> Expression, do_parse!(
     operand: map!(call!(between_operand(dialect)), Box::new)
         >> multispace1
-        >> not: opt!(terminated!(tag_no_case!("not"), multispace1))
-        >> tag_no_case!("between")
+        >> not: opt!(terminated!(complete!(tag_no_case!("not")), multispace1))
+        >> complete!(tag_no_case!("between"))
         >> multispace1
         >> min: map!(call!(simple_expr(dialect)), Box::new)
         >> multispace1
-        >> tag_no_case!("and")
+        >> complete!(tag_no_case!("and"))
         >> multispace1
         >> max: map!(call!(between_max(dialect)), Box::new)
         >> (Expression::Between {

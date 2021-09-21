@@ -120,7 +120,7 @@ pub fn compound_selection(
             many1(other_selects(dialect)),
             multispace0,
             opt(order_clause(dialect)),
-            opt(limit_clause),
+            opt(limit_clause(dialect)),
             statement_terminator,
         ))(i)?;
 

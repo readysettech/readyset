@@ -1815,8 +1815,8 @@ impl QueryOperation {
                 });
 
                 query.limit = Some(LimitClause {
-                    limit: *limit,
-                    offset: 0,
+                    limit: Expression::Literal(Literal::Integer(*limit as _)),
+                    offset: None,
                 });
 
                 if query.distinct {

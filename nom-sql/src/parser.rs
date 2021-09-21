@@ -21,6 +21,7 @@ use nom::combinator::map;
 use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),

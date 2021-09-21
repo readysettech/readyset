@@ -7,13 +7,13 @@ use nom_sql::{OrderType, SelectStatement};
 use crate::controller::sql::query_utils::LogicalOp;
 use crate::ReadySetResult;
 use noria::{internal, invariant, invariant_eq, unsupported};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::string::String;
 use std::vec::Vec;
-use std::{cmp::Ordering, num::NonZeroU64};
-use std::{collections::HashMap, convert::TryInto};
 
 use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
 
@@ -181,8 +181,8 @@ pub enum QueryGraphEdge {
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct Pagination {
     pub order: Vec<(Column, OrderType)>,
-    pub limit: Option<u64>,
-    pub offset: Option<NonZeroU64>,
+    pub limit: Option<Expression>,
+    pub offset: Option<Expression>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -935,8 +935,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
         qg.pagination = Some(Pagination {
             order: order.columns.clone(),
-            limit: st.limit.clone().map(|lim| lim.limit),
-            offset: st.limit.clone().and_then(|lim| lim.offset.try_into().ok()),
+            limit: st.limit.as_ref().map(|lim| lim.limit.clone()),
+            offset: st
+                .limit
+                .as_ref()
+                .and_then(|lim| lim.offset.as_ref())
+                .cloned(),
         })
     }
 

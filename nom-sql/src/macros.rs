@@ -6,7 +6,7 @@ macro_rules! test_parse {
             res.is_ok(),
             "res.err = {}",
             match res.err().unwrap() {
-                nom::Err::Incomplete(_) => "Incomplete".to_owned(),
+                nom::Err::Incomplete(n) => format!("Incomplete({:?})", n),
                 nom::Err::Failure((i, k)) | nom::Err::Error((i, k)) => {
                     format!("{:?}: at {}", k, String::from_utf8_lossy(i))
                 }

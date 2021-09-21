@@ -11,7 +11,7 @@ use std::str;
 
 use crate::common::{
     as_alias, field_definition_expr, field_list, schema_table_reference, statement_terminator,
-    table_list, unsigned_number, ws_sep_comma, FieldDefinitionExpression,
+    table_list, ws_sep_comma, FieldDefinitionExpression,
 };
 use crate::expression::expression;
 use crate::join::{join_operator, JoinConstraint, JoinOperator, JoinRightSide};
@@ -67,15 +67,15 @@ impl fmt::Display for JoinClause {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LimitClause {
-    pub limit: u64,
-    pub offset: u64,
+    pub limit: Expression,
+    pub offset: Option<Expression>,
 }
 
 impl fmt::Display for LimitClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "LIMIT {}", self.limit)?;
-        if self.offset > 0 {
-            write!(f, " OFFSET {}", self.offset)?;
+        if let Some(offset) = &self.offset {
+            write!(f, " OFFSET {}", offset)?;
         }
         Ok(())
     }
@@ -210,29 +210,26 @@ pub fn group_by_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Gro
     }
 }
 
-fn offset(i: &[u8]) -> IResult<&[u8], u64> {
-    let (remaining_input, (_, _, _, val)) = tuple((
-        multispace0,
-        tag_no_case("offset"),
-        multispace1,
-        unsigned_number,
-    ))(i)?;
-
-    Ok((remaining_input, val))
+fn offset_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {
+    move |i| {
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("offset")(i)?;
+        let (i, _) = multispace1(i)?;
+        expression(dialect)(i)
+    }
 }
 
 // Parse LIMIT clause
-pub fn limit_clause(i: &[u8]) -> IResult<&[u8], LimitClause> {
-    let (remaining_input, (_, _, _, limit, opt_offset)) = tuple((
-        multispace0,
-        tag_no_case("limit"),
-        multispace1,
-        unsigned_number,
-        opt(offset),
-    ))(i)?;
-    let offset = opt_offset.unwrap_or(0);
+pub fn limit_clause(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], LimitClause> {
+    move |i| {
+        let (i, _) = multispace0(i)?;
+        let (i, _) = tag_no_case("limit")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, limit) = expression(dialect)(i)?;
+        let (i, offset) = opt(offset_clause(dialect))(i)?;
 
-    Ok((remaining_input, LimitClause { limit, offset }))
+        Ok((i, LimitClause { limit, offset }))
+    }
 }
 
 fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinConstraint> {
@@ -463,7 +460,7 @@ pub fn nested_selection(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Se
             opt(where_clause(dialect)),
             opt(group_by_clause(dialect)),
             opt(order_clause(dialect)),
-            opt(limit_clause),
+            opt(limit_clause(dialect)),
         )))(remaining_input)?;
 
         let mut result = SelectStatement {
@@ -678,18 +675,18 @@ mod tests {
         let qstring2 = "select * from users limit 10 offset 10\n";
 
         let expected_lim1 = LimitClause {
-            limit: 10,
-            offset: 0,
+            limit: Expression::Literal(10.into()),
+            offset: None,
         };
         let expected_lim2 = LimitClause {
-            limit: 10,
-            offset: 10,
+            limit: Expression::Literal(10.into()),
+            offset: Some(Expression::Literal(10.into())),
         };
 
-        let res1 = selection(Dialect::MySQL)(qstring1.as_bytes());
-        let res2 = selection(Dialect::MySQL)(qstring2.as_bytes());
-        assert_eq!(res1.unwrap().1.limit, Some(expected_lim1));
-        assert_eq!(res2.unwrap().1.limit, Some(expected_lim2));
+        let res1 = test_parse!(selection(Dialect::MySQL), qstring1.as_bytes());
+        let res2 = test_parse!(selection(Dialect::MySQL), qstring2.as_bytes());
+        assert_eq!(res1.limit, Some(expected_lim1));
+        assert_eq!(res2.limit, Some(expected_lim2));
     }
 
     #[test]
@@ -867,8 +864,8 @@ mod tests {
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
         let expected_lim = Some(LimitClause {
-            limit: 10,
-            offset: 0,
+            limit: Expression::Literal(10.into()),
+            offset: None,
         });
         let ct = Expression::BinaryOp {
             lhs: Box::new(Expression::Column(Column::from("id"))),
@@ -889,6 +886,15 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn limit_placeholder() {
+        let res = test_parse!(selection(Dialect::MySQL), b"select * from users limit ?");
+        assert_eq!(
+            res.limit.unwrap().limit,
+            Expression::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))
+        )
     }
 
     #[test]
@@ -1181,8 +1187,8 @@ mod tests {
                     columns: vec![("item.i_title".into(), OrderType::OrderAscending)],
                 }),
                 limit: Some(LimitClause {
-                    limit: 50,
-                    offset: 0,
+                    limit: Expression::Literal(50.into()),
+                    offset: None,
                 }),
                 ..Default::default()
             }
