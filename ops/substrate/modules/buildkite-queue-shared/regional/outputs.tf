@@ -1,5 +1,5 @@
 output "secrets_bucket" {
-  value = local.artifacts_bucket_name
+  value = local.secrets_bucket_name
 }
 
 output "artifacts_bucket" {
