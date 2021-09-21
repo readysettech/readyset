@@ -21,7 +21,7 @@ steps:
     plugins:
       - Zegocover/git-diff-conditional#v1.1.1:
           log_level: DEBUG
-          diff: "git diff --name-only origin/main...HEAD,git diff --name-only HEAD HEAD~1"
+          diff: "git diff --name-only HEAD HEAD~1"
           dynamic_pipeline: ".buildkite/common.yaml"
           steps:
             - label: ':docker: Build build image'
