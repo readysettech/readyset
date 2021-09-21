@@ -18,8 +18,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::mem;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
@@ -88,7 +86,7 @@ pub(in crate::controller) struct Materializations {
     partial_enabled: bool,
     frontier_strategy: FrontierStrategy,
 
-    tag_generator: Arc<AtomicUsize>,
+    tag_generator: usize,
 }
 
 impl Materializations {
@@ -108,7 +106,7 @@ impl Materializations {
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
 
-            tag_generator: Arc::new(AtomicUsize::default()),
+            tag_generator: 0,
         }
     }
 
@@ -124,8 +122,9 @@ impl Materializations {
 }
 
 impl Materializations {
-    fn next_tag(&self) -> Tag {
-        Tag::new(self.tag_generator.fetch_add(1, Ordering::SeqCst) as u32)
+    fn next_tag(&mut self) -> Tag {
+        self.tag_generator += 1;
+        Tag::new(self.tag_generator as u32)
     }
 
     /// Extend the current set of materializations with any additional materializations needed to
