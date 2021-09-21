@@ -25,12 +25,12 @@ steps:
           dynamic_pipeline: ".buildkite/common.yaml"
           steps:
             - label: ':docker: Build build image'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ':rust: Check rustfmt'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ':docker: Build cargo-audit image'
               include:
@@ -41,36 +41,36 @@ steps:
                 - 'Cargo.lock'
 
             - label: ':clippy: Check clippy'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ":docker: Build readyset-server image"
-              exclude:
-                - "ops/**"
+              incude:
+                - "[!ops]*"
 
             - label: ':docker: Build readyset-mysql image'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ':docker: Build readyset-psql image'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ':rust: Run tests'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: 'Run logictest'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: 'Run logictest with MySQL replication'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             - label: ':rust: Deploy docs'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
             # --- START INTERNAL OPS STEPS --- #
             - label: ':docker: Build readyset-ops image'
@@ -135,8 +135,8 @@ steps:
                 - "readyset-framework-testing/**"
 
             - label: 'Test readyset deployment'
-              exclude:
-                - "ops/**"
+              include:
+                - "[!ops]*"
 
   - wait: ~
     continue_on_failure: true
