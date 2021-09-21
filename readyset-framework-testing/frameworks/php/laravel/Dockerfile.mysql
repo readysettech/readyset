@@ -2,24 +2,39 @@ FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/php:7-apache
 
 RUN \
 	apt-get update && \
-	apt-get install -y libpng-dev libonig-dev libxml2-dev zip unzip && \
+	apt-get install -y libpng-dev libonig-dev libxml2-dev zip unzip curl mariadb-client jq && \
 	rm -Rvf /var/lib/apt
 
+RUN a2enmod rewrite
 RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 
 RUN \
 	apt-get update && \
-	apt-get install -y git curl && \
+	apt-get install -y git && \
 	curl -v https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer && \
-	apt-get remove -y git curl && \
+	apt-get remove -y git && \
 	rm -Rvf /var/lib/apt
 
-RUN rm -Rvf /var/www
-ADD /src /var/www
-RUN chown -Rc www-data /var/www
+RUN \
+	rm -Rvf /var/www && \
+	mkdir /var/www && \
+	cd /var/www && \
+	composer create-project flarum/flarum . && \
+	ln -svf public/ html && \
+	chown -Rc www-data .
+
+# Hack time!
+RUN \
+	cd /var/www && \
+	# Disable CSRF; this makes using curl to exercise endpoints difficult. \
+	sed -i "s/'bypassCsrfToken', false/'bypassCsrfToken', true/" vendor/flarum/core/src/Http/Middleware/CheckCsrfToken.php
+
 WORKDIR /var/www
-RUN composer install
-RUN mv -vf public html
+
+ADD src /src
+RUN \
+	mv -vf /src/test /var/www/test && \
+	rmdir /src
 
 ENTRYPOINT ["/var/www/test"]
 

@@ -1,6 +1,62 @@
-#!/bin/sh -e
+#!/bin/bash -ex
 
-./artisan migrate:install
-./artisan migrate:fresh --force
-./artisan db:seed --force
+cat >config.yaml <<EOF
+debug: false
+databaseConfiguration:
+  driver: mysql
+  host: ${RS_HOST}
+  port: ${RS_PORT}
+  database: ${RS_DATABASE}
+  username: ${RS_USERNAME}
+  password: ${RS_PASSWORD}
+  prefix:
+adminUser:
+  username: admin
+  password: password
+  email: admin@example.com
+settings: {}
+EOF
+
+php flarum install --no-interaction -f config.yaml
+php flarum migrate
+php flarum cache:clear
+
+apache2-foreground >/dev/null &
+for i in {0..30}; do
+    if curl localhost &>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+if [ $i -eq 30 ]; then
+    exit 1
+fi
+
+function curl() {
+    /usr/bin/curl -s --cookie-jar cookie.jar --cookie cookie.jar "$@"
+}
+
+echo '127.0.0.1 flarum.localhost' >> /etc/hosts
+
+curl 'http://flarum.localhost' >/dev/null
+curl 'http://flarum.localhost/register' -H 'Content-Type: application/json; charset=utf-8' --data-raw '{"username":"test","email":"te@s.t","password":"testtest"}' | jq || true
+mysql -h"${RS_HOST}" -P"${RS_PORT}" -u"${RS_USERNAME}" -p"${RS_PASSWORD}" "${RS_DATABASE}" -Ne "UPDATE users SET is_email_confirmed = 1;"
+curl 'http://flarum.localhost/login' -H 'Content-Type: application/json; charset=utf-8' --data-raw '{"identification":"test","password":"testtest","remember":true}' | jq
+curl 'http://flarum.localhost/api/discussions?include=user,lastPostedUser,firstPost,tags,tags.parent&sort&page%5Boffset%5D=0' | jq
+curl 'http://flarum.localhost/api/discussions' -H 'Content-Type: application/json; charset=utf-8' --data-raw '{"data":{"type":"discussions","attributes":{"title":"new post","content":"post body"},"relationships":{"tags":{"data":[{"type":"tags","id":"1"}]}}}}' | jq
+curl 'http://flarum.localhost/api/discussions?include=user,lastPostedUser,firstPost,tags,tags.parent&sort&page%5Boffset%5D=0' | jq
+curl 'http://flarum.localhost/api/discussions/1-new-post?bySlug=true&page%5Bnear%5D=0' | jq
+curl 'http://flarum.localhost/api/tags/general?include=children,children.parent,parent,state' | jq
+curl 'http://flarum.localhost/api/discussions?include=user,lastPostedUser,firstPost,tags,tags.parent&filter%5Bsubscription%5D=following&sort&page%5Boffset%5D=0' | jq
+curl 'http://flarum.localhost/api/tags?include=children,lastPostedDiscussion' | jq
+curl 'http://flarum.localhost/api/notifications?page%5Boffset%5D=0' | jq
+curl 'http://flarum.localhost/api/posts?filter%5Bauthor%5D=test&filter%5Btype%5D=comment&page%5Boffset%5D&page%5Blimit%5D=20&sort=-createdAt' | jq
+curl 'http://flarum.localhost/api/discussions?include=user,lastPostedUser,mostRelevantPost,mostRelevantPost.user,tags,tags.parent&filter%5Bq%5D=author%3Atest&sort=-createdAt&page%5Boffset%5D=0' | jq
+curl 'http://flarum.localhost/api/posts?filter%5Btype%5D=comment&filter%5Bmentioned%5D=2&page%5Boffset%5D&page%5Blimit%5D=20&sort=-createdAt' | jq
+curl 'http://flarum.localhost/api/users/2' --data-raw '{"data":{"type":"users","id":"2","attributes":{"preferences":{"followAfterReply":false,"notify_discussionRenamed_alert":true,"notify_postLiked_alert":true,"notify_discussionLocked_alert":true,"notify_postMentioned_alert":true,"notify_postMentioned_email":false,"notify_userMentioned_alert":true,"notify_userMentioned_email":false,"notify_newPost_alert":true,"notify_newPost_email":false,"notify_userSuspended_alert":true,"notify_userUnsuspended_alert":true,"discloseOnline":true,"indexProfile":true,"locale":null}}}}' | jq
+curl 'http://flarum.localhost/api/users/2' --data-raw '{"data":{"type":"users","id":"2","attributes":{"preferences":{"followAfterReply":false,"notify_discussionRenamed_alert":true,"notify_postLiked_alert":true,"notify_discussionLocked_alert":true,"notify_postMentioned_alert":true,"notify_postMentioned_email":true,"notify_userMentioned_alert":true,"notify_userMentioned_email":false,"notify_newPost_alert":true,"notify_newPost_email":false,"notify_userSuspended_alert":true,"notify_userUnsuspended_alert":true,"discloseOnline":true,"indexProfile":true,"locale":null}}}}' | jq
+curl 'http://flarum.localhost/logout?token=zDXCx1eaai7bHvCbi1JXEsVLVDIWkEaMCTcRq9i8' >/dev/null
+
+kill %1
+wait %1
 
