@@ -40,14 +40,7 @@ impl ConnectionHandler for MysqlHandler {
         backend: noria_client::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
         if let Err(e) = MysqlIntermediary::run_on_tcp(Backend(backend), stream).await {
-            match e {
-                Error::Io(e) => {
-                    error!(err = ?e, "connection lost");
-                }
-                _ => {
-                    error!(err = ?e)
-                }
-            }
+            error!(err = %e, "connection lost");
         }
     }
 }

@@ -25,8 +25,6 @@ use msql_srv::*;
 
 struct Backend;
 impl<W: io::Write> MysqlShim<W> for Backend {
-    type Error = io::Error;
-
     fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<W>) -> io::Result<()> {
         info.reply(42, &[], &[])
     }

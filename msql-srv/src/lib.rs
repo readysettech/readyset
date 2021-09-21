@@ -26,8 +26,6 @@
 //! struct Backend;
 //! #[async_trait]
 //! impl<W: AsyncWrite + Unpin + Send + 'static> MysqlShim<W> for Backend {
-//!     type Error = io::Error;
-//!
 //!     async fn on_prepare(&mut self, _: &str, info: StatementMetaWriter<'_, W>) -> io::Result<()> {
 //!         info.reply(42, &[], &[]).await
 //!     }
@@ -179,21 +177,13 @@ pub use crate::value::{ToMysqlValue, Value, ValueInner};
 /// Implementors of this trait can be used to drive a MySQL-compatible database backend.
 #[async_trait]
 pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
-    /// The error type produced by operations on this shim.
-    ///
-    /// Must implement `From<io::Error>` so that transport-level errors can be lifted.
-    type Error: From<io::Error>;
-
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`](struct.StatementMetaWriter.html) should be used to
     /// notify the client of the statement id assigned to the prepared statement, as well as to
     /// give metadata about the types of parameters and returned columns.
-    async fn on_prepare(
-        &mut self,
-        query: &str,
-        info: StatementMetaWriter<'_, W>,
-    ) -> Result<(), Self::Error>;
+    async fn on_prepare(&mut self, query: &str, info: StatementMetaWriter<'_, W>)
+        -> io::Result<()>;
 
     /// Called when the client executes a previously prepared statement.
     ///
@@ -205,7 +195,7 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
         id: u32,
         params: ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
-    ) -> Result<(), Self::Error>;
+    ) -> io::Result<()>;
 
     /// Called when the client wishes to deallocate resources associated with a previously prepared
     /// statement.
@@ -215,14 +205,10 @@ pub trait MysqlShim<W: AsyncWrite + Unpin + Send> {
     ///
     /// Results should be returned using the given
     /// [`QueryResultWriter`](struct.QueryResultWriter.html).
-    async fn on_query(
-        &mut self,
-        query: &str,
-        results: QueryResultWriter<'_, W>,
-    ) -> Result<(), Self::Error>;
+    async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()>;
 
     /// Called when client switches database.
-    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> Result<(), Self::Error>;
+    async fn on_init(&mut self, _: &str, _: InitWriter<'_, W>) -> io::Result<()>;
 
     /// Retrieve the password for the user with the given username, if any.
     ///
@@ -249,7 +235,7 @@ impl<B: MysqlShim<net::tcp::OwnedWriteHalf> + Send>
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), B::Error> {
+    pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), io::Error> {
         let (reader, writer) = stream.into_split();
         MysqlIntermediary::run_on(shim, reader, writer).await
     }
@@ -261,7 +247,7 @@ impl<B: MysqlShim<S> + Send, S: AsyncRead + AsyncWrite + Clone + Unpin + Send>
     /// Create a new server over a two-way stream and process client commands until the client
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
-    pub async fn run_on_stream(shim: B, stream: S) -> Result<(), B::Error> {
+    pub async fn run_on_stream(shim: B, stream: S) -> Result<(), io::Error> {
         MysqlIntermediary::run_on(shim, stream.clone(), stream).await
     }
 }
@@ -280,7 +266,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
 {
     /// Create a new server over two one-way channels and process client commands until the client
     /// disconnects or an error occurs.
-    pub async fn run_on(shim: B, reader: R, writer: W) -> Result<(), B::Error> {
+    pub async fn run_on(shim: B, reader: R, writer: W) -> Result<(), io::Error> {
         let r = packet::PacketReader::new(reader);
         let w = packet::PacketWriter::new(writer);
         let mut mi = MysqlIntermediary {
@@ -294,7 +280,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         Ok(())
     }
 
-    async fn init(&mut self) -> Result<bool, B::Error> {
+    async fn init(&mut self) -> Result<bool, io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.writer.write_all(&[10]).await?; // protocol 10
@@ -376,7 +362,7 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
         Ok(auth_success)
     }
 
-    async fn run(mut self) -> Result<(), B::Error> {
+    async fn run(mut self) -> Result<(), io::Error> {
         use crate::commands::Command;
 
         let mut stmts: HashMap<u32, _> = HashMap::new();

@@ -3,14 +3,15 @@ use std::convert::TryFrom;
 use async_trait::async_trait;
 use derive_more::{Deref, DerefMut};
 use tokio::io::{self, AsyncWrite};
-use tracing::trace;
+use tracing::{error, trace};
 
 use crate::schema::convert_column;
 use crate::upstream::{self, MySqlUpstream};
 use crate::value::mysql_value_to_datatype;
 use crate::{Error, MySqlQueryHandler};
 use msql_srv::{
-    ColumnFlags, InitWriter, MysqlShim, QueryResultWriter, RowWriter, StatementMetaWriter,
+    ColumnFlags, InitWriter, MsqlSrvError, MysqlShim, QueryResultWriter, RowWriter,
+    StatementMetaWriter,
 };
 use mysql_async::consts::StatusFlags;
 use noria::errors::internal_err;
@@ -109,13 +110,11 @@ impl<W> MysqlShim<W> for Backend
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    type Error = Error;
-
     async fn on_prepare(
         &mut self,
         query: &str,
         info: StatementMetaWriter<'_, W>,
-    ) -> Result<(), Error> {
+    ) -> io::Result<()> {
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
@@ -164,6 +163,29 @@ where
                 message,
                 ..
             }))) => info.error(code.into(), message.as_bytes()).await,
+            Err(Error::MySql(mysql_async::Error::Driver(
+                mysql_async::DriverError::ConnectionClosed,
+            ))) => {
+                // In this case connection to fallback closed, so
+                // we should close our connection to the client.
+                // This should cause them to re-initiate a
+                // connection, allowing us to form a new connection
+                // to fallback.
+                error!("upstream connection closed");
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "upstream connection closed",
+                ));
+            }
+            Err(Error::Io(e))
+            | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
+            | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
+                error!(err = %e, "encountered io error preparing query: {}", query);
+                // In the case that we encountered an io error, we should bubble it up so the
+                // connection can be closed. This is usually an unrecoverable error, and the client
+                // should re-initiate a connection with us so we can start with a fresh slate.
+                return Err(e);
+            }
             Err(e) => info.error(e.error_kind(), e.to_string().as_bytes()).await,
         };
 
@@ -175,35 +197,61 @@ where
         id: u32,
         params: msql_srv::ParamParser<'_>,
         results: QueryResultWriter<'_, W>,
-    ) -> Result<(), Error> {
-        let mut datatype_params = Vec::new();
+    ) -> io::Result<()> {
         // TODO(DAN): Param conversions are unecessary for fallback execution. Params should be
         // derived directly from ParamParser.
-        for p in params {
-            datatype_params.push(mysql_value_to_datatype(p?.value)?);
-        }
+        let params_result = params
+            .into_iter()
+            .flat_map(|p| p.map(|pval| mysql_value_to_datatype(pval.value).map_err(Error::from)))
+            .collect::<Result<Vec<DataType>, Error>>();
+        let datatype_params = match params_result {
+            Ok(r) => r,
+            Err(Error::Io(e)) | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
+                error!(err = %e, "encountered io error parsing execute params");
+                // In the case that we encountered an io error, we should bubble it up so the
+                // connection can be closed. This is usually an unrecoverable error, and the client
+                // should re-initiate a connection with us so we can start with a fresh slate.
+                return Err(e);
+            }
+            Err(e) => {
+                error!(err = %e, "encountered error parsing execute params");
+                return results
+                    .error(e.error_kind(), e.to_string().as_bytes())
+                    .await;
+            }
+        };
 
         let res = match self.execute(id, datatype_params).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,
-            } )) => {
-                let schema = select_schema.schema.iter().map(|cs| convert_column(&cs.spec)).collect::<Vec<_>>();
+            })) => {
+                let schema = select_schema
+                    .schema
+                    .iter()
+                    .map(|cs| convert_column(&cs.spec))
+                    .collect::<Vec<_>>();
                 let mut rw = results.start(&schema).await?;
                 for resultsets in data {
                     for r in resultsets {
                         for c in &schema {
-                            let coli = select_schema
-                                .columns
-                                .iter()
-                                .position(|f| f == &c.column)
-                                .ok_or_else(|| {
-                                    internal_err(format!(
+                            match select_schema.columns.iter().position(|f| f == &c.column) {
+                                Some(coli) => {
+                                    if let Err(e) = write_column(&mut rw, &r[coli], c).await {
+                                        return handle_column_write_err(e, rw).await;
+                                    };
+                                }
+                                None => {
+                                    let e = Error::from(internal_err(format!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
                                         c.column, select_schema.columns
-                                    ))
-                                })?;
-                            write_column(&mut rw, &r[coli], c).await?;
+                                    )));
+                                    error!(err = %e);
+                                    return rw
+                                        .error(e.error_kind(), e.to_string().as_bytes())
+                                        .await;
+                                }
+                            }
                         }
                         rw.end_row().await?;
                     }
@@ -213,11 +261,15 @@ where
             Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
-            } )) => write_query_results(Ok((num_rows_inserted, first_inserted_id)), results, None).await,
+            })) => {
+                write_query_results(Ok((num_rows_inserted, first_inserted_id)), results, None).await
+            }
             Ok(QueryResult::Noria(noria_connector::QueryResult::Update {
                 num_rows_updated,
-                last_inserted_id
-            })) => write_query_results(Ok((num_rows_updated, last_inserted_id)), results, None).await,
+                last_inserted_id,
+            })) => {
+                write_query_results(Ok((num_rows_updated, last_inserted_id)), results, None).await
+            }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
@@ -230,14 +282,15 @@ where
                 )
                 .await
             }
-            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult { data, columns, status_flags })) => {
+            Ok(QueryResult::Upstream(upstream::QueryResult::ReadResult {
+                data,
+                columns,
+                status_flags,
+            })) => {
                 let mut data = data.iter().peekable();
                 if let Some(cols) = data.peek() {
                     let cols = cols.columns_ref();
-                    let formatted_cols = cols
-                        .iter()
-                        .map(|c| c.into())
-                        .collect::<Vec<_>>();
+                    let formatted_cols = cols.iter().map(|c| c.into()).collect::<Vec<_>>();
                     let mut rw = results.start(&formatted_cols).await?;
                     for r in data {
                         for (coli, _) in formatted_cols.iter().enumerate() {
@@ -248,9 +301,7 @@ where
                     rw.set_status_flags(status_flags).finish().await
                 } else {
                     let formatted_cols = if let Some(c) = columns {
-                        c.iter()
-                            .map(|c| c.into())
-                            .collect::<Vec<_>>()
+                        c.iter().map(|c| c.into()).collect::<Vec<_>>()
                     } else {
                         vec![]
                     };
@@ -260,25 +311,55 @@ where
             }
             Err(e @ Error::ReadySet(ReadySetError::PreparedStatementMissing { .. })) => {
                 return results
-                    .error(
-                        e.error_kind(),
-                        "non-existent statement".as_bytes(),
-                    )
+                    .error(e.error_kind(), "non-existent statement".as_bytes())
+                    .await;
+            }
+            Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
+                code,
+                message,
+                ..
+            }))) => results.error(code.into(), message.as_bytes()).await,
+            Err(Error::MySql(mysql_async::Error::Driver(
+                mysql_async::DriverError::ConnectionClosed,
+            ))) => {
+                // In this case connection to fallback closed, so
+                // we should close our connection to the client.
+                // This should cause them to re-initiate a
+                // connection, allowing us to form a new connection
+                // to fallback.
+                error!("upstream connection closed");
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "upstream connection closed",
+                ));
+            }
+            Err(Error::Io(e))
+            | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
+            | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
+                error!(err = %e, "encountered io error while attempting to execute a prepared statement");
+                // In the case that we encountered an io error, we should bubble it up so the
+                // connection can be closed. This is usually an unrecoverable error, and the client
+                // should re-initiate a connection with us so we can start with a fresh slate.
+                return Err(e);
+            }
+            Err(e) => {
+                results
+                    .error(e.error_kind(), e.to_string().as_bytes())
                     .await
-                    .map_err(Error::from)
             }
-            Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError{code,
-                message, ..}))) => {
-                results.error(code.into(), message.as_bytes()).await
+            _ => {
+                let e = Error::from(internal_err("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."));
+                error!(err = %e);
+                results
+                    .error(e.error_kind(), e.to_string().as_bytes())
+                    .await
             }
-            Err(e) => results.error(e.error_kind(), e.to_string().as_bytes()).await,
-            _ => internal!("Matched a QueryResult that is not supported by on_prepare/on_execute in on_execute."),
         };
 
         Ok(res?)
     }
 
-    async fn on_init(&mut self, database: &str, w: InitWriter<'_, W>) -> Result<(), Self::Error> {
+    async fn on_init(&mut self, database: &str, w: InitWriter<'_, W>) -> io::Result<()> {
         let res = if self.has_fallback() {
             match self.database() {
                 Some(db_name) => {
@@ -305,11 +386,7 @@ where
     }
     async fn on_close(&mut self, _: u32) {}
 
-    async fn on_query(
-        &mut self,
-        query: &str,
-        results: QueryResultWriter<'_, W>,
-    ) -> Result<(), Error> {
+    async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
         let res = match self.query(query).await {
             Ok(QueryResult::Noria(
                 noria_connector::QueryResult::CreateTable
@@ -334,17 +411,23 @@ where
                 for resultsets in data {
                     for r in resultsets {
                         for c in &schema {
-                            let coli = select_schema
-                                .columns
-                                .iter()
-                                .position(|f| f == &c.column)
-                                .ok_or_else(|| {
-                                    internal_err(format!(
+                            match select_schema.columns.iter().position(|f| f == &c.column) {
+                                Some(coli) => {
+                                    if let Err(e) = write_column(&mut rw, &r[coli], c).await {
+                                        return handle_column_write_err(e, rw).await;
+                                    }
+                                }
+                                None => {
+                                    let e = Error::from(internal_err(format!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
                                         c.column, select_schema.columns
-                                    ))
-                                })?;
-                            write_column(&mut rw, &r[coli], c).await?;
+                                    )));
+                                    error!(err = %e);
+                                    return rw
+                                        .error(e.error_kind(), e.to_string().as_bytes())
+                                        .await;
+                                }
+                            }
                         }
                         rw.end_row().await?;
                     }
@@ -407,6 +490,29 @@ where
                 message,
                 ..
             }))) => results.error(code.into(), message.as_bytes()).await,
+            Err(Error::MySql(mysql_async::Error::Driver(
+                mysql_async::DriverError::ConnectionClosed,
+            ))) => {
+                // In this case connection to fallback closed, so
+                // we should close our connection to the client.
+                // This should cause them to re-initiate a
+                // connection, allowing us to form a new connection
+                // to fallback.
+                error!("upstream connection closed");
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "upstream connection closed",
+                ));
+            }
+            Err(Error::Io(e))
+            | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
+            | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
+                error!(err = %e, "encountered io error while attempting to execute query: {}", query);
+                // In the case that we encountered an io error, we should bubble it up so the
+                // connection can be closed. This is usually an unrecoverable error, and the client
+                // should re-initiate a connection with us so we can start with a fresh slate.
+                return Err(e);
+            }
             Err(e) => {
                 results
                     .error(e.error_kind(), e.to_string().as_bytes())
@@ -427,5 +533,32 @@ where
 
     fn require_authentication(&self) -> bool {
         self.require_authentication
+    }
+}
+
+async fn handle_column_write_err<W: AsyncWrite + Unpin>(
+    e: Error,
+    rw: RowWriter<'_, W>,
+) -> io::Result<()> {
+    error!(err = %e, "encountered error while attempting to write column packet");
+    match e {
+        Error::Io(io_e) => {
+            // In the case that we encountered an io error, we should bubble it up so the
+            // connection can be closed. This is usually an unrecoverable error, and the client
+            // should re-initiate a connection with us so we can start with a fresh slate.
+            Err(io_e)
+        }
+        Error::MySql(mysql_async::Error::Driver(mysql_async::DriverError::ConnectionClosed)) => {
+            // In this case connection to fallback closed, so
+            // we should close our connection to the client.
+            // This should cause them to re-initiate a
+            // connection, allowing us to form a new connection
+            // to fallback.
+            Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "upstream connection closed",
+            ))
+        }
+        _ => rw.error(e.error_kind(), e.to_string().as_bytes()).await,
     }
 }
