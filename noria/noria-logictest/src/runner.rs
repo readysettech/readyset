@@ -76,7 +76,6 @@ pub struct RunOptions {
     pub upstream_database_url: Option<DatabaseURL>,
     pub replication_url: Option<String>,
     pub enable_reuse: bool,
-    pub verbose: bool,
     pub time: bool,
 }
 
@@ -86,7 +85,6 @@ impl Default for RunOptions {
             deployment_name: "sqllogictest".to_string(),
             upstream_database_url: None,
             enable_reuse: false,
-            verbose: false,
             time: false,
             replication_url: None,
             database_type: DatabaseType::MySQL,

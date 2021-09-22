@@ -256,10 +256,6 @@ struct Verify {
     #[clap(long)]
     enable_reuse: bool,
 
-    /// Enable logging in both noria and noria-mysql
-    #[clap(long, short)]
-    verbose: bool,
-
     /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
     #[clap(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
     tasks: usize,
@@ -272,6 +268,10 @@ struct Verify {
     /// Collect timing of all named queries
     #[clap(long)]
     time: bool,
+
+    /// Logging options
+    #[clap(flatten)]
+    log: readyset_logging::Options,
 }
 
 #[derive(Default)]
@@ -360,6 +360,8 @@ impl Verify {
 
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
+        self.log.init()?;
+
         let result = Arc::new(Mutex::new(VerifyResult::default()));
         let mut tasks = FuturesUnordered::new();
 
@@ -454,7 +456,6 @@ impl From<&Verify> for RunOptions {
     fn from(verify: &Verify) -> Self {
         Self {
             database_type: verify.database_type,
-            verbose: verify.verbose,
             enable_reuse: verify.enable_reuse,
             upstream_database_url: verify.database_url().cloned(),
             replication_url: verify.replication_url.clone(),
@@ -521,11 +522,8 @@ impl Fuzz {
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
-            rt.block_on(test_script.run(RunOptions {
-                verbose: self.verbose,
-                ..Default::default()
-            }))
-            .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
+            rt.block_on(test_script.run(Default::default()))
+                .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
         });
 
         if let Err(TestError::Fail(reason, script)) = result {
