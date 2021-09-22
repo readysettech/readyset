@@ -329,6 +329,7 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
                 }
                 Err(_) => {
                     if let Some(entry) = self.current_entry.as_mut() {
+                        entry.arguments.push('\n');
                         entry.arguments.push_str(&line);
                     };
                     None
@@ -362,6 +363,7 @@ impl<R: AsyncBufRead + Unpin> Stream<R> {
                     session.entries.push(entry);
                 }
             } else if let Some(entry) = self.current_entry.as_mut() {
+                entry.arguments.push('\n');
                 entry.arguments.push_str(&line);
             }
         }
