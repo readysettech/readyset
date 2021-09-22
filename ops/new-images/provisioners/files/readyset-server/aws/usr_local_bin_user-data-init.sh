@@ -11,6 +11,15 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 
+setup_data_volume /var/lib/readyset-server
+
+if [ -f /var/lib/readyset-server/volume_id ]; then
+  volume_id=$(< /var/lib/readyset-server/volume_id)
+else
+  volume_id=$(< /proc/sys/kernel/random/uuid)
+  echo -n "$volume_id" > /var/lib/readyset-server/volume_id
+fi
+
 cat > /etc/default/readyset-server <<EOF
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 NORIA_MEMORY_BYTES=${MEMORY_BYTES}
@@ -20,10 +29,9 @@ NORIA_REGION=${REGION}
 NORIA_SHARDS=${SHARDS}
 REPLICATION_URL=${MYSQL_URL}
 ZOOKEEPER_ADDRESS=${ZOOKEEPER_ADDRESS}
+VOLUME_ID=${volume_id}
 EOF
 chmod 600 /etc/default/readyset-server
-
-setup_data_volume /var/lib/readyset-server
 
 systemctl reset-failed
 systemctl enable readyset-server
