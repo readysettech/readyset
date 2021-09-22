@@ -121,7 +121,15 @@ async fn process_execute(
         .map(Value::try_from)
         .collect::<Result<Vec<_>, _>>()?;
     let rows = conn.execute(stmt.to_string(), &params).await?;
-    Ok(Record::query(stmt.to_string(), Some(stmt), params, rows))
+    if should_validate_results(&stmt.to_string(), &Some(parsed)) {
+        Ok(Record::query(stmt.to_string(), Some(stmt), params, rows))
+    } else {
+        Ok(Record::Statement(Statement {
+            result: StatementResult::Ok,
+            command: stmt.to_string(),
+            conditionals: vec![],
+        }))
+    }
 }
 
 impl FromQueryLog {
