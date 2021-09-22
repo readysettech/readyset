@@ -163,7 +163,7 @@ struct Opts {
     noria_metrics: bool,
 
     /// Volume associated with the server.
-    #[clap(long)]
+    #[clap(long, env = "VOLUME_ID")]
     volume_id: Option<VolumeId>,
 
     /// Enable (experimental, currently broken) support for TopK in dataflow
