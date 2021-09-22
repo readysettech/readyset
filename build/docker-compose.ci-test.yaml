@@ -14,11 +14,7 @@ services:
   redis:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/redis:6.2
   app:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      cache_from:
-      - 305232526136.dkr.ecr.us-east-2.amazonaws.com/noria-client-build:latest
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
     working_dir: /workdir
     volumes:
     - 'target:/workdir/target'
