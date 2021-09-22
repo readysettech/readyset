@@ -161,7 +161,13 @@ impl FromQueryLog {
                         session.prepared_statements.insert(parsed);
                         None
                     }
-                    Command::Execute => process_execute(&session, entry, &mut conn).await.ok(),
+                    Command::Execute => match process_execute(&session, entry, &mut conn).await {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            eprintln!("!!! (execute) Error with {}:  {:?}", entry.arguments, e);
+                            continue;
+                        }
+                    },
                     Command::CloseStmt => None,
                     Command::Quit => None,
                 };
