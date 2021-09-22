@@ -22,11 +22,17 @@ mkShell {
     rust-analyzer
     docker-compose
     cargo-audit
+    postgresql
   ];
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib/libclang.so";
   CC="sccache clang";
   CXX="sccache clang++";
+
+  PGHOST="localhost";
+  PGUSER="postgres";
+  PGPASSWORD="noria";
+  PGDATABASE="noria";
 
   shellHook = ''
     export CC="sccache clang"
