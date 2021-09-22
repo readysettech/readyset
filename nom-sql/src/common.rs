@@ -593,7 +593,7 @@ impl Display for FieldDefinitionExpression {
             FieldDefinitionExpression::Expression { expr, alias } => {
                 write!(f, "{}", expr)?;
                 if let Some(alias) = alias {
-                    write!(f, " AS {}", alias)?;
+                    write!(f, " AS {}", escape_if_keyword(alias))?;
                 }
                 Ok(())
             }
