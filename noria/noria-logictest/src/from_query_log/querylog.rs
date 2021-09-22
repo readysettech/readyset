@@ -39,7 +39,7 @@ impl FromStr for Command {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub timestamp: DateTime<Utc>,
     pub id: u32,
@@ -54,10 +54,7 @@ impl FromStr for Entry {
         if parts.len() != 3 {
             bail!("Wrong number of tab-delimited parts: {}", parts.len());
         }
-        let middle_parts = parts[1].trim().split(' ').collect::<Vec<&str>>();
-        if middle_parts.len() != 2 {
-            bail!("Wrong number of middle parts: {}", middle_parts.len());
-        }
+        let middle_parts = parts[1].trim().splitn(2, ' ').collect::<Vec<&str>>();
         Ok(Self {
             timestamp: DateTime::<FixedOffset>::parse_from_rfc3339(parts[0])?.into(),
             id: middle_parts[0].parse()?,
@@ -466,6 +463,25 @@ mod tests {
                 String("somebody".to_string()),
                 Integer(867)
             ]
+        );
+    }
+
+    #[test]
+    fn test_close_stmt_parse() {
+        let line = "2021-09-22T11:06:44.749911Z	   11 Close stmt	";
+        let parsed = Entry::from_str(line).unwrap();
+        assert_eq!(
+            parsed,
+            Entry {
+                timestamp: DateTime::<FixedOffset>::parse_from_rfc3339(
+                    "2021-09-22T11:06:44.749911Z"
+                )
+                .unwrap()
+                .into(),
+                id: 11,
+                command: Command::CloseStmt,
+                arguments: "".to_string(),
+            }
         );
     }
 }
