@@ -221,8 +221,12 @@ impl Session {
         // TODO:  We should flip this around to do a comparison where placeholders in a prepared
         // statement match any literal in the input query, then pull out just the literals that
         // matched with a placeholder.  This will allow us to support queries where the prepared
-        // statement itself contains literals.
+        // statement itself contains literals, without this early escape hack making it
+        // all-or-nothing.
         // TODO:  We probably need to support placeholders other than ?
+        if let Some(q) = self.prepared_statements.get(query) {
+            return Some((q, vec![]));
+        }
         let mut query = query.clone();
         match &mut query {
             SqlQuery::Insert(q) => q.data.iter_mut().for_each(|row| {
