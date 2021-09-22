@@ -33,14 +33,23 @@ steps:
             - label: ':docker: Build build image'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: Check rustfmt'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':docker: Build cargo-audit image'
               include:
                 - 'Cargo.lock'
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: :lock: Check cargo-audit'
               include:
@@ -49,34 +58,58 @@ steps:
             - label: ':clippy: Check clippy'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ":docker: Build readyset-server image"
               incude:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':docker: Build readyset-mysql image'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':docker: Build readyset-psql image'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: Run tests'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: 'Run logictest'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: 'Run logictest with MySQL replication'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: Deploy docs'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             # --- START INTERNAL OPS STEPS --- #
             - label: ':docker: Build readyset-ops image'
@@ -143,6 +176,9 @@ steps:
             - label: 'Test readyset deployment'
               include:
                 - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
   - wait: ~
     continue_on_failure: true
