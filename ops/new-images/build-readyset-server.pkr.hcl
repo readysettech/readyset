@@ -1,0 +1,42 @@
+build {
+  sources = ["source.amazon-ebs.readyset-server"]
+
+  provisioner "file" {
+    source      = "provisioners/files/external-base"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "provisioners/files/node_exporter"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "provisioners/files/setup-data-volume"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "provisioners/files/readyset-server"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "${local.binaries_path}/noria-server"
+    destination = "/tmp/readyset-server-binary"
+  }
+
+
+  provisioner "shell" {
+    scripts = [
+      "provisioners/scripts/wait-for-cloud-init.sh",
+      "provisioners/scripts/external-base/00-init.sh",
+      "provisioners/scripts/external-base/10-aws.sh",
+      "provisioners/scripts/node_exporter/00-init.sh",
+      "provisioners/scripts/setup-data-volume/00-init.sh",
+      "provisioners/scripts/readyset-server/00-init.sh",
+    ]
+  }
+  # TODO: Add consul client that can join a consul cluster based upon passed in
+  # tags.
+}

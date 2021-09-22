@@ -1,0 +1,13 @@
+[Unit]
+After=network.target
+Description=ReadySet Server
+
+[Service]
+ExecStart=/usr/local/bin/readyset-server -a 0.0.0.0 --use-aws-external-address --prometheus-metrics
+StateDirectory=readyset-server
+WorkingDirectory=/var/lib/readyset-server
+EnvironmentFile=/etc/default/readyset-server
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
