@@ -12,7 +12,7 @@ use std::str::FromStr;
 use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
-    ws_sep_comma, IndexType, TableKey,
+    ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::table_options;
@@ -199,6 +199,25 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     }
 }
 
+fn referential_action(i: &[u8]) -> IResult<&[u8], ReferentialAction> {
+    alt((
+        map(tag_no_case("cascade"), |_| ReferentialAction::Cascade),
+        map(
+            tuple((tag_no_case("set"), multispace1, tag_no_case("null"))),
+            |_| ReferentialAction::SetNull,
+        ),
+        map(tag_no_case("restrict"), |_| ReferentialAction::Restrict),
+        map(
+            tuple((tag_no_case("no"), multispace1, tag_no_case("action"))),
+            |_| ReferentialAction::NoAction,
+        ),
+        map(
+            tuple((tag_no_case("set"), multispace1, tag_no_case("default"))),
+            |_| ReferentialAction::SetDefault,
+        ),
+    ))(i)
+}
+
 fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
         do_parse!(
@@ -229,12 +248,24 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
                         call!(column_identifier_no_alias(dialect))
                     )
                 >> tag!(")")
+                >> on_delete:
+                    opt!(preceded!(
+                        tuple((
+                            multispace0,
+                            tag_no_case("on"),
+                            multispace1,
+                            tag_no_case("delete"),
+                            multispace1
+                        )),
+                        call!(referential_action)
+                    ))
                 >> (TableKey::ForeignKey {
                     name: name.map(String::from),
                     index_name: index_name.map(String::from),
                     columns,
                     target_table,
-                    target_columns
+                    target_columns,
+                    on_delete
                 })
         )
     }
@@ -456,12 +487,14 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                             target_table,
                             target_columns: target_column,
                             index_name,
+                            on_delete,
                         } => TableKey::ForeignKey {
                             name,
                             columns: attach_names(column),
                             target_table,
                             target_columns: target_column,
                             index_name,
+                            on_delete,
                         },
                         constraint => constraint,
                     }
@@ -800,6 +833,7 @@ mod tests {
                         target_table: "groups".into(),
                         target_columns: vec!["id".into()],
                         index_name: None,
+                        on_delete: None,
                     }
                 ]),
                 if_not_exists: false
@@ -868,6 +902,7 @@ mod tests {
                         target_table: "customers".into(),
                         target_columns: vec!["id".into()],
                         index_name: None,
+                        on_delete: None,
                     },
                     TableKey::PrimaryKey(vec![col("id")]),
                 ]),
@@ -926,6 +961,7 @@ mod tests {
                         target_table: "customers".into(),
                         target_columns: vec!["id".into()],
                         index_name: Some("order_customer".into()),
+                        on_delete: None,
                     },
                     TableKey::ForeignKey {
                         name: None,
@@ -933,6 +969,7 @@ mod tests {
                         target_table: "products".into(),
                         target_columns: vec!["id".into()],
                         index_name: Some("ordered_product".into()),
+                        on_delete: None,
                     },
                     TableKey::PrimaryKey(vec![col("order_number")]),
                 ]),
@@ -1805,5 +1842,127 @@ mod tests {
             let res = creation(Dialect::PostgreSQL)(qstring);
             assert!(res.is_ok());
         }
+    }
+
+    #[test]
+    fn flarum_create_1() {
+        let qstring = b"CREATE TABLE `access_tokens` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `token` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` int(10) unsigned NOT NULL,
+  `last_activity_at` datetime NOT NULL,
+  `created_at` datetime NOT NULL,
+  `type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(150) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_ip_address` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `last_user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `access_tokens_token_unique` (`token`),
+  KEY `access_tokens_user_id_foreign` (`user_id`),
+  KEY `access_tokens_type_index` (`type`),
+  CONSTRAINT `access_tokens_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("access_tokens".into()),
+            function: None,
+        };
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "access_tokens".into(),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        col("id"),
+                        SqlType::UnsignedInt(Some(10)),
+                        vec![ColumnConstraint::NotNull, ColumnConstraint::AutoIncrement,]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("token"),
+                        SqlType::Varchar(40),
+                        vec![
+                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                            ColumnConstraint::NotNull
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("user_id"),
+                        SqlType::UnsignedInt(Some(10)),
+                        vec![ColumnConstraint::NotNull]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("last_activity_at"),
+                        SqlType::DateTime(None),
+                        vec![ColumnConstraint::NotNull]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("created_at"),
+                        SqlType::DateTime(None),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("type"),
+                        SqlType::Varchar(100),
+                        vec![
+                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                            ColumnConstraint::NotNull,
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("title"),
+                        SqlType::Varchar(150),
+                        vec![
+                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                            ColumnConstraint::DefaultValue(Literal::Null),
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("last_ip_address"),
+                        SqlType::Varchar(45),
+                        vec![
+                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                            ColumnConstraint::DefaultValue(Literal::Null),
+                        ]
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("last_user_agent"),
+                        SqlType::Varchar(255),
+                        vec![
+                            ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
+                            ColumnConstraint::DefaultValue(Literal::Null),
+                        ]
+                    ),
+                ],
+                keys: Some(vec![
+                    TableKey::PrimaryKey(vec![col("id")]),
+                    TableKey::UniqueKey {
+                        name: Some("access_tokens_token_unique".into()),
+                        columns: vec![col("token")],
+                        index_type: None,
+                    },
+                    TableKey::Key {
+                        name: "access_tokens_user_id_foreign".into(),
+                        columns: vec![col("user_id")],
+                        index_type: None,
+                    },
+                    TableKey::Key {
+                        name: "access_tokens_type_index".into(),
+                        columns: vec![col("type")],
+                        index_type: None,
+                    },
+                    TableKey::ForeignKey {
+                        name: Some("access_tokens_user_id_foreign".into()),
+                        columns: vec![col("user_id")],
+                        target_table: "users".into(),
+                        target_columns: vec!["id".into()],
+                        index_name: None,
+                        on_delete: Some(ReferentialAction::Cascade),
+                    },
+                ]),
+                if_not_exists: false,
+            }
+        )
     }
 }
