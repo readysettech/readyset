@@ -372,6 +372,31 @@ impl Display for IndexType {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum ReferentialAction {
+    Cascade,
+    SetNull,
+    Restrict,
+    NoAction,
+    SetDefault,
+}
+
+impl fmt::Display for ReferentialAction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Cascade => "CASCADE",
+                Self::SetNull => "SET NULL",
+                Self::Restrict => "RESTRICT",
+                Self::NoAction => "NO ACTION",
+                Self::SetDefault => "SET DEFAULT",
+            }
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
     PrimaryKey(Vec<Column>),
     UniqueKey {
@@ -391,6 +416,7 @@ pub enum TableKey {
         columns: Vec<Column>,
         target_table: Table,
         target_columns: Vec<Column>,
+        on_delete: Option<ReferentialAction>,
     },
     CheckConstraint {
         name: Option<String>,
@@ -478,6 +504,7 @@ impl fmt::Display for TableKey {
                 columns: column,
                 target_table,
                 target_columns: target_column,
+                on_delete,
             } => {
                 write!(
                     f,
@@ -489,8 +516,12 @@ impl fmt::Display for TableKey {
                     target_column
                         .iter()
                         .map(|c| escape_if_keyword(&c.name))
-                        .join(", "),
-                )
+                        .join(", ")
+                )?;
+                if let Some(on_delete) = on_delete {
+                    write!(f, " ON DELETE {}", on_delete)?;
+                }
+                Ok(())
             }
             TableKey::CheckConstraint {
                 name,
