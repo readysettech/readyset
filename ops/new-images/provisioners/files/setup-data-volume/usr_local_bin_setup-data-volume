@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <mount_point>" >&2
+    exit 1
+fi
+
+mount_point="$1"
+
+root_dev_name=$(blkid --list-one --match-token PTTYPE=gpt --output device | sed -e "s#/dev/##" | head -1)
+if [ -z "$root_dev_name" ]; then
+    echo "Error: Failed to get root device name"
+    return 1
+fi
+
+data_dev_name=$(lsblk --nodeps --output NAME --noheadings | grep -v "^$root_dev_name" | head -1)
+if [ -z "$data_dev_name" ]; then
+    echo "Error: Failed to get data device name"
+    return 1
+fi
+
+data_dev=/dev/$data_dev_name
+fs_type=$(lsblk "$data_dev" --output FSTYPE --noheading)
+if [ -z "$fs_type" ]; then
+    mkfs.ext4 "$data_dev"
+    # Obtaining the UUID below needs this
+    sleep 1
+else
+    echo "Warn: Data device has an existing filesystem, skipping"
+fi
+
+mkdir -p "$mount_point"
+uuid=$(lsblk "$data_dev" --output UUID --noheadings)
+if [ -z "$uuid" ]; then
+    echo "Error: Failed to get UUID for data device: $data_dev"
+    return 1
+fi
+
+if ! grep -q "^UUID=$uuid" /etc/fstab; then
+    echo "UUID=$uuid $mount_point ext4 rw,discard,x-systemd.growfs 0 0" >> /etc/fstab
+fi
+
+mount "$mount_point"
