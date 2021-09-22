@@ -1839,5 +1839,17 @@ mod tests {
 
             assert_eq!(res.unwrap().1, expected);
         }
+
+        #[test]
+        fn flarum_select_roundtrip_1() {
+            let qstr = "select exists(select * from `groups` where `id` = ?) as `exists`";
+            let res = test_parse!(selection(Dialect::MySQL), qstr.as_bytes());
+            let qstr = res.to_string();
+            println!("{}", qstr);
+            assert_eq!(
+                qstr,
+                "SELECT EXISTS (SELECT * FROM `groups` WHERE (id = ?)) AS `exists`"
+            );
+        }
     }
 }
