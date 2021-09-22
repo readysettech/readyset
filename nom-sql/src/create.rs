@@ -1965,4 +1965,36 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn flarum_create_2() {
+        let qstring = b"create table `mentions_posts` (`post_id` int unsigned not null, `mentions_id` int unsigned not null) default character set utf8mb4 collate 'utf8mb4_unicode_ci'";
+        let res = test_parse!(creation(Dialect::MySQL), qstring);
+        let col = |n: &str| Column {
+            name: n.into(),
+            table: Some("mentions_posts".into()),
+            function: None,
+        };
+
+        assert_eq!(
+            res,
+            CreateTableStatement {
+                table: "mentions_posts".into(),
+                fields: vec![
+                    ColumnSpecification::with_constraints(
+                        col("post_id"),
+                        SqlType::UnsignedInt(None),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                    ColumnSpecification::with_constraints(
+                        col("mentions_id"),
+                        SqlType::UnsignedInt(None),
+                        vec![ColumnConstraint::NotNull],
+                    ),
+                ],
+                keys: None,
+                if_not_exists: false,
+            }
+        )
+    }
 }
