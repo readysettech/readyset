@@ -205,7 +205,8 @@ impl ConsulAuthority {
             let _ = self
                 .consul
                 .destroy(session.ID.as_ref().unwrap(), None)
-                .await;
+                .await
+                .unwrap();
         }
 
         Ok(())

@@ -22,17 +22,17 @@ services:
     - '.:/workdir'
     environment:
     - ZOOKEEPER_HOST=zookeeper
-    - AUTHORITY_ADDRESS=zookeeper:2181
-    - AUTHORITY=zookeeper
+    - AUTHORITY_ADDRESS=consul-server:8500
+    - AUTHORITY=consul
     - REDIS_URL=redis://redis:6379/
     - MYSQL_HOST=mysql
     - PGHOST=postgres
     - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
     depends_on:
-    - zookeeper
     - redis
     - mysql
     - postgres
+    - consul-server
 
 volumes:
   target:

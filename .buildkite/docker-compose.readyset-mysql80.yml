@@ -1,9 +1,9 @@
 version: "3.8"
 services:
-  zookeeper:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
+  consul:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
     healthcheck:
-      test: ["CMD", "nc", "-vz", "localhost", "2181"]
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
       interval: 10s
       timeout: 2s
       retries: 5
@@ -15,11 +15,11 @@ services:
     environment:
       MYSQL_DATABASE: test
       MYSQL_ROOT_PASSWORD: root
-    # doesn't actually depend on zookeeper, but I can't figure out a way to have
+    # doesn't actually depend on consul, but I can't figure out a way to have
     # a depends_on with multiple health check relationships, so chaining them to ensure
-    # noria-server waits on both zookeeper and mysql for fallback.
+    # noria-server waits on both consul and mysql for fallback.
     depends_on:
-      zookeeper:
+      consul:
         condition: service_healthy
     healthcheck:
       test: "mysqladmin ping"
@@ -34,15 +34,15 @@ services:
       #   32768	60999
       - "32768-60999"
     environment:
-      AUTHORITY_ADDRESS: zookeeper:2181
-      AUTHORITY: "zookeeper"
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: frameworktests
       REPLICATION_URL: mysql://root:root@mysql/test
     links:
       - mysql
-      - zookeeper
+      - consul
     depends_on:
       mysql:
         condition: service_healthy
@@ -57,8 +57,8 @@ services:
     expose:
       - 3333
     environment:
-      AUTHORITY_ADDRESS: zookeeper:2181
-      AUTHORITY: "zookeeper"
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
@@ -67,7 +67,7 @@ services:
     links:
       - readyset-server
       - mysql
-      - zookeeper
+      - consul
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
       interval: 10s
