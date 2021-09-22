@@ -61,6 +61,26 @@ where
     }
 }
 
+/// Helper to parse space-separated create option pairs.
+/// Throws away the create option and value
+pub fn create_option_spaced_pair<'a, I, O1, O2, F, G>(
+    first: F,
+    second: G,
+) -> impl Fn(I) -> IResult<I, ()>
+where
+    F: Fn(I) -> IResult<I, O1>,
+    G: Fn(I) -> IResult<I, O2>,
+    I: nom::InputTakeAtPosition + nom::InputTake + nom::Compare<&'a str>,
+    <I as nom::InputTakeAtPosition>::Item: nom::AsChar + Clone,
+{
+    move |i: I| {
+        let (i, _o1) = first(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _o2) = second(i)?;
+        Ok((i, ()))
+    }
+}
+
 fn create_option_type(i: &[u8]) -> IResult<&[u8], ()> {
     create_option_equals_pair(tag_no_case("type"), alphanumeric1)(i)
 }
@@ -78,26 +98,53 @@ fn create_option_auto_increment(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], ()> {
-    create_option_equals_pair(
-        tag_no_case("default charset"),
-        alt((
-            tag("utf8mb4"),
-            tag("utf8"),
-            tag("binary"),
-            tag("big5"),
-            tag("ucs2"),
-            tag("latin1"),
-        )),
-    )(i)
+    // TODO:  Deduplicate the branch contents
+    alt((
+        create_option_equals_pair(
+            alt((
+                tag_no_case("default charset"),
+                tag_no_case("default character set"),
+            )),
+            alt((
+                tag("utf8mb4"),
+                tag("utf8"),
+                tag("binary"),
+                tag("big5"),
+                tag("ucs2"),
+                tag("latin1"),
+            )),
+        ),
+        create_option_spaced_pair(
+            alt((
+                tag_no_case("default charset"),
+                tag_no_case("default character set"),
+            )),
+            alt((
+                tag("utf8mb4"),
+                tag("utf8"),
+                tag("binary"),
+                tag("big5"),
+                tag("ucs2"),
+                tag("latin1"),
+            )),
+        ),
+    ))(i)
 }
 
 fn create_option_collate(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ()> {
     move |i| {
-        create_option_equals_pair(
-            tag_no_case("collate"),
-            // TODO(malte): imprecise hack, should not accept everything
-            dialect.identifier(),
-        )(i)
+        alt((
+            create_option_equals_pair(
+                tag_no_case("collate"),
+                // TODO(malte): imprecise hack, should not accept everything
+                dialect.identifier(),
+            ),
+            create_option_spaced_pair(
+                tag_no_case("collate"),
+                // TODO(malte): imprecise hack, should not accept everything
+                dialect.string_literal(),
+            ),
+        ))(i)
     }
 }
 
