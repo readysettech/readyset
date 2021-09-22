@@ -2,9 +2,13 @@ steps:
   # Zero the failure status
   - label: ':buildkite:'
     command: buildkite-agent meta-data set 'failure' '0'
+    agents:
+      queue: t3a-small
 
   - label: ':bk-status-pending:'
     command: .buildkite/set_gerrit_running.sh
+    agents:
+      queue: t3a-small
 
   - wait: ~
 
@@ -13,6 +17,8 @@ steps:
     branches: '!refs/heads/main'
     commands:
     - ./scripts/commit_lint.sh
+    agents:
+      queue: t3a-small
 
   # Do not run pipeline if the lint has not passed
   - wait: ~
@@ -141,6 +147,8 @@ steps:
   - wait: ~
     continue_on_failure: true
   - command: ".buildkite/set_gerrit_status.sh"
+    agents:
+      queue: t3a-small
   - wait
 
   - trigger: "docker-release"
