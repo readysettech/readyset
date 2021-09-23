@@ -19,13 +19,13 @@ use mysql_async as mysql;
 use tokio_postgres as pgsql;
 
 use nom_sql::SelectStatement;
-use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use noria::consensus::{Authority, LocalAuthorityStore};
 use noria::ControllerHandle;
 use noria_client::backend::{BackendBuilder, NoriaConnector};
 use noria_client::UpstreamDatabase;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
-use noria_server::{Builder, ReuseConfigType};
+use noria_server::{Builder, LocalAuthority, ReuseConfigType};
 
 use crate::ast::{
     Conditional, Query, QueryResults, Record, SortMode, Statement, StatementResult, Value,
@@ -72,7 +72,6 @@ impl TestScript {
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub database_type: DatabaseType,
-    pub deployment_name: String,
     pub upstream_database_url: Option<DatabaseURL>,
     pub replication_url: Option<String>,
     pub enable_reuse: bool,
@@ -82,7 +81,6 @@ pub struct RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
-            deployment_name: "sqllogictest".to_string(),
             upstream_database_url: None,
             enable_reuse: false,
             time: false,
@@ -98,6 +96,21 @@ impl RunOptions {
             .as_ref()
             .and_then(|url| url.db_name())
             .unwrap_or("noria")
+    }
+}
+
+pub struct NoriaOptions {
+    pub authority: Arc<Authority>,
+}
+
+impl Default for NoriaOptions {
+    fn default() -> Self {
+        let authority_store = Arc::new(LocalAuthorityStore::new());
+        Self {
+            authority: Arc::new(Authority::from(LocalAuthority::new_with_store(
+                authority_store,
+            ))),
+        }
     }
 }
 
@@ -134,7 +147,7 @@ impl TestScript {
         &self.path
     }
 
-    pub async fn run(&mut self, opts: RunOptions) -> anyhow::Result<()> {
+    pub async fn run(&mut self, opts: RunOptions, noria_opts: NoriaOptions) -> anyhow::Result<()> {
         println!(
             "==> {} {}",
             "Running test script".bold(),
@@ -164,7 +177,7 @@ impl TestScript {
                     .await?;
             }
 
-            self.run_on_noria(&opts).await?;
+            self.run_on_noria(&opts, &noria_opts).await?;
         };
 
         println!(
@@ -209,13 +222,15 @@ impl TestScript {
     }
 
     /// Run the test script on Noria server
-    pub async fn run_on_noria(&self, opts: &RunOptions) -> anyhow::Result<()> {
-        let authority_store = Arc::new(LocalAuthorityStore::new());
-        let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
-            authority_store,
-        )));
-        let mut noria_handle = self.start_noria_server(opts, Arc::clone(&authority)).await;
-        let (adapter_task, db_url) = self.setup_adapter(opts, authority).await;
+    pub async fn run_on_noria(
+        &self,
+        opts: &RunOptions,
+        noria_opts: &NoriaOptions,
+    ) -> anyhow::Result<()> {
+        let mut noria_handle = self
+            .start_noria_server(opts, noria_opts.authority.clone())
+            .await;
+        let (adapter_task, db_url) = self.setup_adapter(opts, noria_opts.authority.clone()).await;
 
         let mut conn = db_url
             .connect()
