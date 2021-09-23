@@ -1515,7 +1515,8 @@ mod tests {
                         alias: Some("created_day".to_owned()),
                         expr: Expression::Cast {
                             expr: Box::new(Expression::Column(Column::from("created_at"))),
-                            ty: SqlType::Date
+                            ty: SqlType::Date,
+                            postgres_style: false,
                         },
                     },
                 ],

@@ -153,9 +153,14 @@ fn rewrite_expression(expr: Expression) -> Expression {
             },
             negated,
         },
-        Cast { expr, ty } => Cast {
+        Cast {
+            expr,
+            ty,
+            postgres_style,
+        } => Cast {
             expr: Box::new(rewrite_expression(*expr)),
             ty,
+            postgres_style,
         },
     }
 }

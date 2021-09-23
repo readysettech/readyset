@@ -96,9 +96,14 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
             op: *op,
             rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
         },
-        Expression::Cast { expr, ty } => Expression::Cast {
+        Expression::Cast {
+            expr,
+            ty,
+            postgres_style,
+        } => Expression::Cast {
             expr: Box::new(rewrite_expression(col_table_remap, expr)),
             ty: ty.clone(),
+            postgres_style: *postgres_style,
         },
         Expression::Exists(_) | Expression::NestedSelect(_) => expr.clone(),
         Expression::Between {
