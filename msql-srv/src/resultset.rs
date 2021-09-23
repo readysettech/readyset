@@ -476,6 +476,20 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
         self
     }
 
+    /// Reply to the client's query with an error.
+    ///
+    /// This also calls `no_more_results` implicitly.
+    pub async fn error<E>(mut self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    where
+        E: Borrow<[u8]> + ?Sized,
+    {
+        self.result
+            .take()
+            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
+            .error(kind, msg)
+            .await
+    }
+
     /// Indicate to the client that no more rows are coming.
     pub async fn finish(self) -> io::Result<()> {
         self.finish_one().await?.no_more_results().await
