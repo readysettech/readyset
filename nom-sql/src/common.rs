@@ -858,7 +858,7 @@ pub fn type_identifier(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Sql
 
 // Parses the arguments for an aggregation function, and also returns whether the distinct flag is
 // present.
-pub fn function_arguments(
+pub fn agg_function_arguments(
     dialect: Dialect,
 ) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
     move |i| {
@@ -893,8 +893,21 @@ fn group_concat_fx(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Column
     }
 }
 
-fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
-    move |i| delimited(tag("("), function_arguments(dialect), tag(")"))(i)
+fn agg_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], (Expression, bool)> {
+    move |i| delimited(tag("("), agg_function_arguments(dialect), tag(")"))(i)
+}
+
+fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expression>> {
+    move |i| {
+        delimited(
+            tag("("),
+            separated_list(
+                tag(","),
+                delimited(multispace0, expression(dialect), multispace0),
+            ),
+            tag(")"),
+        )(i)
+    }
 }
 
 named_with_dialect!(cast(dialect) -> FunctionExpression, do_parse!(
@@ -916,35 +929,31 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
         alt((
             map(tag_no_case("count(*)"), |_| FunctionExpression::CountStar),
             map(
-                preceded(tag_no_case("count"), delim_fx_args(dialect)),
+                preceded(tag_no_case("count"), agg_fx_args(dialect)),
                 |args| FunctionExpression::Count {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
                     count_nulls: false,
                 },
             ),
-            map(
-                preceded(tag_no_case("sum"), delim_fx_args(dialect)),
-                |args| FunctionExpression::Sum {
+            map(preceded(tag_no_case("sum"), agg_fx_args(dialect)), |args| {
+                FunctionExpression::Sum {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
-                },
-            ),
-            map(
-                preceded(tag_no_case("avg"), delim_fx_args(dialect)),
-                |args| FunctionExpression::Avg {
+                }
+            }),
+            map(preceded(tag_no_case("avg"), agg_fx_args(dialect)), |args| {
+                FunctionExpression::Avg {
                     expr: Box::new(args.0.clone()),
                     distinct: args.1,
-                },
-            ),
-            map(
-                preceded(tag_no_case("max"), delim_fx_args(dialect)),
-                |args| FunctionExpression::Max(Box::new(args.0)),
-            ),
-            map(
-                preceded(tag_no_case("min"), delim_fx_args(dialect)),
-                |args| FunctionExpression::Min(Box::new(args.0)),
-            ),
+                }
+            }),
+            map(preceded(tag_no_case("max"), agg_fx_args(dialect)), |args| {
+                FunctionExpression::Max(Box::new(args.0))
+            }),
+            map(preceded(tag_no_case("min"), agg_fx_args(dialect)), |args| {
+                FunctionExpression::Min(Box::new(args.0))
+            }),
             cast(dialect),
             map(
                 preceded(
@@ -965,17 +974,8 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                 },
             ),
             map(
-                tuple((
-                    dialect.identifier(),
-                    multispace0,
-                    tag("("),
-                    separated_list(
-                        tag(","),
-                        delimited(multispace0, expression(dialect), multispace0),
-                    ),
-                    tag(")"),
-                )),
-                |(name, _, _, arguments, _)| FunctionExpression::Call {
+                tuple((dialect.identifier(), multispace0, delim_fx_args(dialect))),
+                |(name, _, arguments)| FunctionExpression::Call {
                     name: name.to_string(),
                     arguments,
                 },
