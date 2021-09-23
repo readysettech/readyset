@@ -39,6 +39,7 @@ resource "aws_s3_bucket" "ops-secrets" {
   }
 }
 
+# TODO: create this as part of the buildkite_queue_shared module
 resource "aws_s3_bucket_public_access_block" "ops-secrets" {
   bucket = aws_s3_bucket.ops-secrets.bucket
 
