@@ -265,7 +265,7 @@ fn trace_next_op() -> bool {
 
 /// The next Noria read or write issued from the current thread will be traced using tokio-trace.
 ///
-/// The trace output is visible by setting the environment variable `RUST_LOG=trace`.
+/// The trace output is visible by setting the environment variable `LOG_LEVEL=trace`.
 pub async fn trace_ops_in<T>(f: impl Future<Output = T>) -> T {
     TRACE_NEXT.scope((), f).await
 }

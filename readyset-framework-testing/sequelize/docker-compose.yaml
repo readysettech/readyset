@@ -42,7 +42,7 @@ services:
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: frameworktests
       REPLICATION_URL: mysql://root:root@mysql/test
-      RUST_LOG: TRACE
+      LOG_LEVEL: trace
     links:
       - mysql
       - zookeeper
@@ -65,7 +65,7 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
-      RUST_LOG: TRACE
+      LOG_LEVEL: trace
     links:
       - readyset-server
       - mysql

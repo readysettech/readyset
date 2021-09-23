@@ -43,7 +43,7 @@ services:
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: frameworktests
       REPLICATION_URL: postgresql://root:root@upstream/test
-      RUST_LOG: TRACE
+      LOG_LEVEL: trace
     links:
       - upstream
       - zookeeper
@@ -66,7 +66,7 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: postgresql://root:root@upstream/test
-      RUST_LOG: TRACE
+      LOG_LEVEL: trace
     links:
       - readyset-server
       - upstream
