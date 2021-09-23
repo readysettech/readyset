@@ -63,7 +63,7 @@ steps:
                 - rust-toolchain
 
             - label: ":docker: Build readyset-server image"
-              incude:
+              include:
                 - "[!ops]*"
                 - Cargo.lock
                 - Cargo.toml
