@@ -1,10 +1,15 @@
-with import (builtins.fetchTarball {
-  url = "https://github.com/nixos/nixpkgs/archive/a2b0ea6865b2346ceb015259c76e111dcca039c5.tar.gz";
-  sha256 = "12dgwajv3w94p13scj68c24v01p055k9hcpcsn7w9i8fys72s99d";
-}) {};
+with import <nixpkgs> {};
+
+let
+  terraform_1_0_2 = mkTerraform {
+    version = "1.0.2";
+    sha256 = "0gnv6hajpn1ks4944cr8rgkvly9cgvx4zj1zwc7nf1sikqfa8r1a";
+    vendorSha256 = "0q1frza5625b1va0ipak7ns3myca9mb02r60h0py3v5gyl2cb4dk";
+  };
+in
 
 mkShell {
   buildInputs = [
-    terraform_0_14
+    terraform_1_0_2
   ];
 }
