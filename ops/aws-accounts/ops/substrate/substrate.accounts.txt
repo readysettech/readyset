@@ -1,0 +1,35 @@
+Welcome to your Substrate-managed AWS organization!
+
+You can find the Substrate documentation at <https://src-bin.com/substrate/>.
+
+You're likely to want to use the AWS CLI or Console to explore and manipulate
+your Organization.  Here are the account numbers and roles you'll need for the
+special accounts that Substrate manages:
+
++--------------+----------------+---------------------------+----------------------------------------------------------+
+| Account Name | Account Number | Role Name                 | Role ARN                                                 |
++--------------+----------------+---------------------------+----------------------------------------------------------+
+| management   | 431717529189   | OrganizationAdministrator | arn:aws:iam::431717529189:role/OrganizationAdministrator |
+|              |                |                           |                                                          |
+| audit        | 880228279213   | Auditor                   | arn:aws:iam::880228279213:role/Auditor                   |
+| deploy       | 888984949675   | DeployAdministrator       | arn:aws:iam::888984949675:role/DeployAdministrator       |
+| network      | 911245771907   | NetworkAdministrator      | arn:aws:iam::911245771907:role/NetworkAdministrator      |
++--------------+----------------+---------------------------+----------------------------------------------------------+
+
+And here are the account numbers and roles for your service accounts:
+
++----------+-------------+---------+----------------+---------------+----------------------------------------------+
+| Domain   | Environment | Quality | Account Number | Role Name     | Role ARN                                     |
++----------+-------------+---------+----------------+---------------+----------------------------------------------+
+| readyset | build       | default | 305232526136   | Administrator | arn:aws:iam::305232526136:role/Administrator |
+| readyset | prod        | default | 431238456211   | Administrator | arn:aws:iam::431238456211:role/Administrator |
+| readyset | sandbox     | default | 069491470376   | Administrator | arn:aws:iam::069491470376:role/Administrator |
++----------+-------------+---------+----------------+---------------+----------------------------------------------+
+
+Finally, here are the account numbers and roles for your admin accounts:
+
++---------+----------------+---------------+----------------------------------------------+
+| Quality | Account Number | Role Name     | Role ARN                                     |
++---------+----------------+---------------+----------------------------------------------+
+| default | 716876017850   | Administrator | arn:aws:iam::716876017850:role/Administrator |
++---------+----------------+---------------+----------------------------------------------+

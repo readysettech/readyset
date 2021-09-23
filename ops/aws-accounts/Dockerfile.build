@@ -1,0 +1,2 @@
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54
+RUN rustup component add rustfmt clippy

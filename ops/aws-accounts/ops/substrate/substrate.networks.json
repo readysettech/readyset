@@ -1,0 +1,68 @@
+{
+	"#": "managed by Substrate; do not edit by hand",
+	"IPv4SubnetMaskLength": 18,
+	"Networks": [
+		{
+			"Region": "us-east-2",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.0.0.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.0.64.0/18"
+		},
+		{
+			"Region": "ap-northeast-1",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.2.0.0/18"
+		},
+		{
+			"Region": "eu-west-1",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.2.64.0/18"
+		},
+		{
+			"Region": "sa-east-1",
+			"Environment": "sandbox",
+			"Quality": "default",
+			"IPv4": "10.2.128.0/18"
+		},
+		{
+			"Region": "ap-northeast-1",
+			"Environment": "build",
+			"Quality": "default",
+			"IPv4": "10.2.192.0/18"
+		},
+		{
+			"Region": "eu-west-1",
+			"Environment": "build",
+			"Quality": "default",
+			"IPv4": "10.3.0.0/18"
+		},
+		{
+			"Region": "sa-east-1",
+			"Environment": "build",
+			"Quality": "default",
+			"IPv4": "10.3.64.0/18"
+		},
+		{
+			"Region": "us-east-2",
+			"Environment": "build",
+			"Quality": "default",
+			"IPv4": "10.3.128.0/18"
+		},
+		{
+			"Region": "us-west-2",
+			"Environment": "build",
+			"Quality": "default",
+			"IPv4": "10.3.192.0/18"
+		}
+	],
+	"RFC1918": "10.0.0.0/8",
+	"SubstrateVersion": "2021.08"
+}

@@ -1,0 +1,18 @@
+{
+	"#": "managed by Substrate; do not edit by hand",
+	"ValidEnvironmentQualityPairs": [
+		{
+			"Environment": "admin",
+			"Quality": "default"
+		},
+		{
+			"Environment": "sandbox",
+			"Quality": "default"
+		},
+		{
+			"Environment": "build",
+			"Quality": "default"
+		}
+	],
+	"SubstrateVersion": "2021.07"
+}
