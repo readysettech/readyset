@@ -161,7 +161,7 @@ mod tests {
         use crate::column::Column;
         use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
-        use crate::{BinaryOperator, Double};
+        use crate::{BinaryOperator, Double, FunctionExpression};
 
         #[test]
         fn updated_with_neg_float() {
@@ -211,6 +211,37 @@ mod tests {
                             rhs: Box::new(Expression::Literal(1.into()))
                         },
                     ),],
+                    ..Default::default()
+                }
+            );
+        }
+
+        #[test]
+        fn flarum_update_1() {
+            let qstring = b"update `group_permission` set `permission` = REPLACE(permission,  'viewDiscussions', 'viewForum') where `permission` LIKE '%viewDiscussions'";
+            let res = test_parse!(updating(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                UpdateStatement {
+                    table: Table::from("group_permission"),
+                    fields: vec![(
+                        Column::from("permission"),
+                        Expression::Call(FunctionExpression::Call {
+                            name: "REPLACE".to_string(),
+                            arguments: vec![
+                                Expression::Column(Column::from("permission")),
+                                Expression::Literal(Literal::String("viewDiscussions".into())),
+                                Expression::Literal(Literal::String("viewForum".into())),
+                            ]
+                        })
+                    )],
+                    where_clause: Some(Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column::from("permission"))),
+                        op: BinaryOperator::Like,
+                        rhs: Box::new(Expression::Literal(Literal::String(
+                            "%viewDiscussions".into()
+                        ))),
+                    }),
                     ..Default::default()
                 }
             );

@@ -57,11 +57,6 @@ fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("CONSTRAINT"), keyword_follow_char),
         terminated(tag_no_case("CREATE"), keyword_follow_char),
         terminated(tag_no_case("CROSS"), keyword_follow_char),
-        terminated(tag_no_case("CURRENT_DATE"), keyword_follow_char),
-        terminated(tag_no_case("CURRENT_TIME"), keyword_follow_char),
-        terminated(tag_no_case("CURRENT_TIMESTAMP"), keyword_follow_char),
-        terminated(tag_no_case("DATABASE"), keyword_follow_char),
-        terminated(tag_no_case("DEFAULT"), keyword_follow_char),
         terminated(tag_no_case("DEFERRABLE"), keyword_follow_char),
         terminated(tag_no_case("DEFERRED"), keyword_follow_char),
         terminated(tag_no_case("DELETE"), keyword_follow_char),
@@ -72,16 +67,16 @@ fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("EACH"), keyword_follow_char),
         terminated(tag_no_case("ELSE"), keyword_follow_char),
         terminated(tag_no_case("END"), keyword_follow_char),
-    ))(i)
-}
-
-fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    alt((
         terminated(tag_no_case("ESCAPE"), keyword_follow_char),
         terminated(tag_no_case("EXCEPT"), keyword_follow_char),
         terminated(tag_no_case("EXCLUSIVE"), keyword_follow_char),
         terminated(tag_no_case("EXISTS"), keyword_follow_char),
         terminated(tag_no_case("EXPLAIN"), keyword_follow_char),
+    ))(i)
+}
+
+fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
         terminated(tag_no_case("FAIL"), keyword_follow_char),
         terminated(tag_no_case("FOR"), keyword_follow_char),
         terminated(tag_no_case("FOREIGN"), keyword_follow_char),
@@ -93,29 +88,24 @@ fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("GROUPS"), keyword_follow_char),
         terminated(tag_no_case("HAVING"), keyword_follow_char),
         terminated(tag_no_case("ILIKE"), keyword_follow_char),
-        terminated(tag_no_case("IF"), keyword_follow_char),
         terminated(tag_no_case("IGNORE"), keyword_follow_char),
         terminated(tag_no_case("IMMEDIATE"), keyword_follow_char),
         terminated(tag_no_case("IN"), keyword_follow_char),
         terminated(tag_no_case("INDEX"), keyword_follow_char),
-    ))(i)
-}
-
-fn keyword_i_to_o(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    alt((
         terminated(tag_no_case("INDEXED"), keyword_follow_char),
         terminated(tag_no_case("INITIALLY"), keyword_follow_char),
         terminated(tag_no_case("INNER"), keyword_follow_char),
-        terminated(tag_no_case("INSERT"), keyword_follow_char),
         terminated(tag_no_case("INSTEAD"), keyword_follow_char),
         terminated(tag_no_case("INTERSECT"), keyword_follow_char),
         terminated(tag_no_case("INTO"), keyword_follow_char),
+    ))(i)
+}
+
+fn keyword_i_to_q(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
         terminated(tag_no_case("IS"), keyword_follow_char),
-        terminated(tag_no_case("ISNULL"), keyword_follow_char),
-        terminated(tag_no_case("ORDER"), keyword_follow_char),
         terminated(tag_no_case("JOIN"), keyword_follow_char),
         terminated(tag_no_case("KEY"), keyword_follow_char),
-        terminated(tag_no_case("LEFT"), keyword_follow_char),
         terminated(tag_no_case("LIKE"), keyword_follow_char),
         terminated(tag_no_case("LIMIT"), keyword_follow_char),
         terminated(tag_no_case("MATCH"), keyword_follow_char),
@@ -124,20 +114,21 @@ fn keyword_i_to_o(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("NOT"), keyword_follow_char),
         terminated(tag_no_case("NOTNULL"), keyword_follow_char),
         terminated(tag_no_case("NULL"), keyword_follow_char),
-    ))(i)
-}
-
-fn keyword_o_to_s(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    alt((
         terminated(tag_no_case("OF"), keyword_follow_char),
         terminated(tag_no_case("OFFSET"), keyword_follow_char),
         terminated(tag_no_case("ON"), keyword_follow_char),
         terminated(tag_no_case("OR"), keyword_follow_char),
+        terminated(tag_no_case("ORDER"), keyword_follow_char),
         terminated(tag_no_case("OUTER"), keyword_follow_char),
         terminated(tag_no_case("PLAN"), keyword_follow_char),
         terminated(tag_no_case("PRAGMA"), keyword_follow_char),
         terminated(tag_no_case("PRIMARY"), keyword_follow_char),
         terminated(tag_no_case("QUERY"), keyword_follow_char),
+    ))(i)
+}
+
+fn keyword_r_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
         terminated(tag_no_case("RAISE"), keyword_follow_char),
         terminated(tag_no_case("RECURSIVE"), keyword_follow_char),
         terminated(tag_no_case("REFERENCES"), keyword_follow_char),
@@ -145,16 +136,10 @@ fn keyword_o_to_s(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("REINDEX"), keyword_follow_char),
         terminated(tag_no_case("RELEASE"), keyword_follow_char),
         terminated(tag_no_case("RENAME"), keyword_follow_char),
-        terminated(tag_no_case("REPLACE"), keyword_follow_char),
         terminated(tag_no_case("RESTRICT"), keyword_follow_char),
         terminated(tag_no_case("RIGHT"), keyword_follow_char),
         terminated(tag_no_case("ROLLBACK"), keyword_follow_char),
         terminated(tag_no_case("ROW"), keyword_follow_char),
-    ))(i)
-}
-
-fn keyword_s_to_w(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    alt((
         terminated(tag_no_case("SAVEPOINT"), keyword_follow_char),
         terminated(tag_no_case("SELECT"), keyword_follow_char),
         terminated(tag_no_case("SET"), keyword_follow_char),
@@ -165,23 +150,40 @@ fn keyword_s_to_w(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("TO"), keyword_follow_char),
         terminated(tag_no_case("TRANSACTION"), keyword_follow_char),
         terminated(tag_no_case("TRIGGER"), keyword_follow_char),
+    ))(i)
+}
+
+fn keyword_u_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((
         terminated(tag_no_case("UNION"), keyword_follow_char),
         terminated(tag_no_case("UNIQUE"), keyword_follow_char),
         terminated(tag_no_case("UPDATE"), keyword_follow_char),
         terminated(tag_no_case("USING"), keyword_follow_char),
         terminated(tag_no_case("VACUUM"), keyword_follow_char),
-        terminated(tag_no_case("VALUES"), keyword_follow_char),
         terminated(tag_no_case("VIEW"), keyword_follow_char),
         terminated(tag_no_case("VIRTUAL"), keyword_follow_char),
         terminated(tag_no_case("WHEN"), keyword_follow_char),
         terminated(tag_no_case("WHERE"), keyword_follow_char),
+        terminated(tag_no_case("WITH"), keyword_follow_char),
+        terminated(tag_no_case("WITHOUT"), keyword_follow_char),
     ))(i)
 }
 
-fn keyword_w_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn builtin_function_a_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
-        terminated(tag_no_case("WITH"), keyword_follow_char),
-        terminated(tag_no_case("WITHOUT"), keyword_follow_char),
+        terminated(tag_no_case("CURRENT_DATE"), keyword_follow_char),
+        terminated(tag_no_case("CURRENT_TIME"), keyword_follow_char),
+        terminated(tag_no_case("CURRENT_TIMESTAMP"), keyword_follow_char),
+        terminated(tag_no_case("DATABASE"), keyword_follow_char),
+        terminated(tag_no_case("DEFAULT"), keyword_follow_char),
+        terminated(tag_no_case("IF"), keyword_follow_char),
+        terminated(tag_no_case("IN"), keyword_follow_char),
+        terminated(tag_no_case("INSERT"), keyword_follow_char),
+        terminated(tag_no_case("ISNULL"), keyword_follow_char),
+        terminated(tag_no_case("LEFT"), keyword_follow_char),
+        terminated(tag_no_case("REPLACE"), keyword_follow_char),
+        terminated(tag_no_case("RIGHT"), keyword_follow_char),
+        terminated(tag_no_case("VALUES"), keyword_follow_char),
     ))(i)
 }
 
@@ -191,11 +193,20 @@ pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
         keyword_a_to_c,
         keyword_c_to_e,
         keyword_e_to_i,
-        keyword_i_to_o,
-        keyword_o_to_s,
-        keyword_s_to_w,
-        keyword_w_to_z,
+        keyword_i_to_q,
+        keyword_r_to_t,
+        keyword_u_to_z,
     ))(i)
+}
+
+// Matches any built-in SQL function
+pub fn sql_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    builtin_function_a_to_z(i)
+}
+
+// Matches any SQL reserved keyword _or_ built-in function
+pub fn sql_keyword_or_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    alt((sql_keyword, sql_builtin_function))(i)
 }
 
 // Escapes a keyword using MySQL syntax.

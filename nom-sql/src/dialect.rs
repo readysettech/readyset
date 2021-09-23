@@ -9,7 +9,7 @@ use nom::sequence::{delimited, preceded};
 use nom::IResult;
 use thiserror::Error;
 
-use crate::keywords::sql_keyword;
+use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function};
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -98,6 +98,33 @@ impl FromStr for Dialect {
 impl Dialect {
     /// Parse a SQL identifier using this Dialect
     pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], &'a str> {
+        move |i| match self {
+            Dialect::MySQL => map_res(
+                alt((
+                    preceded(
+                        not(peek(sql_keyword_or_builtin_function)),
+                        take_while1(is_sql_identifier),
+                    ),
+                    delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
+                    delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
+                )),
+                str::from_utf8,
+            )(i),
+            Dialect::PostgreSQL => map_res(
+                alt((
+                    preceded(
+                        not(peek(sql_keyword_or_builtin_function)),
+                        take_while1(is_sql_identifier),
+                    ),
+                    delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
+                )),
+                str::from_utf8,
+            )(i),
+        }
+    }
+
+    /// Parse a SQL function identifier using this Dialect
+    pub fn function_identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], &'a str> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
