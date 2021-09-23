@@ -14,6 +14,7 @@ use colored::Colorize;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use lazy_static::lazy_static;
+use noria::consensus::AuthorityType;
 use proptest::arbitrary::any;
 use proptest::strategy::Strategy;
 use proptest::test_runner::{self, TestCaseError, TestError, TestRng, TestRunner};
@@ -31,7 +32,7 @@ pub mod upstream;
 
 use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
-use crate::runner::{RunOptions, TestScript};
+use crate::runner::{NoriaOptions, RunOptions, TestScript};
 use crate::upstream::{DatabaseType, DatabaseURL};
 
 #[derive(Clap)]
@@ -41,6 +42,7 @@ struct Opts {
 }
 
 #[derive(Clap)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     Parse(Parse),
     Verify(Verify),
@@ -272,6 +274,17 @@ struct Verify {
     /// Logging options
     #[clap(flatten)]
     log: readyset_logging::Options,
+
+    /// Authority connection string. This parameter is ignored if
+    /// authority is "local".
+    // TODO(justin): The default address should depend on the authority
+    // value.
+    #[clap(long, short = 'z', env = "AUTHORITY_ADDRESS", default_value = "")]
+    authority_address: String,
+
+    /// The authority to use. Possible values: zookeeper, consul, local.
+    #[clap(long, env = "AUTHORITY", default_value = "local", possible_values = &["local", "consul", "zookeeper"])]
+    authority: AuthorityType,
 }
 
 #[derive(Default)]
@@ -383,10 +396,18 @@ impl Verify {
             let run_opts: RunOptions = self.into();
             let result = Arc::clone(&result);
             let rename_passing = self.rename_passing;
+            let deployment_name = script.name();
+            let authority = Arc::new(
+                self.authority
+                    .to_authority(&self.authority_address, &deployment_name)
+                    .await,
+            );
+
+            let noria_opts = NoriaOptions { authority };
 
             tasks.push(tokio::spawn(async move {
                 let script_result = script
-                    .run(run_opts)
+                    .run(run_opts, noria_opts)
                     .await
                     .with_context(|| format!("Running test script {}", script.name()));
 
@@ -460,7 +481,6 @@ impl From<&Verify> for RunOptions {
             upstream_database_url: verify.database_url().cloned(),
             replication_url: verify.replication_url.clone(),
             time: verify.time,
-            ..Default::default()
         }
     }
 }
@@ -522,7 +542,7 @@ impl Fuzz {
         let result = runner.run(&self.test_script_strategy(), move |mut test_script| {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let _guard = rt.enter();
-            rt.block_on(test_script.run(Default::default()))
+            rt.block_on(test_script.run(Default::default(), Default::default()))
                 .map_err(|err| TestCaseError::fail(format!("{:#}", err)))
         });
 

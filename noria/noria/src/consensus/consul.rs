@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 use tracing::{error, warn};
 
 use super::WorkerId;
@@ -194,6 +195,20 @@ impl ConsulAuthority {
     fn prefix_with_deployment(&self, path: &str) -> String {
         format!("{}/{}", &self.deployment, path)
     }
+
+    #[cfg(test)]
+    async fn destroy_session(&self) -> Result<(), Error> {
+        let inner = self.read_inner()?;
+        if let Some(session) = &inner.session {
+            // This will not be populated without an id.
+            #[allow(clippy::unwrap_used)]
+            self.consul
+                .destroy(session.ID.as_ref().unwrap(), None)
+                .await;
+        }
+
+        Ok(())
+    }
 }
 
 fn is_new_index(current_index: Option<u64>, kv: &KVPair) -> bool {
@@ -205,19 +220,6 @@ fn is_new_index(current_index: Option<u64>, kv: &KVPair) -> bool {
         }
     } else {
         true
-    }
-}
-
-impl Drop for ConsulAuthority {
-    fn drop(&mut self) {
-        let inner = self.read_inner().unwrap();
-        if let Some(session) = &inner.session {
-            // This will not be populated without an id.
-            #[allow(clippy::unwrap_used)]
-            let _ = futures::executor::block_on(
-                self.consul.destroy(session.ID.as_ref().unwrap(), None),
-            );
-        }
     }
 }
 
@@ -276,10 +278,18 @@ impl AuthorityControl for ConsulAuthority {
     // Block until there is any leader.
     async fn get_leader(&self) -> Result<LeaderPayload, Error> {
         loop {
-            if let Some(leader) = self.try_read::<LeaderPayload>(CONTROLLER_KEY).await? {
-                return Ok(leader);
-            }
-            // TODO(justin): Thread parking potentially.
+            match self
+                .consul
+                .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
+                .await
+            {
+                Ok((Some(kv), _)) if kv.Session.is_some() => {
+                    let bytes = base64::decode(kv.Value)?;
+                    let as_str = serde_json::from_slice::<String>(&bytes)?;
+                    return Ok(serde_json::from_str(&as_str)?);
+                }
+                _ => tokio::time::sleep(Duration::from_millis(100)).await,
+            };
         }
     }
 
@@ -298,6 +308,12 @@ impl AuthorityControl for ConsulAuthority {
                 .await
             {
                 Ok((Some(kv), _)) if is_new_index(current_index, &kv) => {
+                    // The leader may have changed but if no session holds the lock
+                    // then that leader is dead.
+                    if kv.Session.is_none() {
+                        return Ok(GetLeaderResult::NoLeader);
+                    }
+
                     self.update_controller_index_from_pair(&kv)?;
                     // Consul encodes all responses as base64. Using ?raw to get the
                     // raw value back breaks the client we are using.
@@ -554,7 +570,7 @@ mod tests {
         );
 
         // Regicide.
-        drop(authority);
+        authority.destroy_session().await.unwrap();
 
         // Since the previous leader has died, we should be able to now become the leader.
         authority_2.become_leader(payload_2.clone()).await.unwrap();
@@ -617,8 +633,8 @@ mod tests {
         assert!(workers.contains(&worker_id));
 
         // Kill the session, this should remove the keys from the worker set.
-        drop(authority);
-        drop(authority_2);
+        authority.destroy_session().await.unwrap();
+        authority_2.destroy_session().await.unwrap();
 
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
         let workers = authority.get_workers().await.unwrap();
@@ -651,7 +667,7 @@ mod tests {
             authority.try_get_leader().await.unwrap(),
             GetLeaderResult::Unchanged,
         );
-        drop(authority);
+        authority.destroy_session().await.unwrap();
 
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
         assert_eq!(
