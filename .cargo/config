@@ -1,6 +1,7 @@
 [alias]
 xtask = "run --package xtask --bin xtask --"
 lint = "clippy --all-targets"
+substrate = "run --package readyset-substrate --"
 
 [build]
 rustflags = ["-C", "link-args=-llz4"]
