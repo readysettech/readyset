@@ -92,8 +92,8 @@ pub struct Options {
     log_slow: bool,
 
     /// Don't require authentication for any client connections
-    #[clap(long)]
-    no_require_authentication: bool,
+    #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
+    allow_unauthenticated_connections: bool,
 
     /// Make all reads run against Noria and upstream, returning the upstream result.
     #[clap(long, requires("upstream-db-url"))]
@@ -106,13 +106,13 @@ pub struct Options {
     coverage_analysis: Option<PathBuf>,
 
     /// Allow database connections authenticated as this user. Ignored if
-    /// --no-require-authentication is passed
-    #[clap(long, short = 'u')]
+    /// --allow-unauthenticated-connections is passed
+    #[clap(long, env = "ALLOWED_USERNAME", short = 'u')]
     username: Option<String>,
 
-    /// Password to authenticate database connections with. Ignored if --no-require-authentication
-    /// is passed
-    #[clap(long, short = 'p')]
+    /// Password to authenticate database connections with. Ignored if
+    /// --allow-unauthenticated-connections is passed
+    #[clap(long, env = "ALLOWED_PASSWORD", short = 'p')]
     password: Option<String>,
 
     /// URL for the upstream database to connect to. Should include username and password if
@@ -138,12 +138,12 @@ where
 {
     pub fn run(&mut self, options: Options) -> anyhow::Result<()> {
         let users: &'static HashMap<String, String> = Box::leak(Box::new(
-            if !options.no_require_authentication {
+            if !options.allow_unauthenticated_connections {
                 hashmap! {
                     options.username.ok_or_else(|| {
-                        anyhow!("Must specify --username/-u unless --no-require-authentication is passed")
+                        anyhow!("Must specify --username/-u unless --allow-unauthenticated-connections is passed")
                     })? => options.password.ok_or_else(|| {
-                        anyhow!("Must specify --password/-p unless --no-require-authentication is passed")
+                        anyhow!("Must specify --password/-p unless --allow-unauthenticated-connections is passed")
                     })?
                 }
             } else {
@@ -245,7 +245,7 @@ where
                 .slowlog(options.log_slow)
                 .mirror_reads(options.mirror_reads || options.coverage_analysis.is_some())
                 .users(users.clone())
-                .require_authentication(!options.no_require_authentication)
+                .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
                 .query_coverage_info(query_coverage_info);
@@ -323,7 +323,7 @@ mod tests {
             "0.0.0.0:3306",
             "-z",
             "zookeeper:2181",
-            "--no-require-authentication",
+            "--allow-unauthenticated-connections",
             "--upstream-db-url",
             "mysql://root:password@mysql:3306/readyset",
         ]);
