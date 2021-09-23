@@ -11,5 +11,6 @@ in
 mkShell {
   buildInputs = [
     terraform_1_0_2
+    packer
   ];
 }
