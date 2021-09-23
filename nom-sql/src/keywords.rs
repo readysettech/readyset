@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::common::eof;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -212,10 +214,10 @@ pub fn sql_keyword_or_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 // Escapes a keyword using MySQL syntax.
-pub fn escape_if_keyword(s: &str) -> String {
+pub fn escape_if_keyword(s: &str) -> Cow<str> {
     if sql_keyword(s.as_bytes()).is_ok() {
-        format!("`{}`", s)
+        Cow::Owned(format!("`{}`", s))
     } else {
-        s.to_owned()
+        Cow::Borrowed(s)
     }
 }
