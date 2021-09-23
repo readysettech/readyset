@@ -23,7 +23,7 @@ services:
     environment:
     - ZOOKEEPER_HOST=zookeeper
     - AUTHORITY_ADDRESS=zookeeper:2181
-    - AUTHORITY="zookeeper"
+    - AUTHORITY=zookeeper
     - REDIS_URL=redis://redis:6379/
     - MYSQL_HOST=mysql
     - PGHOST=postgres

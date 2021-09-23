@@ -38,7 +38,7 @@ services:
       - "32768-60999"
     environment:
       AUTHORITY_ADDRESS: zookeeper:2181
-      AUTHORITY: "zookeeper"
+      AUTHORITY: zookeeper
       LISTEN_ADDRESS: 0.0.0.0
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: frameworktests
@@ -62,7 +62,7 @@ services:
       - 3333
     environment:
       AUTHORITY_ADDRESS: zookeeper:2181
-      AUTHORITY: "zookeeper"
+      AUTHORITY: zookeeper
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: postgresql://root:root@upstream/test
