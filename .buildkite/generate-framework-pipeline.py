@@ -100,7 +100,7 @@ def generate_test_step(
         .replace("${FRAMEWORK}", framework)
         .replace("${FRAMEWORK_SLUG}", framework_slug)
         .replace("${DEPENDS_ON}", json.dumps(depends_on))
-        .replace("${SOFT_FAIL}", str(fail))
+        .replace("${SOFT_FAIL}", '"%s"' % (str(fail).lower(),))
     )
     if fail:
         step = step + soft_fail
