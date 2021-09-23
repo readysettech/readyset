@@ -496,6 +496,31 @@ mod tests {
                 }
             );
         }
+
+        #[test]
+        fn alter_roundtrip_with_escaped_column() {
+            let qstring = b"ALTER TABLE t CHANGE f `modify` DATETIME";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("t"),
+                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                        name: "f".into(),
+                        spec: ColumnSpecification {
+                            column: Column::from("modify"),
+                            sql_type: SqlType::DateTime(None),
+                            constraints: vec![],
+                            comment: None,
+                        }
+                    }]
+                }
+            );
+            assert_eq!(
+                res.to_string(),
+                "ALTER TABLE t CHANGE COLUMN f `modify` DATETIME"
+            );
+        }
     }
 
     mod postgres {
