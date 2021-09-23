@@ -20,9 +20,15 @@ impl KeyDefinitionCoalescing for SqlQuery {
                 }
                 if !pk.is_empty() {
                     ctq.keys = match ctq.keys {
-                        None => Some(vec![TableKey::PrimaryKey(pk)]),
+                        None => Some(vec![TableKey::PrimaryKey {
+                            name: None,
+                            columns: pk,
+                        }]),
                         Some(mut ks) => {
-                            let new_key = TableKey::PrimaryKey(pk);
+                            let new_key = TableKey::PrimaryKey {
+                                name: None,
+                                columns: pk,
+                            };
                             if !ks.contains(&new_key) {
                                 ks.push(new_key);
                             }
@@ -82,7 +88,10 @@ mod tests {
                 );
                 assert_eq!(
                     ctq.keys,
-                    Some(vec![TableKey::PrimaryKey(vec![Column::from("t.id")])])
+                    Some(vec![TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![Column::from("t.id")]
+                    }])
                 );
             }
             // if we get anything other than a CreateTable back, something really weird is up

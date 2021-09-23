@@ -372,7 +372,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
                 .flatten()
                 .find_map(|k| match k {
                     // TODO(grfn): This doesn't support compound primary keys
-                    TableKey::PrimaryKey(cols) => cols.first(),
+                    TableKey::PrimaryKey { columns, .. } => columns.first(),
                     _ => None,
                 })
                 .and_then(|col| stmt.fields.iter().find(|f| f.column == *col))
@@ -627,7 +627,7 @@ impl From<CreateTableStatement> for TableSpec {
             .into_iter()
             .flatten()
             .flat_map(|k| match k {
-                    TableKey::PrimaryKey(ks)
+                    TableKey::PrimaryKey{columns: ks, .. }
                     | TableKey::UniqueKey { columns: ks, .. }
                       // HACK(grfn): To get foreign keys filled, we just mark them as unique, which
                       // given that we (currently) generate the same number of rows for each table
@@ -663,9 +663,12 @@ impl From<TableSpec> for CreateTableStatement {
                     comment: None,
                 })
                 .collect(),
-            keys: spec
-                .primary_key
-                .map(|cn| vec![TableKey::PrimaryKey(vec![cn.into()])]),
+            keys: spec.primary_key.map(|cn| {
+                vec![TableKey::PrimaryKey {
+                    name: None,
+                    columns: vec![cn.into()],
+                }]
+            }),
             if_not_exists: false,
         }
     }

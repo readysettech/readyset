@@ -181,8 +181,9 @@ fn full_text_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey>
 
 fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
     move |i| {
-        let (remaining_input, (_, _, columns, _)) = tuple((
+        let (remaining_input, (_, name, _, columns, _)) = tuple((
             tag_no_case("primary key"),
+            opt(preceded(multispace1, dialect.identifier())),
             multispace0,
             delimited(
                 tag("("),
@@ -195,7 +196,13 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
             )),
         ))(i)?;
 
-        Ok((remaining_input, TableKey::PrimaryKey(columns)))
+        Ok((
+            remaining_input,
+            TableKey::PrimaryKey {
+                name: name.map(|s| s.to_owned()),
+                columns,
+            },
+        ))
     }
 }
 
@@ -435,7 +442,10 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                 if field.constraints.contains(&ColumnConstraint::PrimaryKey) {
                     // If there is a row that was defined with the PRIMARY KEY constraint, then it will be the primary key
                     // there can only be one such key, but we don't check this is the case
-                    primary_key.replace(TableKey::PrimaryKey(vec![column.clone()]));
+                    primary_key.replace(TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![column.clone()],
+                    });
                 }
 
                 ColumnSpecification { column, ..field }
@@ -457,9 +467,10 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                     };
 
                     match key {
-                        TableKey::PrimaryKey(columns) => {
-                            TableKey::PrimaryKey(attach_names(columns))
-                        }
+                        TableKey::PrimaryKey { name, columns } => TableKey::PrimaryKey {
+                            name,
+                            columns: attach_names(columns),
+                        },
                         TableKey::UniqueKey {
                             name,
                             columns,
@@ -733,7 +744,10 @@ mod tests {
                     ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
                     ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey(vec![Column::from("users.id")])]),
+                keys: Some(vec![TableKey::PrimaryKey {
+                    name: None,
+                    columns: vec![Column::from("users.id")]
+                }]),
                 ..Default::default()
             }
         );
@@ -826,7 +840,10 @@ mod tests {
                     ColumnSpecification::new(col("group_id"), SqlType::Int(None),),
                 ],
                 keys: Some(vec![
-                    TableKey::PrimaryKey(vec![col("id")]),
+                    TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![col("id")],
+                    },
                     TableKey::ForeignKey {
                         name: Some("users_group".into()),
                         columns: vec![col("group_id")],
@@ -904,7 +921,10 @@ mod tests {
                         index_name: None,
                         on_delete: None,
                     },
-                    TableKey::PrimaryKey(vec![col("id")]),
+                    TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![col("id")]
+                    },
                 ]),
                 if_not_exists: false,
             }
@@ -971,7 +991,10 @@ mod tests {
                         index_name: Some("ordered_product".into()),
                         on_delete: None,
                     },
-                    TableKey::PrimaryKey(vec![col("order_number")]),
+                    TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![col("order_number")]
+                    },
                 ]),
                 if_not_exists: false,
             }
@@ -1020,7 +1043,10 @@ mod tests {
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                 ],
-                keys: Some(vec![TableKey::PrimaryKey(vec![col("id")]),]),
+                keys: Some(vec![TableKey::PrimaryKey {
+                    name: None,
+                    columns: vec![col("id")]
+                },]),
                 if_not_exists: false,
             }
         )
@@ -1195,11 +1221,14 @@ mod tests {
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey(vec![Column {
-                        name: "id".into(),
-                        table: Some("django_admin_log".into()),
-                        function: None,
-                    }])]),
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![Column {
+                            name: "id".into(),
+                            table: Some("django_admin_log".into()),
+                            function: None,
+                        }]
+                    }]),
                     if_not_exists: false,
                 }
             );
@@ -1228,11 +1257,14 @@ mod tests {
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey(vec![Column {
-                        name: "id".into(),
-                        table: Some("auth_group".into()),
-                        function: None,
-                    }])]),
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![Column {
+                            name: "id".into(),
+                            table: Some("auth_group".into()),
+                            function: None,
+                        }]
+                    }]),
                     if_not_exists: false,
                 }
             );
@@ -1351,11 +1383,14 @@ mod tests {
                             columns: vec![Column::from("comments.user_id")],
                             index_type: None
                         },
-                        TableKey::PrimaryKey(vec![Column {
-                            name: "id".into(),
-                            table: Some("comments".into()),
-                            function: None,
-                        }]),
+                        TableKey::PrimaryKey {
+                            name: None,
+                            columns: vec![Column {
+                                name: "id".into(),
+                                table: Some("comments".into()),
+                                function: None,
+                            }]
+                        },
                     ]),
                     if_not_exists: false,
                 }
@@ -1565,11 +1600,14 @@ mod tests {
                             vec![ColumnConstraint::NotNull],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey(vec![Column {
-                        name: "id".into(),
-                        table: Some("django_admin_log".into()),
-                        function: None,
-                    }])]),
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![Column {
+                            name: "id".into(),
+                            table: Some("django_admin_log".into()),
+                            function: None,
+                        }]
+                    }]),
                     if_not_exists: false,
                 }
             );
@@ -1598,11 +1636,14 @@ mod tests {
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
-                    keys: Some(vec![TableKey::PrimaryKey(vec![Column {
-                        name: "id".into(),
-                        table: Some("auth_group".into()),
-                        function: None,
-                    }])]),
+                    keys: Some(vec![TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![Column {
+                            name: "id".into(),
+                            table: Some("auth_group".into()),
+                            function: None,
+                        }],
+                    }]),
                     if_not_exists: false,
                 }
             );
@@ -1721,11 +1762,14 @@ mod tests {
                             columns: vec![Column::from("comments.user_id")],
                             index_type: None
                         },
-                        TableKey::PrimaryKey(vec![Column {
-                            name: "id".into(),
-                            table: Some("comments".into()),
-                            function: None,
-                        }]),
+                        TableKey::PrimaryKey {
+                            name: None,
+                            columns: vec![Column {
+                                name: "id".into(),
+                                table: Some("comments".into()),
+                                function: None,
+                            }]
+                        },
                     ]),
                     if_not_exists: false,
                 }
@@ -1936,7 +1980,10 @@ mod tests {
                     ),
                 ],
                 keys: Some(vec![
-                    TableKey::PrimaryKey(vec![col("id")]),
+                    TableKey::PrimaryKey {
+                        name: None,
+                        columns: vec![col("id")]
+                    },
                     TableKey::UniqueKey {
                         name: Some("access_tokens_token_unique".into()),
                         columns: vec![col("token")],

@@ -398,7 +398,10 @@ impl fmt::Display for ReferentialAction {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum TableKey {
-    PrimaryKey(Vec<Column>),
+    PrimaryKey {
+        name: Option<String>,
+        columns: Vec<Column>,
+    },
     UniqueKey {
         name: Option<String>,
         columns: Vec<Column>,
@@ -428,8 +431,11 @@ pub enum TableKey {
 impl fmt::Display for TableKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TableKey::PrimaryKey(columns) => {
+            TableKey::PrimaryKey { name, columns } => {
                 write!(f, "PRIMARY KEY ")?;
+                if let Some(name) = name {
+                    write!(f, "{} ", escape_if_keyword(name))?;
+                }
                 write!(
                     f,
                     "({})",
