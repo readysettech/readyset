@@ -63,6 +63,8 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: postgres://root:root@postgres/test
+      ALLOWED_USERNAME: root
+      ALLOWED_PASSWORD: root
     links:
       - readyset-server
       - postgres

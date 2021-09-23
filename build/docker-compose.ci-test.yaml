@@ -27,6 +27,7 @@ services:
     - REDIS_URL=redis://redis:6379/
     - MYSQL_HOST=mysql
     - PGHOST=postgres
+    - ALLOW_UNAUTHENTICATED_CONNECTIONS=true
     depends_on:
     - zookeeper
     - redis

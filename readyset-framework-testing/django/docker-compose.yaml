@@ -67,6 +67,8 @@ services:
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: postgresql://root:root@upstream/test
       LOG_LEVEL: trace
+      ALLOWED_USERNAME: root
+      ALLOWED_PASSWORD: root
     links:
       - readyset-server
       - upstream

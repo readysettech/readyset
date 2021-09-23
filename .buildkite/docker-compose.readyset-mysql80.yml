@@ -62,12 +62,14 @@ services:
       LISTEN_ADDRESS: 0.0.0.0:3333
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
+      ALLOWED_USERNAME: root
+      ALLOWED_PASSWORD: root
     links:
       - readyset-server
       - mysql
       - zookeeper
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333"]
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
       interval: 10s
       timeout: 10s
       retries: 2

@@ -35,4 +35,4 @@ RUN apt-get update
 # We install mariadb-client so we have access to mysqladmin for healthchecks
 RUN apt-get install -y libssl-dev mariadb-client
 COPY --from=builder /workdir/target/*/noria-mysql /bin/noria-mysql
-ENTRYPOINT ["/bin/noria-mysql", "--no-require-authentication"]
+ENTRYPOINT ["/bin/noria-mysql"]
