@@ -44,13 +44,14 @@ fn keyword_a_to_c(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("CASCADE"), keyword_follow_char),
         terminated(tag_no_case("CASE"), keyword_follow_char),
         terminated(tag_no_case("CAST"), keyword_follow_char),
+        terminated(tag_no_case("CHANGE"), keyword_follow_char),
         terminated(tag_no_case("CHECK"), keyword_follow_char),
-        terminated(tag_no_case("COLLATE"), keyword_follow_char),
     ))(i)
 }
 
 fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("COLLATE"), keyword_follow_char),
         terminated(tag_no_case("COLUMN"), keyword_follow_char),
         terminated(tag_no_case("COMMIT"), keyword_follow_char),
         terminated(tag_no_case("CONFLICT"), keyword_follow_char),
@@ -71,12 +72,12 @@ fn keyword_c_to_e(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("EXCEPT"), keyword_follow_char),
         terminated(tag_no_case("EXCLUSIVE"), keyword_follow_char),
         terminated(tag_no_case("EXISTS"), keyword_follow_char),
-        terminated(tag_no_case("EXPLAIN"), keyword_follow_char),
     ))(i)
 }
 
 fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("EXPLAIN"), keyword_follow_char),
         terminated(tag_no_case("FAIL"), keyword_follow_char),
         terminated(tag_no_case("FOR"), keyword_follow_char),
         terminated(tag_no_case("FOREIGN"), keyword_follow_char),
@@ -97,18 +98,19 @@ fn keyword_e_to_i(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("INNER"), keyword_follow_char),
         terminated(tag_no_case("INSTEAD"), keyword_follow_char),
         terminated(tag_no_case("INTERSECT"), keyword_follow_char),
-        terminated(tag_no_case("INTO"), keyword_follow_char),
     ))(i)
 }
 
-fn keyword_i_to_q(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_i_to_p(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("INTO"), keyword_follow_char),
         terminated(tag_no_case("IS"), keyword_follow_char),
         terminated(tag_no_case("JOIN"), keyword_follow_char),
         terminated(tag_no_case("KEY"), keyword_follow_char),
         terminated(tag_no_case("LIKE"), keyword_follow_char),
         terminated(tag_no_case("LIMIT"), keyword_follow_char),
         terminated(tag_no_case("MATCH"), keyword_follow_char),
+        terminated(tag_no_case("MODIFY"), keyword_follow_char),
         terminated(tag_no_case("NATURAL"), keyword_follow_char),
         terminated(tag_no_case("NO"), keyword_follow_char),
         terminated(tag_no_case("NOT"), keyword_follow_char),
@@ -122,13 +124,13 @@ fn keyword_i_to_q(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("OUTER"), keyword_follow_char),
         terminated(tag_no_case("PLAN"), keyword_follow_char),
         terminated(tag_no_case("PRAGMA"), keyword_follow_char),
-        terminated(tag_no_case("PRIMARY"), keyword_follow_char),
-        terminated(tag_no_case("QUERY"), keyword_follow_char),
     ))(i)
 }
 
-fn keyword_r_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_p_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("PRIMARY"), keyword_follow_char),
+        terminated(tag_no_case("QUERY"), keyword_follow_char),
         terminated(tag_no_case("RAISE"), keyword_follow_char),
         terminated(tag_no_case("RECURSIVE"), keyword_follow_char),
         terminated(tag_no_case("REFERENCES"), keyword_follow_char),
@@ -148,13 +150,13 @@ fn keyword_r_to_t(i: &[u8]) -> IResult<&[u8], &[u8]> {
         terminated(tag_no_case("TEMPORARY"), keyword_follow_char),
         terminated(tag_no_case("THEN"), keyword_follow_char),
         terminated(tag_no_case("TO"), keyword_follow_char),
-        terminated(tag_no_case("TRANSACTION"), keyword_follow_char),
-        terminated(tag_no_case("TRIGGER"), keyword_follow_char),
     ))(i)
 }
 
-fn keyword_u_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
+fn keyword_t_to_z(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((
+        terminated(tag_no_case("TRANSACTION"), keyword_follow_char),
+        terminated(tag_no_case("TRIGGER"), keyword_follow_char),
         terminated(tag_no_case("UNION"), keyword_follow_char),
         terminated(tag_no_case("UNIQUE"), keyword_follow_char),
         terminated(tag_no_case("UPDATE"), keyword_follow_char),
@@ -193,9 +195,9 @@ pub fn sql_keyword(i: &[u8]) -> IResult<&[u8], &[u8]> {
         keyword_a_to_c,
         keyword_c_to_e,
         keyword_e_to_i,
-        keyword_i_to_q,
-        keyword_r_to_t,
-        keyword_u_to_z,
+        keyword_i_to_p,
+        keyword_p_to_t,
+        keyword_t_to_z,
     ))(i)
 }
 
