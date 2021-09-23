@@ -1,19 +1,33 @@
-
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as chef
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly as chef
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
 RUN cargo install cargo-chef
+RUN apt-get update
+RUN apt-get install -y \
+    clang \
+    cmake \
+    libclang-dev \
+    libssl-dev \
+    liblz4-dev \
+    librdkafka-dev \
+    build-essential \
+    llvm
 
 FROM chef as planner
-WORKDIR /workdir
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef as builder
 WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
 COPY --from=planner /workdir/recipe.json recipe.json
 COPY --from=planner $CARGO_HOME $CARGO_HOME
-RUN cargo chef cook --check --all-targets --workspace --recipe-path recipe.json
+RUN cargo chef cook --check -p readyset-substrate --recipe-path recipe.json
 COPY . .
-RUN cargo --offline build --all
+RUN cargo --offline build -p readyset-substrate
 
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as fetcher
 WORKDIR /workdir

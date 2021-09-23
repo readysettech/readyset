@@ -135,6 +135,15 @@ steps:
             - label: ':pipeline: Upload Packer linting steps'
               include:
                 - "ops/images/**"
+
+            - label: ":rust: :docker: Build Substrate Runtime Image"
+              include:
+                - "ops/substrate/**"
+
+            - label: ":pipeline: Upload Validate All Pipeline"
+              include:
+                - "ops/substrate/**"
+
             # --- END INTERNAL OPS STEPS --- #
 
             # --- START CLOUDFORMATION STEPS --- #
