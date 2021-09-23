@@ -925,7 +925,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             left: Box::new(lower_expression(parent, *rhs)?),
             right: Box::new(DataflowExpression::Literal(DataType::Int(1))),
         }),
-        Expression::Cast { expr, ty } => Ok(DataflowExpression::Cast(
+        Expression::Cast { expr, ty, .. } => Ok(DataflowExpression::Cast(
             Box::new(lower_expression(parent, *expr)?),
             ty,
         )),

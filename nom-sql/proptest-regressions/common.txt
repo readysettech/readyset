@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc f43c9ff3b34c6c1f6bb47b21ff477b1567912847df81a8b27da8fff11c9eb9d9 # shrinks to input = _RealHashMatchesEqArgs { real1: Real { value: 0.0, precision: 37 }, real2: Real { value: -0.0, precision: 37 } }
 cc 85060349fcce6cea1082613d5ccdf4996814cc2aa31d1d8e30b3256b1ba1d655 # shrinks to input = _LiteralToStringParseRoundTripArgs { lit: FixedPoint(Real { value: 0.0, precision: 2 }) }
+cc 4956f7bd0a9b5e52bbb0a830d42e8581376e811e65c434796e07c294215e678a # shrinks to input = _LiteralToStringParseRoundTripArgs { lit: Integer(-1) }

@@ -303,7 +303,12 @@ pub enum Expression {
     },
 
     /// `CAST(expression AS type)`.
-    Cast { expr: Box<Expression>, ty: SqlType },
+    Cast {
+        expr: Box<Expression>,
+        ty: SqlType,
+        /// If true indicates that the expression used the Postgres syntax (expr::type)
+        postgres_style: bool,
+    },
 }
 
 impl Display for Expression {
@@ -354,7 +359,12 @@ impl Display for Expression {
                 write!(f, " IN ({})", rhs)
             }
             Expression::NestedSelect(q) => write!(f, "({})", q),
-            Expression::Cast { expr, ty } => write!(f, "CAST({} as {})", expr, ty),
+            Expression::Cast {
+                expr,
+                ty,
+                postgres_style,
+            } if *postgres_style => write!(f, "({}::{})", expr, ty),
+            Expression::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
         }
     }
 }
@@ -372,12 +382,13 @@ impl Expression {
 
 /// A lexed sequence of tokens containing expressions and operators, pre-interpretation of operator
 /// precedence but post-interpretation of parentheses
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum TokenTree {
     Infix(BinaryOperator),
     Prefix(UnaryOperator),
     Primary(Expression),
     Group(Vec<TokenTree>),
+    PgsqlCast(Box<TokenTree>, SqlType),
 }
 
 // no_and_or variants of `infix`, `rest`, and `token_tree` allow parsing (binary op) expressions in the
@@ -436,7 +447,7 @@ named!(prefix(&[u8]) -> TokenTree, map!(alt!(
     terminated!(tag_no_case!("not"), multispace1) => { |_| UnaryOperator::Not }
 ), TokenTree::Prefix));
 
-named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, alt!(
+named_with_dialect!(primary_inner(dialect, &[u8]) -> TokenTree, alt!(
     do_parse!(
         multispace0 >>
             char!('(') >>
@@ -447,6 +458,19 @@ named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, alt!(
             (TokenTree::Group(group))
     ) |
     preceded!(multispace0, simple_expr(dialect)) => { |s| TokenTree::Primary(s) }
+));
+
+named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, do_parse!(
+    expr: call!(primary_inner(dialect))
+        // The Postgres cast is in fact a binary operator, but its right hand side is a type
+        // and not an expression, thankfully it has the highest precedence of all the operators,
+        // hence we can simply check if it is present at the end of any primary expression
+        >> type_: opt!(do_parse!(multispace0
+            >> complete!(tag!("::"))
+            >> multispace0
+            >> type_: call!(type_identifier(dialect))
+            >> (type_)))
+        >> (type_.map(|t| TokenTree::PgsqlCast(Box::new(expr.clone()), t)).unwrap_or(expr))
 ));
 
 named_with_dialect!(rest(dialect, &[u8]) -> Vec<(TokenTree, Vec<TokenTree>, TokenTree)>, many0!(tuple!(
@@ -536,16 +560,24 @@ where
             Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
             Group(_) => Affix::Nilfix,
+            PgsqlCast(_, _) => Affix::Nilfix,
         })
     }
 
     fn primary(&mut self, input: Self::Input) -> Result<Self::Output, Self::Error> {
         use TokenTree::*;
-
         Ok(match input {
             Primary(expr) => expr,
             // unwrap: ok because there are no errors possible
             Group(group) => self.parse(&mut group.into_iter()).unwrap(),
+            PgsqlCast(box expr, ty) => {
+                let tt = self.parse(&mut vec![expr].into_iter()).unwrap();
+                Expression::Cast {
+                    expr: tt.into(),
+                    ty,
+                    postgres_style: true,
+                }
+            }
             _ => unreachable!("Invalid fixity for non-primary token"),
         })
     }
@@ -589,7 +621,7 @@ where
     }
 }
 
-named_with_dialect!(pub(crate) in_lhs(dialect) -> Expression, alt!(
+named_with_dialect!(in_lhs(dialect) -> Expression, alt!(
     call!(column_function(dialect)) => { |f| Expression::Call(f) } |
     call!(literal(dialect)) => { |l| Expression::Literal(l) } |
     call!(case_when(dialect)) |
@@ -619,7 +651,7 @@ named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
         })
 ));
 
-named_with_dialect!(pub(crate) between_operand(dialect) -> Expression, alt!(
+named_with_dialect!(between_operand(dialect) -> Expression, alt!(
     call!(parenthesized_expr(dialect)) |
     call!(column_function(dialect)) => { |f| Expression::Call(f) } |
     call!(literal(dialect)) => { |l| Expression::Literal(l) } |
@@ -627,7 +659,7 @@ named_with_dialect!(pub(crate) between_operand(dialect) -> Expression, alt!(
     call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
 ));
 
-named_with_dialect!(pub(crate) between_max(dialect) -> Expression, alt!(
+named_with_dialect!(between_max(dialect) -> Expression, alt!(
     map!(call!(token_tree_no_and_or(dialect)), |tt| {
         ExprParser.parse(&mut tt.into_iter()).unwrap()
     }) |
@@ -675,7 +707,7 @@ named_with_dialect!(cast(dialect) -> Expression, do_parse!(
         >> ty: call!(type_identifier(dialect))
         >> multispace0
         >> complete!(char!(')'))
-        >> (Expression::Cast {expr: Box::new(arg), ty})
+        >> (Expression::Cast {expr: Box::new(arg), ty, postgres_style: false})
 ));
 
 named_with_dialect!(nested_select(dialect) -> Expression, do_parse!(
@@ -697,7 +729,7 @@ named_with_dialect!(parenthesized_expr(dialect) -> Expression, do_parse!(
 ));
 
 // Expressions without (binary or unary) operators
-named_with_dialect!(pub(crate) simple_expr(dialect, &[u8]) -> Expression, alt!(
+named_with_dialect!(simple_expr(dialect, &[u8]) -> Expression, alt!(
     call!(parenthesized_expr(dialect)) |
     call!(nested_select(dialect)) |
     call!(exists_expr(dialect)) |
@@ -762,6 +794,68 @@ mod tests {
                 "(table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5)",
                 "(table_1.column_2 NOT BETWEEN 1 AND 5) OR (table_1.column_2 NOT BETWEEN 1 AND 5)",
             )
+        }
+    }
+
+    pub mod cast {
+        use super::*;
+
+        #[test]
+        fn postgres_cast() {
+            let res = expression(Dialect::PostgreSQL)(br#"-128::INTEGER"#);
+            assert_eq!(
+                res.unwrap().1,
+                Expression::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(Expression::Cast {
+                        expr: Box::new(Expression::Literal(Literal::Integer(128))),
+                        ty: SqlType::Int(None),
+                        postgres_style: true
+                    }),
+                }
+            );
+
+            let res = expression(Dialect::PostgreSQL)(br#"515*128::TEXT"#);
+            assert_eq!(
+                res.unwrap().1,
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    lhs: Box::new(Expression::Literal(Literal::Integer(515))),
+                    rhs: Box::new(Expression::Cast {
+                        expr: Box::new(Expression::Literal(Literal::Integer(128))),
+                        ty: SqlType::Text,
+                        postgres_style: true
+                    }),
+                }
+            );
+
+            let res = expression(Dialect::PostgreSQL)(br#"(515*128)::TEXT"#);
+            assert_eq!(
+                res.unwrap().1,
+                Expression::Cast {
+                    expr: Box::new(Expression::BinaryOp {
+                        op: BinaryOperator::Multiply,
+                        lhs: Box::new(Expression::Literal(Literal::Integer(515))),
+                        rhs: Box::new(Expression::Literal(Literal::Integer(128)))
+                    }),
+                    ty: SqlType::Text,
+                    postgres_style: true,
+                },
+            );
+
+            let res = expression(Dialect::PostgreSQL)(br#"200*postgres.column::DOUBLE PRECISION"#);
+            assert_eq!(
+                res.unwrap().1,
+                Expression::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    lhs: Box::new(Expression::Literal(Literal::Integer(200))),
+                    rhs: Box::new(Expression::Cast {
+                        expr: Box::new(Expression::Column(Column::from("postgres.column"))),
+                        ty: SqlType::Double,
+                        postgres_style: true,
+                    }),
+                }
+            );
         }
     }
 
