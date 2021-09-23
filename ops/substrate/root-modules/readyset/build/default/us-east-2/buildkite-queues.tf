@@ -9,6 +9,11 @@ module "buildkite_queue_shared" {
   source           = "../../../../../modules/buildkite-queue-shared/regional"
   environment      = "build"
   buildkite_queues = [for it in local.instance_types : replace(it, ".", "-")]
+
+  agent_token_allowed_roles = concat(
+    tolist(module.buildkite_ops_queue.iam_roles),
+    flatten(values(module.buildkite_queue)[*].iam_roles),
+  )
 }
 
 module "buildkite_queue" {

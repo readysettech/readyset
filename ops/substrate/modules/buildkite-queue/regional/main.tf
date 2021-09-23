@@ -46,3 +46,8 @@ resource "aws_cloudformation_stack" "main" {
     "Subnets" = join(",", data.aws_subnets.public_subnets.ids)
   }
 }
+
+data "aws_iam_roles" "iam_roles" {
+  name_regex = "${local.stack_name}-.*"
+  depends_on = [aws_cloudformation_stack.main]
+}
