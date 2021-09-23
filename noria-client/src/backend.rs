@@ -656,8 +656,6 @@ where
             | nom_sql::SqlQuery::StartTransaction(..)
             | nom_sql::SqlQuery::Commit(..)
             | nom_sql::SqlQuery::Rollback(..)
-            | nom_sql::SqlQuery::DropTable(..)
-            | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::CompoundSelect(..)
             | nom_sql::SqlQuery::Delete(..) => {
                 if let Some(ref mut upstream) = self.upstream {
@@ -670,6 +668,10 @@ where
                     error!("unsupported query");
                     unsupported!("query type unsupported");
                 }
+            }
+            nom_sql::SqlQuery::DropTable(..) | nom_sql::SqlQuery::AlterTable(..) => {
+                error!("unsupported query");
+                unsupported!("query type unsupported");
             }
         };
 
