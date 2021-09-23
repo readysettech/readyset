@@ -71,7 +71,11 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
         | Expression::Literal(_)
         | Expression::Column(_)
         | Expression::Exists(_)
-        | Expression::NestedSelect(_) => {
+        | Expression::NestedSelect(_)
+        | Expression::UnaryOp {
+            op: UnaryOperator::Neg,
+            ..
+        } => {
             if negate {
                 unsupported!("Cannot apply NOT operator to expression: {}", ce);
             }

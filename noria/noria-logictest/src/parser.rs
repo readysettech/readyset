@@ -174,10 +174,14 @@ named!(
 named!(
     float<Value>,
     do_parse!(
-        whole: flat_map!(digit1, parse_to!(i64))
+        sign: opt!(tag!("-"))
+            >> whole: flat_map!(digit1, parse_to!(i64))
             >> tag!(".")
             >> fractional: flat_map!(digit1, parse_to!(u32))
-            >> (Value::Real(whole, (fractional as u64) * 100_000_000))
+            >> (Value::Real(
+                if sign.is_some() { -whole } else { whole },
+                (fractional as u64) * 100_000_000
+            ))
     )
 );
 

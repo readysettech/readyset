@@ -1287,7 +1287,7 @@ impl SqlToMirConverter {
                 }
             }
             Expression::UnaryOp {
-                op: UnaryOperator::Not,
+                op: UnaryOperator::Not | UnaryOperator::Neg,
                 ..
             } => internal!("negation should have been removed earlier"),
             Expression::Literal(_) | Expression::Column(_) => {

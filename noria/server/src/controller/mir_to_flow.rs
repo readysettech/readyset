@@ -878,6 +878,8 @@ fn make_latest_node(
 /// - Function calls being resolved to built-in functions, and arities checked
 /// - Desugaring x IN (y, z, ...) to `x = y OR x = z OR ...`
 ///   and x NOT IN (y, z, ...) to `x != y AND x != z AND ...`
+/// - Replacing NEG with (expr * -1)
+/// - Replacing NOT with (expr != 1)
 fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<DataflowExpression> {
     match expr {
         Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(DataflowExpression::Cast(
@@ -910,6 +912,22 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             op,
             left: Box::new(lower_expression(parent, *lhs)?),
             right: Box::new(lower_expression(parent, *rhs)?),
+        }),
+        Expression::UnaryOp {
+            op: UnaryOperator::Neg,
+            rhs,
+        } => Ok(DataflowExpression::Op {
+            op: BinaryOperator::Multiply,
+            left: Box::new(lower_expression(parent, *rhs)?),
+            right: Box::new(DataflowExpression::Literal(DataType::Int(-1))),
+        }),
+        Expression::UnaryOp {
+            op: UnaryOperator::Not,
+            rhs,
+        } => Ok(DataflowExpression::Op {
+            op: BinaryOperator::NotEqual,
+            left: Box::new(lower_expression(parent, *rhs)?),
+            right: Box::new(DataflowExpression::Literal(DataType::Int(1))),
         }),
         Expression::CaseWhen {
             condition,
@@ -961,13 +979,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             }
         }
         Expression::Exists(_) => unsupported!("EXISTS not currently supported"),
-        Expression::UnaryOp {
-            op: UnaryOperator::Not,
-            ..
-        }
-        | Expression::Between { .. }
-        | Expression::NestedSelect(_)
-        | Expression::In { .. } => {
+        Expression::Between { .. } | Expression::NestedSelect(_) | Expression::In { .. } => {
             internal!("Expression should have been desugared earlier: {}", expr)
         }
     }
