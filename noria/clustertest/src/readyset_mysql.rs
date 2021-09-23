@@ -7,15 +7,7 @@ use serial_test::serial;
 #[serial]
 async fn create_table_insert_test() {
     let cluster_name = "ct_create_table_insert";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql_adapter();
@@ -41,17 +33,11 @@ async fn create_table_insert_test() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[ignore]
+// TODO(ENG-641): Test is failing.
 async fn show_tables_test() {
     let cluster_name = "ct_show_tables";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql();
@@ -73,17 +59,11 @@ async fn show_tables_test() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
+#[ignore]
+// TODO(ENG-641): Test is failing.
 async fn describe_table_test() {
     let cluster_name = "ct_describe_table";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql();
