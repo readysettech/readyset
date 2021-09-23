@@ -10,7 +10,10 @@ use nom::{
 use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
-use crate::common::{literal, schema_table_reference, statement_terminator, ws_sep_comma, Literal};
+use crate::common::{
+    literal, schema_table_reference, statement_terminator, ws_sep_comma, Literal, TableKey,
+};
+use crate::create::key_specification;
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 
@@ -50,6 +53,7 @@ impl fmt::Display for DropBehavior {
 #[allow(clippy::enum_variant_names)]
 pub enum AlterTableDefinition {
     AddColumn(ColumnSpecification),
+    AddKey(TableKey),
     AlterColumn {
         name: String,
         operation: AlterColumnOperation,
@@ -73,6 +77,9 @@ impl fmt::Display for AlterTableDefinition {
         match self {
             AlterTableDefinition::AddColumn(col) => {
                 write!(f, "ADD COLUMN {}", col)
+            }
+            AlterTableDefinition::AddKey(index) => {
+                write!(f, "ADD {}", index)
             }
             AlterTableDefinition::AlterColumn { name, operation } => {
                 write!(f, "ALTER COLUMN {} {}", name, operation)
@@ -121,6 +128,16 @@ named_with_dialect!(
             >> multispace1
             >> column: call!(column_specification(dialect))
             >> (AlterTableDefinition::AddColumn(column))
+    )
+);
+
+named_with_dialect!(
+    add_key(dialect) -> AlterTableDefinition,
+    do_parse!(
+        tag_no_case!("add")
+            >> multispace1
+            >> key: call!(key_specification(dialect))
+            >> (AlterTableDefinition::AddKey(key))
     )
 );
 
@@ -229,6 +246,7 @@ named_with_dialect!(
     alter_table_definition(dialect) -> AlterTableDefinition,
     alt!(
         call!(add_column(dialect))
+            | call!(add_key(dialect))
             | call!(drop_column(dialect))
             | call!(alter_column(dialect))
             | call!(change_column(dialect))
@@ -314,6 +332,7 @@ mod tests {
     }
 
     mod mysql {
+        use crate::common::ReferentialAction;
         use crate::{Column, ColumnConstraint, SqlType};
 
         use super::*;
@@ -519,6 +538,59 @@ mod tests {
             assert_eq!(
                 res.to_string(),
                 "ALTER TABLE t CHANGE COLUMN f `modify` DATETIME"
+            );
+        }
+
+        #[test]
+        fn flarum_alter_2() {
+            let qstring = b"alter table `posts_likes` add primary key `posts_likes_post_id_user_id_primary`(`post_id`, `user_id`)";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("posts_likes"),
+                    definitions: vec![AlterTableDefinition::AddKey(TableKey::PrimaryKey {
+                        name: Some("posts_likes_post_id_user_id_primary".into()),
+                        columns: vec![Column::from("post_id"), Column::from("user_id"),],
+                    })]
+                }
+            );
+        }
+
+        #[test]
+        fn flarum_alter_3() {
+            let qstring = b"alter table `flags` add index `flags_created_at_index`(`created_at`)";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("flags"),
+                    definitions: vec![AlterTableDefinition::AddKey(TableKey::Key {
+                        name: "flags_created_at_index".into(),
+                        columns: vec![Column::from("created_at")],
+                        index_type: None,
+                    })]
+                }
+            );
+        }
+
+        #[test]
+        fn flarum_alter_4() {
+            let qstring = b"alter table `flags` add constraint `flags_post_id_foreign` foreign key (`post_id`) references `posts` (`id`) on delete cascade";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("flags"),
+                    definitions: vec![AlterTableDefinition::AddKey(TableKey::ForeignKey {
+                        name: Some("flags_post_id_foreign".into()),
+                        index_name: None,
+                        columns: vec![Column::from("post_id")],
+                        target_table: Table::from("posts"),
+                        target_columns: vec![Column::from("id")],
+                        on_delete: Some(ReferentialAction::Cascade)
+                    })]
+                }
             );
         }
     }
