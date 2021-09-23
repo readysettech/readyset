@@ -56,9 +56,14 @@ impl NoriaServerRunner {
         self.args.push(id.to_string());
     }
 
-    pub fn set_zookeeper(&mut self, zookeeper_addr: &str) {
-        self.args.push("-z".to_string());
-        self.args.push(zookeeper_addr.to_string());
+    pub fn set_authority_addr(&mut self, authority_addr: &str) {
+        self.args.push("--authority-address".to_string());
+        self.args.push(authority_addr.to_string());
+    }
+
+    pub fn set_authority(&mut self, authority: &str) {
+        self.args.push("--authority".to_string());
+        self.args.push(authority.to_string());
     }
 
     pub fn set_deployment(&mut self, deployment: &str) {
@@ -100,7 +105,7 @@ impl NoriaMySQLRunner {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
-            args: vec!["--no-require-authentication".to_string()],
+            args: vec!["--allow-unauthenticated-connections".to_string()],
         }
     }
 
@@ -113,9 +118,14 @@ impl NoriaMySQLRunner {
         })
     }
 
-    pub fn set_zookeeper(&mut self, zookeeper_addr: &str) {
-        self.args.push("-z".to_string());
-        self.args.push(zookeeper_addr.to_string());
+    pub fn set_authority_addr(&mut self, authority_addr: &str) {
+        self.args.push("--authority-address".to_string());
+        self.args.push(authority_addr.to_string());
+    }
+
+    pub fn set_authority(&mut self, authority: &str) {
+        self.args.push("--authority".to_string());
+        self.args.push(authority.to_string());
     }
 
     pub fn set_deployment(&mut self, deployment: &str) {

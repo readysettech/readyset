@@ -18,15 +18,7 @@ use serial_test::serial;
 #[serial]
 async fn query_regional_routing_test() {
     let cluster_name = "ct_server_regional";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.set_sharding(1);
     deployment.set_primary_region("r1");
     deployment.add_server(ServerParams::default().with_region("r1"));
@@ -120,15 +112,7 @@ async fn query_regional_routing_test() {
 #[serial]
 async fn controller_in_primary_test() {
     let cluster_name = "ct_controller_in_primary";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.set_primary_region("r1");
     deployment.add_server(ServerParams::default().with_region("r1"));
     deployment.add_server(ServerParams::default().with_region("r1"));
@@ -156,15 +140,7 @@ async fn controller_in_primary_test() {
 #[serial]
 async fn query_failure_recovery_with_volume_id() {
     let cluster_name = "ct_failure_recovery_with_volume_id";
-    let mut deployment = DeploymentParams::new(
-        cluster_name,
-        NoriaBinarySource::Build(BuildParams {
-            root_project_path: get_project_root(),
-            target_dir: get_project_root().join("test_target"),
-            release: true,
-            rebuild: false,
-        }),
-    );
+    let mut deployment = DeploymentParams::new(cluster_name);
     deployment.set_sharding(1);
     deployment.add_server(ServerParams::default().with_volume("v1"));
 

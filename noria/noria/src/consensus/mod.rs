@@ -165,7 +165,7 @@ pub enum Authority {
 }
 
 /// Enum that mirrors Authority that parses command line arguments.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthorityType {
     Zookeeper,
     Consul,
@@ -180,6 +180,16 @@ impl FromStr for AuthorityType {
             "consul" => Ok(AuthorityType::Consul),
             "local" => Ok(AuthorityType::Local),
             other => Err(anyhow!("Invalid authority type: {}", other)),
+        }
+    }
+}
+
+impl ToString for AuthorityType {
+    fn to_string(&self) -> String {
+        match &self {
+            AuthorityType::Zookeeper => "zookeeper".to_string(),
+            AuthorityType::Consul => "consul".to_string(),
+            AuthorityType::Local => "local".to_string(),
         }
     }
 }
