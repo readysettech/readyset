@@ -27,3 +27,56 @@ module "buildkite_queue" {
   instance_type = each.key
   max_size      = 3
 }
+
+resource "aws_s3_bucket" "ops-secrets" {
+  bucket = "readysettech-build-buildkite-ops-secrets"
+  tags = {
+
+    Name = "readysettech-build-buildkite-ops-secrets"
+  }
+
+  versioning {
+    enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "ops-secrets" {
+  bucket = aws_s3_bucket.ops-secrets.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket" "ops-artifacts" {
+  bucket = "readysettech-build-buildkite-ops-artifacts"
+  tags = {
+    Name = "readysettech-build-buildkite-ops-artifacts"
+  }
+  versioning {
+    enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "ops-artifacts" {
+  bucket = aws_s3_bucket.ops-artifacts.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Separate queue for running the ops pipelines, so that we can give admin permissions to only that role
+module "buildkite_ops_queue" {
+  source          = "../../../../../modules/buildkite-queue/regional"
+  environment     = "build"
+  buildkite_queue = "ops"
+  instance_type   = "t3.large"
+
+  buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
+
+  secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
+  artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
+}
