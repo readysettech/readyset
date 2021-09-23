@@ -373,7 +373,10 @@ impl From<f32> for Value {
 
 impl From<f64> for Value {
     fn from(f: f64) -> Self {
-        Self::Real(f.trunc() as i64, (f.fract() * 1_000_000_000.0).round() as _)
+        Self::Real(
+            f.trunc() as i64,
+            (f.fract().abs() * 1_000_000_000.0).round() as _,
+        )
     }
 }
 

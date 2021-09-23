@@ -161,7 +161,8 @@ mod tests {
         use crate::column::Column;
         use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
-        use crate::{BinaryOperator, Double, FunctionExpression};
+        use crate::Expression::UnaryOp;
+        use crate::{BinaryOperator, Double, FunctionExpression, UnaryOperator};
 
         #[test]
         fn updated_with_neg_float() {
@@ -183,10 +184,13 @@ mod tests {
                     table: Table::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expression::Literal(Literal::Double(Double {
-                            value: -19216.5479744,
-                            precision: 7,
-                        })),
+                        UnaryOp {
+                            op: UnaryOperator::Neg,
+                            rhs: Box::new(Expression::Literal(Literal::Double(Double {
+                                value: 19216.5479744,
+                                precision: 7,
+                            })))
+                        },
                     )],
                     where_clause: expected_where_cond,
                     ..Default::default()
@@ -253,7 +257,8 @@ mod tests {
         use crate::column::Column;
         use crate::common::{ItemPlaceholder, Literal};
         use crate::table::Table;
-        use crate::{BinaryOperator, Double};
+        use crate::Expression::UnaryOp;
+        use crate::{BinaryOperator, Double, UnaryOperator};
 
         #[test]
         fn updated_with_neg_float() {
@@ -275,10 +280,13 @@ mod tests {
                     table: Table::from("stories"),
                     fields: vec![(
                         Column::from("hotness"),
-                        Expression::Literal(Literal::Double(Double {
-                            value: -19216.5479744,
-                            precision: 7,
-                        })),
+                        UnaryOp {
+                            op: UnaryOperator::Neg,
+                            rhs: Box::new(Expression::Literal(Literal::Double(Double {
+                                value: 19216.5479744,
+                                precision: 7,
+                            })))
+                        },
                     ),],
                     where_clause: expected_where_cond,
                     ..Default::default()

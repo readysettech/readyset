@@ -216,12 +216,14 @@ impl Display for BinaryOperator {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum UnaryOperator {
+    Neg,
     Not,
 }
 
 impl Display for UnaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            UnaryOperator::Neg => write!(f, "-"),
             UnaryOperator::Not => write!(f, "NOT"),
         }
     }
@@ -323,6 +325,10 @@ impl Display for Expression {
                 write!(f, " END")
             }
             Expression::BinaryOp { lhs, op, rhs } => write!(f, "({} {} {})", lhs, op, rhs),
+            Expression::UnaryOp {
+                op: UnaryOperator::Neg,
+                rhs,
+            } => write!(f, "(-{})", rhs),
             Expression::UnaryOp { op, rhs } => write!(f, "({} {})", op, rhs),
             Expression::Exists(statement) => write!(f, "EXISTS ({})", statement),
 
@@ -426,7 +432,8 @@ named!(infix(&[u8]) -> TokenTree, complete!(alt!(
 )));
 
 named!(prefix(&[u8]) -> TokenTree, map!(alt!(
-    complete!(tag_no_case!("not")) => { |_| UnaryOperator::Not }
+    complete!(char!('-')) => { |_| UnaryOperator::Neg } |
+    terminated!(tag_no_case!("not"), multispace1) => { |_| UnaryOperator::Not }
 ), TokenTree::Prefix));
 
 named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, alt!(
@@ -526,6 +533,7 @@ where
             Infix(Multiply) => Affix::Infix(Precedence(12), Associativity::Right),
             Infix(Divide) => Affix::Infix(Precedence(12), Associativity::Right),
             Prefix(Not) => Affix::Prefix(Precedence(6)),
+            Prefix(Neg) => Affix::Prefix(Precedence(5)),
             Primary(_) => Affix::Nilfix,
             Group(_) => Affix::Nilfix,
         })
@@ -1309,6 +1317,83 @@ mod tests {
                 rhs: Box::new(Expression::UnaryOp {
                     op: UnaryOperator::Not,
                     rhs: Box::new(Expression::Column("y".into())),
+                }),
+            };
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            assert_eq!(result, expected);
+        }
+    }
+
+    mod negation {
+        use super::*;
+
+        #[test]
+        fn neg_integer() {
+            let qs = b"-256";
+            let expected = Expression::UnaryOp {
+                op: UnaryOperator::Neg,
+                rhs: Box::new(Expression::Literal(Literal::Integer(256))),
+            };
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn neg_in_expression() {
+            let qs = b"x + -y";
+            let expected = Expression::BinaryOp {
+                op: BinaryOperator::Add,
+                lhs: Box::new(Expression::Column("x".into())),
+                rhs: Box::new(Expression::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(Expression::Column("y".into())),
+                }),
+            };
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn neg_column() {
+            let qs = b"NOT -id";
+            let expected = Expression::UnaryOp {
+                op: UnaryOperator::Not,
+                rhs: Box::new(Expression::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(Expression::Column("id".into())),
+                }),
+            };
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn neg_not() {
+            let qs = b"NOT -1";
+            let expected = Expression::UnaryOp {
+                op: UnaryOperator::Not,
+                rhs: Box::new(Expression::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(1))),
+                }),
+            };
+            let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();
+            assert_eq!(std::str::from_utf8(remaining).unwrap(), "");
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn neg_neg() {
+            let qs = b"--1";
+            let expected = Expression::UnaryOp {
+                op: UnaryOperator::Neg,
+                rhs: Box::new(Expression::UnaryOp {
+                    op: UnaryOperator::Neg,
+                    rhs: Box::new(Expression::Literal(Literal::Integer(1))),
                 }),
             };
             let (remaining, result) = expression(Dialect::MySQL)(qs).unwrap();

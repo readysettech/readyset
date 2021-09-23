@@ -1,0 +1,35 @@
+statement ok
+CREATE TABLE notes(
+  id INTEGER PRIMARY KEY,
+  val DOUBLE PRECISION
+)
+
+statement ok
+INSERT INTO notes (id, val) VALUES (1, 4.5)
+
+query IR nosort
+SELECT -id, val FROM notes;
+----
+-1
+4.5
+
+query IR nosort
+SELECT id, -val FROM notes;
+----
+1
+-4.5
+
+query I nosort
+SELECT --id FROM notes;
+----
+1
+
+query I nosort
+SELECT NOT id FROM notes;
+----
+0
+
+query I nosort
+SELECT NOT -id FROM notes;
+----
+1
