@@ -582,7 +582,7 @@ impl SqlToMirConverter {
             Some(keys) => keys
                 .iter()
                 .filter_map(|k| match *k {
-                    ref k @ TableKey::PrimaryKey(..) => Some(k),
+                    ref k @ TableKey::PrimaryKey { .. } => Some(k),
                     _ => None,
                 })
                 .collect(),
@@ -596,10 +596,10 @@ impl SqlToMirConverter {
         // make node
         Ok(if let Some(pk) = primary_keys.first() {
             match **pk {
-                TableKey::PrimaryKey(ref key_cols) => {
+                TableKey::PrimaryKey { ref columns, .. } => {
                     debug!(
                         %name,
-                        primary_key = %key_cols.iter().map(|c| c.name.as_str()).join(", "),
+                        primary_key = %columns.iter().map(|c| c.name.as_str()).join(", "),
                         "Assigning primary key for base",
                     );
                     MirNode::new(
@@ -608,7 +608,7 @@ impl SqlToMirConverter {
                         cols.iter().map(|cs| Column::from(&cs.column)).collect(),
                         MirNodeInner::Base {
                             column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
-                            keys: key_cols.iter().map(Column::from).collect(),
+                            keys: columns.iter().map(Column::from).collect(),
                             adapted_over: None,
                         },
                         vec![],
