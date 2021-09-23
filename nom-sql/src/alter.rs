@@ -58,6 +58,10 @@ pub enum AlterTableDefinition {
         name: String,
         behavior: Option<DropBehavior>,
     },
+    ChangeColumn {
+        name: String,
+        spec: ColumnSpecification,
+    },
     // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#add%20table%20constraint%20definition
     // AddTableConstraint(..),
     // TODO(grfn): https://ronsavage.github.io/SQL/sql-2003-2.bnf.html#drop%20table%20constraint%20definition
@@ -79,6 +83,9 @@ impl fmt::Display for AlterTableDefinition {
                     write!(f, " {}", behavior)?;
                 }
                 Ok(())
+            }
+            AlterTableDefinition::ChangeColumn { name, spec } => {
+                write!(f, "CHANGE COLUMN {} {}", escape_if_keyword(name), spec)
             }
         }
     }
@@ -185,11 +192,48 @@ named_with_dialect!(
 );
 
 named_with_dialect!(
+    change_column(dialect) -> AlterTableDefinition,
+    do_parse!(
+        tag_no_case!("change")
+            >> opt!(preceded!(multispace1, tag_no_case!("column")))
+            >> multispace1
+            >> name: call!(dialect.identifier())
+            >> multispace1
+            >> spec: call!(column_specification(dialect))
+            // TODO:  FIRST
+            // TODO:  AFTER col_name
+            >> (AlterTableDefinition::ChangeColumn{
+                name: name.to_string(),
+                spec
+            })
+    )
+);
+
+named_with_dialect!(
+    modify_column(dialect) -> AlterTableDefinition,
+    do_parse!(
+        tag_no_case!("modify")
+            >> opt!(preceded!(multispace1, tag_no_case!("column")))
+            >> multispace1
+            >> spec: call!(column_specification(dialect))
+            // TODO:  FIRST
+            // TODO:  AFTER col_name
+            >> (AlterTableDefinition::ChangeColumn{
+                name: spec.column.name.clone(),
+                spec
+            })
+    )
+);
+
+named_with_dialect!(
     alter_table_definition(dialect) -> AlterTableDefinition,
     alt!(
         call!(add_column(dialect))
             | call!(drop_column(dialect))
-            | call!(alter_column(dialect)))
+            | call!(alter_column(dialect))
+            | call!(change_column(dialect))
+            | call!(modify_column(dialect))
+    )
 );
 
 named_with_dialect!(
@@ -270,7 +314,7 @@ mod tests {
     }
 
     mod mysql {
-        use crate::{Column, SqlType};
+        use crate::{Column, ColumnConstraint, SqlType};
 
         use super::*;
 
@@ -406,6 +450,51 @@ mod tests {
             };
             let result = alter_table_statement(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(result.unwrap().1, expected);
+        }
+
+        #[test]
+        fn flarum_alter_1() {
+            let qstring = b"ALTER TABLE flags CHANGE time created_at DATETIME NOT NULL";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("flags"),
+                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                        name: "time".into(),
+                        spec: ColumnSpecification {
+                            column: Column::from("created_at"),
+                            sql_type: SqlType::DateTime(None),
+                            constraints: vec![ColumnConstraint::NotNull],
+                            comment: None,
+                        }
+                    }]
+                }
+            );
+        }
+
+        #[test]
+        fn alter_modify() {
+            let qstring = b"ALTER TABLE t MODIFY f VARCHAR(255) NOT NULL PRIMARY KEY";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("t"),
+                    definitions: vec![AlterTableDefinition::ChangeColumn {
+                        name: "f".into(),
+                        spec: ColumnSpecification {
+                            column: Column::from("f"),
+                            sql_type: SqlType::Varchar(255),
+                            constraints: vec![
+                                ColumnConstraint::NotNull,
+                                ColumnConstraint::PrimaryKey
+                            ],
+                            comment: None,
+                        }
+                    }]
+                }
+            );
         }
     }
 
