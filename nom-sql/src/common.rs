@@ -974,7 +974,11 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
                 },
             ),
             map(
-                tuple((dialect.identifier(), multispace0, delim_fx_args(dialect))),
+                tuple((
+                    dialect.function_identifier(),
+                    multispace0,
+                    delim_fx_args(dialect),
+                )),
                 |(name, _, arguments)| FunctionExpression::Call {
                     name: name.to_string(),
                     arguments,
