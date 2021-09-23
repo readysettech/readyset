@@ -147,7 +147,7 @@ impl fmt::Display for SqlType {
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
             SqlType::Binary(len) => write_with_len(f, "BINARY", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
-            SqlType::Enum(_) => write!(f, "ENUM(...)"),
+            SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
         }
