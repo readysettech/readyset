@@ -593,6 +593,32 @@ mod tests {
                 }
             );
         }
+
+        #[test]
+        fn flarum_alter_5() {
+            let qstring =
+                b"alter table `discussion_user` add `subscription` enum('follow', 'ignore') null";
+            let res = test_parse!(alter_table_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterTableStatement {
+                    table: Table::from("discussion_user"),
+                    definitions: vec![AlterTableDefinition::AddColumn(ColumnSpecification {
+                        column: Column::from("subscription"),
+                        sql_type: SqlType::Enum(vec![
+                            Literal::String("follow".into()),
+                            Literal::String("ignore".into())
+                        ]),
+                        constraints: vec![ColumnConstraint::Null],
+                        comment: None,
+                    })],
+                }
+            );
+            assert_eq!(
+                res.to_string(),
+                "ALTER TABLE discussion_user ADD COLUMN subscription ENUM('follow', 'ignore') NULL"
+            );
+        }
     }
 
     mod postgres {
