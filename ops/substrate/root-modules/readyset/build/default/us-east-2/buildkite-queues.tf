@@ -29,10 +29,9 @@ module "buildkite_queue" {
 }
 
 resource "aws_s3_bucket" "ops-secrets" {
-  bucket = "readysettech-build-buildkite-ops-secrets"
+  bucket = "readysettech-build-buildkite-ops-secrets-us-east-2"
   tags = {
-
-    Name = "readysettech-build-buildkite-ops-secrets"
+    Name = "readysettech-build-buildkite-ops-secrets-us-east-2"
   }
 
   versioning {
@@ -50,9 +49,9 @@ resource "aws_s3_bucket_public_access_block" "ops-secrets" {
 }
 
 resource "aws_s3_bucket" "ops-artifacts" {
-  bucket = "readysettech-build-buildkite-ops-artifacts"
+  bucket = "readysettech-build-buildkite-ops-artifacts-us-east-2"
   tags = {
-    Name = "readysettech-build-buildkite-ops-artifacts"
+    Name = "readysettech-build-buildkite-ops-artifacts-us-east-2"
   }
   versioning {
     enabled = true
