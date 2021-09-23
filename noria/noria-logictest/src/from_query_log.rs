@@ -160,7 +160,7 @@ impl FromQueryLog {
                             Ok(v) => v,
                             Err(e) => {
                                 eprintln!(
-                                    "!!! (prepare) Failed to parse {}:\n{:?}",
+                                    "!!! (prepare) Failed to parse {}:\n{}",
                                     &entry.arguments, e
                                 );
                                 continue;
@@ -172,7 +172,7 @@ impl FromQueryLog {
                     Command::Execute => match process_execute(&session, entry, &mut conn).await {
                         Ok(v) => Some(v),
                         Err(e) => {
-                            eprintln!("!!! (execute) Error with {}:  {:?}", entry.arguments, e);
+                            eprintln!("!!! (execute) Error with {}:  {}", entry.arguments, e);
                             continue;
                         }
                     },
