@@ -9,7 +9,7 @@ Parameters:
   ReadysetAdapterNodes:
     Type: String
     Description: Number of Adapter nodes to create
-  KeyPair:
+  KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: "AWS::EC2::KeyPair::KeyName"
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
@@ -97,7 +97,7 @@ Resources:
       AssociatePublicIpAddress: false
       SecurityGroups:
         - !Ref ReadysetMySQLAdapterSecurityGroup
-      KeyName: !Ref KeyPair
+      KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
         - !Ref "AWS::Region"

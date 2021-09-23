@@ -1,11 +1,9 @@
 project:
   name: readyset
-  s3_regional_buckets: true
   package_lambda: false
-  regions:
-    - us-east-2
 tests:
   readyset:
     parameters:
       ReadysetAdapterNodes: 3
-    template: templates/readyset-mysql-template.yaml
+      AvailabilityZones: $[taskcat_genaz_3]
+    template: templates/readyset-mysql-super-template.yaml
