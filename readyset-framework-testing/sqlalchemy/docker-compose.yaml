@@ -80,7 +80,7 @@ services:
       readyset-server:
         condition: service_healthy
   test:
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/python/sqlalchemy"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/frameworks/mysql/python/sqlalchemy"
     depends_on:
       db:
         condition: service_healthy
