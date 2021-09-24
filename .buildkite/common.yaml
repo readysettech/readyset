@@ -148,6 +148,7 @@ steps:
           login: true
 
   - label: ":nodejs: Test js-client"
+    timeout_in_minutes: 60
     depends_on:
       - readyset-server-image
       - build-js-client-lib
