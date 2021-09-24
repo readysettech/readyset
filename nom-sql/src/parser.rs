@@ -61,6 +61,28 @@ impl fmt::Display for SqlQuery {
     }
 }
 
+impl SqlQuery {
+    /// Returns the type of the query, e.g. "CREATE TABLE" or "SELECT"
+    pub fn query_type(&self) -> &'static str {
+        match self {
+            Self::Select(_) => "SELECT",
+            Self::Insert(_) => "INESRT",
+            Self::CreateTable(_) => "CREATE TABLE",
+            Self::CreateView(_) => "CREATE VIEW",
+            Self::Delete(_) => "DELETE",
+            Self::DropTable(_) => "DROP TABLE",
+            Self::Update(_) => "UPDATE",
+            Self::Set(_) => "SET",
+            Self::AlterTable(_) => "ALTER TABLE",
+            Self::CompoundSelect(_) => "SELECT",
+            Self::StartTransaction(_) => "START TRANSACTION",
+            Self::Commit(_) => "COMMIT",
+            Self::Rollback(_) => "ROLLBACK",
+            Self::RenameTable(_) => "RENAME",
+        }
+    }
+}
+
 pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery> {
     move |i| {
         alt((
