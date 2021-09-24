@@ -23,7 +23,7 @@ use noria_client::{QueryHandler, UpstreamDatabase};
 use tokio::fs::OpenOptions;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, info, span, Level};
+use tracing::{debug, error, info, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
@@ -301,6 +301,22 @@ where
                     .open(path),
             )?;
             let mut tar = tokio_tar::Builder::new(GzipEncoder::new(file));
+
+            if let Some(url) = options.upstream_db_url {
+                let result: Result<(), anyhow::Error> = rt.block_on(async {
+                    let mut upstream = H::UpstreamDatabase::connect(url).await?;
+                    let schema = upstream.schema_dump().await?;
+                    let mut header = tokio_tar::Header::new_gnu();
+                    header.set_size(schema.len().try_into()?);
+                    header.set_cksum();
+                    tar.append_data(&mut header, "schema.sql", schema.as_slice())
+                        .await?;
+                    Ok(())
+                });
+                if let Err(e) = result {
+                    error!("Failed to dump database schema:  {}", e);
+                }
+            }
 
             let qci = query_coverage_info.unwrap().serialize()?;
             let mut header = tokio_tar::Header::new_gnu();

@@ -1,13 +1,17 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use noria::{unsupported, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
+use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{Config, GenericResult, Row};
 use psql_srv::Column;
+use tokio::process::Command;
 use tokio_postgres as pgsql;
 use tracing::{info, info_span};
 use tracing_futures::Instrument;
@@ -201,5 +205,34 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         self.client.query("ROLLBACK", &[]).await?;
         self.in_transaction = false;
         Ok(QueryResult::Command)
+    }
+
+    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
+        let config = Config::from_str(&self.url)?;
+        let mut pg_dump = Command::new("pg_dump");
+        pg_dump.arg("--schema-only");
+        if let Some(host) = config
+            .get_hosts()
+            .iter()
+            .filter_map(|h| match h {
+                Host::Tcp(v) => Some(v),
+                _ => None,
+            })
+            .next()
+        {
+            pg_dump.arg(&format!("-h{}", host));
+        } else {
+            anyhow::bail!("Postgres TCP host not found");
+        }
+        if let Some(user) = config.get_user() {
+            pg_dump.arg(format!("-U{}", user));
+        }
+        if let Some(dbname) = config.get_dbname() {
+            pg_dump.arg(dbname);
+        }
+        if let Some(password) = config.get_password() {
+            pg_dump.env("PGPASSWORD", OsStr::from_bytes(password));
+        }
+        Ok(pg_dump.output().await?.stdout)
     }
 }
