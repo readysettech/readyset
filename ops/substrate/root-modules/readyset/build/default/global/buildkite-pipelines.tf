@@ -35,3 +35,15 @@ steps:
     label: ":pipeline:"
 STEPS
 }
+
+resource "buildkite_pipeline" "external-amis" {
+  name           = "external-amis"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.external-amis.yml"
+    label: ":pipeline:"
+STEPS
+}

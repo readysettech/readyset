@@ -210,6 +210,15 @@ steps:
       message: ":rocket: Internal AMIs for ${BUILDKITE_COMMIT}"
     async: true
 
+  # TODO: Enable after deployment
+  # - trigger: "external-amis"
+  #   branches: refs/heads/main
+  #   label: ":rocket: External AMIs"
+  #   build:
+  #     branch: refs/heads/main
+  #     commit: HEAD
+  #     message: ":rocket: External AMIs for ${BUILDKITE_COMMIT}"
+  #   async: true
 
   - block: ":rocket: :rust: Build release binaries?"
     key: build-release-binaries

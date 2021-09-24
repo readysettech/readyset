@@ -2,6 +2,7 @@ steps:
   - block: "Create internal :amazon-ec2: AMIs?"
 
   - label: ":packer: Run production build for internal-base"
+    key: packer-internal-base
     commands:
     - cd /workdir/ops/new-images
     - packer init .
@@ -18,6 +19,7 @@ steps:
 
 
   - label: ":packer: Run production build for all internal images"
+    depends_on: packer-internal-base
     commands:
     - cd /workdir/ops/new-images
     - packer init .

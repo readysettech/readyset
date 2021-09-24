@@ -1,0 +1,62 @@
+steps:
+  - block: "Create external :amazon-ec2: AMIs?"
+
+  - label: ":packer: Run production build for external-base"
+    key: packer-external-base
+    commands:
+    - cd /workdir/ops/new-images
+    - packer init .
+    - packer build -only=amazon-ebs.external-base .
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+        propagate-environment: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.2.0:
+        login: true
+
+
+  - label: ":packer: Run production build for all external images"
+    depends_on: packer-external-base
+    key: packer-build-external
+    commands:
+    - cd /workdir/ops/new-images
+    - packer init .
+    - packer build -only=amazon-ebs.readyset-* .
+    - buildkite-agent artifact upload packer-manifest.json
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+        propagate-environment: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.2.0:
+        login: true
+
+  - block: "Release external images?"
+    fields:
+      - key: release-name
+        required: true
+        text: Release Name (This name WILL be seen by customers)
+
+  - label: ":packer: Run copy production images to deploy account"
+    key: packer-build-external
+    commands:
+    - export RELEASE_NAME="$(buildkite-agent meta-data get release-name)"
+    - cd /workdir/ops/image-deploy
+    - buildkite-agent artifact download packer-manifest.json source-packer-manifest.json
+    - packer init .
+    - ./run-with-manifest-as-env.sh source-packer-manifest.json packer build -only=amazon-ebs.readyset-* .
+    - buildkite-agent artifact upload packer-manifest.json
+    plugins:
+    - docker#v3.7.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+        propagate-environment: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.2.0:
+        login: true
