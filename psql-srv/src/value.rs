@@ -15,4 +15,5 @@ pub enum Value {
     Float(f32),
     Text(ArcCStr),
     Timestamp(NaiveDateTime),
+    ByteArray(Vec<u8>),
 }

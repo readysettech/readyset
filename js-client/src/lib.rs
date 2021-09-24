@@ -113,7 +113,7 @@ fn async_prepare(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let jsclient = wrapped_jsclient.borrow_mut();
     let query = cx.argument::<JsString>(1)?.value(&mut cx);
     let callback = cx.argument::<JsFunction>(2)?.root(&mut cx);
-    let queue = cx.queue();
+    let queue = cx.channel();
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {
@@ -153,7 +153,7 @@ fn async_execute(mut cx: FunctionContext) -> JsResult<JsUndefined> {
         .map(|p| convert::convert_param(&mut cx, p))
         .collect::<Result<Vec<_>, _>>()?;
     let callback = cx.argument::<JsFunction>(3)?.root(&mut cx);
-    let queue = cx.queue();
+    let queue = cx.channel();
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {
@@ -186,7 +186,7 @@ fn async_query(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let jsclient = wrapped_jsclient.borrow_mut();
     let query = cx.argument::<JsString>(1)?.value(&mut cx);
     let callback = cx.argument::<JsFunction>(2)?.root(&mut cx);
-    let queue = cx.queue();
+    let queue = cx.channel();
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {

@@ -23,6 +23,6 @@ arccstr = "1.3.0"
 chrono = { version = "0.4.0", features = ["serde"] }
 
 [dependencies.neon]
-version = "0.7.1-napi"
+version = "0.9.1-napi"
 default-features = false
 features = ["napi-6", "event-queue-api"]

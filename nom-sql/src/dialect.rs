@@ -16,6 +16,27 @@ fn is_sql_identifier(chr: u8) -> bool {
     is_alphanumeric(chr) || chr == b'_' || chr == b'@'
 }
 
+/// Byte array literal value (PostgreSQL)
+fn raw_hex_bytes_psql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    delimited(tag("E'\\\\x"), hex_bytes, tag("'::bytea"))(input)
+}
+
+/// Blob literal value (MySQL)
+fn raw_hex_bytes_mysql(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    delimited(tag("X'"), hex_bytes, tag("'"))(input)
+}
+
+fn hex_bytes(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    fold_many0(
+        map_res(take(2_usize), hex::decode),
+        Vec::new(),
+        |mut acc: Vec<u8>, bytes: Vec<u8>| {
+            acc.extend(bytes);
+            acc
+        },
+    )(input)
+}
+
 /// String literal value
 fn raw_string_quoted(input: &[u8], is_single_quote: bool) -> IResult<&[u8], Vec<u8>> {
     // TODO: clean up these assignments. lifetimes and temporary values made it difficult
@@ -151,6 +172,16 @@ impl Dialect {
             Dialect::MySQL => alt((raw_string_single_quoted, raw_string_double_quoted))(i),
         }
     }
+
+    /// Parse the raw (byte) content of a bytes literal using this Dialect.
+    // TODO(fran): Improve this. This is very naive, and for Postgres specifically, it only
+    //  parses the hex-formatted byte array. We need to also add support for the escaped format.
+    pub fn bytes_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
+        move |i| match self {
+            Dialect::PostgreSQL => raw_hex_bytes_psql(i),
+            Dialect::MySQL => raw_hex_bytes_mysql(i),
+        }
+    }
 }
 
 /// Create a function from a combination of nom parsers, which takes a [`Dialect`] as an argument.
@@ -239,6 +270,22 @@ mod tests {
             let expected = r#"a"b"#.as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
         }
+
+        #[test]
+        fn bytes_parsing() {
+            let res = Dialect::MySQL.bytes_literal()(b"X'0008275c6480'");
+            let expected = vec![0, 8, 39, 92, 100, 128];
+            assert_eq!(res, Ok((&b""[..], expected)));
+
+            // Empty
+            let res = Dialect::MySQL.bytes_literal()(b"X''");
+            let expected = vec![];
+            assert_eq!(res, Ok((&b""[..], expected)));
+
+            // Malformed string
+            let res = Dialect::MySQL.bytes_literal()(b"''");
+            assert!(res.is_err());
+        }
     }
 
     mod postgres {
@@ -269,6 +316,22 @@ mod tests {
             let res = Dialect::PostgreSQL.string_literal()(quoted);
             let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
             assert_eq!(res, Ok((&b""[..], expected)));
+        }
+
+        #[test]
+        fn bytes_parsing() {
+            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\x0008275c6480'::bytea");
+            let expected = vec![0, 8, 39, 92, 100, 128];
+            assert_eq!(res, Ok((&b""[..], expected)));
+
+            // Empty
+            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\x'::bytea");
+            let expected = vec![];
+            assert_eq!(res, Ok((&b""[..], expected)));
+
+            // Malformed string
+            let res = Dialect::PostgreSQL.bytes_literal()(b"E'\\\\'::btea");
+            assert!(res.is_err());
         }
     }
 }

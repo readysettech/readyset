@@ -1,5 +1,6 @@
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use noria::{ReadySetError, ReadySetResult};
+use std::sync::Arc;
 use std::{collections::HashMap, convert::TryInto};
 use tokio_postgres as pgsql;
 use tracing::{debug, error};
@@ -254,6 +255,9 @@ impl wal::TupleData {
                             &str,
                             noria::TIME_FORMAT,
                         )?),
+                        PGType::BYTEA => hex::decode(str.as_ref())
+                            .map_err(|_| WalError::ByteArrayHexParseError)
+                            .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
                         ref t => {
                             unimplemented!(
                                 "Conversion not implemented for type {:?}; value {:?}",

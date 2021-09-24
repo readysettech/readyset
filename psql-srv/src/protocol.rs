@@ -459,6 +459,7 @@ fn make_field_description(
         Type::FLOAT4 => TYPLEN_4,
         Type::FLOAT8 | Type::NUMERIC => TYPLEN_8,
         Type::TIMESTAMP => TYPLEN_8,
+        Type::BYTEA => TYPLEN_VARLENA,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
     Ok(FieldDescription {

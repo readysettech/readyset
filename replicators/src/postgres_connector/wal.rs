@@ -27,6 +27,8 @@ pub enum WalError {
     IntParseError,
     BoolParseError,
     CStrParseError,
+    ByteArraySyntaxError,
+    ByteArrayHexParseError,
     TimestampParseError,
     InvalidMapping(String),
     ToastNotSupported,

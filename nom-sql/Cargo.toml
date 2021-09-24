@@ -22,6 +22,7 @@ proptest = "1.0.0"
 test-strategy = "0.1.1"
 launchpad = { path = "../launchpad" }
 thiserror = "1.0.26"
+hex = "0.4.3"
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

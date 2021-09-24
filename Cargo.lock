@@ -3390,9 +3390,9 @@ dependencies = [
 
 [[package]]
 name = "neon"
-version = "0.7.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e98cdd7a8f84ad67b8b3b15806a2972914533d3af7e4ec32cb24e3a101955b9"
+checksum = "5e85820b585bf3360bf158ac87a75764c48e361c91bbeb69873e6613cc78c023"
 dependencies = [
  "cslice",
  "neon-build",
@@ -3404,15 +3404,15 @@ dependencies = [
 
 [[package]]
 name = "neon-build"
-version = "0.7.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40aa98b2816150f1b0e4f9283b6cb8df101aba9a5e8c5facba32e607e80bedac"
+checksum = "ad9febc63f515156d4311a0c43899d3ace46352ecdd591c21b98ca3974f2a0d0"
 
 [[package]]
 name = "neon-macros"
-version = "0.7.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c8b046fb631a0e57e785342e8ebe0597554779a805956e24e6c525a2441ae1a"
+checksum = "987f12c91eb6ce0b67819f7c5fb4d391de64cf411c605ed027f03507a33943b2"
 dependencies = [
  "quote",
  "syn",
@@ -3420,9 +3420,9 @@ dependencies = [
 
 [[package]]
 name = "neon-runtime"
-version = "0.7.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdde3dee10a83057034f65c7a1e73dc595f111c16d7e4ae123c57fa7f065e86a"
+checksum = "02662cd2e62b131937bdef85d0918b05bc3c204daf4c64af62845403eccb60f3"
 dependencies = [
  "cfg-if 1.0.0",
  "libloading 0.6.7",
@@ -3523,6 +3523,7 @@ version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
  "derive_more",
+ "hex",
  "itertools 0.10.1",
  "launchpad",
  "maplit",
@@ -3586,6 +3587,7 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "serde_bytes",
  "serde_json",
  "slab",
  "test-strategy",
@@ -4678,9 +4680,11 @@ version = "0.1.0"
 dependencies = [
  "arccstr",
  "async-trait",
+ "byteorder",
  "bytes 1.1.0",
  "chrono",
  "futures 0.3.17",
+ "hex",
  "nom-sql",
  "postgres 0.19.1 (git+https://github.com/readysettech/rust-postgres.git)",
  "postgres-types 0.2.1 (git+https://github.com/readysettech/rust-postgres.git)",
@@ -5087,6 +5091,7 @@ dependencies = [
  "chrono",
  "clap 3.0.0-beta.4",
  "futures 0.3.17",
+ "hex",
  "itertools 0.10.1",
  "launchpad",
  "mysql_async 0.28.0",
@@ -5406,6 +5411,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f12d06de37cf59146fbdecab66aa99f9fe4f78722e3607577a5375d66bd0c913"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16ae07dd2f88a366f15bd0632ba725227018c69a1c8550a927324f8eb8368bb9"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

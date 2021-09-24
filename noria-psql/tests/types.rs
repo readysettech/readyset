@@ -98,5 +98,6 @@ mod types {
         #[ignore] real_f32("real", f32);
         #[ignore] double_f64("double precision", f64);
         #[ignore] text_string("text", String);
+        #[ignore] bytea_bytes("bytea", Vec<u8>);
     }
 }

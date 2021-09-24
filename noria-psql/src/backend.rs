@@ -11,6 +11,7 @@ use crate::resultset::Resultset;
 use crate::row::Row;
 use crate::value::Value;
 use crate::PostgreSqlUpstream;
+use std::sync::Arc;
 
 /// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
 /// requests provided to `psql_srv::Backend` trait function implementations are forwared to the
@@ -89,6 +90,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
             ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Timestamp(v) => Ok((*v).into()),
+            ps::Value::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
         }
     }
 }

@@ -115,6 +115,9 @@ where
             .or_else(|e| cx.throw_error(e.to_string()))?
             .upcast::<JsValue>()),
         DataType::Time(_) => unimplemented!("Time conversion to JS type"),
+        DataType::ByteArray(bytes) => {
+            Ok(JsArrayBuffer::external(cx, bytes.as_ref().clone()).upcast::<JsValue>())
+        }
     }
 }
 
