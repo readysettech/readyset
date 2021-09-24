@@ -239,4 +239,21 @@ impl UpstreamDatabase for MySqlUpstream {
             status_flags: self.conn.status(),
         })
     }
+
+    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error> {
+        let tables: Vec<String> = self.conn.query_iter("SHOW TABLES").await?.collect().await?;
+        let mut dump = String::with_capacity(tables.len());
+        for table in &tables {
+            if let Some(create) = self
+                .conn
+                .query_first(format!("SHOW CREATE TABLE `{}`", &table))
+                .await?
+                .map(|row: (String, String)| row.1)
+            {
+                dump.push_str(&create);
+                dump.push('\n');
+            }
+        }
+        Ok(dump.into_bytes())
+    }
 }

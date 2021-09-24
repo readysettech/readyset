@@ -103,4 +103,7 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback(&mut self) -> Result<Self::QueryResult, Self::Error>;
+
+    /// Return schema dump from the upstream database, for inclusion in a query analysis bundle.
+    async fn schema_dump(&mut self) -> Result<Vec<u8>, anyhow::Error>;
 }
