@@ -106,6 +106,7 @@ pub enum Type {
     Real,
     Date,
     Time,
+    ByteArray,
 }
 
 impl Type {
@@ -132,6 +133,7 @@ impl Display for Type {
             Self::Real => write!(f, "R"),
             Self::Date => write!(f, "D"),
             Self::Time => write!(f, "M"),
+            Self::ByteArray => write!(f, "B"),
         }
     }
 }
@@ -180,6 +182,7 @@ pub enum Value {
     Real(i64, u64),
     Date(NaiveDateTime),
     Time(MysqlTime),
+    ByteArray(Vec<u8>),
     Null,
 }
 
@@ -245,6 +248,7 @@ impl TryFrom<Literal> for Value {
             Literal::CurrentTime => Value::Time(Utc::now().naive_utc().time().into()),
             Literal::CurrentDate => Value::Date(Utc::now().naive_utc()),
             Literal::CurrentTimestamp => Value::Date(Utc::now().naive_utc()),
+            Literal::ByteArray(b) => Value::ByteArray(b),
             Literal::Placeholder(_) => bail!("Placeholders are not valid values"),
         })
     }
@@ -266,6 +270,8 @@ impl From<Value> for mysql::Value {
                 t.seconds(),
                 t.microseconds(),
             ),
+            // This type is PostgreSQL-specific
+            Value::ByteArray(_) => unimplemented!(),
         }
     }
 }
@@ -282,6 +288,7 @@ impl pgsql::types::ToSql for Value {
             Value::Real(i, f) => (*i as f64 + ((*f as f64) / 1_000_000_000.0)).to_sql(ty, out),
             Value::Date(x) => x.to_sql(ty, out),
             Value::Time(x) => NaiveTime::from(*x).to_sql(ty, out),
+            Value::ByteArray(array) => array.to_sql(ty, out),
             Value::Null => None::<i8>.to_sql(ty, out),
         }
     }
@@ -331,6 +338,7 @@ impl TryFrom<DataType> for Value {
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Text(value.try_into()?)),
             DataType::Timestamp(ts) => Ok(Value::Date(ts)),
             DataType::Time(t) => Ok(Value::Time(*t)),
+            DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
         }
     }
 }
@@ -361,6 +369,10 @@ impl Display for Value {
             Self::Date(dt) => write!(f, "{}", dt.format(TIMESTAMP_FORMAT)),
             Self::Null => write!(f, "NULL"),
             Self::Time(t) => write!(f, "{}", t),
+            Self::ByteArray(a) => {
+                // TODO(fran): This is gonna be more complicated than this, probably.
+                write!(f, "{:?}", a)
+            }
         }
     }
 }
@@ -400,6 +412,7 @@ impl Value {
             Self::Real(_, _) => Some(Type::Real),
             Self::Date(_) => Some(Type::Date),
             Self::Time(_) => Some(Type::Time),
+            Self::ByteArray(_) => Some(Type::ByteArray),
             Self::Null => None,
         }
     }
@@ -432,6 +445,7 @@ impl Value {
                 }
                 _ => bail!("Could not convert {:?} to Time", val),
             })),
+            Type::ByteArray => unimplemented!(),
         }
     }
 

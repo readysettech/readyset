@@ -71,6 +71,7 @@ pub enum SqlType {
     #[weight(0)]
     Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=#0)] u8),
     Json,
+    ByteArray,
 }
 
 impl SqlType {
@@ -150,6 +151,7 @@ impl fmt::Display for SqlType {
             SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
+            SqlType::ByteArray => write!(f, "BYTEA"),
         }
     }
 }
@@ -231,6 +233,13 @@ pub enum Literal {
     CurrentTime,
     CurrentDate,
     CurrentTimestamp,
+    // Even though `ByteArray` has the same inner representation as `Blob`,
+    // we want to distinguish them, so then we can avoid doing a trial-and-error
+    // to try to determine to which DataType it corresponds to.
+    // Having this here makes it easy to parse PostgreSQL byte array literals, and
+    // then just store the `Vec<u8>` into a DataType without testing if it's a valid
+    // String or not.
+    ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
 }
 
@@ -304,6 +313,9 @@ impl Display for Literal {
             Literal::CurrentTime => write!(f, "CURRENT_TIME"),
             Literal::CurrentDate => write!(f, "CURRENT_DATE"),
             Literal::CurrentTimestamp => write!(f, "CURRENT_TIMESTAMP"),
+            Literal::ByteArray(b) => {
+                write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
+            }
             Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
         }
     }
@@ -332,6 +344,7 @@ impl Literal {
                 any::<u16>().prop_map(|i| Self::Integer(i as _)).boxed()
             }
             SqlType::Blob
+            | SqlType::ByteArray
             | SqlType::Longblob
             | SqlType::Mediumblob
             | SqlType::Tinyblob
@@ -849,6 +862,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             |t| SqlType::Varbinary(t.1),
         ),
         map(tag_no_case("json"), |_| SqlType::Json),
+        map(tag_no_case("bytea"), |_| SqlType::ByteArray),
     ))(i)
 }
 
@@ -1185,6 +1199,7 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
                     Err(err) => Literal::Blob(err.into_bytes()),
                 }
             }),
+            map(dialect.bytes_literal(), Literal::ByteArray),
             map(tag_no_case("null"), |_| Literal::Null),
             map(tag_no_case("current_timestamp"), |_| {
                 Literal::CurrentTimestamp
@@ -1440,7 +1455,10 @@ mod tests {
 
     #[proptest]
     fn literal_to_string_parse_round_trip(lit: Literal) {
-        prop_assume!(!matches!(lit, Literal::Double(_) | Literal::Float(_)));
+        prop_assume!(!matches!(
+            lit,
+            Literal::Double(_) | Literal::Float(_) | Literal::ByteArray(_)
+        ));
         let s = lit.to_string();
         assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
     }

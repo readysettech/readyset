@@ -52,6 +52,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
+            (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(b.as_ref().clone())),
             (t, dt) => {
                 error!(
                     psql_type = %t,

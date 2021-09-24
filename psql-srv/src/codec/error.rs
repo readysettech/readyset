@@ -1,3 +1,4 @@
+use hex::FromHexError;
 use postgres_types::Type;
 use std::ffi::FromBytesWithNulError;
 use std::fmt;
@@ -35,6 +36,9 @@ pub enum DecodeError {
 
     #[error("invalid text timestamp value: {0}")]
     InvalidTextTimestampValue(#[from] chrono::ParseError),
+
+    #[error("invalid text byte array value: {0}")]
+    InvalidTextByteArrayValue(FromHexError),
 
     #[error("invalid type: {0}")]
     InvalidType(u32),

@@ -3,6 +3,7 @@ use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
+use serde_bytes::{ByteBuf, Bytes};
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -56,6 +57,12 @@ impl serde::ser::Serialize for DataType {
                     &i128::from_le_bytes(b),
                 )
             }
+            DataType::ByteArray(array) => serializer.serialize_newtype_variant(
+                "DataType",
+                8,
+                "ByteArray",
+                Bytes::new(array.as_ref()),
+            ),
         }
     }
 }
@@ -74,6 +81,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             Time,
             TinyText,
             Float,
+            ByteArray,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -94,9 +102,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     5u64 => Ok(Field::Time),
                     6u64 => Ok(Field::TinyText),
                     7u64 => Ok(Field::Float),
+                    8u64 => Ok(Field::ByteArray),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 8",
+                        &"variant index 0 <= i < 9",
                     )),
                 }
             }
@@ -113,6 +122,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "Timestamp" => Ok(Field::Timestamp),
                     "Time" => Ok(Field::Time),
                     "TinyText" => Ok(Field::TinyText),
+                    "ByteArray" => Ok(Field::ByteArray),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -129,6 +139,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"Timestamp" => Ok(Field::Timestamp),
                     b"Time" => Ok(Field::Time),
                     b"TinyText" => Ok(Field::TinyText),
+                    b"ByteArray" => Ok(Field::ByteArray),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -258,6 +269,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         .map(|v| DataType::Time(Arc::new(v))),
                     (Field::TinyText, variant) => VariantAccess::newtype_variant::<i128>(variant)
                         .map(|r| DataType::TinyText(r.to_le_bytes()[..15].try_into().unwrap())),
+                    (Field::ByteArray, variant) => {
+                        VariantAccess::newtype_variant::<ByteBuf>(variant)
+                            .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))
+                    }
                 }
             }
         }
@@ -271,6 +286,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "Time",
             "TinyText",
             "Float",
+            "ByteArray",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }

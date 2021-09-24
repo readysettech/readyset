@@ -3,6 +3,7 @@ use noria::{DataType, ReadySetError, ReadySetResult};
 
 use arccstr::ArcCStr;
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 pub(crate) trait ToDataType {
     fn into_datatype(self) -> Result<DataType, ReadySetError>;
@@ -37,6 +38,7 @@ impl ToDataType for Literal {
             Literal::CurrentTime | Literal::CurrentTimestamp => {
                 DataType::Timestamp(chrono::Local::now().naive_local())
             }
+            Literal::ByteArray(b) => DataType::ByteArray(Arc::new(b)),
             Literal::Placeholder(_) => unreachable!(),
         })
     }

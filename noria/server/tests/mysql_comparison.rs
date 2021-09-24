@@ -316,6 +316,7 @@ async fn check_query(
                             let s: &str = (&v).try_into().unwrap();
                             s.to_string()
                         }
+                        d @ DataType::ByteArray(_) => format!("{}", d),
                         DataType::Timestamp(_) | DataType::Time(_) => unimplemented!(),
                     })
                     .collect()

@@ -91,6 +91,7 @@ use nom_sql::{
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
+use std::sync::Arc;
 
 /// Generate a constant value with the given [`SqlType`]
 ///
@@ -116,6 +117,12 @@ fn value_of_type(typ: &SqlType) -> DataType {
             // It is safe to transform an "a" String into a DataType.
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a").unwrap()
+        }
+        SqlType::ByteArray => {
+            // Zero is an interesting value, because it can only occur for
+            // byte arrays, since character strings don't allow zero
+            // octets.
+            DataType::ByteArray(Arc::new(vec![0u8]))
         }
         SqlType::Int(_) => 1i32.into(),
         SqlType::Bigint(_) => 1i64.into(),
@@ -192,6 +199,14 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             // It is safe to transform an String of consecutive a's into a DataType.
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
+        }
+        SqlType::ByteArray => {
+            let length = rng.gen_range(1..10);
+            let mut array = Vec::new();
+            for _ in 0..length {
+                array.push(rng.gen::<u8>());
+            }
+            DataType::ByteArray(Arc::new(array))
         }
         SqlType::Int(_) => rng.gen::<i32>().into(),
         SqlType::Bigint(_) => rng.gen::<i64>().into(),
@@ -282,6 +297,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Date => unimplemented!(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),
+        SqlType::ByteArray => unimplemented!(),
         SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
         SqlType::Json => DataType::from(format!("{{\"k\": {}}}", idx)),
     }

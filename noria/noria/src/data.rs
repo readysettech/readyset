@@ -3,7 +3,7 @@ use arccstr::ArcCStr;
 use bytes::BytesMut;
 use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
 use derive_more::{From, Into};
-use itertools::Either;
+use itertools::{Either, Itertools};
 use serde::{Deserialize, Serialize};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
@@ -59,7 +59,10 @@ pub enum DataType {
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
     /// A time duration
-    Time(Arc<MysqlTime>), //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
+    Time(Arc<MysqlTime>),
+    //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
+    /// A byte array
+    ByteArray(Arc<Vec<u8>>),
 }
 
 impl Eq for DataType {}
@@ -81,6 +84,13 @@ impl fmt::Display for DataType {
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
             DataType::Time(ref t) => {
                 write!(f, "{}", t.to_string())
+            }
+            DataType::ByteArray(ref array) => {
+                write!(
+                    f,
+                    "E'\\x{}'",
+                    array.iter().map(|byte| format!("{:02x}", byte)).join("")
+                )
             }
         }
     }
@@ -106,6 +116,7 @@ impl fmt::Debug for DataType {
             DataType::BigInt(n) => write!(f, "BigInt({})", n),
             DataType::UnsignedBigInt(n) => write!(f, "UnsignedBigInt({})", n),
             DataType::Time(ref t) => f.debug_tuple("Time").field(t.as_ref()).finish(),
+            DataType::ByteArray(ref array) => write!(f, "ByteArray({:?})", array),
         }
     }
 }
@@ -136,15 +147,16 @@ impl DataType {
             DataType::BigInt(_) => DataType::BigInt(i64::min_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedInt(0),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
+            DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
         }
     }
 
     /// Generates the maximum DataType corresponding to the type of a given DataType.
-    /// Note that there is no possible maximum for the `Text` variant, hence it is not implemented.
+    /// Note that there is no possible maximum for the `Text` or `ByteArray` variants,
+    /// hence it is not implemented.
     pub fn max_value(other: &Self) -> Self {
         match other {
             DataType::None => DataType::None,
-            DataType::Text(_) => unimplemented!(),
             DataType::TinyText(_) => DataType::TinyText([u8::max_value(); 15]),
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MAX_DATE,
@@ -157,6 +169,7 @@ impl DataType {
             DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
+            DataType::Text(_) | DataType::ByteArray(_) => unimplemented!(),
         }
     }
 
@@ -167,6 +180,7 @@ impl DataType {
     pub fn deep_clone(&self) -> Self {
         match *self {
             DataType::Text(ref cstr) => DataType::Text(ArcCStr::from(&**cstr)),
+            DataType::ByteArray(ref bytes) => DataType::ByteArray(Arc::new(bytes.as_ref().clone())),
             ref dt => dt.clone(),
         }
     }
@@ -202,6 +216,11 @@ impl DataType {
         matches!(*self, DataType::Time(_))
     }
 
+    /// Checks if this value is of a byte array data type.
+    pub fn is_byte_array(&self) -> bool {
+        matches!(*self, DataType::ByteArray(_))
+    }
+
     /// Returns true if this datatype is truthy (is not 0, 0.0, '', or NULL)
     ///
     /// # Examples
@@ -229,6 +248,7 @@ impl DataType {
             }
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
+            DataType::ByteArray(ref array) => !array.is_empty(),
         }
     }
 
@@ -287,6 +307,7 @@ impl DataType {
             Self::TinyText(_) => Some(Tinytext),
             Self::Timestamp(_) => Some(Timestamp),
             Self::Time(_) => Some(Time),
+            Self::ByteArray(_) => Some(ByteArray),
         }
     }
 
@@ -733,6 +754,9 @@ impl PartialEq for DataType {
             ) => other == self,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
+            (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
+                array_a.as_ref() == array_b.as_ref()
+            }
             (&DataType::None, &DataType::None) => true,
 
             _ => false,
@@ -869,6 +893,10 @@ impl Ord for DataType {
             (&DataType::Double(..) | &DataType::Float(..), _) => Ordering::Greater,
             (&DataType::Timestamp(..) | DataType::Time(_), _) => Ordering::Greater,
             (&DataType::None, _) => Ordering::Greater,
+            (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
+                array_a.cmp(array_b)
+            }
+            (&DataType::ByteArray(_), _) => Ordering::Greater,
         }
     }
 }
@@ -908,6 +936,7 @@ impl Hash for DataType {
             }
             DataType::Timestamp(ts) => ts.hash(state),
             DataType::Time(ref t) => t.hash(state),
+            DataType::ByteArray(ref array) => array.hash(state),
         }
     }
 }
@@ -1064,6 +1093,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::Float(ref float) => Ok(DataType::Float(float.value, float.precision)),
             Literal::Double(ref double) => Ok(DataType::Double(double.value, double.precision)),
             Literal::Blob(b) => DataType::try_from(b.as_slice()),
+            Literal::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DataType")
             }
@@ -1099,6 +1129,7 @@ impl TryFrom<DataType> for Literal {
             DataType::Time(_) => Ok(Literal::String(String::try_from(
                 dt.coerce_to(&SqlType::Text)?.as_ref(),
             )?)),
+            DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
         }
     }
 }
@@ -1112,6 +1143,12 @@ impl From<NaiveTime> for DataType {
 impl From<MysqlTime> for DataType {
     fn from(t: MysqlTime) -> Self {
         DataType::Time(Arc::new(t))
+    }
+}
+
+impl From<Vec<u8>> for DataType {
+    fn from(t: Vec<u8>) -> Self {
+        DataType::ByteArray(Arc::new(t))
     }
 }
 
@@ -1169,6 +1206,22 @@ impl<'a> TryFrom<&'a DataType> for MysqlTime {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "MysqlTime".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a DataType> for Vec<u8> {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
+        match *data {
+            DataType::ByteArray(ref array) => Ok(array.as_ref().clone()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "Vec<u8>".to_string(),
                 details: "".to_string(),
             }),
         }
@@ -1241,6 +1294,7 @@ impl TryFrom<DataType> for Vec<u8> {
                     Ok(t.to_vec())
                 }
             }
+            DataType::ByteArray(bytes) => Ok(bytes.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: match data.sql_type() {
@@ -1599,12 +1653,7 @@ impl<'a> TryFrom<&'a [u8]> for DataType {
         } else {
             match ArcCStr::try_from(b) {
                 Ok(arc_c_str) => Ok(DataType::Text(arc_c_str)),
-                Err(_) => Err(Self::Error::DataTypeConversionError {
-                    val: format!("{:?}", b),
-                    src_type: "DataType".to_string(),
-                    target_type: "&[u8]".to_string(),
-                    details: "".to_string(),
-                }),
+                Err(_) => Ok(DataType::ByteArray(Arc::new(b.to_vec()))),
             }
         }
     }
@@ -1674,6 +1723,7 @@ impl ToSql for DataType {
             Self::Text(_) | Self::TinyText(_) => <&str>::try_from(self).unwrap().to_sql(ty, out),
             Self::Timestamp(x) => x.to_sql(ty, out),
             Self::Time(x) => NaiveTime::from(**x).to_sql(ty, out),
+            Self::ByteArray(ref array) => array.as_ref().to_sql(ty, out),
         }
     }
 
@@ -1711,6 +1761,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::VARCHAR => mk_from_sql!(&str),
             Type::DATE => mk_from_sql!(NaiveDateTime),
             Type::TIME => mk_from_sql!(NaiveTime),
+            Type::BYTEA => mk_from_sql!(Vec<u8>),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -1740,8 +1791,7 @@ impl TryFrom<DataType> for mysql_common::value::Value {
             DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
             DataType::Float(val, _) => Ok(Value::Float(val)),
             DataType::Double(val, _) => Ok(Value::Double(val)),
-            DataType::Text(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
-            DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
+            DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
             DataType::Timestamp(val) => Ok(val.into()),
             DataType::Time(val) => Ok(Value::Time(
                 !val.is_positive(),
@@ -1751,6 +1801,7 @@ impl TryFrom<DataType> for mysql_common::value::Value {
                 val.seconds(),
                 val.microseconds(),
             )),
+            DataType::ByteArray(array) => Ok(Value::Bytes(array.as_ref().clone())),
         }
     }
 }
@@ -2035,6 +2086,7 @@ impl Arbitrary for DataType {
                 .prop_map(MysqlTime::new)
                 .prop_map(Arc::new)
                 .prop_map(Time),
+            any::<Vec<u8>>().prop_map(|b| DataType::ByteArray(Arc::new(b))),
         ]
         .boxed()
     }
@@ -2111,12 +2163,11 @@ mod tests {
         use chrono::Datelike;
         use mysql_common::value::Value;
 
-        prop_assume!(!matches!(
-            dt,
-            DataType::Timestamp(t)
-                if t.date().year() < 1000 ||
-                   t.date().year() > 9999
-        ));
+        prop_assume!(match dt {
+            DataType::Timestamp(t) if t.date().year() < 1000 || t.date().year() > 9999 => false,
+            DataType::ByteArray(_) => false,
+            _ => true,
+        });
 
         match (
             DataType::try_from(Value::try_from(dt.clone()).unwrap()).unwrap(),
@@ -2178,10 +2229,12 @@ mod tests {
         assert_eq!(a_dt.unwrap(), DataType::None);
 
         // Test Value::Bytes.
-        // Can't build a CString with interior nul-terminated chars.
+        // Can't build a CString with interior nul-terminated chars, but now it can be mapped
+        // to a ByteArray.
         let a = Value::Bytes(vec![0; 30]);
         let a_dt = DataType::try_from(a);
-        assert!(a_dt.is_err());
+        assert!(a_dt.is_ok());
+        assert_eq!(a_dt.unwrap(), DataType::ByteArray(Arc::new(vec![0; 30])));
 
         let a = Value::Bytes(vec![1; 30]);
         let a_dt = DataType::try_from(a);
@@ -2408,6 +2461,7 @@ mod tests {
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
+        let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
         assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
         assert_eq!(format!("{:?}", text), "Text(\"I contain ' and \\\"\")");
         assert_eq!(format!("{:?}", float_from_real), "Float(-0.05, 255)");
@@ -2420,6 +2474,10 @@ mod tests {
         );
         assert_eq!(format!("{:?}", int), "Int(5)");
         assert_eq!(format!("{:?}", big_int), "BigInt(5)");
+        assert_eq!(
+            format!("{:?}", bytes),
+            "ByteArray([0, 8, 39, 92, 100, 128])"
+        );
     }
 
     #[test]
@@ -2433,6 +2491,7 @@ mod tests {
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
+        let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
         assert_eq!(format!("{}", tiny_text), "hi");
         assert_eq!(format!("{}", text), "this is a very long text indeed");
         assert_eq!(format!("{}", float_from_real), "-8.99");
@@ -2442,6 +2501,7 @@ mod tests {
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
+        assert_eq!(format!("{}", bytes), "E'\\x0008275c6480'");
     }
 
     fn _data_type_fungibility_test_eq<T>(f: &dyn for<'a> Fn(&'a DataType) -> T)
@@ -2471,6 +2531,8 @@ mod tests {
         let ushrt6 = DataType::UnsignedInt(6);
         let ulong = DataType::UnsignedBigInt(5);
         let ulong6 = DataType::UnsignedBigInt(6);
+        let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
+        let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
 
         assert_eq!(f(&txt1), f(&txt1));
         assert_eq!(f(&txt2), f(&txt2));
@@ -2484,6 +2546,7 @@ mod tests {
         assert_eq!(f(&double), f(&double));
         assert_eq!(f(&double_from_real), f(&double_from_real));
         assert_eq!(f(&time), f(&time));
+        assert_eq!(f(&bytes), f(&bytes));
 
         // coercion
         assert_eq!(f(&txt1), f(&txt2));
@@ -2513,6 +2576,7 @@ mod tests {
         assert_ne!(f(&txt1), f(&long));
         assert_ne!(f(&txt1), f(&ushrt));
         assert_ne!(f(&txt1), f(&ulong));
+        assert_ne!(f(&txt1), f(&bytes));
 
         assert_ne!(f(&txt2), f(&txt12));
         assert_ne!(f(&txt2), f(&text));
@@ -2525,6 +2589,7 @@ mod tests {
         assert_ne!(f(&txt2), f(&long));
         assert_ne!(f(&txt2), f(&ushrt));
         assert_ne!(f(&txt2), f(&ulong));
+        assert_ne!(f(&txt2), f(&bytes));
 
         assert_ne!(f(&text), f(&text2));
         assert_ne!(f(&text), f(&txt1));
@@ -2538,6 +2603,7 @@ mod tests {
         assert_ne!(f(&text), f(&long));
         assert_ne!(f(&text), f(&ushrt));
         assert_ne!(f(&text), f(&ulong));
+        assert_ne!(f(&text), f(&bytes));
 
         assert_ne!(f(&float), f(&float2));
         assert_ne!(f(&float_from_real), f(&float_from_real2));
@@ -2586,6 +2652,7 @@ mod tests {
         assert_ne!(f(&time), f(&long));
         assert_ne!(f(&time), f(&ushrt));
         assert_ne!(f(&time), f(&ulong));
+        assert_ne!(f(&time), f(&bytes));
 
         assert_ne!(f(&shrt), f(&shrt6));
         assert_ne!(f(&shrt), f(&txt1));
@@ -2594,6 +2661,7 @@ mod tests {
         assert_ne!(f(&shrt), f(&float_from_real));
         assert_ne!(f(&shrt), f(&time));
         assert_ne!(f(&shrt), f(&long6));
+        assert_ne!(f(&shrt), f(&bytes));
 
         assert_ne!(f(&long), f(&long6));
         assert_ne!(f(&long), f(&txt1));
@@ -2602,6 +2670,7 @@ mod tests {
         assert_ne!(f(&long), f(&float_from_real));
         assert_ne!(f(&long), f(&time));
         assert_ne!(f(&long), f(&shrt6));
+        assert_ne!(f(&long), f(&bytes));
 
         assert_ne!(f(&ushrt), f(&ushrt6));
         assert_ne!(f(&ushrt), f(&txt1));
@@ -2612,6 +2681,7 @@ mod tests {
         assert_ne!(f(&ushrt), f(&ulong6));
         assert_ne!(f(&ushrt), f(&shrt6));
         assert_ne!(f(&ushrt), f(&long6));
+        assert_ne!(f(&ushrt), f(&bytes));
 
         assert_ne!(f(&ulong), f(&ulong6));
         assert_ne!(f(&ulong), f(&txt1));
@@ -2622,6 +2692,19 @@ mod tests {
         assert_ne!(f(&ulong), f(&ushrt6));
         assert_ne!(f(&ulong), f(&shrt6));
         assert_ne!(f(&ulong), f(&long6));
+        assert_ne!(f(&ulong), f(&bytes));
+
+        assert_ne!(f(&bytes), f(&ulong));
+        assert_ne!(f(&bytes), f(&ulong6));
+        assert_ne!(f(&bytes), f(&txt1));
+        assert_ne!(f(&bytes), f(&txt2));
+        assert_ne!(f(&bytes), f(&text));
+        assert_ne!(f(&bytes), f(&float_from_real));
+        assert_ne!(f(&bytes), f(&time));
+        assert_ne!(f(&bytes), f(&ushrt6));
+        assert_ne!(f(&bytes), f(&shrt6));
+        assert_ne!(f(&bytes), f(&long6));
+        assert_ne!(f(&bytes), f(&bytes2));
     }
 
     #[test]
@@ -2837,6 +2920,8 @@ mod tests {
         let ushrt6 = DataType::UnsignedInt(6);
         let ulong = DataType::UnsignedBigInt(5);
         let ulong6 = DataType::UnsignedBigInt(6);
+        let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
+        let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
 
         use std::cmp::Ordering;
         assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
@@ -2851,6 +2936,7 @@ mod tests {
         assert_eq!(double.cmp(&double), Ordering::Equal);
         assert_eq!(double_from_real.cmp(&double_from_real), Ordering::Equal);
         assert_eq!(time.cmp(&time), Ordering::Equal);
+        assert_eq!(bytes.cmp(&bytes), Ordering::Equal);
 
         // coercion
         assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
@@ -2876,6 +2962,7 @@ mod tests {
         assert_ne!(txt1.cmp(&ushrt), Ordering::Equal);
         assert_ne!(txt1.cmp(&long), Ordering::Equal);
         assert_ne!(txt1.cmp(&ulong), Ordering::Equal);
+        assert_ne!(txt1.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
         assert_ne!(txt2.cmp(&text), Ordering::Equal);
@@ -2888,6 +2975,7 @@ mod tests {
         assert_ne!(txt2.cmp(&ushrt), Ordering::Equal);
         assert_ne!(txt2.cmp(&long), Ordering::Equal);
         assert_ne!(txt2.cmp(&ulong), Ordering::Equal);
+        assert_ne!(txt2.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(text.cmp(&text2), Ordering::Equal);
         assert_ne!(text.cmp(&txt1), Ordering::Equal);
@@ -2901,6 +2989,7 @@ mod tests {
         assert_ne!(text.cmp(&ushrt), Ordering::Equal);
         assert_ne!(text.cmp(&long), Ordering::Equal);
         assert_ne!(text.cmp(&ulong), Ordering::Equal);
+        assert_ne!(text.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(float.cmp(&float2), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&float_from_real2), Ordering::Equal);
@@ -2942,6 +3031,10 @@ mod tests {
         assert_ne!(float_from_real.cmp(&ulong), Ordering::Equal);
         assert_ne!(double.cmp(&ulong), Ordering::Equal);
         assert_ne!(double_from_real.cmp(&ulong), Ordering::Equal);
+        assert_ne!(float.cmp(&bytes), Ordering::Equal);
+        assert_ne!(float_from_real.cmp(&bytes), Ordering::Equal);
+        assert_ne!(double.cmp(&bytes), Ordering::Equal);
+        assert_ne!(double_from_real.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(time.cmp(&time2), Ordering::Equal);
         assert_ne!(time.cmp(&txt1), Ordering::Equal);
@@ -2955,6 +3048,7 @@ mod tests {
         assert_ne!(time.cmp(&ushrt), Ordering::Equal);
         assert_ne!(time.cmp(&long), Ordering::Equal);
         assert_ne!(time.cmp(&ulong), Ordering::Equal);
+        assert_ne!(time.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ushrt6), Ordering::Equal);
@@ -2968,6 +3062,7 @@ mod tests {
         assert_ne!(shrt.cmp(&time), Ordering::Equal);
         assert_ne!(shrt.cmp(&long6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
+        assert_ne!(shrt.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(ushrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ushrt6), Ordering::Equal);
@@ -2981,6 +3076,7 @@ mod tests {
         assert_ne!(ushrt.cmp(&time), Ordering::Equal);
         assert_ne!(ushrt.cmp(&long6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(long.cmp(&long6), Ordering::Equal);
         assert_ne!(long.cmp(&ulong6), Ordering::Equal);
@@ -2994,6 +3090,7 @@ mod tests {
         assert_ne!(long.cmp(&time), Ordering::Equal);
         assert_ne!(long.cmp(&shrt6), Ordering::Equal);
         assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(long.cmp(&bytes), Ordering::Equal);
 
         assert_ne!(ulong.cmp(&long6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ulong6), Ordering::Equal);
@@ -3007,6 +3104,21 @@ mod tests {
         assert_ne!(ulong.cmp(&time), Ordering::Equal);
         assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(ulong.cmp(&bytes), Ordering::Equal);
+
+        assert_ne!(bytes.cmp(&long6), Ordering::Equal);
+        assert_ne!(bytes.cmp(&ulong), Ordering::Equal);
+        assert_ne!(bytes.cmp(&txt1), Ordering::Equal);
+        assert_ne!(bytes.cmp(&txt2), Ordering::Equal);
+        assert_ne!(bytes.cmp(&text), Ordering::Equal);
+        assert_ne!(bytes.cmp(&float), Ordering::Equal);
+        assert_ne!(bytes.cmp(&float_from_real), Ordering::Equal);
+        assert_ne!(bytes.cmp(&double), Ordering::Equal);
+        assert_ne!(bytes.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(bytes.cmp(&time), Ordering::Equal);
+        assert_ne!(bytes.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(bytes.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(bytes.cmp(&bytes2), Ordering::Equal);
 
         // Test invariants
         // 1. Text types always > everythign else

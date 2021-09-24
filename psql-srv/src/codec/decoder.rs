@@ -1,5 +1,6 @@
 use crate::bytes::BytesStr;
 use crate::codec::error::DecodeError as Error;
+use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
 use crate::codec::Codec;
 use crate::error::Error as BackendError;
 use crate::message::{
@@ -308,6 +309,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+        Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -344,7 +346,10 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
                 TIMESTAMP_FORMAT,
             )?))
         }
-
+        Type::BYTEA => {
+            let bytes = hex::decode(text_str).map_err(InvalidTextByteArrayValue)?;
+            Ok(Value::ByteArray(bytes))
+        }
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -984,6 +989,24 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_bytes() {
+        let bytes = vec![0, 8, 39, 92, 100, 128];
+        let mut buf = BytesMut::new();
+        buf.put_i32(-1); // length (placeholder)
+        bytes.to_sql(&Type::BYTEA, &mut buf).unwrap(); // add value
+        let value_len = buf.len() - 4;
+        let mut window = buf
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual length
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::BYTEA).unwrap(),
+            DataValue::ByteArray(bytes)
+        );
+    }
+
+    #[test]
     fn test_decode_text_null() {
         let mut buf = BytesMut::new();
         buf.put_i32(-1); // size
@@ -1102,6 +1125,17 @@ mod tests {
             DataValue::Timestamp(
                 NaiveDateTime::parse_from_str("2020-01-02 03:04:05.66", TIMESTAMP_FORMAT).unwrap()
             )
+        );
+    }
+
+    #[test]
+    fn test_decode_text_bytes() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(12);
+        buf.extend_from_slice(b"0008275c6480");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::BYTEA).unwrap(),
+            DataValue::ByteArray(vec![0, 8, 39, 92, 100, 128])
         );
     }
 }
