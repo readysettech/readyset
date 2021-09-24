@@ -11,7 +11,7 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 
-setup_data_volume /var/lib/readyset-server
+setup-data-volume /var/lib/readyset-server
 
 if [ -f /var/lib/readyset-server/volume_id ]; then
   volume_id=$(< /var/lib/readyset-server/volume_id)
