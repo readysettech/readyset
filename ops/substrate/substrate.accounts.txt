@@ -1,6 +1,6 @@
 Welcome to your Substrate-managed AWS organization!
 
-You can find the Substrate documentation at <https://src-bin.com/substrate/>.
+You can find the Substrate documentation at <https://src-bin.co/substrate/>.
 
 You're likely to want to use the AWS CLI or Console to explore and manipulate
 your Organization.  Here are the account numbers and roles you'll need for the
