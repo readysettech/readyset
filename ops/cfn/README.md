@@ -23,7 +23,7 @@ general:
     - <region>
   parameters:
     KeyPairName: <Name of AWS keypair>
-    ReadySetBucketName: <Bucket Name created in step 1>
+    ReadysetS3BucketName: <Bucket Name created in step 1>
     AccessCIDR: <CIDR that you will be able to SSH to the Bastion Host from>
     DatabaseName: <Name of Database created in RDS>
 ```
