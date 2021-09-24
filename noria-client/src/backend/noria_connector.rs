@@ -754,12 +754,11 @@ impl NoriaConnector {
         let filter = binops
             .iter()
             .enumerate()
-            .filter_map(|(i, (col, binop))| {
+            .find_map(|(i, (col, binop))| {
                 ViewQueryOperator::try_from(*binop)
                     .ok()
                     .map(|op| (i, col, op))
             })
-            .next()
             .map(|(idx, col, operator)| -> ReadySetResult<_> {
                 let mut key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
                 if !keys.is_empty() {
