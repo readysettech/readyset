@@ -21,6 +21,13 @@ impl ReferredTables for SqlQuery {
                 .flat_map(|(_, sq)| &sq.tables)
                 .cloned()
                 .collect(),
+            SqlQuery::RenameTable(ref rt) => rt
+                .ops
+                .iter()
+                // Only including op.from because referred_tables() callers expect to get a list of
+                // _existing_ tables that are utilized in the query.
+                .map(|op| op.from.clone())
+                .collect(),
             // If the type does not have any referred tables, we return an
             // empty hashset.
             SqlQuery::CreateView(_)

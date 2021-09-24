@@ -776,6 +776,7 @@ impl SqlIncorporator {
             | ref q @ SqlQuery::Delete(_)
             | ref q @ SqlQuery::DropTable(_)
             | ref q @ SqlQuery::AlterTable(_)
+            | ref q @ SqlQuery::RenameTable(_)
             | ref q @ SqlQuery::Insert(_) => {
                 for t in &q.referred_tables() {
                     if !self.view_schemas.contains_key(&t.name) {

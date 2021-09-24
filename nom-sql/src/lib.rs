@@ -51,6 +51,7 @@ mod insert;
 mod join;
 mod keywords;
 mod order;
+mod rename;
 mod select;
 mod set;
 mod table;

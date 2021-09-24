@@ -7,6 +7,7 @@ use crate::create::{creation, view_creation, CreateTableStatement, CreateViewSta
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{drop_table, DropTableStatement};
 use crate::insert::{insertion, InsertStatement};
+use crate::rename::{rename_table, RenameTableStatement};
 use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
@@ -36,6 +37,7 @@ pub enum SqlQuery {
     StartTransaction(StartTransactionStatement),
     Commit(CommitStatement),
     Rollback(RollbackStatement),
+    RenameTable(RenameTableStatement),
 }
 
 impl fmt::Display for SqlQuery {
@@ -54,6 +56,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::StartTransaction(ref tx) => write!(f, "{}", tx),
             SqlQuery::Commit(ref commit) => write!(f, "{}", commit),
             SqlQuery::Rollback(ref rollback) => write!(f, "{}", rollback),
+            SqlQuery::RenameTable(ref rename) => write!(f, "{}", rename),
         }
     }
 }
@@ -74,6 +77,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(start_transaction(dialect), SqlQuery::StartTransaction),
             map(commit(dialect), SqlQuery::Commit),
             map(rollback(dialect), SqlQuery::Rollback),
+            map(rename_table(dialect), SqlQuery::RenameTable),
         ))(i)
     }
 }
