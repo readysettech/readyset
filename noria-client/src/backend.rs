@@ -1047,31 +1047,15 @@ where
                 // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                 nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
                 nom_sql::SqlQuery::CreateTable(stmt) => handle_ddl!(handle_create_table(stmt)),
-                nom_sql::SqlQuery::DropTable(_) => {
+                nom_sql::SqlQuery::DropTable(_)
+                | nom_sql::SqlQuery::AlterTable(_)
+                | nom_sql::SqlQuery::RenameTable(_) => {
                     if self.mirror_reads {
                         let res = upstream.query(query).await;
                         handle.set_upstream_duration();
                         Ok(QueryResult::Upstream(res?))
                     } else {
-                        unsupported!("DROP TABLE not yet supported");
-                    }
-                }
-                nom_sql::SqlQuery::AlterTable(_) => {
-                    if self.mirror_reads {
-                        let res = upstream.query(query).await;
-                        handle.set_upstream_duration();
-                        Ok(QueryResult::Upstream(res?))
-                    } else {
-                        unsupported!("ALTER TABLE not yet supported");
-                    }
-                }
-                nom_sql::SqlQuery::RenameTable(_) => {
-                    if self.mirror_reads {
-                        let res = upstream.query(query).await;
-                        handle.set_upstream_duration();
-                        Ok(QueryResult::Upstream(res?))
-                    } else {
-                        unsupported!("RENAME TABLE not yet supported");
+                        unsupported!("{} not yet supported", parsed_query.query_type());
                     }
                 }
                 nom_sql::SqlQuery::Set(_) => {
