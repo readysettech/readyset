@@ -23,3 +23,15 @@ steps:
     label: ":pipeline:"
 STEPS
 }
+
+resource "buildkite_pipeline" "docker-release" {
+  name           = "docker-release"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.docker-release.yml"
+    label: ":pipeline:"
+STEPS
+}
