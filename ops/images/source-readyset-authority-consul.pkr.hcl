@@ -1,12 +1,12 @@
 locals {
-  consul_server_ami_name = format("readyset/images/%s-ssd/consul_server-%s-amd64-%s",
+  readyset_authority_consul_ami_name = format("readyset/images/%s-ssd/readyset-authority-consul-%s-amd64-%s",
     local.ami_virtualization_type,
     local.ami_version,
     local.ami_suffix
   )
 }
 
-source "amazon-ebs" "consul-server" {
+source "amazon-ebs" "readyset-authority-consul" {
   # Settings to allow development of images outside of CI.
   skip_create_ami       = local.skip_create_ami
   force_deregister      = local.force_degregister
@@ -26,7 +26,7 @@ source "amazon-ebs" "consul-server" {
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
 
-  ami_name                  = local.consul_server_ami_name
+  ami_name                  = local.readyset_authority_consul_ami_name
   ssh_clear_authorized_keys = true
 
   ami_users = local.ami_users

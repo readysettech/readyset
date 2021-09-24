@@ -1,8 +1,8 @@
 build {
-  sources = ["source.amazon-ebs.consul-server"]
+  sources = ["source.amazon-ebs.readyset-authority-consul"]
 
   provisioner "file" {
-    source      = "provisioners/files/internal-base"
+    source      = "provisioners/files/external-base"
     destination = "/tmp/"
   }
 
@@ -24,16 +24,13 @@ build {
   provisioner "shell" {
     scripts = [
       "provisioners/scripts/wait-for-cloud-init.sh",
-      "provisioners/scripts/internal-base/00-init.sh",
-      "provisioners/scripts/internal-base/10-aws-cli.sh",
-      "provisioners/scripts/internal-base/20-hostname.sh",
-      "provisioners/scripts/internal-base/99-tailscale.sh",
+      "provisioners/scripts/external-base/00-init.sh",
+      "provisioners/scripts/external-base/10-aws.sh",
       "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/consul-server/00-init.sh",
     ]
-    environment_vars = [
-      "HOSTNAME_PREFIX=consul-server"
-    ]
   }
+
+  post-processor "manifest" {}
 }

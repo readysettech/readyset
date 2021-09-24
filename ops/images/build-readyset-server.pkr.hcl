@@ -46,4 +46,6 @@ build {
   }
   # TODO: Add consul client that can join a consul cluster based upon passed in
   # tags.
+
+  post-processor "manifest" {}
 }

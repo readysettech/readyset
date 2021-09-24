@@ -26,7 +26,7 @@ source "amazon-ebs" "readyset-mysql-adapter" {
   ssh_username            = local.ssh_username
 
 
-  ami_name                  = local.external_base_ami_name
+  ami_name                  = local.readyset_mysql_adapter_ami_name
   ssh_clear_authorized_keys = true
 
   ami_users = local.ami_users
