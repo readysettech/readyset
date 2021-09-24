@@ -289,13 +289,13 @@ steps:
     - ecr#v2.2.0:
         login: true
 
-  - label: ':packer: Format/Validate new-images'
+  - label: ':packer: Format/Validate images'
     key: ops-packer-lint
     depends_on:
     - build-ops-image
     commands:
     - .buildkite/confirm-binaries-for-packer.sh
-    - cd /workdir/ops/new-images
+    - cd /workdir/ops/images
     - packer fmt -check -diff .
     - packer init .
     - packer validate .
@@ -310,7 +310,7 @@ steps:
     depends_on:
     - build-ops-image
     commands:
-    - cd /workdir/ops/new-images
+    - cd /workdir/ops/images
     - find -name "*.sh" -type f -exec shellcheck {} \;
     plugins:
     - docker#v3.7.0:
@@ -319,14 +319,14 @@ steps:
         login: true
 
   # TODO: Eventually their will be a base image and other images that will be in different steps
-  - label: ':packer: Run test build for all new-images'
+  - label: ':packer: Run test build for all images'
     depends_on:
     - build-ops-image
     - ops-packer-lint
     - ops-shellcheck
     commands:
     - .buildkite/confirm-binaries-for-packer.sh
-    - cd /workdir/ops/new-images
+    - cd /workdir/ops/images
     - packer init .
     - packer build .
     plugins:
@@ -334,14 +334,6 @@ steps:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
     - ecr#v2.2.0:
         login: true
-
-  - label: ':pipeline: Upload Packer linting steps'
-    depends_on:
-    - build-ops-image
-    command: .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
-    env:
-      ONLY_VALIDATE: 1
-      PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
 
   - label: ":rust: :docker: Build Substrate Runtime Image"
     key: build-runtime-image

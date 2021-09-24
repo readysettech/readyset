@@ -120,19 +120,15 @@ steps:
               include:
                 - "ops/tf/**"
 
-            - label: ':packer: Format/Validate new-images'
+            - label: ':packer: Format/Validate images'
               include:
-                - "ops/new-images/**"
+                - "ops/images/**"
 
             - label: ':shell::heavy_check_mark: shellcheck all scripts'
               include:
-                - "ops/new-images/**"
+                - "ops/images/**"
 
-            - label: ':packer: Run test build for all new-images'
-              include:
-                - "ops/new-images/**"
-
-            - label: ':pipeline: Upload Packer linting steps'
+            - label: ':packer: Run test build for all images'
               include:
                 - "ops/images/**"
 
@@ -305,17 +301,5 @@ steps:
     depends_on:
     - build-noria-release
     - build-noria-mysql-release
-    env:
-      PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
-
-  - block: ":packer: Build Packer images?"
-    key: build-packer-images
-    depends_on: []
-
-  - label: ':pipeline: Build Packer pipeline'
-    commands:
-    - .buildkite/build-packer-images.sh | buildkite-agent pipeline upload
-    depends_on:
-      - build-packer-images
     env:
       PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
