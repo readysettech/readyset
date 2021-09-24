@@ -3,7 +3,7 @@ After=network.target
 Description=ReadySet Server
 
 [Service]
-ExecStart=/usr/local/bin/readyset-server -a 0.0.0.0 --use-aws-external-address --prometheus-metrics
+ExecStart=/usr/local/bin/readyset-server -a 0.0.0.0 --use-aws-external-address --prometheus-metrics --authority consul
 StateDirectory=readyset-server
 WorkingDirectory=/var/lib/readyset-server
 EnvironmentFile=/etc/default/readyset-server
