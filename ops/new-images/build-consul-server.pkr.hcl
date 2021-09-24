@@ -12,6 +12,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/setup-data-volume"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "provisioners/files/consul-server"
     destination = "/tmp/"
   }
@@ -24,6 +29,7 @@ build {
       "provisioners/scripts/internal-base/20-hostname.sh",
       "provisioners/scripts/internal-base/99-tailscale.sh",
       "provisioners/scripts/node_exporter/00-init.sh",
+      "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/consul-server/00-init.sh",
     ]
     environment_vars = [
