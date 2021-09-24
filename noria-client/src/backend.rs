@@ -669,7 +669,9 @@ where
                     unsupported!("query type unsupported");
                 }
             }
-            nom_sql::SqlQuery::DropTable(..) | nom_sql::SqlQuery::AlterTable(..) => {
+            nom_sql::SqlQuery::DropTable(..)
+            | nom_sql::SqlQuery::AlterTable(..)
+            | nom_sql::SqlQuery::RenameTable(..) => {
                 error!("unsupported query");
                 unsupported!("query type unsupported");
             }
@@ -1061,6 +1063,15 @@ where
                         Ok(QueryResult::Upstream(res?))
                     } else {
                         unsupported!("ALTER TABLE not yet supported");
+                    }
+                }
+                nom_sql::SqlQuery::RenameTable(_) => {
+                    if self.mirror_reads {
+                        let res = upstream.query(query).await;
+                        handle.set_upstream_duration();
+                        Ok(QueryResult::Upstream(res?))
+                    } else {
+                        unsupported!("RENAME TABLE not yet supported");
                     }
                 }
                 nom_sql::SqlQuery::Set(_) => {
