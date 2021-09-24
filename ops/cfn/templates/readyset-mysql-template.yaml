@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Readyset
+Description: Readyset MySQL Cluster
 Parameters:
   ReadysetAdapterInstanceType:
     Type: String
@@ -29,6 +29,7 @@ Parameters:
       ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
   MySQLDatabaseURL:
     Type: String
+    NoEcho: True
     Default: ""
     # TODO: Allowed Pattern
   DeploymentName:
@@ -69,6 +70,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
+          CidrIp: !Ref VPCCIDR
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0

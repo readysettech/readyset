@@ -1,9 +1,10 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
   AvailabilityZones:
     Description: >-
       List of Availability Zones to use for the subnets in the VPC.
-      Note: The logical order is preserved. (3 Three Availability
-      ZonesAZs are used for this deployment.)
+      Note: The logical order is preserved. Requires 3.
     Type: 'List<AWS::EC2::AvailabilityZone::Name>'
   QSS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
@@ -88,11 +89,23 @@ Parameters:
   ReadysetAdapterNodes:
     Type: String
     Description: Number of Adapter nodes to create
-  MySQLDatabaseURL:
+  DatabaseName:
     Type: String
-    Default: ""
+    Description: Name of MySQL Database
+  DatabaseStorageType:
+    Type: String
+    Default: gp2
+    Description: Storage  type for MySQL Database
+  DatabaseAllocatedStorage:
+    Type: String
+    Description: Allocated storage for MySQL Database
+  DatabaseUsername:
+    Type: String
+    Description: Username to log into the MySQL Database
+  DatabasePassword:
+    Type: String
     NoEcho: true
-    # TODO: Allowed Pattern
+    Description: Password to log into the MySQL Database
   DeploymentName:
     Type: String
     Default: ""
@@ -134,6 +147,39 @@ Resources:
         VPCID: !GetAtt
           - VPCStack
           - Outputs.VPCID
+  ReadysetConsulStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
+      Parameters:
+        BastionSecurityGroupID: !GetAtt
+          - BastionStack
+          - Outputs.BastionSecurityGroupID
+        KeyPairName: !Ref KeyPairName
+        PrivateSubnet1ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet1AID
+        PrivateSubnet2ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet2AID
+        PrivateSubnet3ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet3AID
+        VPCID: !GetAtt
+          - VPCStack
+          - Outputs.VPCID
+        VPCCIDR: !Ref VPCCIDR
+  MySQLDatabaseInstance:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      Engine: "mysql"
+      DBInstanceClass: db.m5.large
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      StorageType: !Ref DatabaseStorageType
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -142,7 +188,14 @@ Resources:
       Parameters:
         ReadysetAdapterInstanceType: !Ref ReadysetAdapterInstanceType
         ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
-        MySQLDatabaseURL: !Ref MySQLDatabaseURL
+        MySQLDatabaseURL: !Sub
+          - mysql://${DatabaseUsername}:$DatabasePassword@${EndpointAddress}:${EndpointPort}/${DatabaseName}
+          - EndpointAddress: !GetAtt
+              - MySQLDatabaseInstance
+              - Endpoint.Address
+            EndpointPort: !GetAtt
+              - MySQLDatabaseInstance
+              - Endpoint.Port
         DeploymentName: !Ref DeploymentName
         KeyPairName: !Ref KeyPairName
         PrivateSubnet1ID: !GetAtt

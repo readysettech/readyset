@@ -1,0 +1,174 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  BastionSecurityGroupID:
+    Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
+    Type: "AWS::EC2::SecurityGroup::Id"
+  ConsulInstanceType:
+    Type: String
+    Description: The EC2 instance type for the Consul instances.
+    ConstraintDescription: Choose an instance type.
+    Default: m5.large
+  ConsulEc2RetryJoinTagKey:
+    Description:
+      The EC2 instance tag key to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "ReadysetConsulNodeType"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+  ConsulEc2RetryJoinTagValue:
+    Description:
+      The EC2 instance tag value to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "Server"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  PrivateSubnet1ID:
+    Description: "ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  PrivateSubnet2ID:
+    Description: "ID of the private subnet 2 in Availability Zone 2 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  PrivateSubnet3ID:
+    Description: "ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  VPCID:
+    Description: VPC ID
+    Type: "AWS::EC2::VPC::Id"
+  VPCCIDR:
+    AllowedPattern: >-
+      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Description: CIDR block for the VPC
+    Type: String
+  ConsulServerNodes:
+    Type: String
+    Description: The number of Consul server nodes that will be created. You can choose 3, 5, or 7 nodes.
+    AllowedValues:
+      - "3"
+      - "5"
+      - "7"
+    Default: "3"
+Mappings:
+  AWSAMIRegionMap:
+    us-east-2:
+      AUTHORITYCONSUL: ami-00294ee57b7ae6277
+Resources:
+  ConsulSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enables SSH access.
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref VPCCIDR
+      Tags:
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref "AWS::StackName"
+              - ConsulSecGroup
+  ConsulServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ""
+  ConsulJoinPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ConsulJoin
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - "ec2:DescribeInstances"
+              - "ec2:DescribeTags"
+              - "autoscaling:DescribeAutoScalingGroups"
+            Resource: "*"
+      Roles:
+        - !Ref ConsulServerRole
+  ConsulServerProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ConsulServerRole
+  ConsulServerLC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      InstanceType: !Ref ConsulInstanceType
+      AssociatePublicIpAddress: false
+      SecurityGroups:
+        - !Ref ConsulSecurityGroup
+      KeyName: !Ref KeyPairName
+      ImageId: !FindInMap
+        - AWSAMIRegionMap
+        - !Ref "AWS::Region"
+        - AUTHORITYCONSUL
+      IamInstanceProfile: !Ref ConsulServerProfile
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+            MIME-Version: 1.0
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            #!/bin/bash -v
+            set -eu -o pipefail
+            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
+            export AWS_CLOUDFORMATION_RESOURCE="ConsulServerASG"
+            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
+            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
+            exec /usr/local/bin/user-data-init.sh
+            --==BOUNDARY==
+          - {}
+  ConsulServerASG:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      LaunchConfigurationName: !Ref ConsulServerLC
+      MinSize: !Ref ConsulServerNodes
+      MaxSize: !Ref ConsulServerNodes
+      DesiredCapacity: !Ref ConsulServerNodes
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+        - !Ref PrivateSubnet3ID
+      Tags:
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref "AWS::StackName"
+              - ConsulServer
+          PropagateAtLaunch: true
+        - Key: !Ref ConsulEc2RetryJoinTagKey
+          Value: !Ref ConsulEc2RetryJoinTagValue
+          PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ConsulServerNodes
+        Timeout: PT20M
+Outputs:
+  ConsulJoinPolicy:
+    Value: !Ref ConsulJoinPolicy
+    Description: IAM Policy that allows an instance to find the Consul server nodes.
+  ConsulEc2RetryJoinTagKey:
+    Value: !Ref ConsulEc2RetryJoinTagKey
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
+  ConsulEc2RetryJoinTagValue:
+    Value: !Ref ConsulEc2RetryJoinTagValue
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.

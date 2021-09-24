@@ -6,4 +6,8 @@ tests:
     parameters:
       ReadysetAdapterNodes: 3
       AvailabilityZones: $[taskcat_genaz_3]
+      DatabaseUsername: $[taskcat_random-string]
+      DatabasePassword: $[taskcat_genpass_16S]
+      DatabaseStorageType: gp2
+      DatabaseAllocatedStorage: 20
     template: templates/readyset-mysql-super-template.yaml
