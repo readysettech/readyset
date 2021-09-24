@@ -14,6 +14,10 @@ terraform {
       source = "hashicorp/external"
       version = ">= 2.1.0"
     }
+    buildkite = {
+      source  = "buildkite/buildkite"
+      version = "0.5.0"
+    }
   }
   required_version = "= 1.0.2"
 }

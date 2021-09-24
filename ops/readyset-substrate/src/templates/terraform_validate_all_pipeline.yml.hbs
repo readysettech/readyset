@@ -13,6 +13,8 @@ steps:
             - "{{ this }}"
             {{/each}}
           shell: false
+          environment:
+          - BUILDKITE_API_TOKEN
       - ecr#v2.2.0:
           account_ids: "305232526136"
           login: true
