@@ -11,6 +11,8 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 
+/usr/local/bin/configure-consul-client.sh
+
 setup-data-volume /var/lib/readyset-server
 
 if [ -f /var/lib/readyset-server/volume_id ]; then
