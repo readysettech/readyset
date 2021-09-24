@@ -158,6 +158,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compression"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5443ccbb270374a2b1055fc72da40e1f237809cd6bb0e97e66d264cd138473a6"
+dependencies = [
+ "flate2",
+ "futures-core",
+ "memchr",
+ "pin-project-lite 0.2.7",
+ "tokio 1.11.0",
+]
+
+[[package]]
 name = "async-executor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3682,6 +3695,7 @@ name = "noria-client-adapter"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-compression",
  "async-trait",
  "clap 3.0.0-beta.4",
  "futures-util",
@@ -3695,6 +3709,7 @@ dependencies = [
  "readyset-logging",
  "tokio 1.11.0",
  "tokio-stream",
+ "tokio-tar",
  "tracing",
  "tracing-futures",
  "tracing-subscriber",
@@ -6419,6 +6434,21 @@ dependencies = [
  "futures-core",
  "pin-project-lite 0.2.7",
  "tokio 1.11.0",
+]
+
+[[package]]
+name = "tokio-tar"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a50188549787c32c1c3d9c8c71ad7e003ccf2f102489c5a96e385c84760477f4"
+dependencies = [
+ "filetime",
+ "futures-core",
+ "libc",
+ "redox_syscall 0.2.10",
+ "tokio 1.11.0",
+ "tokio-stream",
+ "xattr",
 ]
 
 [[package]]

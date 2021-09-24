@@ -3,14 +3,11 @@
 
 #![allow(dead_code)] // TODO: remove once this is used
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use serde::Serialize;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
 
 use noria::ReadySetError;
 
@@ -194,10 +191,6 @@ pub(crate) struct QueryInfo {
 /// [design-doc]: https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit
 #[derive(Debug, Serialize)]
 struct QueryCoverageInfo {
-    /// Path to which to write when save() is called
-    #[serde(skip)]
-    file: PathBuf,
-
     /// Queries that have been run during the execution of an adapter
     queries: HashMap<String, QueryInfo>,
 
@@ -212,9 +205,8 @@ struct QueryCoverageInfo {
 }
 
 impl QueryCoverageInfo {
-    fn new(file: PathBuf) -> Self {
+    fn new() -> Self {
         Self {
-            file,
             queries: HashMap::new(),
             prepared: HashMap::new(),
             schema: None,
@@ -251,20 +243,9 @@ impl QueryCoverageInfo {
         }
     }
 
-    /// Serialize this QueryCoverageInfo to JSON and write it to self.file.  Takes care of
-    /// opening/flushing/closing the file on its own.
-    pub async fn save(&self) -> anyhow::Result<()> {
-        let mut file = OpenOptions::new()
-            .read(false)
-            .write(true)
-            .append(false)
-            .truncate(true)
-            .create(true)
-            .open(&self.file)
-            .await?;
-        let data = serde_json::to_vec_pretty(&self)?;
-        file.write_all(&data).await?;
-        Ok(())
+    /// Serialize this QueryCoverageInfo to JSON.
+    fn serialize(&self) -> anyhow::Result<Vec<u8>> {
+        Ok(serde_json::to_vec_pretty(&self)?)
     }
 }
 
@@ -276,14 +257,6 @@ impl QueryCoverageInfo {
 pub struct QueryCoverageInfoRef(&'static Mutex<QueryCoverageInfo>);
 
 impl QueryCoverageInfoRef {
-    /// Allocate a shared [`QueryCoverageInfo`] on the heap that lives for the lifetime of the
-    /// program, and return a cloneable reference to it
-    pub fn new(path: PathBuf) -> Self {
-        Self(Box::leak(Box::new(Mutex::new(QueryCoverageInfo::new(
-            path,
-        )))))
-    }
-
     /// Record that a query was prepared
     ///
     /// # Panics
@@ -317,13 +290,21 @@ impl QueryCoverageInfoRef {
         self.0.lock().unwrap().prepare_executed(statement_id, event)
     }
 
-    /// Serialize to JSON and write to the file that was passed into new().
+    /// Serialize to JSON and return the resulting blob.
     ///
     /// # Panics
     ///
     /// Panics if the backing mutex has been poisoned (this should generally only happen in
     /// exceptional cases)
-    pub async fn save(&self) -> anyhow::Result<()> {
-        self.0.lock().unwrap().save().await
+    pub fn serialize(&self) -> anyhow::Result<Vec<u8>> {
+        self.0.lock().unwrap().serialize()
+    }
+}
+
+impl Default for QueryCoverageInfoRef {
+    /// Allocate a shared [`QueryCoverageInfo`] on the heap that lives for the lifetime of the
+    /// program, and return a cloneable reference to it
+    fn default() -> Self {
+        Self(Box::leak(Box::new(Mutex::new(QueryCoverageInfo::new()))))
     }
 }

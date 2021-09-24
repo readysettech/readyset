@@ -2,6 +2,7 @@
 #![deny(macro_use_extern_crate)]
 
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
@@ -10,6 +11,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
 use anyhow::anyhow;
+use async_compression::tokio::write::GzipEncoder;
 use async_trait::async_trait;
 use clap::Clap;
 use futures_util::future::FutureExt;
@@ -18,6 +20,7 @@ use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::{QueryHandler, UpstreamDatabase};
+use tokio::fs::OpenOptions;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, info, span, Level};
@@ -231,8 +234,8 @@ where
 
         let query_coverage_info = options
             .coverage_analysis
-            .as_ref()
-            .map(|f| QueryCoverageInfoRef::new(f.clone()));
+            .is_some()
+            .then(QueryCoverageInfoRef::default);
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
@@ -286,8 +289,26 @@ where
             rt.handle().spawn(fut);
         }
 
-        if let Some(qci) = query_coverage_info.as_ref() {
-            rt.block_on(qci.save())?;
+        if let Some(path) = options.coverage_analysis.as_ref() {
+            let _guard = rt.enter();
+            let file = rt.block_on(
+                OpenOptions::new()
+                    .read(false)
+                    .write(true)
+                    .append(false)
+                    .truncate(true)
+                    .create(true)
+                    .open(path),
+            )?;
+            let mut tar = tokio_tar::Builder::new(GzipEncoder::new(file));
+
+            let qci = query_coverage_info.unwrap().serialize()?;
+            let mut header = tokio_tar::Header::new_gnu();
+            header.set_size(qci.len().try_into()?);
+            header.set_cksum();
+            rt.block_on(tar.append_data(&mut header, "query-info.json", qci.as_ref()))?;
+
+            rt.block_on(tar.finish())?;
         }
 
         drop(ch);
