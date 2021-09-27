@@ -2,13 +2,14 @@
 //! which Noria worker acts as the controller, which Noria workers exist, detecting failed
 //! workers which necessitate changes, and storing cluster wide global state.
 
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
+use std::str::FromStr;
 use url::Url;
 
 mod consul;
@@ -161,4 +162,37 @@ pub enum Authority {
     ZookeeperAuthority,
     ConsulAuthority,
     LocalAuthority,
+}
+
+/// Enum that mirrors Authority that parses command line arguments.
+#[derive(Clone)]
+pub enum AuthorityType {
+    ZookeeperAuthority,
+    ConsulAuthority,
+}
+
+impl FromStr for AuthorityType {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "zookeeper" => Ok(AuthorityType::ZookeeperAuthority),
+            "consul" => Ok(AuthorityType::ConsulAuthority),
+            other => Err(anyhow!("Invalid authority type: {}", other)),
+        }
+    }
+}
+
+impl AuthorityType {
+    pub async fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
+        match self {
+            AuthorityType::ZookeeperAuthority => Authority::from(
+                ZookeeperAuthority::new(&format!("{}/{}", &addr, &deployment))
+                    .await
+                    .unwrap(),
+            ),
+            AuthorityType::ConsulAuthority => Authority::from(
+                ConsulAuthority::new(&format!("http://{}/{}", &addr, &deployment)).unwrap(),
+            ),
+        }
+    }
 }
