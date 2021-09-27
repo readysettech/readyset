@@ -1,315 +1,107 @@
 /// Defintions of things specific to how Substrate organizes Terraform modules.
-use std::path::{Path, PathBuf};
+use std::io::BufRead;
+use std::path::PathBuf;
+use std::process::Command;
+use std::str::FromStr;
 
 use anyhow::{bail, Result};
-use clap::Clap;
+use serde::Serialize;
+use tracing::error;
 
-// Important note about region. Region here is not only an AWS region but also includes the special
-// region "global" which represents things which are only in one place.
-
-// There are different kind of root modules with different directory structures that Substrate generates
-// This trait represents those different kind of root modules and what we can get from them.
-pub(crate) trait ModuleLocator {
-    // Where is this root module located in the repository
-    fn to_terraform_path(&self) -> Result<PathBuf>;
-    // A description of the root module
-    fn to_description(&self) -> String;
-    // What args need to be passed in to this command to reference this module
-    fn to_args(&self) -> Vec<String>;
+/// Reference to a root module
+#[derive(Serialize, Debug)]
+pub(crate) struct RootModule {
+    path: PathBuf,
 }
 
-// The most common kind of root module is Service which contains all of the different forms
-#[derive(Clap, Debug, PartialEq)]
-pub(crate) struct ServiceModuleLocator {
-    domain: String,
-    environment: String,
-    #[clap(long, default_value = "default")]
-    quality: String,
-    region: String,
-}
+impl RootModule {
+    pub(crate) fn to_terraform_path(&self) -> Result<PathBuf> {
+        let root_modules_path = root_modules_path()?;
+        let terraform_path = root_modules_path.join(&self.path);
+        if terraform_path.is_dir() {
+            Ok(terraform_path)
+        } else {
+            bail!("root module {:?} does not exist", &self.path)
+        }
+    }
 
-// The admin modules contain IAMs and SSO configuration only. These only have quality and region.
-#[derive(Clap, Debug, PartialEq)]
-pub(crate) struct AdminModuleLocator {
-    #[clap(long, default_value = "default")]
-    quality: String,
-    region: String,
-}
-
-// The deploy modules contain resources that are shared between different accounts. These only have
-// region.
-#[derive(Clap, Debug, PartialEq)]
-pub(crate) struct DeployModuleLocator {
-    region: String,
-}
-
-fn substrate_root() -> PathBuf {
-    match std::env::var("SUBSTRATE_ROOT") {
-        Ok(substrate_root) => Path::new(&substrate_root).to_path_buf(),
-        Err(_) => Path::new("ops/substrate").to_path_buf(),
+    // The output of the `substrate root-modules` command includes the prefix
+    // `root-modules`. Since we also want to use it as input, remove the
+    // `root-modules` prefix.
+    fn from_substrate_output(s: &str) -> Self {
+        let path = PathBuf::from(s)
+            .strip_prefix("root-modules")
+            .unwrap()
+            .to_path_buf();
+        Self { path }
     }
 }
 
-fn root_modules_path() -> PathBuf {
-    let substrate_root = substrate_root();
-    substrate_root.join("root-modules")
+impl FromStr for RootModule {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let path = root_modules_path()?.join(PathBuf::from(s));
+        if path.is_dir() {
+            Ok(RootModule { path })
+        } else {
+            bail!("Could not find substrate root module {}", s)
+        }
+    }
 }
 
-impl ModuleLocator for ServiceModuleLocator {
-    fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = root_modules_path();
-        if !path.is_dir() {
-            bail!("Cannot find root modules path")
+fn root_path() -> Result<PathBuf> {
+    let mut path: PathBuf;
+    if let Ok(substrate_root) = std::env::var("SUBSTRATE_ROOT") {
+        path = PathBuf::from(&substrate_root);
+        if !path.is_absolute() {
+            path = std::env::current_dir()?.join(path)
         }
-        path.push(self.domain.clone());
-        if !path.is_dir() {
-            bail!("Cannot find domain root modules path")
-        }
-        path.push(self.environment.clone());
-        if !path.is_dir() {
-            bail!("Cannot find environment root modules path")
-        }
-        path.push(self.quality.clone());
-        if !path.is_dir() {
-            bail!("Cannot find quality root modules path")
-        }
-        path.push(self.region.clone());
-        if !path.is_dir() {
-            bail!("Cannot find region root module path")
-        }
-        Ok(path)
+    } else {
+        path = std::env::current_dir()?.join("ops/substrate")
     }
+    if !path.is_dir() {
+        bail!("could not find substrate root")
+    }
+    Ok(path)
+}
 
-    fn to_description(&self) -> String {
-        format!(
-            "Service Root Domain: {} Environment: {} Quality: {} Region: {}",
-            self.domain, self.environment, self.quality, self.region
+fn root_modules_path() -> Result<PathBuf> {
+    let path = root_path()?.join("root-modules");
+    if !path.is_dir() {
+        bail!("could not find root-modules in substrate root");
+    }
+    Ok(path)
+}
+
+pub(crate) fn root_modules() -> Result<Vec<RootModule>> {
+    let root = root_path()?;
+    let output = Command::new("substrate")
+        .arg("root-modules")
+        .current_dir(&root)
+        .output()?;
+    if !output.status.success() {
+        error!(
+            stderr = %std::str::from_utf8(&output.stderr).unwrap(),
+            stdout = %std::str::from_utf8(&output.stdout).unwrap(),
+        );
+        bail!(
+            "Could not get root-modules from substrate (status {})",
+            output.status.code().unwrap_or(0)
         )
     }
-
-    fn to_args(&self) -> Vec<String> {
-        vec![
-            String::from("--quality"),
-            self.quality.clone(),
-            self.domain.clone(),
-            self.environment.clone(),
-            self.region.clone(),
-        ]
-    }
-}
-
-impl ModuleLocator for AdminModuleLocator {
-    fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = root_modules_path();
-        if !path.is_dir() {
-            bail!("Cannot find root modules path")
-        }
-        path.push("admin");
-        if !path.is_dir() {
-            bail!("Cannot find admin root modules path")
-        }
-        path.push(self.quality.clone());
-        if !path.is_dir() {
-            bail!("Cannot find quality root module path")
-        }
-        path.push(self.region.clone());
-        if !path.is_dir() {
-            bail!("Cannot find region root module path")
-        }
-        Ok(path)
-    }
-
-    fn to_description(&self) -> String {
-        format!(
-            "Admin Root Quality: {} Region: {}",
-            self.quality, self.region
-        )
-    }
-
-    fn to_args(&self) -> Vec<String> {
-        vec![
-            String::from("--quality"),
-            self.quality.clone(),
-            self.region.clone(),
-        ]
-    }
-}
-
-impl ModuleLocator for DeployModuleLocator {
-    fn to_terraform_path(&self) -> Result<PathBuf> {
-        let mut path: PathBuf = root_modules_path();
-        if !path.is_dir() {
-            bail!("Cannot find root modules path")
-        }
-        path.push("deploy");
-        if !path.is_dir() {
-            bail!("Cannot find deploy root modules path")
-        }
-        path.push(self.region.clone());
-        if !path.is_dir() {
-            bail!("Cannot find region root module path")
-        }
-        Ok(path)
-    }
-
-    fn to_description(&self) -> String {
-        format!("Deploy Root Region: {}", self.region)
-    }
-
-    fn to_args(&self) -> Vec<String> {
-        vec![self.region.clone()]
-    }
-}
-
-// TODO: In one scan over the directory, generate all the different module locators. As such, this
-// should eventually return Result<Vec<dyn ModuleLocator>>
-pub(crate) fn find_all_admin_module_locators() -> Result<Vec<AdminModuleLocator>> {
-    let mut admin_module_locators: Vec<AdminModuleLocator> = vec![];
-    let admin_path = root_modules_path().join("admin");
-    for entry in admin_path.read_dir()? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            // If it is a directory, assume it is a quality.
-            let quality = path
-                .file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .unwrap()
-                .to_string();
-            for entry in path.read_dir()? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    // If it is a directory, assume it is a region.
-                    let region = path
-                        .file_name()
-                        .map(std::ffi::OsStr::to_string_lossy)
-                        .unwrap()
-                        .to_string();
-                    // If there is a main.tf, this is valid and we should add this to the list.
-                    if path.join("main.tf").exists() {
-                        admin_module_locators.push(AdminModuleLocator {
-                            quality: String::from(&quality),
-                            region: String::from(&region),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    Ok(admin_module_locators)
-}
-
-pub(crate) fn find_all_deploy_module_locators() -> Result<Vec<DeployModuleLocator>> {
-    let mut deploy_module_locators: Vec<DeployModuleLocator> = vec![];
-    let deploy_path = root_modules_path().join("deploy");
-
-    for entry in deploy_path.read_dir()? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            // If it is a directory, assume it is a region.
-            let region = path
-                .file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .unwrap()
-                .to_string();
-            // If there is a main.tf, this is valid and we should add this to the list.
-            if path.join("main.tf").exists() {
-                deploy_module_locators.push(DeployModuleLocator {
-                    region: String::from(&region),
-                });
-            }
-        }
-    }
-    Ok(deploy_module_locators)
-}
-
-pub(crate) fn find_all_service_module_locators() -> Result<Vec<ServiceModuleLocator>> {
-    let mut service_module_locators: Vec<ServiceModuleLocator> = vec![];
-    // TODO: Supporting only the readyset/build domain/environment to get this started.
-    // Fetch the list of domains/environments from `substrate-account -format json`
-    let domain = String::from("readyset");
-    let environment = String::from("build");
-    let service_path = root_modules_path().join(&domain).join(&environment);
-    for entry in service_path.read_dir()? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            // If it is a directory, assume it is a quality.
-            let quality = path
-                .file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .unwrap()
-                .to_string();
-            for entry in path.read_dir()? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    // If it is a directory, assume it is a region.
-                    let region = path
-                        .file_name()
-                        .map(std::ffi::OsStr::to_string_lossy)
-                        .unwrap()
-                        .to_string();
-                    // If there is a main.tf, this is valid and we should add this to the list.
-                    if path.join("main.tf").exists() {
-                        service_module_locators.push(ServiceModuleLocator {
-                            domain: String::from(&domain),
-                            environment: String::from(&environment),
-                            quality: String::from(&quality),
-                            region: String::from(&region),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    Ok(service_module_locators)
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn deploy_module_locator_roundtrip() {
-        let original_module_locator = DeployModuleLocator {
-            region: String::from("us-east-2"),
-        };
-        let mut module_locator_args = original_module_locator.to_args();
-        module_locator_args.insert(0, "command".to_string());
-        let parsed_module_locator =
-            DeployModuleLocator::try_parse_from(module_locator_args).unwrap();
-        assert_eq!(original_module_locator, parsed_module_locator);
-    }
-
-    #[test]
-    fn admin_module_locator_roundtrip() {
-        let original_module_locator = AdminModuleLocator {
-            quality: String::from("default"),
-            region: String::from("us-east-2"),
-        };
-        let mut module_locator_args = original_module_locator.to_args();
-        module_locator_args.insert(0, "command".to_string());
-        let parsed_module_locator =
-            AdminModuleLocator::try_parse_from(module_locator_args).unwrap();
-        assert_eq!(original_module_locator, parsed_module_locator);
-    }
-
-    #[test]
-    fn service_module_locator_roundtrip() {
-        let original_module_locator = ServiceModuleLocator {
-            domain: String::from("readyset"),
-            environment: String::from("build"),
-            quality: String::from("default"),
-            region: String::from("us-east-2"),
-        };
-        let mut module_locator_args = original_module_locator.to_args();
-        module_locator_args.insert(0, "command".to_string());
-        let parsed_module_locator =
-            ServiceModuleLocator::try_parse_from(module_locator_args).unwrap();
-        assert_eq!(original_module_locator, parsed_module_locator);
+    let result: Result<Vec<String>, _> = output.stdout.lines().collect();
+    match result {
+        Ok(root_modules) => Ok(root_modules
+            .iter()
+            .map(|s| RootModule::from_substrate_output(s))
+            // TODO(harleyk): Remove these filters once they are fixed up.
+            // network/sandbox is using modules in Github which don't work in CI.
+            // readyset/prod is in a weird half existing state.
+            .filter(|r| {
+                !(r.path.starts_with("network/sandbox") || r.path.starts_with("readyset/prod"))
+            })
+            .collect()),
+        Err(_) => bail!("Could not parse substrate root-modules output"),
     }
 }

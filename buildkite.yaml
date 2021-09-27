@@ -138,10 +138,12 @@ steps:
 
             - label: ":rust: :docker: Build Substrate Runtime Image"
               include:
+                - "ops/readyset-substrate/**"
                 - "ops/substrate/**"
 
             - label: ":pipeline: Upload Validate All Pipeline"
               include:
+                - "ops/readyset-substrate/**"
                 - "ops/substrate/**"
 
             # --- END INTERNAL OPS STEPS --- #

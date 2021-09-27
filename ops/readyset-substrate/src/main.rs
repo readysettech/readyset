@@ -3,80 +3,24 @@ use anyhow::Result;
 use clap::{AppSettings, Clap};
 use tracing_subscriber::EnvFilter;
 
+use substrate::RootModule;
 mod commands;
 mod substrate;
 mod terraform;
 
-// Some draft commands have been added to this struct to give some guidance on what needs to be implemented.
-// We should have commands that run outside Buildkite just in case Buildkite falls over and we need to run
-// without Buildkite in case of emergency.
-// TODO: Break down this into more subcommands to reduce the size of this enum.
 #[derive(Clap, Debug)]
 enum Subcommand {
-    TerraformServiceValidate {
-        #[clap(flatten)]
-        service_module_locator: substrate::ServiceModuleLocator,
-    },
-    TerraformServicePlan {
-        #[clap(flatten)]
-        service_module_locator: substrate::ServiceModuleLocator,
-    },
-    TerraformServiceApply {
-        #[clap(flatten)]
-        service_module_locator: substrate::ServiceModuleLocator,
-    },
-    TerraformAdminValidate {
-        #[clap(flatten)]
-        admin_module_locator: substrate::AdminModuleLocator,
-    },
-    TerraformAdminPlan {
-        #[clap(flatten)]
-        admin_module_locator: substrate::AdminModuleLocator,
-    },
-    TerraformAdminApply {
-        #[clap(flatten)]
-        admin_module_locator: substrate::AdminModuleLocator,
-    },
-    TerraformDeployValidate {
-        #[clap(flatten)]
-        deploy_module_locator: substrate::DeployModuleLocator,
-    },
-    TerraformDeployPlan {
-        #[clap(flatten)]
-        deploy_module_locator: substrate::DeployModuleLocator,
-    },
-    TerraformDeployApply {
-        #[clap(flatten)]
-        deploy_module_locator: substrate::DeployModuleLocator,
-    },
-    BuildkiteTerraformServiceValidate {
-        #[clap(flatten)]
-        service_module_locator: substrate::ServiceModuleLocator,
-    },
-    BuildkiteTerraformServicePlan {
-        #[clap(flatten)]
-        service_module_locator: substrate::ServiceModuleLocator,
-    },
-    // BuildkiteTerraformServiceApply,
-    BuildkiteTerraformAdminValidate {
-        #[clap(flatten)]
-        admin_module_locator: substrate::AdminModuleLocator,
-    },
-    BuildkiteTerraformAdminPlan {
-        #[clap(flatten)]
-        admin_module_locator: substrate::AdminModuleLocator,
-    },
-    // BuildkiteTerraformAdminApply,
-    BuildkiteTerraformDeployValidate {
-        #[clap(flatten)]
-        deploy_module_locator: substrate::DeployModuleLocator,
-    },
-    BuildkiteTerraformDeployPlan {
-        #[clap(flatten)]
-        deploy_module_locator: substrate::DeployModuleLocator,
-    },
-    // BuildkiteTerraformDeployApply,
+    TerraformValidate { root_module: RootModule },
+    TerraformPlan { root_module: RootModule },
+    TerraformApply { root_module: RootModule },
+    BuildkiteTerraformValidate { root_module: RootModule },
+    BuildkiteTerraformPlan { root_module: RootModule },
+    // BuildkiteSubstrateTerraformApply {
+    //    root_module: String
+    // }
+    BuildkiteTerraformGenerateValidateAllPipeline,
     BuildkiteTerraformUploadValidateAllPipeline,
+    BuildkiteTerraformGeneratePlanAllPipeline,
     BuildkiteTerraformUploadPlanAllPipeline,
 }
 
@@ -96,53 +40,25 @@ fn main() -> Result<()> {
 
     let opts = Opts::parse();
     match opts.subcommand {
-        Subcommand::TerraformServiceValidate {
-            service_module_locator,
-        } => commands::terraform::validate(&service_module_locator),
-        Subcommand::TerraformServicePlan {
-            service_module_locator,
-        } => commands::terraform::plan(&service_module_locator),
-        Subcommand::TerraformServiceApply {
-            service_module_locator,
-        } => commands::terraform::apply(&service_module_locator),
-        Subcommand::TerraformAdminValidate {
-            admin_module_locator,
-        } => commands::terraform::validate(&admin_module_locator),
-        Subcommand::TerraformAdminPlan {
-            admin_module_locator,
-        } => commands::terraform::plan(&admin_module_locator),
-        Subcommand::TerraformAdminApply {
-            admin_module_locator,
-        } => commands::terraform::apply(&admin_module_locator),
-        Subcommand::TerraformDeployValidate {
-            deploy_module_locator,
-        } => commands::terraform::validate(&deploy_module_locator),
-        Subcommand::TerraformDeployPlan {
-            deploy_module_locator,
-        } => commands::terraform::plan(&deploy_module_locator),
-        Subcommand::TerraformDeployApply {
-            deploy_module_locator,
-        } => commands::terraform::apply(&deploy_module_locator),
-        Subcommand::BuildkiteTerraformServiceValidate {
-            service_module_locator,
-        } => commands::buildkite::terraform_validate(&service_module_locator),
-        Subcommand::BuildkiteTerraformServicePlan {
-            service_module_locator,
-        } => commands::buildkite::terraform_plan(&service_module_locator),
-        Subcommand::BuildkiteTerraformAdminValidate {
-            admin_module_locator,
-        } => commands::buildkite::terraform_validate(&admin_module_locator),
-        Subcommand::BuildkiteTerraformAdminPlan {
-            admin_module_locator,
-        } => commands::buildkite::terraform_plan(&admin_module_locator),
-        Subcommand::BuildkiteTerraformDeployValidate {
-            deploy_module_locator,
-        } => commands::buildkite::terraform_validate(&deploy_module_locator),
-        Subcommand::BuildkiteTerraformDeployPlan {
-            deploy_module_locator,
-        } => commands::buildkite::terraform_plan(&deploy_module_locator),
+        Subcommand::TerraformValidate { root_module } => {
+            commands::terraform::validate(&root_module)
+        }
+        Subcommand::TerraformPlan { root_module } => commands::terraform::plan(&root_module),
+        Subcommand::TerraformApply { root_module } => commands::terraform::apply(&root_module),
+        Subcommand::BuildkiteTerraformValidate { root_module } => {
+            commands::buildkite::terraform_validate(&root_module)
+        }
+        Subcommand::BuildkiteTerraformPlan { root_module } => {
+            commands::buildkite::terraform_plan(&root_module)
+        }
+        Subcommand::BuildkiteTerraformGenerateValidateAllPipeline => {
+            commands::buildkite::terraform_generate_validate_all_pipeline()
+        }
         Subcommand::BuildkiteTerraformUploadValidateAllPipeline => {
             commands::buildkite::terraform_upload_validate_all_pipeline()
+        }
+        Subcommand::BuildkiteTerraformGeneratePlanAllPipeline => {
+            commands::buildkite::terraform_generate_plan_all_pipeline()
         }
         Subcommand::BuildkiteTerraformUploadPlanAllPipeline => {
             commands::buildkite::terraform_upload_plan_all_pipeline()

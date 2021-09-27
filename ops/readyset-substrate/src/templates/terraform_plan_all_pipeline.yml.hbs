@@ -1,16 +1,14 @@
 steps:
-  {{#each modules}}
-  - label: ":terraform: Plan for {{ module_descriptor }}"
+  {{#each root_modules}}
+  - label: ":terraform: Plan for {{ path }}"
     plugins:
       - docker#v3.8.0:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
           propagate-environment: true
           propagate-aws-auth-tokens: true
           command:
-            - "{{ buildkite_plan_command }}"
-            {{#each module_locator_args}}
-            - "{{ this }}"
-            {{/each}}
+            - "buildkite-terraform-plan"
+            - "{{ path }}"
           shell: false
           environment:
           - BUILDKITE_API_TOKEN

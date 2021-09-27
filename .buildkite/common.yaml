@@ -352,8 +352,13 @@ steps:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
           shell: false
           propagate-environment: true
+          propagate-aws-auth-tokens: true
       - ecr#v2.2.0:
           login: true
+      - cultureamp/aws-assume-role#v0.2.0:
+          role: "arn:aws:iam::716876017850:role/Administrator"
+    agents:
+      queue: ops
 
   # --- END INTERNAL OPS STEPS --- #
 

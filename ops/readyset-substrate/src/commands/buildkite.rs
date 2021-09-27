@@ -6,35 +6,24 @@ use anyhow::{anyhow, bail, Result};
 use handlebars::Handlebars;
 use std::{
     io::{ErrorKind, Write},
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
 };
 use tracing::{event, Level};
 
 use serde::Serialize;
 
-use crate::substrate::{
-    find_all_admin_module_locators, find_all_deploy_module_locators,
-    find_all_service_module_locators, ModuleLocator,
-};
+use crate::substrate::{self, RootModule};
 use crate::terraform;
-
-#[derive(Debug, Serialize)]
-struct ModuleTemplateData {
-    module_descriptor: String,
-    module_locator_args: Vec<String>,
-    buildkite_validate_command: String,
-    buildkite_plan_command: String,
-}
 
 #[derive(Serialize)]
 struct TerraformValidateAllPipelineTemplateData {
-    modules: Vec<ModuleTemplateData>,
+    root_modules: Vec<RootModule>,
     plan_only: bool,
 }
 #[derive(Serialize)]
 struct TerraformPlanAllPipelineTemplateData {
-    modules: Vec<ModuleTemplateData>,
+    root_modules: Vec<RootModule>,
 }
 
 // TODO: Replace templating with YAML serialization with serde.
@@ -74,47 +63,10 @@ fn template_registry() -> Result<Handlebars<'static>> {
     Ok(handlebars)
 }
 
-fn module_template_data_for_all() -> Result<Vec<ModuleTemplateData>> {
-    let all_deploy_module_locators = find_all_deploy_module_locators()?;
-    let all_admin_module_locators = find_all_admin_module_locators()?;
-    let all_service_module_locators = find_all_service_module_locators()?;
-    let deploy_template_data_iter =
-        all_deploy_module_locators
-            .iter()
-            .map(|locator| ModuleTemplateData {
-                module_descriptor: locator.to_description(),
-                module_locator_args: locator.to_args(),
-                buildkite_validate_command: String::from("buildkite-terraform-deploy-validate"),
-                buildkite_plan_command: String::from("buildkite-terraform-deploy-plan"),
-            });
-    let admin_template_data_iter =
-        all_admin_module_locators
-            .iter()
-            .map(|locator| ModuleTemplateData {
-                module_descriptor: locator.to_description(),
-                module_locator_args: locator.to_args(),
-                buildkite_validate_command: String::from("buildkite-terraform-admin-validate"),
-                buildkite_plan_command: String::from("buildkite-terraform-admin-plan"),
-            });
-    let service_template_data_iter =
-        all_service_module_locators
-            .iter()
-            .map(|locator| ModuleTemplateData {
-                module_descriptor: locator.to_description(),
-                module_locator_args: locator.to_args(),
-                buildkite_validate_command: String::from("buildkite-terraform-service-validate"),
-                buildkite_plan_command: String::from("buildkite-terraform-service-plan"),
-            });
-    Ok(deploy_template_data_iter
-        .chain(admin_template_data_iter)
-        .chain(service_template_data_iter)
-        .collect())
-}
-
 fn generate_plan_all_pipeline() -> Result<String> {
-    let modules: Vec<ModuleTemplateData> = module_template_data_for_all()?;
+    let root_modules: Vec<RootModule> = substrate::root_modules()?;
 
-    let template_data = TerraformPlanAllPipelineTemplateData { modules };
+    let template_data = TerraformPlanAllPipelineTemplateData { root_modules };
 
     let handlebars = template_registry()?;
     let pipeline_defintion = handlebars.render("plan_all", &template_data)?;
@@ -123,10 +75,10 @@ fn generate_plan_all_pipeline() -> Result<String> {
 }
 
 fn generate_validate_all_pipeline() -> Result<String> {
-    let modules: Vec<ModuleTemplateData> = module_template_data_for_all()?;
+    let root_modules: Vec<RootModule> = substrate::root_modules()?;
 
     let template_data = TerraformValidateAllPipelineTemplateData {
-        modules,
+        root_modules,
         plan_only: true,
     };
 
@@ -136,15 +88,15 @@ fn generate_validate_all_pipeline() -> Result<String> {
     Ok(pipeline_defintion)
 }
 
-pub(crate) fn terraform_validate<T: ModuleLocator>(module_locator: &T) -> Result<()> {
-    let terraform_path: PathBuf = module_locator.to_terraform_path()?;
+pub(crate) fn terraform_validate(root_module: &substrate::RootModule) -> Result<()> {
+    let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
     terraform::run_validate(&terraform_path)?;
     Ok(())
 }
 
-pub(crate) fn terraform_plan<T: ModuleLocator>(module_locator: &T) -> Result<()> {
-    let terraform_path: PathBuf = module_locator.to_terraform_path()?;
+pub(crate) fn terraform_plan(root_module: &substrate::RootModule) -> Result<()> {
+    let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
     let status = terraform::run_plan(&terraform_path)?;
     match status {
@@ -206,9 +158,21 @@ fn buildkite_pipeline_upload(pipeline_definition: String) -> Result<()> {
     }
 }
 
+pub(crate) fn terraform_generate_validate_all_pipeline() -> Result<()> {
+    let pipeline_definition = generate_validate_all_pipeline()?;
+    println!("{}", pipeline_definition);
+    Ok(())
+}
+
 pub(crate) fn terraform_upload_validate_all_pipeline() -> Result<()> {
     let pipeline_definition = generate_validate_all_pipeline()?;
     buildkite_pipeline_upload(pipeline_definition)
+}
+
+pub(crate) fn terraform_generate_plan_all_pipeline() -> Result<()> {
+    let pipeline_definition = generate_plan_all_pipeline()?;
+    println!("{}", pipeline_definition);
+    Ok(())
 }
 
 pub(crate) fn terraform_upload_plan_all_pipeline() -> Result<()> {
