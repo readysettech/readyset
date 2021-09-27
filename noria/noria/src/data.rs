@@ -503,6 +503,7 @@ impl DataType {
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
+            (_, Some(Timestamp), DateTime(_)) => Ok(Cow::Borrowed(self)),
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(f.round() as i32)))
@@ -3228,6 +3229,18 @@ mod tests {
             assert_eq!(
                 *input.coerce_to(&Time).unwrap(),
                 NaiveTime::from_hms(11, 34, 56).into()
+            );
+        }
+
+        #[proptest]
+        fn timestamp_to_datetime(
+            #[strategy(arbitrary_naive_date_time())] ndt: NaiveDateTime,
+            prec: Option<u16>,
+        ) {
+            let input = DataType::from(ndt);
+            assert_eq!(
+                input.clone().coerce_to(&SqlType::DateTime(prec)).unwrap(),
+                Cow::Owned(input)
             );
         }
 
