@@ -38,8 +38,6 @@ build {
       "provisioners/scripts/readyset-mysql-adapter/10-aws.sh",
     ]
   }
-  # TODO: Add consul client that can join a consul cluster based upon passed in
-  # tags.
 
   post-processor "manifest" {}
 }
