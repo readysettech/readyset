@@ -27,8 +27,8 @@ use tracing::{debug, error, info, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
-use noria::consensus::{Authority, ConsulAuthority};
-use noria::{ControllerHandle, ReadySetError, ZookeeperAuthority};
+use noria::consensus::AuthorityType;
+use noria::{ControllerHandle, ReadySetError};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::{Backend, BackendBuilder};
 
@@ -87,8 +87,8 @@ pub struct Options {
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "zookeeper")]
-    authority: String,
+    #[clap(long, env = "AUTHORITY", default_value = "zookeeper", possible_values = &["consul", "zookeeper"])]
+    authority: AuthorityType,
 
     /// Log slow queries (> 5ms)
     #[clap(long)]
@@ -174,18 +174,9 @@ where
         let authority_address = options.authority_address.clone();
         let deployment = options.deployment.clone();
         let ch = rt.block_on(async {
-            let authority = match authority.as_str() {
-                "zookeeper" => Authority::from(
-                    ZookeeperAuthority::new(&format!("{}/{}", &authority_address, &deployment))
-                        .await
-                        .unwrap(),
-                ),
-                "consul" => Authority::from(
-                    ConsulAuthority::new(&format!("http://{}/{}", &authority_address, &deployment))
-                        .unwrap(),
-                ),
-                other => unreachable!("Invalid authority type: {}", other),
-            };
+            let authority = authority
+                .to_authority(&authority_address, &deployment)
+                .await;
 
             Ok::<ControllerHandle, ReadySetError>(
                 ControllerHandle::new(authority)

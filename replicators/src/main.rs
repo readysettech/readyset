@@ -6,8 +6,7 @@ pub(crate) mod postgres_connector;
 
 use clap::Clap;
 use mysql_async as mysql;
-use noria::consensus::{Authority, ConsulAuthority};
-use noria::ZookeeperAuthority;
+use noria::consensus::AuthorityType;
 use noria_adapter::{AdapterOpts, NoriaAdapter};
 use tokio_postgres as pgsql;
 
@@ -20,9 +19,9 @@ struct Opts {
     deployment: String,
     /// IP:PORT for Zookeeper.
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
-    authority_address: std::net::SocketAddr,
-    #[clap(long, env("AUTHORITY"), default_value("zookeeper"))]
-    authority: String,
+    authority_address: String,
+    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    authority: AuthorityType,
     #[clap(subcommand)]
     subcmd: DbOpts,
 
@@ -142,21 +141,10 @@ async fn main() -> anyhow::Result<!> {
         DbOpts::Postgres(opts) => opts.into(),
     };
 
-    let authority = match opts.authority.as_str() {
-        "zookeeper" => Authority::from(
-            ZookeeperAuthority::new(&format!("{}/{}", &opts.authority_address, &opts.deployment))
-                .await
-                .unwrap(),
-        ),
-        "consul" => Authority::from(
-            ConsulAuthority::new(&format!(
-                "http://{}/{}",
-                &opts.authority_address, &opts.deployment
-            ))
-            .unwrap(),
-        ),
-        other => unreachable!("Invalid authority type: {}", other),
-    };
+    let authority = opts
+        .authority
+        .to_authority(&opts.authority_address, &opts.deployment)
+        .await;
 
     NoriaAdapter::start_with_authority(authority, options).await?
 }

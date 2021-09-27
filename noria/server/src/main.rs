@@ -11,14 +11,11 @@ use clap::Clap;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 
-use noria_server::consensus::ConsulAuthority;
+use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
 };
-use noria_server::{
-    Authority, Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId,
-    ZookeeperAuthority,
-};
+use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -106,8 +103,8 @@ struct Opts {
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "zookeeper")]
-    authority: String,
+    #[clap(long, env = "AUTHORITY", default_value = "zookeeper", possible_values = &["consul", "zookeeper"])]
+    authority: AuthorityType,
 
     /// Memory, in bytes, available for partially materialized state (0 = unlimited)
     #[clap(long, short = 'm', default_value = "0", env = "NORIA_MEMORY_BYTES")]
@@ -263,18 +260,7 @@ fn main() -> anyhow::Result<()> {
     let deployment = opts.deployment;
     let external_port = opts.external_port;
     let mut handle = rt.block_on(async move {
-        let authority = match authority.as_str() {
-            "zookeeper" => Authority::from(
-                ZookeeperAuthority::new(&format!("{}/{}", &authority_addr, &deployment))
-                    .await
-                    .unwrap(),
-            ),
-            "consul" => Authority::from(
-                ConsulAuthority::new(&format!("http://{}/{}", &authority_addr, &deployment))
-                    .unwrap(),
-            ),
-            other => unreachable!("Invalid authority type: {}", other),
-        };
+        let authority = authority.to_authority(&authority_addr, &deployment).await;
 
         let external_addr = external_addr.await.unwrap_or_else(|err| {
             eprintln!("Error obtaining external IP address: {}", err);
