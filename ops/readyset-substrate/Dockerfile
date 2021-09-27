@@ -42,17 +42,16 @@ RUN set -eux; \
     echo "185348fd77fc160d5bdf3cd20ecbc796163504fd3df196d7cb29000773657b74 /usr/local/bin/sops" | sha256sum -c; \
     chmod a+x /usr/local/bin/sops
 
-RUN set -eux; \
-    curl -o substrate.tar.gz https://src-bin.com/substrate-2021.08-160dc94-linux-amd64.tar.gz; \
-    tar -C /usr/local/bin --strip-components=1 -xvf substrate.tar.gz
-
-
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as runtime
 WORKDIR /workdir
 ENV SUBSTRATE_ROOT /workdir/ops/substrate
 
 COPY --from=builder /workdir/target/debug/readyset-substrate /usr/local/bin/readyset-substrate
 COPY --from=fetcher /usr/local/bin/* /usr/local/bin/
+
+RUN set -eux; \
+    curl -o substrate.tar.gz https://src-bin.com/substrate-2021.09-1174b29-linux-amd64.tar.gz; \
+    tar -C /usr/local/bin --strip-components=1 -xvf substrate.tar.gz
 
 RUN set -eux; \
     curl -o "awscliv2.zip" "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.32.zip"; \
