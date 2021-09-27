@@ -1795,10 +1795,10 @@ impl SqlToMirConverter {
                 _ => {
                     // If parameters have equality operators only, ensure their columns are
                     // projected and collect them into the lookup key.
-                    // FIXME: Only equality parameters are expected here (ie
-                    // qg.parameters().iter().all(|p| p.1 == BinaryOperator::Equal)), however in
-                    // some cases non equality parameters are passed through and must be accepted.
-                    for (pc, _) in qg.parameters() {
+                    for (pc, op) in qg.parameters() {
+                        if *op != BinaryOperator::Equal {
+                            unsupported!("Unsupported binary operator `{}`; only direct equality is supported", op);
+                        }
                         let pc = Column::from(pc);
                         if !projected_columns.contains(&pc) {
                             projected_columns.push(pc);

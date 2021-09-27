@@ -112,3 +112,23 @@ fn json_column_partial_update() {
     let rows: Vec<(i32, String)> = conn.query("SELECT * FROM Cats WHERE Cats.id = 1").unwrap();
     assert_eq!(rows, vec![(1, "{}".to_string())]);
 }
+
+// TODO: remove this once we support range queries again
+#[test]
+#[serial]
+fn range_query() {
+    let d = Deployment::new("range_queries");
+    let opts = setup(&d);
+    let mut conn = mysql::Conn::new(opts).unwrap();
+
+    conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
+        .unwrap();
+    conn.query_drop("INSERT INTO cats (id, cuteness) values (1, 10)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, i32)> = conn
+        .exec("SELECT id, cuteness FROM cats WHERE cuteness > ?", vec![5])
+        .unwrap();
+    assert_eq!(rows, vec![(1, 10)]);
+}
