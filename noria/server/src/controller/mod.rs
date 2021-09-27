@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{error, info, info_span, warn};
+use tracing::{error, info, warn};
 use url::Url;
 
 mod domain_handle;
@@ -649,9 +649,6 @@ async fn authority_inner(
     config: Config,
     region: Option<String>,
 ) -> anyhow::Result<()> {
-    let span = info_span!("authority");
-    let _g = span.enter();
-
     authority.init().await?;
 
     let mut leader_election_state = AuthorityLeaderElectionState::new(
