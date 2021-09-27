@@ -3,6 +3,7 @@
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use proptest::prelude::*;
 use rust_decimal::Decimal;
+use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
@@ -52,4 +53,15 @@ pub fn arbitrary_timestamp_naive_date_time() -> impl Strategy<Value = NaiveDateT
     (dates, times)
         .prop_union((last_dates, last_times))
         .prop_map(|(date, time)| NaiveDateTime::new(date, time))
+}
+
+/// Strategy to generate an arbitrary [`SystemTime`] with a microsecond resolution
+pub fn arbitrary_systemtime() -> impl Strategy<Value = SystemTime> {
+    (proptest::num::i32::ANY, 0..1_000_000u32).prop_map(|(s, us)| {
+        if s >= 0 {
+            UNIX_EPOCH + StdDuration::new(s as u64, us * 1000)
+        } else {
+            UNIX_EPOCH - StdDuration::new((-(s as i64)) as u64, us * 1000)
+        }
+    })
 }

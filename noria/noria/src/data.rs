@@ -1971,6 +1971,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::TIME => mk_from_sql!(NaiveTime),
             Type::BYTEA => mk_from_sql!(Vec<u8>),
             Type::NUMERIC => mk_from_sql!(Decimal),
+            Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty

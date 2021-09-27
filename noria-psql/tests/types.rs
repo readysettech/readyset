@@ -17,7 +17,7 @@ mod types {
     use std::fmt::Display;
 
     use super::*;
-    use launchpad::arbitrary::arbitrary_decimal;
+    use launchpad::arbitrary::{arbitrary_decimal, arbitrary_systemtime};
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
     use rust_decimal::Decimal;
@@ -48,6 +48,7 @@ mod types {
 
         // check values coming out of noria
         let star_results = client.query("SELECT * FROM t", &[]).unwrap();
+
         assert_eq!(star_results.len(), 1);
         assert_eq!(star_results[0].get::<_, V>(0), val);
 
@@ -102,5 +103,6 @@ mod types {
         // TODO(fran): Add numeric with precision and scale when we start correctly
         //  handling them.
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
+        timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
     }
 }

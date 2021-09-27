@@ -232,45 +232,58 @@ impl wal::TupleData {
                     // WAL delivers all entries as text, and it is up to us to parse to the proper Noria type
                     let str = String::from_utf8_lossy(&text);
 
-                    let val = match spec.data_type {
-                        PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
-                            "t" => true as _,
-                            "f" => false as _,
-                            _ => return Err(WalError::BoolParseError),
-                        }),
-                        PGType::INT2 | PGType::INT4 => DataType::Int(str.parse()?),
-                        PGType::OID => DataType::UnsignedInt(str.parse()?),
-                        PGType::INT8 => DataType::BigInt(str.parse()?),
-                        PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
-                        PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
-                        PGType::NUMERIC => Decimal::from_str(str.as_ref())
-                            .map_err(|_| WalError::NumericParseError)
-                            .map(|d| DataType::Numeric(Arc::new(d)))?,
-                        PGType::JSON | PGType::TEXT | PGType::VARCHAR | PGType::CHAR => {
-                            DataType::Text(str.as_ref().try_into()?)
-                        }
-                        PGType::TIMESTAMP => DataType::Timestamp(
-                            chrono::NaiveDateTime::parse_from_str(&str, noria::TIMESTAMP_FORMAT)?,
-                        ),
-                        PGType::DATE => DataType::Timestamp(chrono::NaiveDateTime::parse_from_str(
-                            &str,
-                            noria::DATE_FORMAT,
-                        )?),
-                        PGType::TIME => DataType::Timestamp(chrono::NaiveDateTime::parse_from_str(
-                            &str,
-                            noria::TIME_FORMAT,
-                        )?),
-                        PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
-                            .map_err(|_| WalError::ByteArrayHexParseError)
-                            .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
-                        ref t => {
-                            unimplemented!(
-                                "Conversion not implemented for type {:?}; value {:?}",
-                                t,
-                                str
-                            );
-                        }
-                    };
+                    let val =
+                        match spec.data_type {
+                            PGType::BOOL => DataType::UnsignedInt(match str.as_ref() {
+                                "t" => true as _,
+                                "f" => false as _,
+                                _ => return Err(WalError::BoolParseError),
+                            }),
+                            PGType::INT2 | PGType::INT4 => DataType::Int(str.parse()?),
+                            PGType::OID => DataType::UnsignedInt(str.parse()?),
+                            PGType::INT8 => DataType::BigInt(str.parse()?),
+                            PGType::FLOAT4 => str.parse::<f32>()?.try_into()?,
+                            PGType::FLOAT8 => str.parse::<f64>()?.try_into()?,
+                            PGType::NUMERIC => Decimal::from_str(str.as_ref())
+                                .map_err(|_| WalError::NumericParseError)
+                                .map(|d| DataType::Numeric(Arc::new(d)))?,
+                            PGType::JSON | PGType::TEXT | PGType::VARCHAR | PGType::CHAR => {
+                                DataType::Text(str.as_ref().try_into()?)
+                            }
+                            PGType::TIMESTAMP => DataType::Timestamp({
+                                // If there is a dot, there is a microseconds field attached
+                                if let Some((time, micro)) = &str.split_once('.') {
+                                    // The usec format in WAL is super dumb, it is actually skipping the trailing zeroes, and not the leading zeroes ...
+                                    chrono::NaiveDateTime::parse_from_str(
+                                        time,
+                                        noria::TIMESTAMP_FORMAT,
+                                    )? + chrono::Duration::microseconds(
+                                        micro.parse::<i64>()? * 10i64.pow(6 - micro.len() as u32),
+                                    )
+                                } else {
+                                    chrono::NaiveDateTime::parse_from_str(
+                                        &str,
+                                        noria::TIMESTAMP_FORMAT,
+                                    )?
+                                }
+                            }),
+                            PGType::DATE => DataType::Timestamp(
+                                chrono::NaiveDateTime::parse_from_str(&str, noria::DATE_FORMAT)?,
+                            ),
+                            PGType::TIME => DataType::Timestamp(
+                                chrono::NaiveDateTime::parse_from_str(&str, noria::TIME_FORMAT)?,
+                            ),
+                            PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
+                                .map_err(|_| WalError::ByteArrayHexParseError)
+                                .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
+                            ref t => {
+                                unimplemented!(
+                                    "Conversion not implemented for type {:?}; value {:?}",
+                                    t,
+                                    str
+                                );
+                            }
+                        };
 
                     ret.push(val);
                 }
