@@ -73,6 +73,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 use tracing::{error, warn};
+use tracing_futures::Instrument;
 use url::Url;
 
 use dataflow::Readers;
@@ -220,6 +221,7 @@ pub(super) async fn start_instance(
         config,
         region,
     )
+    .instrument(tracing::info_span!("authority"))
     .map_err(move |e| {
         error!(error = %e, "AuthorityRunner failed");
         if abort_on_task_failure {
