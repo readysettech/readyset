@@ -29,8 +29,8 @@ macro_rules! pipeline_tests {
 }
 
 pipeline_tests! {
-    buildkite_yaml("buildkite.yaml");
-    buildkite_common_yaml(".buildkite/common.yaml");
-    buildkite_nightly_yaml(".buildkite/nightly.yaml");
-    buildkite_fuzz_yaml(".buildkite/fuzz.yaml");
+    buildkite_yaml(".buildkite/pipeline.yml");
+    buildkite_common_yaml(".buildkite/pipeline.common.yml");
+    buildkite_nightly_yaml(".buildkite/pipeline.readyset-nightly.yml");
+    buildkite_fuzz_yaml(".buildkite/pipeline.readyset-fuzz.yml");
 }

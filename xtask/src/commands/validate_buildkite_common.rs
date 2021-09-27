@@ -15,10 +15,11 @@ use tracing::warn;
 
 pub(crate) fn run() -> Result<()> {
     let project_path = project_root_path();
-    let buildkite_yaml_path = project_path.join("buildkite.yaml");
-    let buildkite_common_yaml_path = project_path.join(".buildkite").join("common.yaml");
+    let buildkite_pipeline_path = project_path.join(".buildkite").join("pipeline.yml");
+    let buildkite_common_pipeline_path =
+        project_path.join(".buildkite").join("pipeline.common.yml");
 
-    let buildkite_yaml = YamlLoader::load_from_str(&fs::read_to_string(buildkite_yaml_path)?)?;
+    let buildkite_yaml = YamlLoader::load_from_str(&fs::read_to_string(buildkite_pipeline_path)?)?;
 
     let buildkite_yaml_steps = buildkite_yaml
         .first()
@@ -71,7 +72,7 @@ pub(crate) fn run() -> Result<()> {
     }
 
     let buildkite_common_yaml =
-        YamlLoader::load_from_str(&fs::read_to_string(buildkite_common_yaml_path)?)?;
+        YamlLoader::load_from_str(&fs::read_to_string(buildkite_common_pipeline_path)?)?;
 
     let buildkite_common_yaml_steps = buildkite_common_yaml
         .first()

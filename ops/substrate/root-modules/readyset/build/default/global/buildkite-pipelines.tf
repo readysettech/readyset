@@ -24,6 +24,69 @@ steps:
 STEPS
 }
 
+
+resource "buildkite_pipeline" "readyset-nightly" {
+  name           = "readyset-nightly"
+  description    = "Slower, periodically scheduled builds for Readyset"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.readyset-nightly.yml"
+    label: ":pipeline:"
+STEPS
+}
+
+resource "buildkite_pipeline" "readyset-fuzz" {
+  name           = "readyset-fuzz"
+  description    = "Regular randomized fuzz testing using logictest"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.readyset-fuzz.yml"
+    label: ":pipeline:"
+STEPS
+}
+
+resource "buildkite_pipeline" "framework-testing" {
+  name           = "framework-testing"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.framework-testing.yml"
+    label: ":pipeline:"
+STEPS
+}
+
+resource "buildkite_pipeline" "mirror-docker-hub-to-ecr" {
+  name           = "mirror-docker-hub-to-ecr"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.mirror-docker-hub-to-ecr.yml"
+    label: ":pipeline:"
+STEPS
+}
+
+resource "buildkite_pipeline" "internal-amis" {
+  name           = "internal-amis"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.internal-amis.yml"
+    label: ":pipeline:"
+STEPS
+}
+
 resource "buildkite_pipeline" "docker-release" {
   name           = "docker-release"
   default_branch = "refs/heads/main"

@@ -5,6 +5,7 @@ steps:
     agents:
       queue: t3a-small
 
+
   - label: ':bk-status-pending:'
     command: .buildkite/set_gerrit_running.sh
     agents:
@@ -28,7 +29,7 @@ steps:
       - Zegocover/git-diff-conditional#v1.1.1:
           log_level: DEBUG
           diff: "git diff --name-only HEAD HEAD~1"
-          dynamic_pipeline: ".buildkite/common.yaml"
+          dynamic_pipeline: ".buildkite/pipeline.common.yml"
           steps:
             - label: ':docker: Build build image'
               include:
