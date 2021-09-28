@@ -196,12 +196,23 @@ async fn run_queries(
 
     let mut ret = Vec::new();
     for q in queries {
-        let results = conn
+        let mut results = conn
             .execute(&q.query, q.params.clone())
             .await
             .with_context(|| format!("Running query {}", q.query))?;
 
-        let values = results.into_iter().flatten().collect::<Vec<_>>();
+        let values: Vec<_> = match q.sort_mode.unwrap_or_default() {
+            SortMode::NoSort => results.into_iter().flatten().collect(),
+            SortMode::RowSort => {
+                results.sort();
+                results.into_iter().flatten().collect()
+            }
+            SortMode::ValueSort => {
+                let mut vals: Vec<_> = results.into_iter().flatten().collect();
+                vals.sort();
+                vals
+            }
+        };
 
         let query_results = if values.len() > hash_threshold {
             QueryResults::hash(&values)
@@ -211,7 +222,6 @@ async fn run_queries(
 
         ret.push(Record::Query(Query {
             results: query_results,
-            sort_mode: Some(SortMode::NoSort),
             ..q.clone()
         }))
     }
