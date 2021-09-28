@@ -9,7 +9,7 @@ use std::{
 
 use metrics::histogram;
 use nom_sql::Dialect;
-use tracing::{error, span, trace, warn, Level};
+use tracing::{error, instrument, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consistency::Timestamp;
@@ -568,6 +568,7 @@ where
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
+    #[instrument(level = "debug", name = "prepare", skip(self, event))]
     async fn prepare_inner(
         &mut self,
         query: &str,
@@ -576,8 +577,6 @@ where
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
 
-        let span = span!(Level::DEBUG, "prepare", query);
-        let _g = span.enter();
         let mut handle = event.start_timer();
 
         if self.is_in_tx() {
@@ -864,14 +863,12 @@ where
         res
     }
 
+    #[instrument(level = "trace", name = "query", skip(self, event))]
     async fn query_inner(
         &mut self,
         query: &str,
         event: &mut MaybeExecuteEvent,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        let span = span!(Level::TRACE, "query", query);
-        let _g = span.enter();
-
         let start = time::Instant::now();
         let mut handle = event.start_timer();
 
