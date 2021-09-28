@@ -7,8 +7,9 @@ use std::time::Duration;
 
 pub mod like;
 
-/// Timeout, in seconds, applied to outgoing RPC requests sent with [`do_noria_rpc`].
-pub static RPC_REQUEST_TIMEOUT_SECS: u64 = 60;
+/// Timeout, in seconds, applied to outgoing RPC requests sent with [`do_noria_rpc`]. Also used to
+/// set up the controller rpc timeout in `controller.rs`.
+pub static RPC_REQUEST_TIMEOUT_SECS: u64 = 10;
 
 /// Make a request to a remote noria-server instance, using an already partially constructed
 /// [`RequestBuilder`]. This handles sending the request with a timeout ([`RPC_REQUEST_TIMEOUT_SECS`])
