@@ -433,17 +433,17 @@ pub struct GenerateOpts {
 pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
     #[clap(parse(from_str))]
-    from: Option<PathBuf>,
+    pub from: Option<PathBuf>,
 
     #[clap(flatten)]
-    query_options: query_generator::GenerateOpts,
+    pub query_options: query_generator::GenerateOpts,
 
     #[clap(flatten)]
-    script_options: GenerateOpts,
+    pub script_options: GenerateOpts,
 
     /// File to write results to (defaults to stdout)
     #[clap(short = 'o')]
-    output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 }
 
 fn write_output<W>(script: &TestScript, output: &mut W) -> io::Result<()>

@@ -47,3 +47,4 @@ enum-display-derive = "0.1.1"
 lazy_static = "1.4.0"
 humantime = "2.1"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres"] }
+indicatif = "0.16.2"

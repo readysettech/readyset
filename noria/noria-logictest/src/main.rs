@@ -27,11 +27,13 @@ pub mod ast;
 pub mod from_query_log;
 pub mod generate;
 pub mod parser;
+pub mod permute;
 pub mod runner;
 pub mod upstream;
 
 use crate::from_query_log::FromQueryLog;
 use crate::generate::Generate;
+use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
 use crate::upstream::{DatabaseType, DatabaseURL};
 
@@ -49,6 +51,7 @@ enum Command {
     Generate(Generate),
     FromQueryLog(FromQueryLog),
     Fuzz(Fuzz),
+    Permute(Permute),
 }
 
 impl Command {
@@ -65,6 +68,7 @@ impl Command {
                 let fuzz: &'static mut _ = Box::leak(Box::new(fuzz));
                 fuzz.run()
             }
+            Self::Permute(permute) => permute.run(),
         }
     }
 }
