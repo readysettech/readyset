@@ -18,11 +18,14 @@ mod types {
 
     use super::*;
     use eui48::MacAddress;
-    use launchpad::arbitrary::{arbitrary_decimal, arbitrary_mac_address, arbitrary_systemtime};
+    use launchpad::arbitrary::{
+        arbitrary_decimal, arbitrary_mac_address, arbitrary_systemtime, arbitrary_uuid,
+    };
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
     use rust_decimal::Decimal;
     use test_helpers::sleep;
+    use uuid::Uuid;
 
     fn test_type_roundtrip<T, V>(type_name: T, val: V)
     where
@@ -106,5 +109,6 @@ mod types {
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
         timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
         macaddr_string("macaddr", #[strategy(arbitrary_mac_address())] MacAddress);
+        uuid_string("uuid", #[strategy(arbitrary_uuid())] Uuid);
     }
 }

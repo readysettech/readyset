@@ -5,6 +5,7 @@ use eui48::MacAddress;
 use proptest::prelude::*;
 use rust_decimal::Decimal;
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// Strategy to generate an arbitrary [`NaiveDate`]
 pub fn arbitrary_naive_date() -> impl Strategy<Value = NaiveDate> {
@@ -74,4 +75,9 @@ pub fn arbitrary_mac_address() -> impl Strategy<Value = MacAddress> {
         #[allow(clippy::unwrap_used)]
         MacAddress::from_bytes(&bytes[..]).unwrap()
     })
+}
+
+/// Strategy to generate an arbitrary [`Uuid`].
+pub fn arbitrary_uuid() -> impl Strategy<Value = Uuid> {
+    any::<u128>().prop_map(Uuid::from_u128)
 }

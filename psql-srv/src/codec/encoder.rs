@@ -342,6 +342,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::MacAddress(m) => {
             m.to_sql(&Type::MACADDR, dst)?;
         }
+        Value::Uuid(u) => {
+            u.to_sql(&Type::UUID, dst)?;
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -418,6 +421,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             )?;
         }
         Value::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
+        Value::Uuid(u) => write!(dst, "{}", u)?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -438,6 +442,7 @@ mod tests {
     use eui48::MacAddress;
     use rust_decimal::Decimal;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     struct Value(DataValue);
 
@@ -1043,10 +1048,23 @@ mod tests {
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_binary_value(DataValue::MacAddress(macaddr.clone()), &mut buf).unwrap();
+        put_binary_value(DataValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(6);
         macaddr.to_sql(&Type::MACADDR, &mut exp).unwrap(); // add value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_uuid() {
+        let mut buf = BytesMut::new();
+        let uuid = Uuid::from_bytes([
+            85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
+        ]);
+        put_binary_value(DataValue::Uuid(uuid), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(16);
+        uuid.to_sql(&Type::UUID, &mut exp).unwrap(); // add value
         assert_eq!(buf, exp);
     }
 
@@ -1203,10 +1221,23 @@ mod tests {
     fn test_encode_text_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
-        put_text_value(DataValue::MacAddress(macaddr.clone()), &mut buf).unwrap();
+        put_text_value(DataValue::MacAddress(macaddr), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(17); // length (placeholder)
         exp.extend_from_slice(b"12:34:56:ab:cd:ef");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_uuid() {
+        let mut buf = BytesMut::new();
+        let uuid = Uuid::from_bytes([
+            85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
+        ]);
+        put_text_value(DataValue::Uuid(uuid), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(36); // length (placeholder)
+        exp.extend_from_slice(b"550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(buf, exp);
     }
 }

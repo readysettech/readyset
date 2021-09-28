@@ -5,7 +5,7 @@ use std::str::FromStr;
 use itertools::Itertools;
 use launchpad::arbitrary::{
     arbitrary_decimal, arbitrary_naive_time, arbitrary_positive_naive_date,
-    arbitrary_timestamp_naive_date_time,
+    arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
@@ -77,6 +77,7 @@ pub enum SqlType {
     Json,
     ByteArray,
     MacAddr,
+    Uuid,
 }
 
 impl SqlType {
@@ -163,6 +164,7 @@ impl fmt::Display for SqlType {
             SqlType::Json => write!(f, "JSON"),
             SqlType::ByteArray => write!(f, "BYTEA"),
             SqlType::MacAddr => write!(f, "MACADDR"),
+            SqlType::Uuid => write!(f, "UUID"),
         }
     }
 }
@@ -393,6 +395,9 @@ impl Literal {
                             .to_string(MacAddressFormat::HexString),
                     )
                 })
+                .boxed(),
+            SqlType::Uuid => arbitrary_uuid()
+                .prop_map(|uuid| Self::String(uuid.to_string()))
                 .boxed(),
         }
     }
@@ -914,6 +919,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tag_no_case("json"), |_| SqlType::Json),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
         map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
+        map(tag_no_case("uuid"), |_| SqlType::Uuid),
     ))(i)
 }
 
@@ -1640,6 +1646,12 @@ mod tests {
         fn macaddr_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"macaddr");
             assert_eq!(res, SqlType::MacAddr);
+        }
+
+        #[test]
+        fn uuid_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"uuid");
+            assert_eq!(res, SqlType::Uuid);
         }
     }
 }

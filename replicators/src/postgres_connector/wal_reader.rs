@@ -251,7 +251,8 @@ impl wal::TupleData {
                             | PGType::TEXT
                             | PGType::VARCHAR
                             | PGType::CHAR
-                            | PGType::MACADDR => DataType::Text(str.as_ref().try_into()?),
+                            | PGType::MACADDR
+                            | PGType::UUID => DataType::Text(str.as_ref().try_into()?),
                             PGType::TIMESTAMP => DataType::Timestamp({
                                 // If there is a dot, there is a microseconds field attached
                                 if let Some((time, micro)) = &str.split_once('.') {

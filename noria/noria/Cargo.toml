@@ -51,13 +51,14 @@ derive_more = "0.99.11"
 backoff = { version = "0.3.0", features = ["tokio"] }
 url = { version = "2.2", features = ["serde"] }
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4"] }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8"] }
 metrics = "0.17.0"
 metrics-util = "0.10.0"
 itertools = "0.10.0"
 bytes = "1.0.1"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"] }
 eui48 = "0.4"
+uuid = { version = "0.8", features = ["v4"] }
 
 # consensus/
 zookeeper-async = "4.0.1"

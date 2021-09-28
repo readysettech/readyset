@@ -2576,6 +2576,7 @@ dependencies = [
  "rust_decimal",
  "tokio 1.11.0",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3543,6 +3544,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -3611,6 +3613,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "url",
+ "uuid",
  "vec1",
  "vec_map",
  "zookeeper-async",
@@ -3894,6 +3897,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-futures",
+ "uuid",
  "zookeeper",
 ]
 
@@ -4548,6 +4552,7 @@ dependencies = [
  "eui48",
  "fallible-iterator",
  "postgres-protocol",
+ "uuid",
 ]
 
 [[package]]
@@ -4684,6 +4689,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-test 0.4.2",
  "tokio-util 0.6.8",
+ "uuid",
 ]
 
 [[package]]
@@ -4737,6 +4743,7 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio 1.11.0",
+ "uuid",
 ]
 
 [[package]]
