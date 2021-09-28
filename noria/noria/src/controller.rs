@@ -15,6 +15,7 @@ use crate::{
 };
 use futures_util::future;
 use futures_util::future::Either;
+use hyper::client::HttpConnector;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -27,6 +28,7 @@ use std::{
     time,
 };
 use tower::buffer::Buffer;
+use tower::timeout::Timeout;
 use tower::ServiceExt;
 use tower_service::Service;
 use url::Url;
@@ -165,7 +167,7 @@ impl Service<ControllerRequest> for Controller {
 // TODO: this should be renamed to NoriaHandle, or maybe just Connection, since it also provides
 // reads and writes, which aren't controller actions!
 pub struct ControllerHandle {
-    handle: Buffer<Controller, ControllerRequest>,
+    handle: Buffer<Timeout<Controller>, ControllerRequest>,
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     tracer: tracing::Dispatch,
@@ -207,14 +209,22 @@ impl ControllerHandle {
     pub fn make(authority: Arc<Authority>) -> Self {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_connect_timeout(Some(Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS)));
         ControllerHandle {
             views: Default::default(),
             domains: Default::default(),
             handle: Buffer::new(
-                Controller {
-                    authority,
-                    client: hyper::Client::new(),
-                },
+                Timeout::new(
+                    Controller {
+                        authority,
+                        client: hyper::Client::builder()
+                            .http2_only(true)
+                            .http2_keep_alive_timeout(Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS))
+                            .build(http_connector),
+                    },
+                    Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS),
+                ),
                 CONTROLLER_BUFFER_SIZE,
             ),
             tracer,
