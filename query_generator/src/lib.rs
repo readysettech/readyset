@@ -147,6 +147,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Json => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
+        SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
     }
 }
 
@@ -251,6 +252,13 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
                     .to_string(MacAddressFormat::HexString),
             )
         }
+        SqlType::Uuid => {
+            let mut bytes = [0_u8, 16];
+            rng.fill(&mut bytes);
+            // We know the length and format of the bytes, so this should always be parsable as a `UUID`.
+            #[allow(clippy::unwrap_used)]
+            DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
+        }
     }
 }
 
@@ -330,6 +338,16 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
                     .unwrap()
                     .to_string(MacAddressFormat::HexString),
             )
+        }
+        SqlType::Uuid => {
+            let mut bytes = [u8::MAX; 16];
+            bytes[0] = ((idx >> 24) & 0xff) as u8;
+            bytes[1] = ((idx >> 16) & 0xff) as u8;
+            bytes[2] = ((idx >> 8) & 0xff) as u8;
+            bytes[3] = (idx & 0xff) as u8;
+            // We know the length and format of the bytes, so this should always be parsable as a `UUID`.
+            #[allow(clippy::unwrap_used)]
+            DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
     }
 }

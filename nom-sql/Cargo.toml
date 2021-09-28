@@ -25,6 +25,7 @@ thiserror = "1.0.26"
 hex = "0.4.3"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres"] }
 eui48 = "0.4"
+uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

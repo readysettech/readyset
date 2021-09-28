@@ -5,6 +5,7 @@ use psql_srv as ps;
 use std::convert::TryFrom;
 use tokio_postgres::types::Type;
 use tracing::error;
+use uuid::Uuid;
 
 /// An encapsulation of a Noria `DataType` value that facilitates conversion of this `DataType`
 /// into a `psql_srv::Value`.
@@ -60,6 +61,13 @@ impl TryFrom<Value> for ps::Value {
                     .map_err(|e| ps::Error::EncodeError(e.into()))
                     .and_then(|s| {
                         MacAddress::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
+                    })?,
+            )),
+            (Type::UUID, DataType::Text(u)) => Ok(ps::Value::Uuid(
+                u.to_str()
+                    .map_err(|e| ps::Error::EncodeError(e.into()))
+                    .and_then(|s| {
+                        Uuid::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
                     })?,
             )),
             (t, dt) => {

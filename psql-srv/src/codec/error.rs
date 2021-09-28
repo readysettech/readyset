@@ -47,6 +47,9 @@ pub enum DecodeError {
     #[error("invalid text mac address value: {0}")]
     InvalidTextMacAddressValue(ParseError),
 
+    #[error("invalid text uuid value: {0}")]
+    InvalidTextUuidValue(uuid::Error),
+
     #[error("invalid type: {0}")]
     InvalidType(u32),
 

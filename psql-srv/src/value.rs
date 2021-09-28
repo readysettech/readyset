@@ -2,6 +2,7 @@ use arccstr::ArcCStr;
 use chrono::NaiveDateTime;
 use eui48::MacAddress;
 use rust_decimal::Decimal;
+use uuid::Uuid;
 
 /// A PostgreSQL data value that can be received from, or sent to, a PostgreSQL frontend.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,4 +21,5 @@ pub enum Value {
     Timestamp(NaiveDateTime),
     ByteArray(Vec<u8>),
     MacAddress(MacAddress),
+    Uuid(Uuid),
 }

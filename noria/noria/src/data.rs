@@ -720,6 +720,17 @@ impl DataType {
                 })?;
                 Ok(Cow::Borrowed(self))
             }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Uuid) => {
+                // We perform this parsing just to validate that the string
+                // is a valid UUID.
+                uuid::Uuid::parse_str(<&str>::try_from(self)?).map_err(|e| {
+                    mk_err(
+                        "Could not parse value as UUID".to_owned(),
+                        Some(e.into()),
+                    )
+                })?;
+                Ok(Cow::Borrowed(self))
+            }
             (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
         }
     }
@@ -890,6 +901,7 @@ use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
 use std::cmp::Ordering;
 use std::sync::Arc;
+use uuid::Uuid;
 
 impl PartialOrd for DataType {
     fn partial_cmp(&self, other: &DataType) -> Option<Ordering> {
@@ -1948,6 +1960,16 @@ impl ToSql for DataType {
                     })
                     .and_then(|m| m.to_sql(ty, out))
             }
+            (Self::Text(_) | Self::TinyText(_), &Type::UUID) => {
+                Uuid::parse_str(<&str>::try_from(self).unwrap())
+                    .map_err(|e| {
+                        Box::<dyn Error + Send + Sync>::from(format!(
+                            "Could not convert Text into a UUID: {}",
+                            e
+                        ))
+                    })
+                    .and_then(|m| m.to_sql(ty, out))
+            }
             (Self::Text(_) | Self::TinyText(_), _) => {
                 <&str>::try_from(self).unwrap().to_sql(ty, out)
             }
@@ -1959,7 +1981,7 @@ impl ToSql for DataType {
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR
+        TIME, TIMESTAMP, MACADDR, UUID
     );
 
     to_sql_checked!();
@@ -1997,6 +2019,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::MACADDR => Ok(DataType::from(
                 MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
             )),
+            Type::UUID => Ok(DataType::from(Uuid::from_sql(ty, raw)?.to_string())),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -3808,6 +3831,13 @@ mod tests {
         fn text_to_macaddr() {
             let input = DataType::from("12:34:56:AB:CD:EF");
             let result = input.coerce_to(&SqlType::MacAddr).unwrap();
+            assert_eq!(&input, result.as_ref());
+        }
+
+        #[test]
+        fn text_to_uuid() {
+            let input = DataType::from(uuid::Uuid::new_v4().to_string());
+            let result = input.coerce_to(&SqlType::Uuid).unwrap();
             assert_eq!(&input, result.as_ref());
         }
 
