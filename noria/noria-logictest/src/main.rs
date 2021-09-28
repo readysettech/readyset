@@ -271,6 +271,10 @@ struct Verify {
     #[clap(long)]
     rename_passing: bool,
 
+    /// When tests that are expected to pass fail, rename the test file from .test to .fail.test
+    #[clap(long)]
+    rename_failing: bool,
+
     /// Collect timing of all named queries
     #[clap(long)]
     time: bool,
@@ -400,6 +404,7 @@ impl Verify {
             let run_opts: RunOptions = self.into();
             let result = Arc::clone(&result);
             let rename_passing = self.rename_passing;
+            let rename_failing = self.rename_failing;
             let deployment_name = script.name();
             let authority = Arc::new(
                 self.authority
@@ -442,6 +447,13 @@ impl Verify {
                             .failures
                             .push(script.name().into_owned());
                         eprintln!("{:#}", e);
+                        if rename_failing {
+                            let passing_fname = script.path().to_str().unwrap();
+                            let failing_fname = passing_fname.replace(".test", ".fail.test");
+                            eprintln!("Renaming {} to {}", passing_fname, failing_fname);
+                            fs::rename(Path::new(passing_fname), Path::new(&failing_fname))
+                                .unwrap();
+                        }
                     }
                     Err(e) => {
                         eprintln!(
