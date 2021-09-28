@@ -1658,7 +1658,9 @@ impl QueryOperation {
         // We don't currently support query parameters in subqueries
         !matches!(
             self,
-            QueryOperation::MultipleParameters | QueryOperation::SingleParameter
+            QueryOperation::MultipleParameters
+                | QueryOperation::SingleParameter
+                | QueryOperation::InParameter { .. }
         )
     }
 
