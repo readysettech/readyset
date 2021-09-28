@@ -52,6 +52,7 @@ pub(crate) struct Seed {
     relations_to_drop: Vec<Relation>,
     tables: Vec<CreateTableStatement>,
     queries: Vec<Query>,
+    generator: GeneratorState,
     hash_threshold: usize,
     file: Option<File>,
     script: TestScript,
@@ -98,11 +99,14 @@ impl TryFrom<PathBuf> for Seed {
             }
         }
 
+        let generator = GeneratorState::from(tables.clone());
+
         file.seek(SeekFrom::Start(0))?;
         Ok(Seed {
             relations_to_drop,
             tables,
             queries,
+            generator,
             hash_threshold,
             file: Some(file),
             script,
@@ -122,11 +126,11 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
     type Error = anyhow::Error;
 
     fn try_from(seeds: Vec<QuerySeed>) -> Result<Self, Self::Error> {
-        let mut gen = query_generator::GeneratorState::default();
+        let mut generator = query_generator::GeneratorState::default();
         let queries = seeds
             .into_iter()
             .map(|seed| -> anyhow::Result<Query> {
-                let query = gen.generate_query(seed);
+                let query = generator.generate_query(seed);
 
                 Ok(Query {
                     label: None,
@@ -155,7 +159,7 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
         let mut tables = vec![];
         let mut records = vec![];
 
-        for (name, table) in gen.tables_mut() {
+        for (name, table) in generator.tables_mut() {
             table.primary_key(); // ensure the table has a primary key
             let create_stmt = CreateTableStatement::from(table.clone());
 
@@ -172,6 +176,7 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
             relations_to_drop,
             tables,
             queries,
+            generator,
             hash_threshold: DEFAULT_HASH_THRESHOLD,
             file: None,
             script: records.into(),
@@ -245,13 +250,12 @@ impl Seed {
             .iter()
             .map(|t| t.table.name.clone())
             .collect::<Vec<_>>();
-        let mut generator = GeneratorState::from(self.tables.clone());
 
         let data = tables_in_order
             .clone()
             .into_iter()
             .map(|table_name| {
-                let spec = generator.table_mut(&table_name).unwrap();
+                let spec = self.generator.table_mut(&table_name).unwrap();
                 (
                     table_name,
                     spec.generate_data(opts.rows_per_table, opts.random),
@@ -262,7 +266,7 @@ impl Seed {
         let insert_statements = data
             .iter()
             .map(|(table_name, data)| {
-                let spec = generator.table(table_name).unwrap();
+                let spec = self.generator.table(table_name).unwrap();
                 let columns = spec.columns.keys().collect::<Vec<_>>();
                 nom_sql::InsertStatement {
                     table: spec.name.clone().into(),
@@ -320,7 +324,7 @@ impl Seed {
             let delete_statements: Vec<DeleteStatement> = data
                 .iter()
                 .map(|(table_name, data)| {
-                    let spec = generator.table(table_name).unwrap();
+                    let spec = self.generator.table(table_name).unwrap();
                     let table: Table = spec.name.clone().into();
                     let pk = spec.primary_key.clone().ok_or_else(|| {
                         anyhow!(
