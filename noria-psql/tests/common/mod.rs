@@ -51,20 +51,6 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
                     .unwrap(),
             );
 
-        // assume (for now) that connection errors mean the db doesn't exist, so we can just keep
-        // going. If the db does exist but we can't connect for another reason, we'd fail later
-        // anyway.
-        if let Ok(mut noria) = config.clone().dbname("noria").connect(NoTls) {
-            noria
-                .simple_query("SELECT pg_terminate_backend(pid) FROM pg_stat_replication;")
-                .unwrap();
-            noria
-                .simple_query(
-                    "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots;",
-                )
-                .unwrap();
-        }
-
         let mut management_db = config.dbname("postgres").connect(NoTls).unwrap();
         management_db
             .simple_query("DROP DATABASE IF EXISTS noria")

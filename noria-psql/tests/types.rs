@@ -1,14 +1,13 @@
 use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self, Deployment};
+use noria_client::test_helpers::{self};
 
 mod common;
 use common::PostgreSQLAdapter;
 use postgres::NoTls;
 
-fn setup(deployment: &Deployment) -> postgres::Config {
+fn setup() -> postgres::Config {
     test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
-        deployment,
         true,
         true,
     )
@@ -30,8 +29,7 @@ mod types {
         V: ToSql + Sync + PartialEq,
         for<'a> V: FromSql<'a>,
     {
-        let d = Deployment::new("type_test");
-        let config = setup(&d);
+        let config = setup();
         let mut client = config.connect(NoTls).unwrap();
 
         sleep();
@@ -92,17 +90,17 @@ mod types {
 
     // https://docs.rs/tokio-postgres/0.7.2/tokio_postgres/types/trait.ToSql.html#types
     test_types! {
-        #[ignore] bool_bool("bool", bool);
-        #[ignore] smallint_i16("smallint", i16);
-        #[ignore] int_i32("integer", i32);
+        bool_bool("bool", bool);
+        smallint_i16("smallint", i16);
+        int_i32("integer", i32);
         #[ignore] oid_u32("oid", u32);
-        #[ignore] bigint_i64("bigint", i64);
-        #[ignore] real_f32("real", f32);
-        #[ignore] double_f64("double precision", f64);
-        #[ignore] text_string("text", String);
-        #[ignore] bytea_bytes("bytea", Vec<u8>);
+        bigint_i64("bigint", i64);
+        real_f32("real", f32);
+        double_f64("double precision", f64);
+        text_string("text", String);
+        bytea_bytes("bytea", Vec<u8>);
         // TODO(fran): Add numeric with precision and scale when we start correctly
         //  handling them.
-        #[ignore] numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
+        numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
     }
 }

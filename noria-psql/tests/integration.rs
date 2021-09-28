@@ -1,15 +1,14 @@
 use chrono::{NaiveDate, NaiveDateTime};
-use noria_client::test_helpers::{self, sleep, Deployment};
+use noria_client::test_helpers::{self, sleep};
 use noria_client::BackendBuilder;
 use postgres::{NoTls, SimpleQueryMessage};
 
 mod common;
 use common::PostgreSQLAdapter;
 
-pub fn setup(deployment: &Deployment, partial: bool) -> postgres::Config {
+pub fn setup(partial: bool) -> postgres::Config {
     test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
-        deployment,
         false,
         partial,
     )
@@ -17,8 +16,7 @@ pub fn setup(deployment: &Deployment, partial: bool) -> postgres::Config {
 
 #[test]
 fn delete_basic() {
-    let d = Deployment::new("delete_basic");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
@@ -50,8 +48,7 @@ fn delete_basic() {
 
 #[test]
 fn delete_only_constraint() {
-    let d = Deployment::new("delete_only_constraint");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -79,8 +76,7 @@ fn delete_only_constraint() {
 
 #[test]
 fn delete_multiple() {
-    let d = Deployment::new("delete_multiple");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
@@ -119,8 +115,7 @@ fn delete_multiple() {
 
 #[test]
 fn delete_bogus() {
-    let d = Deployment::new("delete_bogus");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
@@ -139,8 +134,7 @@ fn delete_bogus() {
 
 #[test]
 fn delete_bogus_valid_and() {
-    let d = Deployment::new("delete_bogus_valid_and");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
         .unwrap();
@@ -173,8 +167,7 @@ fn delete_bogus_valid_and() {
 
 #[test]
 fn delete_bogus_valid_or() {
-    let d = Deployment::new("delete_bogus_valid_or");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
@@ -207,8 +200,7 @@ fn delete_bogus_valid_or() {
 
 #[test]
 fn delete_other_column() {
-    let d = Deployment::new("delete_other_column");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -222,8 +214,7 @@ fn delete_other_column() {
 
 #[test]
 fn delete_no_keys() {
-    let d = Deployment::new("delete_no_keys");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -237,8 +228,7 @@ fn delete_no_keys() {
 
 #[test]
 fn delete_compound_primary_key() {
-    let d = Deployment::new("delete_compound_primary_key");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -281,8 +271,7 @@ fn delete_compound_primary_key() {
 
 #[test]
 fn update_basic() {
-    let d = Deployment::new("update_basic");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -309,8 +298,7 @@ fn update_basic() {
 
 #[test]
 fn update_basic_prepared() {
-    let d = Deployment::new("update_basic_prepared");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -357,8 +345,7 @@ fn update_basic_prepared() {
 
 #[test]
 fn update_compound_primary_key() {
-    let d = Deployment::new("update_compound_primary_key");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query(
         "CREATE TABLE Vote (aid int, uid int, reason VARCHAR(255), PRIMARY KEY(aid, uid))",
@@ -404,8 +391,7 @@ fn update_compound_primary_key() {
 
 #[test]
 fn update_only_constraint() {
-    let d = Deployment::new("update_only_constraint");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     // Note that this doesn't have `id int PRIMARY KEY` like the other tests:
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
@@ -433,8 +419,7 @@ fn update_only_constraint() {
 
 #[test]
 fn update_pkey() {
-    let d = Deployment::new("update_pkey");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -469,8 +454,7 @@ fn update_pkey() {
 
 #[test]
 fn update_separate() {
-    let d = Deployment::new("update_separate");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -508,8 +492,7 @@ fn update_separate() {
 
 #[test]
 fn update_no_keys() {
-    let d = Deployment::new("update_no_keys");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -521,8 +504,7 @@ fn update_no_keys() {
 
 #[test]
 fn update_other_column() {
-    let d = Deployment::new("update_other_column");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -534,8 +516,7 @@ fn update_other_column() {
 
 #[test]
 fn update_bogus() {
-    let d = Deployment::new("update_bogus");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -551,8 +532,7 @@ fn update_bogus() {
 
 #[test]
 fn select_collapse_where_in() {
-    let d = Deployment::new("select_collapse_where_in");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")
         .unwrap();
@@ -647,8 +627,7 @@ fn select_collapse_where_in() {
 
 #[test]
 fn basic_select() {
-    let d = Deployment::new("basic_select");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -678,8 +657,7 @@ fn basic_select() {
 
 #[test]
 fn strings() {
-    let d = Deployment::new("strings");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x TEXT)").unwrap();
     sleep();
@@ -706,8 +684,7 @@ fn strings() {
 
 #[test]
 fn prepared_select() {
-    let d = Deployment::new("prepared_select");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -729,8 +706,7 @@ fn prepared_select() {
 
 #[test]
 fn select_quoting_names() {
-    let d = Deployment::new("select_quoting_names");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x INT, y INT)")
         .unwrap();
@@ -759,8 +735,7 @@ fn select_quoting_names() {
 
 #[test]
 fn create_view() {
-    let d = Deployment::new("create_view");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -791,8 +766,7 @@ fn create_view() {
 
 #[test]
 fn absurdly_simple_select() {
-    let d = Deployment::new("absurdly_simple_select");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -817,8 +791,7 @@ fn absurdly_simple_select() {
 
 #[test]
 fn order_by_basic() {
-    let d = Deployment::new("order_by_basic");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -865,8 +838,7 @@ fn order_by_basic() {
 
 #[test]
 fn order_by_limit_basic() {
-    let d = Deployment::new("order_by_limit_basic");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE test (x int, y int)")
         .unwrap();
@@ -899,8 +871,7 @@ fn order_by_limit_basic() {
 
 #[test]
 fn write_timestamps() {
-    let d = Deployment::new("insert_timestamps");
-    let opts = setup(&d, true);
+    let opts = setup(true);
     let mut conn = opts.connect(NoTls).unwrap();
     conn.simple_query("CREATE TABLE posts (id int primary key, created_at TIMESTAMP)")
         .unwrap();

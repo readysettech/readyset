@@ -260,7 +260,7 @@ impl wal::TupleData {
                             &str,
                             noria::TIME_FORMAT,
                         )?),
-                        PGType::BYTEA => hex::decode(str.as_ref())
+                        PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
                             .map_err(|_| WalError::ByteArrayHexParseError)
                             .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,
                         ref t => {
