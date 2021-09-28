@@ -59,6 +59,7 @@ pub enum DataType {
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
     /// A time duration
+    /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00 to 24:00:00
     Time(Arc<MysqlTime>),
     //NOTE(Fran): Using an `Arc` to keep the `DataType` type 16 bytes long
     /// A byte array
@@ -1973,6 +1974,7 @@ impl ToSql for DataType {
             (Self::Text(_) | Self::TinyText(_), _) => {
                 <&str>::try_from(self).unwrap().to_sql(ty, out)
             }
+            (Self::Timestamp(x), &Type::DATE) => x.date().to_sql(ty, out),
             (Self::Timestamp(x), _) => x.to_sql(ty, out),
             (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
@@ -2011,7 +2013,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::FLOAT4 => mk_from_sql!(f32),
             Type::FLOAT8 => mk_from_sql!(f64),
             Type::VARCHAR => mk_from_sql!(&str),
-            Type::DATE => mk_from_sql!(NaiveDateTime),
+            Type::DATE => mk_from_sql!(NaiveDate),
             Type::TIME => mk_from_sql!(NaiveTime),
             Type::BYTEA => mk_from_sql!(Vec<u8>),
             Type::NUMERIC => mk_from_sql!(Decimal),

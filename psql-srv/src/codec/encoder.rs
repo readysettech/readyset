@@ -53,6 +53,8 @@ const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+const TIME_FORMAT: &str = "%H:%M:%S%.f";
+const DATE_FORMAT: &str = "%Y-%m-%d";
 
 impl<R> Encoder<BackendMessage<R>> for Codec<R>
 where
@@ -146,9 +148,11 @@ where
                     })?,
                     None => Text,
                 };
+
                 let v = v
                     .try_into()
                     .map_err(|e| Error::InternalError(e.to_string()))?;
+
                 match format {
                     Binary => put_binary_value(v, dst)?,
                     Text => put_text_value(v, dst)?,
@@ -336,6 +340,12 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Timestamp(v) => {
             v.to_sql(&Type::TIMESTAMP, dst)?;
         }
+        Value::Date(v) => {
+            v.to_sql(&Type::DATE, dst)?;
+        }
+        Value::Time(v) => {
+            v.to_sql(&Type::TIME, dst)?;
+        }
         Value::ByteArray(b) => {
             b.to_sql(&Type::BYTEA, dst)?;
         }
@@ -409,6 +419,12 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
             write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
+        }
+        Value::Date(v) => {
+            write!(dst, "{}", v.format(DATE_FORMAT))?;
+        }
+        Value::Time(v) => {
+            write!(dst, "{}", v.format(TIME_FORMAT))?;
         }
         Value::ByteArray(b) => {
             write!(

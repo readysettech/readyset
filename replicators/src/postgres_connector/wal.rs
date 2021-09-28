@@ -30,6 +30,7 @@ pub enum WalError {
     ByteArraySyntaxError,
     ByteArrayHexParseError,
     TimestampParseError,
+    TimeParseError(mysql_time::ConvertError),
     NumericParseError,
     InvalidMapping(String),
     ToastNotSupported,
@@ -81,6 +82,12 @@ impl From<WalError> for noria::ReadySetError {
 impl From<noria::ReadySetError> for WalError {
     fn from(err: noria::ReadySetError) -> Self {
         WalError::ReadySetError(err)
+    }
+}
+
+impl From<mysql_time::ConvertError> for WalError {
+    fn from(err: mysql_time::ConvertError) -> Self {
+        WalError::TimeParseError(err)
     }
 }
 

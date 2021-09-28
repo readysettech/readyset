@@ -5112,6 +5112,7 @@ dependencies = [
  "hex",
  "itertools 0.10.1",
  "launchpad",
+ "mysql-time",
  "mysql_async 0.28.0",
  "mysql_common 0.27.5",
  "native-tls",
