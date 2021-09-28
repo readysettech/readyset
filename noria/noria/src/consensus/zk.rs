@@ -31,6 +31,7 @@ pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
 pub const WORKER_PATH: &str = "/workers";
 pub const WORKER_PREFIX: &str = "/workers/guid-";
+const BACKOFF_MAX_TIME: Duration = Duration::from_secs(10);
 
 struct EventWatcher;
 impl Watcher for EventWatcher {
@@ -71,7 +72,7 @@ impl ZookeeperAuthority {
         inner: Option<RwLock<ZookeeperAuthorityInner>>,
     ) -> ReadySetResult<Self> {
         let mut backoff: ExponentialBackoff<SystemClock> = ExponentialBackoff {
-            max_elapsed_time: None,
+            max_elapsed_time: Some(BACKOFF_MAX_TIME),
             ..Default::default()
         };
         backoff.reset();

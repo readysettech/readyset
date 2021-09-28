@@ -32,6 +32,7 @@ const SESSION_RELEASE_BEHAVIOR: &str = "delete";
 /// The amount of time to wait for a heartbeat before declaring a
 /// session as dead.
 const SESSION_TTL: &str = "20s";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct ConsulAuthorityInner {
     session: Option<SessionEntry>,
@@ -79,13 +80,14 @@ impl ConsulAuthority {
         let address = connect_string[..split_idx].to_owned();
 
         let config = ClientBuilder::new()
+            .timeout(CONNECT_TIMEOUT)
             .build()
             .map(|client| Config {
                 address,
                 datacenter: None,
                 http_client: client,
                 token: None,
-                wait_time: None,
+                wait_time: Some(CONNECT_TIMEOUT),
             })
             .map_err(|e| ReadySetError::Internal(e.to_string()))?;
 
