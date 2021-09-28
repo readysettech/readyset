@@ -99,5 +99,6 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Decimal(_, _) => unsupported_type!(),
         SqlType::ByteArray => Ok(Type::BYTEA),
         SqlType::Numeric(_) => Ok(Type::NUMERIC),
+        SqlType::MacAddr => Ok(Type::MACADDR),
     }
 }

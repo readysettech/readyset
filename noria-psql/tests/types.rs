@@ -17,7 +17,8 @@ mod types {
     use std::fmt::Display;
 
     use super::*;
-    use launchpad::arbitrary::{arbitrary_decimal, arbitrary_systemtime};
+    use eui48::MacAddress;
+    use launchpad::arbitrary::{arbitrary_decimal, arbitrary_mac_address, arbitrary_systemtime};
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
     use rust_decimal::Decimal;
@@ -104,5 +105,6 @@ mod types {
         //  handling them.
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
         timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
+        macaddr_string("macaddr", #[strategy(arbitrary_mac_address())] MacAddress);
     }
 }

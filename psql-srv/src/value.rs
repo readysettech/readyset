@@ -1,5 +1,6 @@
 use arccstr::ArcCStr;
 use chrono::NaiveDateTime;
+use eui48::MacAddress;
 use rust_decimal::Decimal;
 
 /// A PostgreSQL data value that can be received from, or sent to, a PostgreSQL frontend.
@@ -18,4 +19,5 @@ pub enum Value {
     Text(ArcCStr),
     Timestamp(NaiveDateTime),
     ByteArray(Vec<u8>),
+    MacAddress(MacAddress),
 }

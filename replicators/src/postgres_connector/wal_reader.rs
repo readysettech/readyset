@@ -247,9 +247,11 @@ impl wal::TupleData {
                             PGType::NUMERIC => Decimal::from_str(str.as_ref())
                                 .map_err(|_| WalError::NumericParseError)
                                 .map(|d| DataType::Numeric(Arc::new(d)))?,
-                            PGType::JSON | PGType::TEXT | PGType::VARCHAR | PGType::CHAR => {
-                                DataType::Text(str.as_ref().try_into()?)
-                            }
+                            PGType::JSON
+                            | PGType::TEXT
+                            | PGType::VARCHAR
+                            | PGType::CHAR
+                            | PGType::MACADDR => DataType::Text(str.as_ref().try_into()?),
                             PGType::TIMESTAMP => DataType::Timestamp({
                                 // If there is a dot, there is a microseconds field attached
                                 if let Some((time, micro)) = &str.split_once('.') {

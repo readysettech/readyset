@@ -23,6 +23,7 @@ const TRANSFER_FORMAT_PLACEHOLDER: TransferFormat = TransferFormat::Text;
 const TYPLEN_1: i16 = 1;
 const TYPLEN_2: i16 = 2;
 const TYPLEN_4: i16 = 4;
+const TYPLEN_6: i16 = 6;
 const TYPLEN_8: i16 = 8;
 const TYPLEN_VARLENA: i16 = -1;
 const UNKNOWN_COLUMN: i16 = 0;
@@ -461,6 +462,7 @@ fn make_field_description(
         Type::NUMERIC => TYPLEN_VARLENA,
         Type::TIMESTAMP => TYPLEN_8,
         Type::BYTEA => TYPLEN_VARLENA,
+        Type::MACADDR => TYPLEN_6,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
     Ok(FieldDescription {

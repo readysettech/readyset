@@ -83,6 +83,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
 
+use eui48::{MacAddress, MacAddressFormat};
 use launchpad::intervals::{BoundPair, IterBoundPair};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
@@ -145,6 +146,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Bool => 1i32.into(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Json => "{}".into(),
+        SqlType::MacAddr => "01:23:45:67:89:AF".into(),
     }
 }
 
@@ -238,6 +240,17 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             "{{\"k\":\"{}\"}}",
             "a".repeat(rng.gen_range(1..255))
         )),
+        SqlType::MacAddr => {
+            let mut bytes = [0_u8; 6];
+            rng.fill(&mut bytes);
+            // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+            #[allow(clippy::unwrap_used)]
+            DataType::from(
+                MacAddress::from_bytes(&bytes[..])
+                    .unwrap()
+                    .to_string(MacAddressFormat::HexString),
+            )
+        }
     }
 }
 
@@ -304,6 +317,20 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::ByteArray => unimplemented!(),
         SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
         SqlType::Json => DataType::from(format!("{{\"k\": {}}}", idx)),
+        SqlType::MacAddr => {
+            let b1: u8 = ((idx >> 24) & 0xff) as u8;
+            let b2: u8 = ((idx >> 16) & 0xff) as u8;
+            let b3: u8 = ((idx >> 8) & 0xff) as u8;
+            let b4: u8 = (idx & 0xff) as u8;
+            let bytes = [b1, b2, b3, b4, u8::MIN, u8::MAX];
+            // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+            #[allow(clippy::unwrap_used)]
+            DataType::from(
+                MacAddress::from_bytes(&bytes[..])
+                    .unwrap()
+                    .to_string(MacAddressFormat::HexString),
+            )
+        }
     }
 }
 

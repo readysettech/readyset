@@ -1675,6 +1675,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "eui48"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c4cf866e4d3e5e773691f5f61615a224a7b0b72b7daf994fc56d1b82dab0b6b"
+dependencies = [
+ "rustc-serialize",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2560,6 +2569,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "eui48",
  "futures 0.3.17",
  "proptest",
  "reqwest",
@@ -3519,6 +3529,7 @@ version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
  "derive_more",
+ "eui48",
  "hex",
  "itertools 0.10.1",
  "launchpad",
@@ -3564,6 +3575,7 @@ dependencies = [
  "consul",
  "derive_more",
  "enum_dispatch",
+ "eui48",
  "futures 0.3.17",
  "futures-util",
  "hyper",
@@ -3860,6 +3872,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap 3.0.0-beta.4",
+ "eui48",
  "futures 0.3.17",
  "jemallocator",
  "launchpad",
@@ -4532,6 +4545,7 @@ source = "git+https://github.com/readysettech/rust-postgres.git#df6df6ad805afff4
 dependencies = [
  "bytes 1.1.0",
  "chrono",
+ "eui48",
  "fallible-iterator",
  "postgres-protocol",
 ]
@@ -4657,6 +4671,7 @@ dependencies = [
  "async-trait",
  "bytes 1.1.0",
  "chrono",
+ "eui48",
  "futures 0.3.17",
  "hex",
  "nom-sql",
@@ -4697,6 +4712,7 @@ dependencies = [
  "colored",
  "criterion",
  "derive_more",
+ "eui48",
  "futures-util",
  "humantime",
  "humantime-serde",
@@ -5202,6 +5218,12 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc-serialize"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 
 [[package]]
 name = "rustc_version"

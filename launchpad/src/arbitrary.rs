@@ -1,6 +1,7 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use eui48::MacAddress;
 use proptest::prelude::*;
 use rust_decimal::Decimal;
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
@@ -63,5 +64,14 @@ pub fn arbitrary_systemtime() -> impl Strategy<Value = SystemTime> {
         } else {
             UNIX_EPOCH - StdDuration::new((-(s as i64)) as u64, us * 1000)
         }
+    })
+}
+
+/// Strategy to generate an arbitrary [`MacAddress`].
+pub fn arbitrary_mac_address() -> impl Strategy<Value = MacAddress> {
+    any::<[u8; 6]>().prop_map(|bytes| {
+        // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+        #[allow(clippy::unwrap_used)]
+        MacAddress::from_bytes(&bytes[..]).unwrap()
     })
 }
