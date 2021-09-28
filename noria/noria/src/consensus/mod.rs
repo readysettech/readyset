@@ -167,16 +167,18 @@ pub enum Authority {
 /// Enum that mirrors Authority that parses command line arguments.
 #[derive(Clone)]
 pub enum AuthorityType {
-    ZookeeperAuthority,
-    ConsulAuthority,
+    Zookeeper,
+    Consul,
+    Local,
 }
 
 impl FromStr for AuthorityType {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "zookeeper" => Ok(AuthorityType::ZookeeperAuthority),
-            "consul" => Ok(AuthorityType::ConsulAuthority),
+            "zookeeper" => Ok(AuthorityType::Zookeeper),
+            "consul" => Ok(AuthorityType::Consul),
+            "local" => Ok(AuthorityType::Local),
             other => Err(anyhow!("Invalid authority type: {}", other)),
         }
     }
@@ -185,14 +187,15 @@ impl FromStr for AuthorityType {
 impl AuthorityType {
     pub async fn to_authority(&self, addr: &str, deployment: &str) -> Authority {
         match self {
-            AuthorityType::ZookeeperAuthority => Authority::from(
+            AuthorityType::Zookeeper => Authority::from(
                 ZookeeperAuthority::new(&format!("{}/{}", &addr, &deployment))
                     .await
                     .unwrap(),
             ),
-            AuthorityType::ConsulAuthority => Authority::from(
+            AuthorityType::Consul => Authority::from(
                 ConsulAuthority::new(&format!("http://{}/{}", &addr, &deployment)).unwrap(),
             ),
+            AuthorityType::Local => Authority::from(LocalAuthority::new()),
         }
     }
 }
