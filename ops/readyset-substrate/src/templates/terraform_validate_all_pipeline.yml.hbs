@@ -31,7 +31,7 @@ steps:
     commands:
       - buildkite-terraform-upload-plan-all-pipeline
     plugins:
-      - docker#v3.7.0:
+      - docker#v3.8.0:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
           propagate-environment: true
           shell: false
@@ -42,7 +42,7 @@ steps:
   #   commands:
   #     - buildkite-terraform-upload-plan-and-apply-pipeline
   #   plugins:
-  #     - docker#v3.7.0:
+  #     - docker#v3.8.0:
   #         image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
   #         propagate-environment: true
   #         shell: false

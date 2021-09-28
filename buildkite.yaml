@@ -243,7 +243,7 @@ steps:
     - build-image
     - build-release-binaries
     plugins:
-      - docker#v3.7.0:
+      - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -267,7 +267,7 @@ steps:
     - build-image
     - build-release-binaries
     plugins:
-      - docker#v3.7.0:
+      - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -291,7 +291,7 @@ steps:
     - build-image
     - build-release-binaries
     plugins:
-      - docker#v3.7.0:
+      - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
