@@ -36,6 +36,7 @@ steps:
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
+                - ops/readyset-substrate
 
             - label: ':rust: Check rustfmt'
               include:
@@ -43,6 +44,7 @@ steps:
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
+                - ops/readyset-substrate
 
             - label: ':docker: Build cargo-audit image'
               include:
@@ -61,6 +63,7 @@ steps:
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
+                - ops/readyset-substrate
 
             - label: ":docker: Build readyset-server image"
               include:
@@ -89,6 +92,7 @@ steps:
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
+                - ops/readyset-substrate
 
             - label: 'Run logictest'
               include:
