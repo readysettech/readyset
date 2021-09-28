@@ -53,6 +53,8 @@ impl TryFrom<Value> for ps::Value {
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
+            (Type::DATE, DataType::Timestamp(v)) => Ok(ps::Value::Date(v.date())),
+            (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((*t.as_ref()).into())),
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(b.as_ref().clone())),

@@ -462,11 +462,14 @@ fn make_field_description(
         Type::FLOAT8 => TYPLEN_8,
         Type::NUMERIC => TYPLEN_VARLENA,
         Type::TIMESTAMP => TYPLEN_8,
+        Type::DATE => TYPLEN_4,
+        Type::TIME => TYPLEN_8,
         Type::BYTEA => TYPLEN_VARLENA,
         Type::MACADDR => TYPLEN_6,
         Type::UUID => TYPLEN_16,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
+
     Ok(FieldDescription {
         field_name: col.name.clone(),
         table_id: UNKNOWN_TABLE,

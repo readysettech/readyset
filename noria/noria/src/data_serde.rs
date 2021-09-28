@@ -43,8 +43,10 @@ impl serde::ser::Serialize for DataType {
             }
             DataType::Text(v) => serializer.serialize_newtype_variant("DataType", 3, "Text", v),
             DataType::Timestamp(v) => {
-                // We serialize the NaiveDateTime as seconds in the low 64 bits of i128 and subsec nanos in the high 64 bits
-                let ts = v.timestamp() as i128 + ((v.timestamp_subsec_nanos() as i128) << 64);
+                // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec nanos in the high 64 bits
+                // NOTE: don't be tempted to remove the intermediate step of casting to u64, as it will propagate the sign bit
+                let ts =
+                    v.timestamp() as u64 as u128 + ((v.timestamp_subsec_nanos() as u128) << 64);
                 serializer.serialize_newtype_variant("DataType", 4, "Timestamp", &ts)
             }
             DataType::Time(v) => serializer.serialize_newtype_variant("DataType", 5, "Time", &v),
@@ -273,7 +275,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         })
                     }
                     // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
-                    (Field::Timestamp, variant) => VariantAccess::newtype_variant::<i128>(variant)
+                    (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
                         .map(|v| DataType::Time(Arc::new(v))),

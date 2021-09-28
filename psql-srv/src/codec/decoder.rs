@@ -11,7 +11,7 @@ use crate::message::{
 use crate::value::Value;
 use arccstr::ArcCStr;
 use bytes::{Buf, Bytes, BytesMut};
-use chrono::NaiveDateTime;
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use postgres_types::{FromSql, Type};
 use rust_decimal::prelude::FromStr;
@@ -313,6 +313,8 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
         Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
+        Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
+        Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
         Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
         Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
