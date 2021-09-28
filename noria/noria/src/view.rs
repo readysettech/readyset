@@ -14,7 +14,6 @@ use nom_sql::{Column, SqlType};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -22,12 +21,16 @@ use std::net::SocketAddr;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::{collections::HashMap, time::Duration};
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
+use tower::timeout::Timeout;
 use tower_service::Service;
 use vec1::Vec1;
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
@@ -111,7 +114,7 @@ impl Service<()> for Endpoint {
     fn call(&mut self, _: ()) -> Self::Future {
         let f = tokio::net::TcpStream::connect(self.0);
         async move {
-            let s = f.await?;
+            let s = tokio::time::timeout(REQUEST_TIMEOUT, f).await??;
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
@@ -225,7 +228,7 @@ type Discover = impl tower::discover::Discover<Key = usize, Service = InnerServi
     + Send;
 
 pub(crate) type ViewRpc =
-    Buffer<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>, Tagged<ReadQuery>>;
+    Buffer<Timeout<ConcurrencyLimit<Balance<Discover, Tagged<ReadQuery>>>>, Tagged<ReadQuery>>;
 
 /// Representation for a comparison predicate against a set of keys
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone, Hash)]
@@ -594,9 +597,12 @@ impl ViewBuilder {
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
-                        ConcurrencyLimit::new(
-                            Balance::new(make_views_discover(shard.addr)),
-                            crate::PENDING_LIMIT,
+                        Timeout::new(
+                            ConcurrencyLimit::new(
+                                Balance::new(make_views_discover(shard.addr)),
+                                crate::PENDING_LIMIT,
+                            ),
+                            REQUEST_TIMEOUT,
                         ),
                         crate::BUFFER_TO_POOL,
                     );
