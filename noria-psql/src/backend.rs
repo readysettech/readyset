@@ -11,6 +11,7 @@ use crate::resultset::Resultset;
 use crate::row::Row;
 use crate::value::Value;
 use crate::PostgreSqlUpstream;
+use eui48::MacAddressFormat;
 use std::sync::Arc;
 
 /// A `noria_client` `Backend` wrapper that implements `psql_srv::Backend`. PostgreSQL client
@@ -92,6 +93,9 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Timestamp(v) => Ok((*v).into()),
             ps::Value::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
+            ps::Value::MacAddress(m) => {
+                Ok(DataType::from(m.to_string(MacAddressFormat::HexString)))
+            }
         }
     }
 }

@@ -30,6 +30,7 @@ use crate::expression::expression;
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
+use eui48::{MacAddress, MacAddressFormat};
 use rust_decimal::Decimal;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -75,6 +76,7 @@ pub enum SqlType {
     Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=#0)] u8),
     Json,
     ByteArray,
+    MacAddr,
 }
 
 impl SqlType {
@@ -160,6 +162,7 @@ impl fmt::Display for SqlType {
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
             SqlType::ByteArray => write!(f, "BYTEA"),
+            SqlType::MacAddr => write!(f, "MACADDR"),
         }
     }
 }
@@ -380,6 +383,17 @@ impl Literal {
                 .boxed(),
             SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
             SqlType::Json => unimplemented!("Json isn't implemented yet"),
+            SqlType::MacAddr => any::<[u8; 6]>()
+                .prop_map(|bytes| {
+                    // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
+                    #[allow(clippy::unwrap_used)]
+                    Self::String(
+                        MacAddress::from_bytes(&bytes[..])
+                            .unwrap()
+                            .to_string(MacAddressFormat::HexString),
+                    )
+                })
+                .boxed(),
         }
     }
 }
@@ -899,6 +913,7 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         ),
         map(tag_no_case("json"), |_| SqlType::Json),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
+        map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
     ))(i)
 }
 
@@ -1619,6 +1634,12 @@ mod tests {
             let res = type_identifier(Dialect::PostgreSQL)(qs);
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Numeric(Some((10, Some(20)))));
+        }
+
+        #[test]
+        fn macaddr_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"macaddr");
+            assert_eq!(res, SqlType::MacAddr);
         }
     }
 }

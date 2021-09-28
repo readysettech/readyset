@@ -711,6 +711,15 @@ impl DataType {
                 // TODO(grfn): Validate JSON here
                 Ok(Cow::Borrowed(self))
             }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), MacAddr) => {
+                MacAddress::parse_str(<&str>::try_from(self)?).map_err(|e| {
+                    mk_err(
+                        "Could not parse value as mac address".to_owned(),
+                        Some(e.into()),
+                    )
+                })?;
+                Ok(Cow::Borrowed(self))
+            }
             (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
         }
     }
@@ -874,6 +883,7 @@ impl PartialEq for DataType {
 }
 
 use crate::errors::internal_err;
+use eui48::{MacAddress, MacAddressFormat};
 use launchpad::arbitrary::arbitrary_decimal;
 use mysql_time::MysqlTime;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -1917,27 +1927,39 @@ impl ToSql for DataType {
         ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
-        match self {
-            Self::None => None::<i8>.to_sql(ty, out),
-            Self::Int(x) if *ty == Type::INT2 => (*x as i16).to_sql(ty, out),
-            Self::Int(x) => x.to_sql(ty, out),
-            Self::UnsignedInt(x) if *ty == Type::BOOL => (*x != 0).to_sql(ty, out),
-            Self::UnsignedInt(x) => x.to_sql(ty, out),
-            Self::BigInt(x) => x.to_sql(ty, out),
-            Self::UnsignedBigInt(x) => (*x as i64).to_sql(ty, out),
-            Self::Float(x, _) => x.to_sql(ty, out),
-            Self::Double(x, _) => x.to_sql(ty, out),
-            Self::Numeric(d) => d.to_sql(ty, out),
-            Self::Text(_) | Self::TinyText(_) => <&str>::try_from(self).unwrap().to_sql(ty, out),
-            Self::Timestamp(x) => x.to_sql(ty, out),
-            Self::Time(x) => NaiveTime::from(**x).to_sql(ty, out),
-            Self::ByteArray(ref array) => array.as_ref().to_sql(ty, out),
+        match (self, ty) {
+            (Self::None, _) => None::<i8>.to_sql(ty, out),
+            (Self::Int(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
+            (Self::Int(x), _) => x.to_sql(ty, out),
+            (Self::UnsignedInt(x), &Type::BOOL) => (*x != 0).to_sql(ty, out),
+            (Self::UnsignedInt(x), _) => x.to_sql(ty, out),
+            (Self::BigInt(x), _) => x.to_sql(ty, out),
+            (Self::UnsignedBigInt(x), _) => (*x as i64).to_sql(ty, out),
+            (Self::Float(x, _), _) => x.to_sql(ty, out),
+            (Self::Double(x, _), _) => x.to_sql(ty, out),
+            (Self::Numeric(d), _) => d.to_sql(ty, out),
+            (Self::Text(_) | Self::TinyText(_), &Type::MACADDR) => {
+                MacAddress::parse_str(<&str>::try_from(self).unwrap())
+                    .map_err(|e| {
+                        Box::<dyn Error + Send + Sync>::from(format!(
+                            "Could not convert Text into a Mac Address: {}",
+                            e
+                        ))
+                    })
+                    .and_then(|m| m.to_sql(ty, out))
+            }
+            (Self::Text(_) | Self::TinyText(_), _) => {
+                <&str>::try_from(self).unwrap().to_sql(ty, out)
+            }
+            (Self::Timestamp(x), _) => x.to_sql(ty, out),
+            (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
+            (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
         }
     }
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP
+        TIME, TIMESTAMP, MACADDR
     );
 
     to_sql_checked!();
@@ -1972,6 +1994,9 @@ impl<'a> FromSql<'a> for DataType {
             Type::BYTEA => mk_from_sql!(Vec<u8>),
             Type::NUMERIC => mk_from_sql!(Decimal),
             Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
+            Type::MACADDR => Ok(DataType::from(
+                MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
+            )),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -1986,7 +2011,7 @@ impl<'a> FromSql<'a> for DataType {
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP
+        TIME, TIMESTAMP, MACADDR
     );
 }
 
@@ -3776,6 +3801,13 @@ mod tests {
         fn text_to_json() {
             let input = DataType::from("{\"foo\": \"bar\"}");
             let result = input.coerce_to(&SqlType::Json).unwrap();
+            assert_eq!(&input, result.as_ref());
+        }
+
+        #[test]
+        fn text_to_macaddr() {
+            let input = DataType::from("12:34:56:AB:CD:EF");
+            let result = input.coerce_to(&SqlType::MacAddr).unwrap();
             assert_eq!(&input, result.as_ref());
         }
 

@@ -35,3 +35,4 @@ launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
 test-strategy = "0.1.1"
 rust_decimal = { version = "1.16" }
+eui48 = "0.4"

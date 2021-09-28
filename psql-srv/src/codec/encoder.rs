@@ -9,6 +9,7 @@ use crate::message::{
 };
 use crate::value::Value;
 use bytes::{BufMut, BytesMut};
+use eui48::MacAddressFormat;
 use postgres_types::{ToSql, Type};
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -338,6 +339,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::ByteArray(b) => {
             b.to_sql(&Type::BYTEA, dst)?;
         }
+        Value::MacAddress(m) => {
+            m.to_sql(&Type::MACADDR, dst)?;
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -413,6 +417,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
                     .join("")
             )?;
         }
+        Value::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -430,6 +435,7 @@ mod tests {
     use arccstr::ArcCStr;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
+    use eui48::MacAddress;
     use rust_decimal::Decimal;
     use std::sync::Arc;
 
@@ -1034,6 +1040,17 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_macaddr() {
+        let mut buf = BytesMut::new();
+        let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
+        put_binary_value(DataValue::MacAddress(macaddr.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(6);
+        macaddr.to_sql(&Type::MACADDR, &mut exp).unwrap(); // add value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_text_null() {
         let mut buf = BytesMut::new();
         put_text_value(DataValue::Null, &mut buf).unwrap();
@@ -1179,6 +1196,17 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(12); // length (placeholder)
         exp.extend_from_slice(b"0008275c6480");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_macaddr() {
+        let mut buf = BytesMut::new();
+        let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
+        put_text_value(DataValue::MacAddress(macaddr.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(17); // length (placeholder)
+        exp.extend_from_slice(b"12:34:56:ab:cd:ef");
         assert_eq!(buf, exp);
     }
 }

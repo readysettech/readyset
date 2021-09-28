@@ -1,7 +1,7 @@
 use crate::bytes::BytesStr;
 use crate::codec::error::DecodeError as Error;
 use crate::codec::error::DecodeError::InvalidTextByteArrayValue;
-use crate::codec::Codec;
+use crate::codec::{Codec, DecodeError};
 use crate::error::Error as BackendError;
 use crate::message::{
     FrontendMessage::{self, *},
@@ -12,6 +12,7 @@ use crate::value::Value;
 use arccstr::ArcCStr;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::NaiveDateTime;
+use eui48::MacAddress;
 use postgres_types::{FromSql, Type};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
@@ -313,6 +314,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
         Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
+        Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -354,6 +356,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             let bytes = hex::decode(text_str).map_err(InvalidTextByteArrayValue)?;
             Ok(Value::ByteArray(bytes))
         }
+        Type::MACADDR => MacAddress::parse_str(text_str)
+            .map_err(DecodeError::InvalidTextMacAddressValue)
+            .map(Value::MacAddress),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -1029,6 +1034,18 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_macaddr() {
+        let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
+        let mut buf = BytesMut::new();
+        buf.put_i32(6);
+        macaddr.to_sql(&Type::MACADDR, &mut buf).unwrap(); // add value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::MACADDR).unwrap(),
+            DataValue::MacAddress(macaddr)
+        );
+    }
+
+    #[test]
     fn test_decode_text_null() {
         let mut buf = BytesMut::new();
         buf.put_i32(-1); // size
@@ -1169,6 +1186,17 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::BYTEA).unwrap(),
             DataValue::ByteArray(vec![0, 8, 39, 92, 100, 128])
+        );
+    }
+
+    #[test]
+    fn test_decode_text_macaddr() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(17);
+        buf.extend_from_slice(b"12:34:56:AB:CD:EF");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::MACADDR).unwrap(),
+            DataValue::MacAddress(MacAddress::new([18, 52, 86, 171, 205, 239]))
         );
     }
 }

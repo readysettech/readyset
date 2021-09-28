@@ -1,3 +1,4 @@
+use eui48::ParseError;
 use hex::FromHexError;
 use postgres_types::Type;
 use std::ffi::FromBytesWithNulError;
@@ -42,6 +43,9 @@ pub enum DecodeError {
 
     #[error("invalid text byte array value: {0}")]
     InvalidTextByteArrayValue(FromHexError),
+
+    #[error("invalid text mac address value: {0}")]
+    InvalidTextMacAddressValue(ParseError),
 
     #[error("invalid type: {0}")]
     InvalidType(u32),

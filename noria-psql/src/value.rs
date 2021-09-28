@@ -1,4 +1,5 @@
 use arccstr::ArcCStr;
+use eui48::MacAddress;
 use noria::{DataType, ReadySetError};
 use psql_srv as ps;
 use std::convert::TryFrom;
@@ -54,6 +55,13 @@ impl TryFrom<Value> for ps::Value {
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(b.as_ref().clone())),
+            (Type::MACADDR, DataType::Text(m)) => Ok(ps::Value::MacAddress(
+                m.to_str()
+                    .map_err(|e| ps::Error::EncodeError(e.into()))
+                    .and_then(|s| {
+                        MacAddress::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
+                    })?,
+            )),
             (t, dt) => {
                 error!(
                     psql_type = %t,

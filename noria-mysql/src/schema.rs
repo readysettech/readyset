@@ -76,6 +76,7 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         SqlType::Json => MYSQL_TYPE_JSON,
         SqlType::ByteArray => MYSQL_TYPE_BLOB,
         SqlType::Numeric(_) => MYSQL_TYPE_DECIMAL,
+        SqlType::MacAddr => unimplemented!("MySQL does not support the MACADDR type"),
     };
 
     for c in &col.constraints {
