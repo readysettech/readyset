@@ -3,16 +3,14 @@
 //! see: <https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit>
 
 use mysql::prelude::Queryable;
-use noria_client::test_helpers::{sleep, Deployment};
+use noria_client::test_helpers::sleep;
 
 mod common;
 use common::setup;
 
 #[test]
 fn mirror_reads_with_supported_query() {
-    let d = Deployment::new("mirror_reads_with_supported_query");
-    let opts = setup(&d, true);
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();
@@ -30,9 +28,7 @@ fn mirror_reads_with_supported_query() {
 #[test]
 #[ignore] // waiting on fallback for prepared statements
 fn mirror_reads_with_unsupported_query() {
-    let d = Deployment::new("mirror_reads_with_unsupported_query");
-    let opts = setup(&d, true);
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
 
     conn.query_drop("CREATE TABLE Cats(id int PRIMARY KEY, name VARCHAR(255))")
         .unwrap();

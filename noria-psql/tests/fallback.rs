@@ -1,15 +1,14 @@
 use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self, sleep, Deployment};
+use noria_client::test_helpers::{self, sleep};
 use serial_test::serial;
 
 mod common;
 use common::PostgreSQLAdapter;
 use postgres::NoTls;
 
-fn setup(deployment: &Deployment) -> postgres::Config {
+fn setup() -> postgres::Config {
     test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
-        deployment,
         true,
         true,
     )
@@ -18,8 +17,7 @@ fn setup(deployment: &Deployment) -> postgres::Config {
 #[test]
 #[serial]
 fn create_table() {
-    let d = Deployment::new("create_table");
-    let config = setup(&d);
+    let config = setup();
     let mut client = config.connect(NoTls).unwrap();
 
     // NOTE: Currently, a race condition with noria startup means we have to wait until the
@@ -48,8 +46,7 @@ fn create_table() {
 #[serial]
 #[ignore] // needs proper detection of reads vs writes through fallback
 fn prepare_execute_fallback() {
-    let d = Deployment::new("create_table");
-    let config = setup(&d);
+    let config = setup();
     let mut client = config.connect(NoTls).unwrap();
 
     sleep();

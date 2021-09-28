@@ -1,15 +1,14 @@
 use mysql::prelude::*;
-use noria_client::test_helpers::{self, sleep, Deployment};
+use noria_client::test_helpers::{self, sleep};
 use noria_client::BackendBuilder;
 use serial_test::serial;
 
 mod common;
 use common::MySQLAdapter;
 
-fn setup(deployment: &Deployment) -> mysql::Opts {
+fn setup() -> mysql::Opts {
     test_helpers::setup::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
-        deployment,
         true,
         true,
     )
@@ -18,10 +17,7 @@ fn setup(deployment: &Deployment) -> mysql::Opts {
 #[test]
 #[serial]
 fn create_table() {
-    let d = Deployment::new("create_table");
-    let opts = setup(&d);
-
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup()).unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
@@ -40,10 +36,7 @@ fn create_table() {
 #[serial]
 #[ignore] // alter table not supported yet
 fn add_column() {
-    let d = Deployment::new("create_table");
-    let opts = setup(&d);
-
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup()).unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int, PRIMARY KEY(id))")
         .unwrap();
@@ -72,9 +65,7 @@ fn add_column() {
 #[test]
 #[serial]
 fn json_column_insert_read() {
-    let d = Deployment::new("insert_quoted_string");
-    let opts = setup(&d);
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup()).unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .unwrap();
@@ -95,9 +86,7 @@ fn json_column_insert_read() {
 #[test]
 #[serial]
 fn json_column_partial_update() {
-    let d = Deployment::new("insert_quoted_string");
-    let opts = setup(&d);
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup()).unwrap();
 
     conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, data JSON)")
         .unwrap();
@@ -117,9 +106,7 @@ fn json_column_partial_update() {
 #[test]
 #[serial]
 fn range_query() {
-    let d = Deployment::new("range_queries");
-    let opts = setup(&d);
-    let mut conn = mysql::Conn::new(opts).unwrap();
+    let mut conn = mysql::Conn::new(setup()).unwrap();
 
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .unwrap();

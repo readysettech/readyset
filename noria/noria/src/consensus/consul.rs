@@ -202,7 +202,8 @@ impl ConsulAuthority {
         if let Some(session) = &inner.session {
             // This will not be populated without an id.
             #[allow(clippy::unwrap_used)]
-            self.consul
+            let _ = self
+                .consul
                 .destroy(session.ID.as_ref().unwrap(), None)
                 .await;
         }

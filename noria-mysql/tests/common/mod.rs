@@ -5,7 +5,7 @@ use tokio::net::TcpStream;
 
 use msql_srv::MysqlIntermediary;
 use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self, Deployment};
+use noria_client::test_helpers;
 
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 
@@ -65,10 +65,9 @@ impl test_helpers::Adapter for MySQLAdapter {
 // Initializes a Noria worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
 #[allow(dead_code)] // not all test files use this function
-pub fn setup(deployment: &Deployment, partial: bool) -> mysql::Opts {
+pub fn setup(partial: bool) -> mysql::Opts {
     test_helpers::setup::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
-        deployment,
         false,
         partial,
     )
