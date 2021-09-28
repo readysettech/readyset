@@ -86,7 +86,7 @@ use test_strategy::Arbitrary;
 use launchpad::intervals::{BoundPair, IterBoundPair};
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, CommonTableExpression,
-    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression,
+    CreateTableStatement, Expression, FieldDefinitionExpression, FunctionExpression, InValue,
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
@@ -975,10 +975,19 @@ impl From<Vec<CreateTableStatement>> for GeneratorState {
     }
 }
 
+pub struct QueryParameter {
+    table_name: TableName,
+    column_name: ColumnName,
+    /// Index of this parameter in the list of parameters with the same table and column name, if
+    /// any. This value is used when generating values for query parameters to generate multiple
+    /// values when the same column appears in multiple parameters
+    index: Option<u32>,
+}
+
 pub struct QueryState<'a> {
     gen: &'a mut GeneratorState,
     tables: HashSet<TableName>,
-    parameters: Vec<(TableName, ColumnName)>,
+    parameters: Vec<QueryParameter>,
     unique_parameters: HashMap<TableName, Vec<(ColumnName, DataType)>>,
     alias_counter: u32,
     datatype_counter: u8,
@@ -1072,7 +1081,32 @@ impl<'a> QueryState<'a> {
     /// Record a new (positional) parameter for the query, comparing against the given column of the
     /// given table
     pub fn add_parameter(&mut self, table_name: TableName, column_name: ColumnName) {
-        self.parameters.push((table_name, column_name))
+        self.parameters.push(QueryParameter {
+            table_name,
+            column_name,
+            index: None,
+        })
+    }
+
+    /// Record a new (positional) parameter for the query, comparing against the given column of the
+    /// given table, and with the given *index*, used to distinguish between duplicate instances of
+    /// the same parameter in the query.
+    pub fn add_parameter_with_index(
+        &mut self,
+        table_name: TableName,
+        column_name: ColumnName,
+        index: u32,
+    ) {
+        let table = self.gen.table_mut(&table_name).unwrap();
+        let sql_type = &table.columns[&column_name].sql_type;
+        let val = unique_value_of_type(sql_type, index);
+        table.expect_value(column_name.clone(), val);
+
+        self.parameters.push(QueryParameter {
+            table_name,
+            column_name,
+            index: Some(index),
+        });
     }
 
     /// Make a new, unique key for all the parameters in the query.
@@ -1080,7 +1114,12 @@ impl<'a> QueryState<'a> {
     /// To get data that matches this key, call `generate_data()` after calling this function.
     pub fn make_unique_key(&mut self) -> Vec<DataType> {
         let mut ret = Vec::with_capacity(self.parameters.len());
-        for (table_name, column_name) in self.parameters.iter() {
+        for QueryParameter {
+            table_name,
+            column_name,
+            ..
+        } in self.parameters.iter()
+        {
             let val = unique_value_of_type(
                 &self.gen.tables[table_name].columns[column_name].sql_type,
                 self.datatype_counter as u32,
@@ -1099,9 +1138,19 @@ impl<'a> QueryState<'a> {
     pub fn key(&self) -> Vec<DataType> {
         self.parameters
             .iter()
-            .map(|(table_name, column_name)| {
-                value_of_type(&self.gen.tables[table_name].columns[column_name].sql_type)
-            })
+            .map(
+                |QueryParameter {
+                     table_name,
+                     column_name,
+                     index,
+                 }| {
+                    let sql_type = &self.gen.tables[table_name].columns[column_name].sql_type;
+                    match index {
+                        Some(idx) => unique_value_of_type(sql_type, *idx),
+                        None => value_of_type(sql_type),
+                    }
+                },
+            )
             .collect()
     }
 }
@@ -1369,6 +1418,10 @@ pub enum QueryOperation {
     SingleParameter,
     #[weight(if args.in_subquery { 0 } else { 1 })]
     MultipleParameters,
+    #[weight(if args.in_subquery { 0 } else { 1 })]
+    InParameter {
+        num_values: u8,
+    },
     ProjectBuiltinFunction(BuiltinFunction),
     TopK {
         order_type: OrderType,
@@ -1496,6 +1549,7 @@ lazy_static! {
             .chain(JOIN_OPERATORS.iter().cloned().map(QueryOperation::Join))
             .chain(iter::once(QueryOperation::ProjectLiteral))
             .chain(iter::once(QueryOperation::SingleParameter))
+            .chain(iter::once(QueryOperation::InParameter { num_values: 3 }))
             .chain(BuiltinFunction::iter().map(QueryOperation::ProjectBuiltinFunction))
             .chain(ALL_TOPK.iter().cloned())
             .chain(ALL_SUBQUERY_POSITIONS.iter().cloned().map(QueryOperation::Subquery))
@@ -1761,6 +1815,33 @@ impl QueryOperation {
                 QueryOperation::SingleParameter.add_to_query(state, query);
                 QueryOperation::SingleParameter.add_to_query(state, query);
             }
+            QueryOperation::InParameter { num_values } => {
+                let col = column_in_query(state, query);
+                and_where(
+                    query,
+                    Expression::In {
+                        lhs: Box::new(Expression::Column(col.clone())),
+                        rhs: InValue::List(
+                            (0..*num_values)
+                                .map(|_| {
+                                    Expression::Literal(Literal::Placeholder(
+                                        ItemPlaceholder::QuestionMark,
+                                    ))
+                                })
+                                .collect(),
+                        ),
+                        negated: false,
+                    },
+                );
+
+                for idx in 0..*num_values {
+                    state.add_parameter_with_index(
+                        col.table.clone().unwrap().into(),
+                        col.name.clone().into(),
+                        idx as _,
+                    )
+                }
+            }
             QueryOperation::ProjectBuiltinFunction(bif) => {
                 macro_rules! add_builtin {
                     ($fname:ident($($arg:tt)*)) => {{
@@ -1894,6 +1975,7 @@ impl QueryOperation {
 /// | single_parameter / single_param / param | A single query parameter          |
 /// | project_literal                         | A projected literal value         |
 /// | multiple_parameters / params            | Multiple query parameters         |
+/// | in_parameter                            | IN with multiple query parameters |
 /// | project_builtin                         | Project a built-in function       |
 /// | subqueries                              | All subqueries                    |
 /// | cte                                     | CTEs (WITH statements)            |
@@ -2011,6 +2093,7 @@ impl FromStr for Operations {
             "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter].into()),
             "project_literal" => Ok(vec![ProjectLiteral].into()),
             "multiple_parameters" | "params" => Ok(vec![MultipleParameters].into()),
+            "in_parameter" => Ok(vec![InParameter { num_values: 3 }].into()),
             "project_builtin" => Ok(BuiltinFunction::iter()
                 .map(ProjectBuiltinFunction)
                 .collect()),
@@ -2517,5 +2600,31 @@ mod tests {
                 (Bound::Included(0), Bound::Included(123))
             )
         }
+    }
+
+    #[test]
+    fn in_params() {
+        let mut gen = GeneratorState::default();
+        let seed = QuerySeed {
+            operations: vec![QueryOperation::InParameter { num_values: 3 }],
+            subqueries: vec![],
+        };
+        let query = gen.generate_query(seed);
+        eprintln!("query: {}", query.statement);
+        match query.statement.where_clause {
+            Some(Expression::In {
+                lhs: _,
+                rhs: InValue::List(exprs),
+                negated: false,
+            }) => {
+                assert_eq!(exprs.len(), 3);
+                assert!(exprs.iter().all(|expr| *expr
+                    == Expression::Literal(Literal::Placeholder(ItemPlaceholder::QuestionMark))));
+            }
+            _ => unreachable!(),
+        }
+
+        let key = query.state.key();
+        assert_eq!(key.len(), 3);
     }
 }
