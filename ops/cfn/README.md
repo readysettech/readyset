@@ -15,14 +15,15 @@ and Servers in separate ASGs inside a given VPC.
 
 1. Create a regional bucket for Taskcat to upload in development stacks to. A
     reasonable name is of the format `readysettech-tcat-<username>-<region>`.
-2. Create a file at `~/.taskcat.yml` with the following content:
+2. Create an EC2 keypair, or note the name of an existing EC2 keypair
+3. Create a file at `~/.taskcat.yml` with the following content:
 ```
 general:
   s3_bucket: <Bucket Name created in step 1>
   regions:
     - <region>
   parameters:
-    KeyPairName: <Name of AWS keypair>
+    KeyPairName: <Name of AWS keypair from step 2>
     ReadysetS3BucketName: <Bucket Name created in step 1>
     AccessCIDR: <CIDR that you will be able to SSH to the Bastion Host from>
     DatabaseName: <Name of Database created in RDS>
