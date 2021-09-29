@@ -23,6 +23,12 @@ impl DomainIndex {
     }
 }
 
+impl fmt::Display for DomainIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct LocalNodeIndex {
