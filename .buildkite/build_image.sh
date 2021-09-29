@@ -25,14 +25,24 @@ else
     cache_from=""
 fi
 
-echo "+++ :docker: Building $image:$VERSION"
-DOCKER_BUILDKIT=1 docker build \
-    -f "$dockerfile" \
-    "$cache_from" \
-    -t "$image:$VERSION" \
-    --build-arg BUILDKIT_INLINE_CACHE=1 \
+build_cmd_prefix=(
+    "docker" "build" \
+    "-f" "$dockerfile" \
+    "-t" "$image:$VERSION" \
+    "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
+)
+build_cmd_suffix=(
     "$@" \
-    .
+    "."
+)
+if [ -n "$cache_from" ]; then
+    build_cmd=("${build_cmd_prefix[@]}" "$cache_from" "${build_cmd_suffix[@]}")
+else
+    build_cmd=("${build_cmd_prefix[@]}" "${build_cmd_suffix[@]}")
+fi
+
+echo "+++ :docker: Building $image:$VERSION"
+DOCKER_BUILDKIT=1 "${build_cmd[@]}"
 
 if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
     docker tag "$image:$VERSION" "$image:latest"

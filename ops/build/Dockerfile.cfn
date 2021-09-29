@@ -1,5 +1,5 @@
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
 
-RUN pip install taskcat
-RUN pip install cfn-lint
-RUN pip install pydot
+RUN set -eux; \
+    apk add --no-cache gcc musl-dev; \
+    pip install --no-cache-dir taskcat cfn-lint pydot

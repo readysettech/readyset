@@ -152,11 +152,11 @@ steps:
             # --- START CLOUDFORMATION STEPS --- #
             - label: ':docker: Build readyset-ops-cfn image'
               include:
-                - "ops/cfn"
+                - "ops/cfn/**"
 
             - label: ':aws-cloudformation: Lint with taskcat :cat:'
               include:
-                - "ops/cfn"
+                - "ops/cfn/**"
             # --- END CLOUDFORMATIOn STEPS --- #
 
             # --- START JS CLIENT STEPS --- #
