@@ -1,6 +1,7 @@
+use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, JoinConstraint, JoinOperator,
-    JoinRightSide, Literal, Table, UnaryOperator,
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, JoinConstraint,
+    JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
 };
 use nom_sql::{OrderType, SelectStatement};
 
@@ -8,7 +9,7 @@ use crate::controller::sql::query_utils::LogicalOp;
 use crate::ReadySetResult;
 use noria::{internal, invariant, invariant_eq, unsupported};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -488,6 +489,32 @@ fn classify_conditionals(
                 }
             } else {
                 unsupported!("Arithmetic not supported here")
+            }
+        }
+        Expression::In {
+            lhs,
+            rhs: InValue::List(rhs),
+            ..
+        } => {
+            let tables = lhs
+                .referred_columns()
+                .chain(rhs.iter().flat_map(|expr| expr.referred_columns()))
+                .flat_map(|col| &col.table)
+                .collect::<HashSet<_>>();
+            let num_tables = tables.len();
+            match tables.into_iter().next() {
+                // TODO(grfn): This limitation probably isn't too hard to lift
+                None => {
+                    unsupported!("Filter conditions must currently mention at least one column")
+                }
+                Some(table) if num_tables == 1 => {
+                    // only one table mentioned, so local
+                    local.entry(table.clone()).or_default().push(ce.clone())
+                }
+                _ => {
+                    // more than 1 table mentioned, so must be a global predicate
+                    global.push(ce.clone())
+                }
             }
         }
         Expression::UnaryOp {

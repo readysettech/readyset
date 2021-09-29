@@ -1234,56 +1234,52 @@ impl SqlToMirConverter {
         let mut pred_nodes: Vec<MirNodeRef> = Vec::new();
         let output_cols = parent.borrow().columns().to_vec();
         match ce {
-            Expression::BinaryOp { lhs, op, rhs } => {
-                match op {
-                    BinaryOperator::And => {
-                        let left = self.make_predicate_nodes(name, parent, lhs, nc)?;
-                        invariant!(!left.is_empty());
-                        #[allow(clippy::unwrap_used)] // checked above
-                        let right = self.make_predicate_nodes(
-                            name,
-                            left.last().unwrap().clone(),
-                            rhs,
-                            nc + left.len(),
-                        )?;
+            Expression::BinaryOp {
+                lhs,
+                op: BinaryOperator::And,
+                rhs,
+            } => {
+                let left = self.make_predicate_nodes(name, parent, lhs, nc)?;
+                invariant!(!left.is_empty());
+                #[allow(clippy::unwrap_used)] // checked above
+                let right = self.make_predicate_nodes(
+                    name,
+                    left.last().unwrap().clone(),
+                    rhs,
+                    nc + left.len(),
+                )?;
 
-                        pred_nodes.extend(left);
-                        pred_nodes.extend(right);
-                    }
-                    BinaryOperator::Or => {
-                        let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
-                        let right =
-                            self.make_predicate_nodes(name, parent, rhs, nc + left.len())?;
+                pred_nodes.extend(left);
+                pred_nodes.extend(right);
+            }
+            Expression::BinaryOp {
+                lhs,
+                op: BinaryOperator::Or,
+                rhs,
+            } => {
+                let left = self.make_predicate_nodes(name, parent.clone(), lhs, nc)?;
+                let right = self.make_predicate_nodes(name, parent, rhs, nc + left.len())?;
 
-                        debug!("Creating union node for `or` predicate");
+                debug!("Creating union node for `or` predicate");
 
-                        invariant!(!left.is_empty());
-                        invariant!(!right.is_empty());
-                        #[allow(clippy::unwrap_used)] // checked above
-                        let last_left = left.last().unwrap().clone();
-                        #[allow(clippy::unwrap_used)] // checked above
-                        let last_right = right.last().unwrap().clone();
-                        let union = self.make_union_from_same_base(
-                            &format!("{}_un{}", name, nc + left.len() + right.len()),
-                            vec![last_left, last_right],
-                            output_cols,
-                            // the filters might overlap, so we need to set BagUnion mode which
-                            // removes rows in one side that exist in the other
-                            union::DuplicateMode::BagUnion,
-                        )?;
+                invariant!(!left.is_empty());
+                invariant!(!right.is_empty());
+                #[allow(clippy::unwrap_used)] // checked above
+                let last_left = left.last().unwrap().clone();
+                #[allow(clippy::unwrap_used)] // checked above
+                let last_right = right.last().unwrap().clone();
+                let union = self.make_union_from_same_base(
+                    &format!("{}_un{}", name, nc + left.len() + right.len()),
+                    vec![last_left, last_right],
+                    output_cols,
+                    // the filters might overlap, so we need to set BagUnion mode which
+                    // removes rows in one side that exist in the other
+                    union::DuplicateMode::BagUnion,
+                )?;
 
-                        pred_nodes.extend(left);
-                        pred_nodes.extend(right);
-                        pred_nodes.push(union);
-                    }
-                    _ => {
-                        // currently, we only support filter-like
-                        // comparison operations, no nested-selections
-                        let f =
-                            self.make_filter_node(&format!("{}_f{}", name, nc), parent, ce.clone());
-                        pred_nodes.push(f);
-                    }
-                }
+                pred_nodes.extend(left);
+                pred_nodes.extend(right);
+                pred_nodes.push(union);
             }
             Expression::UnaryOp {
                 op: UnaryOperator::Not | UnaryOperator::Neg,
@@ -1306,10 +1302,13 @@ impl SqlToMirConverter {
             Expression::Call(_) => {
                 internal!("Function calls should have been handled by projection earlier")
             }
-            Expression::CaseWhen { .. } => unsupported!("CASE WHEN not supported in filters"),
             Expression::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
-            Expression::In { .. } => internal!("IN should have been removed earlier"),
-            Expression::Cast { .. } => internal!("CAST should have been removed earlier"),
+            _ => {
+                // currently, we only support filter-like
+                // comparison operations, no nested-selections
+                let f = self.make_filter_node(&format!("{}_f{}", name, nc), parent, ce.clone());
+                pred_nodes.push(f);
+            }
         }
 
         Ok(pred_nodes)
