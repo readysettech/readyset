@@ -29,6 +29,7 @@ build {
       "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/consul-server/00-init.sh",
+      "provisioners/scripts/consul-server/10-aws.sh",
     ]
   }
 

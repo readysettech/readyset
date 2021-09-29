@@ -14,17 +14,20 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 
-/usr/local/bin/configure-consul-client.sh
+mkdir -p /opt/consul
+# TODO: Maintain state in a separate EBS volume
+# setup-data-volume /opt/consul
 
-cat > /etc/default/readyset-mysql-adapter <<EOF
-MYSQL_URL=${MYSQL_URL}
-NORIA_DEPLOYMENT=${DEPLOYMENT}
-AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
+cat > /etc/consul.d/consul.hcl <<EOF
+data_dir = "/opt/consul"
+client_addr = "0.0.0.0"
+server = true
+bootstrap_expect=${CONSUL_BOOTSTRAP_EXPECT:-1}
+retry_join = ["provider=aws tag_key=${CONSUL_TAG_KEY:-consul-server} tag_value=${CONSUL_TAG_VALUE}"]
 EOF
-chmod 600 /etc/default/readyset-mysql-adapter
 
 systemctl reset-failed
-systemctl enable readyset-mysql-adapter
-systemctl restart readyset-mysql-adapter
+systemctl enable consul.service
+systemctl restart consul.service
 
 /usr/local/bin/cfn-signal-wrapper.sh 0

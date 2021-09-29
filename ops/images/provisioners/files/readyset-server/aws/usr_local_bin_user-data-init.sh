@@ -1,5 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eux -o pipefail
+
+# https://aws.amazon.com/premiumsupport/knowledge-center/ec2-linux-log-user-data/
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
 on_error() {
   local exit_code="$?"
@@ -13,7 +16,9 @@ trap 'on_error' ERR
 
 /usr/local/bin/configure-consul-client.sh
 
-setup-data-volume /var/lib/readyset-server
+mkdir -p /var/lib/readyset-server
+# TODO: Maintain state in a separate EBS volume
+# setup-data-volume /var/lib/readyset-server
 
 if [ -f /var/lib/readyset-server/volume_id ]; then
   volume_id=$(< /var/lib/readyset-server/volume_id)

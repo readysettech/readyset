@@ -49,5 +49,12 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip python3-venv
 # There is no signature or checksum which seems to be associated with this.
 curl -o /tmp/aws-cfn-bootstrap.tar.gz https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-2.0-6.tar.gz
 sudo python3 -m venv /opt/aws-cfn
+sudo /opt/aws-cfn/bin/pip3 install /tmp/aws-cfn-bootstrap.tar.gz
 
-sudo pip3 install /tmp/aws-cfn-bootstrap.tar.gz
+sudo install -o root -g root -m 755 \
+  /tmp/external-base/aws/usr_local_bin_cfn-init-wrapper.sh \
+  /usr/local/bin/cfn-init-wrapper.sh
+
+sudo install -o root -g root -m 755 \
+  /tmp/external-base/aws/usr_local_bin_cfn-signal-wrapper.sh \
+  /usr/local/bin/cfn-signal-wrapper.sh

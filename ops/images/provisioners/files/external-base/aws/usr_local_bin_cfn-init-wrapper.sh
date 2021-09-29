@@ -4,11 +4,11 @@
 
 set -eux
 
-if [ -z "${AWS_CLOUDFORMATION_STACK:+x}" ]; then
+if [ -z "${AWS_CLOUDFORMATION_STACK+x}" ] || [ -z "${AWS_CLOUDFORMATION_CONFIGSETS+x}" ]; then
   exit 0
 fi
 
-/opt/aws-cfn/bin/cfn-init \
+/opt/aws-cfn/bin/python3 /opt/aws-cfn/bin/cfn-init \
   --stack "$AWS_CLOUDFORMATION_STACK" \
   --resource "$AWS_CLOUDFORMATION_RESOURCE" \
   --configsets "$AWS_CLOUDFORMATION_CONFIGSETS" \

@@ -7,13 +7,13 @@ set -eux
 
 exit_code=$1
 
-if [ -n "${AWS_CLOUDFORMATION_STACK:+x}" ] || [ -n "${AWS_CLOUDFORMATION_CONFIGSETS:+x}" ]; then
+if [ -z "${AWS_CLOUDFORMATION_STACK+x}" ] || [ -z "${AWS_CLOUDFORMATION_RESOURCE+x}" ]; then
   exit 0
 fi
 
-/opt/aws-cfn/bin/cfn-init \
+/opt/aws-cfn/bin/python3 /opt/aws-cfn/bin/cfn-signal \
   --exit-code "$exit_code" \
   --stack "$AWS_CLOUDFORMATION_STACK" \
-  --configsets "$AWS_CLOUDFORMATION_CONFIGSETS" \
+  --resource "$AWS_CLOUDFORMATION_RESOURCE" \
   --region "$AWS_CLOUDFORMATION_REGION"
 
