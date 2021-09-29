@@ -1,5 +1,5 @@
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery, TableKey,
 };
 use noria::{ReadySetError, ReadySetResult};
 use std::collections::HashMap;
@@ -21,9 +21,11 @@ fn is_unique_or_primary(
     base_schemas: &HashMap<String, CreateTableStatement>,
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
-    // matching col.name. It also assumes that col will always have an associated table.
+    // matching col.name. The pass also assumes that col will always have an associated table.
     // The last assumption will only hold true if this pass is run after the
     // expand_implied_tables() pass
+    // This pass should also be run after the key_def_coalition pass, beause this pass will only
+    // search for primary keys in the table.keys filed (and not in column.constraints)
     let table_name = col.table.as_ref().ok_or_else(|| {
         ReadySetError::Internal(
             "All columns must have an associated table name at this point".to_string(),
@@ -32,6 +34,21 @@ fn is_unique_or_primary(
     let table = base_schemas.get(table_name).ok_or_else(|| {
         ReadySetError::Internal("Table name must match table in base schema".to_string())
     })?;
+
+    // check to see if column is in table.keys (and whether we have a compound primary key)
+    let col_in_keys = if let Some(ref keys) = table.keys {
+        keys.iter().any(|key| match key {
+            // TODO(DAN): Support compound keys
+            TableKey::PrimaryKey { columns, .. } | TableKey::UniqueKey { columns, .. } => {
+                columns.len() == 1 && columns.iter().any(|c| c.name == col.name)
+            }
+            _ => false,
+        })
+    } else {
+        false
+    };
+
+    // check to see if column constraints specify unique or primary
     let col_spec = table
         .fields
         .iter()
@@ -41,10 +58,12 @@ fn is_unique_or_primary(
                 "Column name must match column in base schema table".to_string(),
             )
         })?;
-    Ok(col_spec
-        .constraints
-        .iter()
-        .any(|c| matches!(c, ColumnConstraint::Unique | ColumnConstraint::PrimaryKey)))
+
+    Ok(col_in_keys
+        || col_spec
+            .constraints
+            .iter()
+            .any(|c| matches!(c, ColumnConstraint::Unique)))
 }
 
 fn compares_unique_key_against_literal(
@@ -99,7 +118,7 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect, LimitClause, OrderClause, OrderType};
+    use nom_sql::{parse_query, Dialect};
 
     use super::*;
 
@@ -119,7 +138,7 @@ mod tests {
                 function: None,
             },
             sql_type: nom_sql::SqlType::Bool,
-            constraints: vec![ColumnConstraint::PrimaryKey],
+            constraints: vec![],
             comment: None,
         };
         let col2 = ColumnSpecification {
@@ -142,9 +161,29 @@ mod tests {
             constraints: vec![],
             comment: None,
         };
+        let col4 = ColumnSpecification {
+            column: Column {
+                name: "c4".to_string(),
+                table: Some("t".to_string()),
+                function: None,
+            },
+            sql_type: nom_sql::SqlType::Bool,
+            constraints: vec![],
+            comment: None,
+        };
 
-        let fields = vec![col1, col2, col3];
-        let keys = None;
+        let fields = vec![col1.clone(), col2, col3, col4.clone()];
+        let keys = Some(vec![
+            TableKey::UniqueKey {
+                name: None,
+                columns: vec![col4.column],
+                index_type: None,
+            },
+            TableKey::PrimaryKey {
+                name: None,
+                columns: vec![col1.column],
+            },
+        ]);
         let if_not_exists = false;
 
         let mut base_schemas = HashMap::new();
@@ -170,7 +209,7 @@ mod tests {
                 assert!(stmt.order.is_none());
                 assert!(stmt.limit.is_none());
             }
-            _ => panic!("Invalid query returned: {:?}", actual),
+            _ => panic!("Invalid query returned: {:?}", revised_query),
         }
     }
 
@@ -225,5 +264,74 @@ mod tests {
         does_not_change_limit_order(
             "SELECT t.c1 FROM t WHERE t.c3 = 1 AND t.c3 = 1 ORDER BY c1 ASC LIMIT 10",
         )
+    }
+
+    #[test]
+    fn primary_key_clause() {
+        // condition on unique key, when the constraints field is empty
+        removes_limit_order("SELECT t.c1 FROM t WHERE t.c4 = 1 ORDER BY c1 ASC LIMIT 10")
+    }
+
+    #[test]
+    fn compound_keys() {
+        // condition on primary/unique key with compound primary/unique key
+        let mut base_schema = generate_base_schemas();
+        let col1 = Column {
+            name: "c1".to_string(),
+            table: Some("t".to_string()),
+            function: None,
+        };
+        let col2 = Column {
+            name: "c2".to_string(),
+            table: Some("t".to_string()),
+            function: None,
+        };
+        let input_query = parse_query(
+            Dialect::MySQL,
+            "SELECT t.c1 FROM t WHERE t.c1 = 1 ORDER BY c1 ASC LIMIT 10",
+        )
+        .unwrap();
+
+        let input_query2 = parse_query(
+            Dialect::MySQL,
+            "SELECT t.c1 FROM t WHERE t.c2 = 1 ORDER BY c1 ASC LIMIT 10",
+        )
+        .unwrap();
+        // compound Primary
+        let keys = Some(vec![TableKey::PrimaryKey {
+            name: None,
+            columns: vec![col1.clone(), col2.clone()],
+        }]);
+        base_schema.get_mut("t").unwrap().keys = keys;
+        assert_eq!(
+            input_query,
+            input_query
+                .clone()
+                .order_limit_removal(&base_schema)
+                .unwrap()
+        );
+        // compound Unique
+        let keys = Some(vec![TableKey::UniqueKey {
+            name: None,
+            columns: vec![col1, col2],
+            index_type: None,
+        }]);
+        base_schema.get_mut("t").unwrap().keys = keys;
+        assert_eq!(
+            input_query,
+            input_query
+                .clone()
+                .order_limit_removal(&base_schema)
+                .unwrap()
+        );
+        // compound unique but col is separately specified to be unique
+        let revised_query = input_query2.order_limit_removal(&base_schema).unwrap();
+        match revised_query {
+            SqlQuery::Select(stmt) => {
+                assert!(stmt.order.is_none());
+                assert!(stmt.limit.is_none());
+            }
+            _ => panic!("Invalid query returned: {:?}", revised_query),
+        }
     }
 }
