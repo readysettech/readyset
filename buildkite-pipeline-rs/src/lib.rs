@@ -602,7 +602,7 @@ label: 'Run MySQL generated logictests'
 key: logictest-generated-mysql
 command:
 - 'echo +++ Running noria-logictest'
-- cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 1 --database-type mysql
+- LOG_LEVEL=off cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 1 --database-type mysql
 depends_on:
 - build-image
 plugins:
