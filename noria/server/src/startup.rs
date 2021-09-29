@@ -1,8 +1,8 @@
 //! # The Noria server
 //!
 //! A Noria server instance consists of three main components: the `NoriaServer` HTTP server
-//! (which listens externally for RPC calls), the `ControllerOuter` controller wrapper (which may
-//! contain a `ControllerInner` if this instance is elected leader), and the `Worker` (which
+//! (which listens externally for RPC calls), the `Controller` controller wrapper (which may
+//! contain a `Leader` if this instance is elected leader), and the `Worker` (which
 //! contains many `Domain` objects).
 //!
 //! We also start the reader listening loop (`worker::readers::listen`, responsible for servicing
@@ -11,7 +11,7 @@
 //! the `Authority`, keeping track of workers, and winning the leadership election if possible).
 //!
 //! These are all spun up by the `start_instance` function in this module, and run on the Tokio
-//! event loop. This gives you a `Handle`, enabling you to send requests to the `ControllerOuter`.
+//! event loop. This gives you a `Handle`, enabling you to send requests to the `Controller`.
 //!
 //! # Control plane and data plane
 //!
@@ -30,18 +30,15 @@
 //! All control plane communications go via server instances' `NoriaServer`s, which are just HTTP
 //! servers. The endpoints exposed by this HTTP server are:
 //!
-//! - registration and heartbeat requests sent from workers to the `ControllerInner`
-//!   - `ControllerInner::handle_register`, mapped to `POST /worker_rx/register`
-//!   - `ControllerInner::handle_heartbeat`, mapped to `POST /worker_rx/heartbeat`
-//! - requests sent from the `ControllerInner` to workers (including those workers' domains)
+//! - requests sent from the `Leader` to workers (including those workers' domains)
 //!   - the `WorkerRequestKind` enum, mapped to `POST /worker_request`
 //!   - ...which can contain a `DomainRequest`
-//! - requests sent from clients to the `ControllerInner`
-//!   - see `ControllerInner::external_request`
+//! - requests sent from clients to the `Leader`
+//!   - see `Leader::external_request`
 //! - other misc. endpoints for things like metrics (see the `NoriaServer` implementation for more)
 //!
 //! Typically, an incoming HTTP request is deserialized and then sent via a `tokio::sync::mpsc`
-//! channel to the `ControllerOuter` or `Worker`; the response is sent back via a
+//! channel to the `Controller` or `Worker`; the response is sent back via a
 //! `tokio::sync::oneshot` channel, serialized, and returned to the client.
 //!
 //! The `do_noria_rpc` function in `noria::util` shows how clients can make RPC requests (as well
@@ -73,7 +70,6 @@ use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 use tracing::{error, warn};
-use tracing_futures::Instrument;
 use url::Url;
 
 use dataflow::Readers;
@@ -82,7 +78,7 @@ use noria::metrics::recorded;
 use noria::ReadySetError;
 use noria::{ControllerDescriptor, WorkerDescriptor};
 
-use crate::controller::{ControllerOuter, ControllerRequest};
+use crate::controller::{Controller, ControllerRequest};
 use crate::handle::Handle;
 use crate::metrics::{get_global_recorder, Clear, RecorderType};
 use crate::worker::{Worker, WorkerRequest};
@@ -104,7 +100,6 @@ pub(super) async fn start_instance(
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
-    let (authority_tx, authority_rx) = tokio::sync::mpsc::channel(16);
     let (handle_tx, handle_rx) = tokio::sync::mpsc::channel(16);
 
     let (trigger, valve) = Valve::new();
@@ -192,19 +187,6 @@ pub(super) async fn start_instance(
         nonce: rand::random(),
     };
 
-    let controller = ControllerOuter {
-        inner: None,
-        authority: authority.clone(),
-        worker_tx,
-        authority_rx,
-        http_rx: controller_rx,
-        handle_rx,
-        our_descriptor: our_descriptor.clone(),
-        valve: valve.clone(),
-        replicator_url,
-        replicator_task: None,
-    };
-
     let worker_descriptor = WorkerDescriptor {
         worker_uri: http_uri,
         reader_addr,
@@ -213,24 +195,23 @@ pub(super) async fn start_instance(
         volume_id,
     };
 
-    tokio::spawn(maybe_abort_on_panic!(crate::controller::authority_runner(
-        authority_tx,
-        authority.clone(),
-        our_descriptor.clone(),
+    let controller = Controller {
+        inner: None,
+        authority: authority.clone(),
+        worker_tx,
+        http_rx: controller_rx,
+        handle_rx,
+        our_descriptor: our_descriptor.clone(),
+        valve: valve.clone(),
+        replicator_url,
+        replicator_task: None,
         worker_descriptor,
         config,
-        region,
-    )
-    .instrument(tracing::info_span!("authority"))
-    .map_err(move |e| {
-        error!(error = %e, "AuthorityRunner failed");
-        if abort_on_task_failure {
-            process::abort()
-        }
-    })));
+        authority_task: None,
+    };
 
     tokio::spawn(maybe_abort_on_panic!(controller.run().map_err(move |e| {
-        error!(error = %e, "ControllerOuter failed");
+        error!(error = %e, "Controller failed");
         if abort_on_task_failure {
             process::abort()
         }
@@ -243,7 +224,7 @@ pub(super) async fn start_instance(
 struct NoriaServer {
     /// Channel to the running `Worker`.
     worker_tx: Sender<WorkerRequest>,
-    /// Channel to the running `ControllerOuter`.
+    /// Channel to the running `Controller`.
     controller_tx: Sender<ControllerRequest>,
     /// The `Authority` used inside the server.
     authority: Arc<Authority>,
