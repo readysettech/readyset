@@ -384,7 +384,7 @@ named_with_dialect!(nested_select(dialect) -> FromClause, do_parse!(
         >> multispace0
         >> tag!(")")
         >> alias: opt!(call!(as_alias(dialect)))
-        >> (FromClause::NestedSelect(Box::new(selection), alias.map(|s| s.to_owned())))
+        >> (FromClause::NestedSelect(Box::new(selection), alias.map(|s| s.to_string())))
 ));
 
 named_with_dialect!(from_clause_join(dialect) -> FromClause, do_parse!(

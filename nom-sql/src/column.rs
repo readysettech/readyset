@@ -278,7 +278,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
                 dialect.identifier(),
             ),
             |cs| {
-                let char_set = cs.to_owned();
+                let char_set = cs.to_string();
                 ColumnConstraint::CharacterSet(char_set)
             },
         );
@@ -288,7 +288,7 @@ pub fn column_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], C
                 dialect.identifier(),
             ),
             |c| {
-                let collation = c.to_owned();
+                let collation = c.to_string();
                 ColumnConstraint::Collation(collation)
             },
         );

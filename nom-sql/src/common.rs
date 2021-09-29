@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
@@ -1106,7 +1107,7 @@ pub fn statement_terminator(i: &[u8]) -> IResult<&[u8], ()> {
 }
 
 // Parse rule for AS-based aliases for SQL entities.
-pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], &str> {
+pub fn as_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Cow<str>> {
     move |i| {
         map(
             tuple((
@@ -1167,7 +1168,7 @@ fn expression_field(
         do_parse!(
             i,
             expr: call!(expression(dialect))
-                >> alias: opt!(map!(as_alias(dialect), |a| a.to_owned()))
+                >> alias: opt!(map!(as_alias(dialect), |a| a.to_string()))
                 >> (FieldDefinitionExpression::Expression { expr, alias })
         )
     }

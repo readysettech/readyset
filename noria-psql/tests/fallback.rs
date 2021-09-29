@@ -1,23 +1,14 @@
-use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self, sleep};
+use noria_client::test_helpers::sleep;
 use serial_test::serial;
 
 mod common;
-use common::PostgreSQLAdapter;
+use common::setup_w_fallback;
 use postgres::NoTls;
-
-fn setup() -> postgres::Config {
-    test_helpers::setup::<PostgreSQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
-        true,
-        true,
-    )
-}
 
 #[test]
 #[serial]
 fn create_table() {
-    let config = setup();
+    let config = setup_w_fallback();
     let mut client = config.connect(NoTls).unwrap();
 
     // NOTE: Currently, a race condition with noria startup means we have to wait until the
@@ -46,7 +37,7 @@ fn create_table() {
 #[serial]
 #[ignore] // needs proper detection of reads vs writes through fallback
 fn prepare_execute_fallback() {
-    let config = setup();
+    let config = setup_w_fallback();
     let mut client = config.connect(NoTls).unwrap();
 
     sleep();
