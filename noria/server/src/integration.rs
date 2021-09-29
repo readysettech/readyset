@@ -21,6 +21,7 @@ use dataflow::{DurabilityMode, PersistenceParameters, PostLookup};
 use itertools::Itertools;
 use nom_sql::OrderType;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use noria::Modification;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, SchemaType,
     ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
@@ -2362,6 +2363,43 @@ async fn cascading_replays_with_sharding() {
     );
 
     sleep().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replay_multiple_keys_then_write() {
+    let mut g = start_simple("replay_multiple_keys_then_write").await;
+    g.install_recipe(
+        "
+        CREATE TABLE t (id INTEGER PRIMARY KEY, value INTEGER);
+        QUERY q: SELECT id, value FROM t WHERE id = ?;",
+    )
+    .await
+    .unwrap();
+    let mut t = g.table("t").await.unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(2)],
+    ])
+    .await
+    .unwrap();
+
+    q.lookup(&[1.into()], true).await.unwrap();
+    q.lookup(&[2.into()], true).await.unwrap();
+
+    t.update(
+        vec![DataType::from(1)],
+        vec![(1, Modification::Set(2.into()))],
+    )
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    let res = q.lookup_first(&[1.into()], true).await.unwrap().unwrap();
+
+    assert_eq!(Vec::from(res), vec![DataType::from(1), DataType::from(2)]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

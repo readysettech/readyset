@@ -76,87 +76,77 @@ impl PacketFilter {
         target: NodeIndex,
     ) -> ReadySetResult<bool> {
         // First, check if the target node needs to go through the filtering process.
-        match self.requested_keys.get_mut(&target) {
-            None => Ok(true),
-            Some(wd) => match packet {
-                Packet::Message { data, .. } => {
-                    // If the packet is an update, we must check what keys the target node has previously requested.
-                    // Based on that, we'll filter the records from the Packet.
-                    if wd.keys.is_empty() {
-                        // If no keys were previously requested by the target node, then that
-                        // means that all packets must be dropped until it requests some keys.
-                        return Ok(false);
-                    }
-                    data.retain(|record| {
-                        let row = record.row();
+        let node_keys = match self.requested_keys.get_mut(&target) {
+            None => return Ok(true),
+            Some(node_keys) => node_keys,
+        };
 
-                        for (ci, keys) in &wd.keys {
-                            for key in keys {
-                                match key {
-                                    // Here we filter the records based on the keys that the target node
-                                    // requested previously.
-                                    KeyComparison::Equal(ref cond) => {
-                                        if !check_bound(ci, row, cond, |d1, d2| d1 == d2) {
-                                            return false;
-                                        }
-                                    }
-                                    KeyComparison::Range((ref lower_bound, ref upper_bound)) => {
-                                        if !check_lower_bound(lower_bound, ci, row)
-                                            || !check_upper_bound(upper_bound, ci, row)
-                                        {
-                                            return false;
-                                        }
-                                    }
-                                }
+        match packet {
+            Packet::Message { data, .. } => {
+                // If the packet is an update, we must check what keys the target node has previously requested.
+                // Based on that, we'll filter the records from the Packet.
+                if node_keys.keys.is_empty() {
+                    // If no keys were previously requested by the target node, then that
+                    // means that all packets must be dropped until it requests some keys.
+                    return Ok(false);
+                }
+                data.retain(|record| {
+                    let row = record.row();
+                    // TODO(grfn): Make the asymptotics here better
+                    node_keys.keys.iter().any(|(ci, keys)| {
+                        keys.iter().any(|key| match key {
+                            // Here we filter the records based on the keys that the target node
+                            // requested previously.
+                            KeyComparison::Equal(ref cond) => {
+                                check_bound(ci, row, cond, |d1, d2| d1 == d2)
                             }
-                        }
-                        true
-                    });
-                    // If no records survived the filtering, then signal
-                    // that the Packet should be dropped.
-                    if data.is_empty() {
-                        return Ok(false);
+                            KeyComparison::Range((ref lower_bound, ref upper_bound)) => {
+                                check_lower_bound(lower_bound, ci, row)
+                                    && check_upper_bound(upper_bound, ci, row)
+                            }
+                        })
+                    })
+                });
+                // If no records survived the filtering, then signal that the Packet should be
+                // dropped.  Otherwise, return the new updated packet with the filtered records.
+                Ok(!data.is_empty())
+            }
+            Packet::ReplayPiece {
+                context: ReplayPieceContext::Partial { for_keys, .. },
+                ..
+            } => {
+                // If we are processing a replay piece for a partial replay,
+                // then the "keyed-by" parameter must be present.
+                match keyed_by {
+                    None => {
+                        // If it's not, return an error.
+                        internal!("The keyed-by parameter must be present for replay messages")
                     }
-                    // Otherwise, return the new updated packet with the filtered records.
-                    Ok(true)
+                    // We add the keys to the node's allowlist information.
+                    Some(column_indexes) => self.add_keys(
+                        target,
+                        column_indexes.to_vec(),
+                        &for_keys.iter().cloned().collect::<Vec<_>>(),
+                    ),
                 }
-                Packet::ReplayPiece {
-                    context: ReplayPieceContext::Partial { for_keys, .. },
-                    ..
-                } => {
-                    // If we are processing a replay piece for a partial replay,
-                    // then the "keyed-by" parameter must be present.
-                    match keyed_by {
-                        None => {
-                            // If it's not, return an error.
-                            internal!("The keyed-by parameter must be present for replay messages")
-                        }
-                        // We add the keys to the node's allowlist information.
-                        Some(column_indexes) => self.add_keys(
-                            target,
-                            column_indexes.to_vec(),
-                            &for_keys.iter().cloned().collect::<Vec<_>>(),
-                        ),
+                Ok(true)
+            }
+            Packet::EvictKeys {
+                link: _,
+                tag: _,
+                keys,
+            } => {
+                // We iterate through the keys that must be evicted, as
+                // instructed by the packet.
+                for k in keys {
+                    for (_, allowlisted_keys) in node_keys.keys.iter_mut() {
+                        allowlisted_keys.remove(k);
                     }
-                    Ok(true)
                 }
-                Packet::EvictKeys {
-                    link: _,
-                    tag: _,
-                    keys,
-                } => {
-                    // We iterate through the keys that must be evicted, as
-                    // instructed by the packet.
-                    for k in keys {
-                        for (_, allowlisted_keys) in wd.keys.iter_mut() {
-                            allowlisted_keys.remove(k);
-                        }
-                    }
-                    Ok(true)
-                }
-                // For any other packet, we signal to just send the Packet.
-                _ => Ok(true),
-            },
+                Ok(true)
+            }
+            // For any other packet, we signal to just send the Packet.
+            _ => Ok(true),
         }
     }
 
@@ -244,6 +234,7 @@ mod test {
     mod update_processing {
         use super::*;
         use common::Record;
+        use maplit::hashset;
         use std::ops::Bound;
 
         #[test]
@@ -286,6 +277,51 @@ mod test {
                 !should_send,
                 "The process should be signaling that the packet should not be sent"
             );
+        }
+
+        #[test]
+        fn multiple_replayed_keys() {
+            let mk_replay = |key, data| Packet::ReplayPiece {
+                link: create_link(),
+                tag: Tag::new(1),
+                data,
+                context: ReplayPieceContext::Partial {
+                    for_keys: hashset! { key },
+                    requesting_shard: 0,
+                    unishard: false,
+                },
+            };
+
+            let mut packet_filter = PacketFilter::default();
+            packet_filter.add_for_filtering(NodeIndex::new(3));
+
+            // process a replay of one key
+            let mut replay_1 = mk_replay(
+                KeyComparison::Equal(vec1![1.into()]),
+                vec![Record::Positive(vec![1.into(), 1.into()])].into(),
+            );
+            packet_filter
+                .process(&mut replay_1, Some(&[1]), NodeIndex::new(3))
+                .unwrap();
+
+            // process a replay of another key
+            let mut replay_2 = mk_replay(
+                KeyComparison::Equal(vec1![2.into()]),
+                vec![Record::Positive(vec![2.into(), 2.into()])].into(),
+            );
+            packet_filter
+                .process(&mut replay_2, Some(&[1]), NodeIndex::new(3))
+                .unwrap();
+
+            // process a write to one of those keys
+            let original = create_packet(vec![Record::Positive(vec![1.into(), 2.into()])]);
+            let mut packet = original.clone();
+            let res = packet_filter
+                .process(&mut packet, Some(&[1]), NodeIndex::new(3))
+                .unwrap();
+
+            assert!(res);
+            assert_eq!(original, packet);
         }
 
         #[test]
