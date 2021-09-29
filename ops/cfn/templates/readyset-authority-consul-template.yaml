@@ -52,10 +52,11 @@ Parameters:
       - "5"
       - "7"
     Default: "3"
+# Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      AUTHORITYCONSUL: ami-00294ee57b7ae6277
+      AUTHORITYCONSUL: ami-0bc5a6a247c2a5455
 Resources:
   ConsulSecurityGroup:
     Type: "AWS::EC2::SecurityGroup"

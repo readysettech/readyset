@@ -88,7 +88,14 @@ Parameters:
     Default: t3.small
   ReadysetAdapterNodes:
     Type: String
-    Description: Number of Adapter nodes to create
+    Description: Number of adapter nodes to create
+  ReadysetServerInstanceType:
+    Type: String
+    Description: The EC2 instance type to use for server instances.
+    Default: t3.small
+  ReadysetServerNodes:
+    Type: String
+    Description: Number of server nodes to create
   DatabaseName:
     Type: String
     Description: Name of MySQL Database
@@ -188,6 +195,8 @@ Resources:
       Parameters:
         ReadysetAdapterInstanceType: !Ref ReadysetAdapterInstanceType
         ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
+        ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
+        ReadysetServerNodes: !Ref ReadysetServerNodes
         MySQLDatabaseURL: !Sub
           - mysql://${DatabaseUsername}:$DatabasePassword@${EndpointAddress}:${EndpointPort}/${DatabaseName}
           - EndpointAddress: !GetAtt
