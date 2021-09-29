@@ -4,7 +4,7 @@ use noria_client::BackendBuilder;
 use postgres::{NoTls, SimpleQueryMessage};
 
 mod common;
-use common::PostgreSQLAdapter;
+use common::{setup_w_fallback, PostgreSQLAdapter};
 
 pub fn setup(partial: bool) -> postgres::Config {
     test_helpers::setup::<PostgreSQLAdapter>(
@@ -918,4 +918,89 @@ fn write_timestamps() {
         row.get::<usize, NaiveDateTime>(1),
         NaiveDate::from_ymd(2021, 1, 25).and_hms(17, 08, 24)
     );
+}
+
+#[test]
+fn delete_case_sensitive() {
+    for opts in [setup(true), setup_w_fallback()] {
+        let mut conn = opts.connect(NoTls).unwrap();
+        conn.simple_query(r#"CREATE TABLE "Cats" (id int PRIMARY KEY, "ID" int)"#)
+            .unwrap();
+        sleep();
+
+        assert!(conn
+            .simple_query(r#"INSERT INTO cats (id) VALUES (1)"#)
+            .is_err());
+
+        assert!(conn
+            .simple_query(r#"INSERT INTO "cats" (id) VALUES (1)"#)
+            .is_err());
+
+        assert!(conn
+            .simple_query(r#"INSERT INTO Cats (id) VALUES (1)"#)
+            .is_err());
+
+        assert!(conn
+            .simple_query(r#"INSERT INTO "Cats" (id, "Id") VALUES (1, 2)"#)
+            .is_err());
+
+        conn.simple_query(r#"INSERT INTO "Cats" (iD, "ID") VALUES (1, 2)"#)
+            .unwrap();
+
+        sleep();
+
+        let row = conn
+            .query_opt(
+                r#"SELECT "Cats".id FROM "Cats" WHERE "Cats".id = 1 and "Cats"."ID" = 2"#,
+                &[],
+            )
+            .unwrap();
+        assert!(row.is_some());
+
+        {
+            let res = conn
+                .simple_query(r#"DELETE FROM "Cats" WHERE "Cats".Id = 1"#)
+                .unwrap();
+            let deleted = res.first().unwrap();
+            assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+            sleep();
+        }
+
+        let row = conn
+            .query_opt(r#"SELECT "Cats".id FROM "Cats" WHERE "Cats".id = 1"#, &[])
+            .unwrap();
+        assert!(row.is_none());
+    }
+}
+
+#[test]
+fn delete_case_insensitive() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY)")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO cats (id) VALUES (1)")
+        .unwrap();
+    sleep();
+
+    let row = conn
+        .query_opt("SELECT Cats.id FROM Cats WHERE CaTs.id = 1", &[])
+        .unwrap();
+    assert!(row.is_some());
+
+    {
+        let res = conn
+            .simple_query("DELETE FROM Cats WHERE Cats.id = 1")
+            .unwrap();
+        let deleted = res.first().unwrap();
+        assert!(matches!(deleted, SimpleQueryMessage::CommandComplete(1)));
+        sleep();
+    }
+
+    let row = conn
+        .query_opt("SELECT CatS.iD FROM Cats WHERE CatS.Id = 1", &[])
+        .unwrap();
+    assert!(row.is_none());
 }

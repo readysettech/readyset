@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str::{self, FromStr};
 
 use nom::branch::alt;
@@ -118,7 +119,7 @@ impl FromStr for Dialect {
 
 impl Dialect {
     /// Parse a SQL identifier using this Dialect
-    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], &'a str> {
+    pub fn identifier(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Cow<str>> {
         move |i| match self {
             Dialect::MySQL => map_res(
                 alt((
@@ -129,18 +130,25 @@ impl Dialect {
                     delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
-                str::from_utf8,
+                |v| str::from_utf8(v).map(Cow::Borrowed),
             )(i),
-            Dialect::PostgreSQL => map_res(
-                alt((
+            Dialect::PostgreSQL => alt((
+                map_res(
                     preceded(
                         not(peek(sql_keyword_or_builtin_function)),
                         take_while1(is_sql_identifier),
                     ),
+                    |v| {
+                        str::from_utf8(v)
+                            .map(str::to_ascii_lowercase)
+                            .map(Cow::Owned)
+                    },
+                ),
+                map_res(
                     delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
-                )),
-                str::from_utf8,
-            )(i),
+                    |v| str::from_utf8(v).map(Cow::Borrowed),
+                ),
+            ))(i),
         }
     }
 
@@ -306,6 +314,17 @@ mod tests {
             assert!(Dialect::PostgreSQL.identifier()(id4).is_err());
             assert!(Dialect::PostgreSQL.identifier()(id5).is_err());
             assert!(Dialect::PostgreSQL.identifier()(id6).is_ok());
+        }
+
+        #[test]
+        fn sql_identifiers_case() {
+            let id1 = b"FoO";
+            let id2 = b"foO";
+            let id3 = br#""foO""#;
+
+            assert_eq!(Dialect::PostgreSQL.identifier()(id1).unwrap().1, "foo");
+            assert_eq!(Dialect::PostgreSQL.identifier()(id2).unwrap().1, "foo");
+            assert_eq!(Dialect::PostgreSQL.identifier()(id3).unwrap().1, "foO");
         }
 
         #[test]

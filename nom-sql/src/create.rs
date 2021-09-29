@@ -199,7 +199,7 @@ fn primary_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
         Ok((
             remaining_input,
             TableKey::PrimaryKey {
-                name: name.map(|s| s.to_owned()),
+                name: name.map(|s| s.to_string()),
                 columns,
             },
         ))
@@ -350,7 +350,7 @@ fn check_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableK
             opt(preceded(
                 terminated(tag_no_case("constraint"), multispace1),
                 opt(terminated(
-                    map(dialect.identifier(), ToOwned::to_owned),
+                    map(dialect.identifier(), |c| c.to_string()),
                     multispace1,
                 )),
             )),
