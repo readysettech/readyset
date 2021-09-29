@@ -44,9 +44,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 statement_id,
                 params,
             }) => Ok(ps::PrepareResponse {
-                // NOTE u32::try_from is used because NoriaPrepareUpdate's statement_id has a
-                // non-standard u64 data type.
-                prepared_statement_id: u32::try_from(statement_id)?,
+                prepared_statement_id: statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: vec![],
             }),

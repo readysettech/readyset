@@ -419,10 +419,8 @@ where
                     .insert(self.prepared_count, PreparedStatement::Noria(*statement_id));
             }
             PrepareResult::Noria(Update { statement_id, .. }) => {
-                self.prepared_statements.insert(
-                    self.prepared_count,
-                    PreparedStatement::Noria(*statement_id as u32),
-                );
+                self.prepared_statements
+                    .insert(self.prepared_count, PreparedStatement::Noria(*statement_id));
             }
             PrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
                 self.prepared_statements.insert(self.prepared_count, {
