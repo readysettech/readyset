@@ -795,6 +795,26 @@ impl TableSpec {
             .unwrap_or_else(|| self.fresh_column_with_type(col_type))
     }
 
+    /// Returns the name of *some* column in this table with the given type but different than the one
+    /// specified, potentially generating a new column if necessary
+    pub fn some_column_with_type_different_than(
+        &mut self,
+        col_type: SqlType,
+        name: &ColumnName,
+    ) -> ColumnName {
+        self.columns
+            .iter()
+            .find_map(|(n, t)| {
+                if t.sql_type == col_type && n != name {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .cloned()
+            .unwrap_or_else(|| self.fresh_column_with_type(col_type))
+    }
+
     /// Specifies that the column given by `column_name` should be a primary key value
     /// and generate unique column data.
     pub fn set_primary_key_column(&mut self, column_name: &ColumnName) {
@@ -1080,7 +1100,7 @@ impl<'a> QueryState<'a> {
             .next()
         {
             Some(tbl) => self.gen.table_mut(&tbl.name).unwrap(),
-            None => self.fresh_table_mut(),
+            None => self.some_table_mut(),
         }
     }
 
@@ -1739,7 +1759,10 @@ impl QueryOperation {
                                 Expression::Literal(val.clone())
                             }
                             FilterRHS::Column => {
-                                let col = tbl.fresh_column();
+                                let col = tbl.some_column_with_type_different_than(
+                                    filter.column_type.clone(),
+                                    &col,
+                                );
                                 Expression::Column(Column {
                                     table: Some(tbl.name.clone().into()),
                                     ..col.into()
