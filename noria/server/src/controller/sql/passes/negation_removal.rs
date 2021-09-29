@@ -65,7 +65,9 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
         Expression::In {
             ref mut negated, ..
         } => {
-            *negated = !*negated;
+            if negate {
+                *negated = !*negated;
+            }
         }
         Expression::Call(_)
         | Expression::Literal(_)
@@ -104,6 +106,8 @@ impl NegationRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
+    use nom_sql::{parse_query, Dialect};
+
     use super::*;
 
     #[test]
@@ -141,5 +145,23 @@ mod tests {
 
         normalize_expr(&mut expr, false).unwrap();
         assert_eq!(expr, target, "expected = {}\nactual = {}", target, expr);
+    }
+
+    #[test]
+    fn normalize_in_with_not() {
+        let statement =
+            parse_query(Dialect::MySQL, "SELECT * FROM t WHERE NOT id IN (1, 2)").unwrap();
+        let expected =
+            parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id NOT IN (1, 2)").unwrap();
+        let res = statement.remove_negation().unwrap();
+        assert_eq!(res, expected)
+    }
+
+    #[test]
+    fn normalize_in_without_not() {
+        let statement = parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id IN (1, 2)").unwrap();
+        let expected = statement.clone();
+        let res = statement.remove_negation().unwrap();
+        assert_eq!(res, expected)
     }
 }
