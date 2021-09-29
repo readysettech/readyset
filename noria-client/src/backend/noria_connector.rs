@@ -6,7 +6,7 @@ use noria::{
 };
 
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, InsertStatement, Literal, SelectStatement, SqlQuery,
+    self, BinaryOperator, ColumnConstraint, InsertStatement, SelectStatement, SqlQuery,
     UpdateStatement,
 };
 use vec1::vec1;
@@ -17,7 +17,6 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 
-use crate::convert::ToDataType;
 use crate::rewrite;
 use crate::utils;
 
@@ -878,16 +877,10 @@ impl NoriaConnector {
     pub(crate) async fn handle_select(
         &mut self,
         q: nom_sql::SelectStatement,
-        use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult> {
         trace!("query::select::access view");
         let qname = self.get_or_create_view(&q, false).await?;
-
-        let keys: Vec<Vec<DataType>> = use_params
-            .into_iter()
-            .map(|l| Ok(vec1![l.into_datatype()?].into()))
-            .collect::<Result<Vec<Vec<DataType>>, ReadySetError>>()?;
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
@@ -904,7 +897,7 @@ impl NoriaConnector {
         )?;
 
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &q, keys, &key_column_indices, ticket)
+        self.do_read(&qname, &q, vec![], &key_column_indices, ticket)
             .await
     }
 
@@ -923,7 +916,7 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let rewritten = rewrite::collapse_where_in(&mut sql_q, false)?;
+        let rewritten = rewrite::collapse_where_in(&mut sql_q)?;
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
         } else {

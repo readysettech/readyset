@@ -21,7 +21,7 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::coverage::{MaybeExecuteEvent, MaybePrepareEvent, QueryCoverageInfoRef};
 pub use crate::upstream_database::UpstreamPrepare;
-use crate::{rewrite, QueryHandler, UpstreamDatabase};
+use crate::{QueryHandler, UpstreamDatabase};
 
 pub mod noria_connector;
 
@@ -252,7 +252,7 @@ impl BackendBuilder {
 
 pub struct Backend<DB, Handler> {
     // a cache of all previously parsed queries
-    parsed_query_cache: HashMap<String, (SqlQuery, Vec<nom_sql::Literal>)>,
+    parsed_query_cache: HashMap<String, SqlQuery>,
     // all queries previously prepared on noria, mapped by their ID.
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
@@ -438,7 +438,6 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query_str: String,
-        use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
         event: &mut MaybeExecuteEvent,
     ) -> Result<QueryResult<DB>, DB::Error> {
@@ -454,7 +453,7 @@ where
             QueryResult::Upstream(r)
         });
         handle = event.start_timer();
-        match self.noria.handle_select(q, use_params, ticket).await {
+        match self.noria.handle_select(q, ticket).await {
             Ok(_) => {
                 handle.set_noria_duration();
             }
@@ -513,10 +512,9 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query_str: &str,
-        use_params: Vec<Literal>,
         ticket: Option<Timestamp>,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        match self.noria.handle_select(q, use_params, ticket).await {
+        match self.noria.handle_select(q, ticket).await {
             Ok(r) => Ok(QueryResult::Noria(r)),
             Err(e) => {
                 // Check if we have fallback setup. If not, we need to return this error,
@@ -590,9 +588,8 @@ where
             return res;
         }
 
-        let res = self.parse_query(query, false);
-        let parsed_query = match res {
-            Ok((parsed_query, _)) => parsed_query,
+        let parsed_query = match self.parse_query(query) {
+            Ok(parsed_query) => parsed_query,
             Err(e) => {
                 drop(handle);
                 event.set_noria_error(&e);
@@ -879,11 +876,11 @@ where
             return res;
         }
 
-        let parse_result = self.parse_query(query, true);
+        let parse_result = self.parse_query(query);
         let parse_time = start.elapsed().as_micros();
 
         // fallback to upstream database on query parse failure
-        let (parsed_query, use_params) = match parse_result {
+        let parsed_query = match parse_result {
             Ok(parsed_tuple) => parsed_tuple,
             Err(e) => {
                 // Do not fall back if the set is not allowed
@@ -972,16 +969,10 @@ where
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
-                        self.mirror_read(
-                            q,
-                            query.to_owned(),
-                            use_params,
-                            self.ticket.clone(),
-                            event,
-                        )
-                        .await
+                        self.mirror_read(q.clone(), query.to_owned(), self.ticket.clone(), event)
+                            .await
                     } else {
-                        self.cascade_read(q, query, use_params, self.ticket.clone())
+                        self.cascade_read(q.clone(), query, self.ticket.clone())
                             .await
                     };
                     //TODO(Dan): Implement fallback execution timing
@@ -1081,10 +1072,7 @@ where
             Ok(QueryResult::Noria(match parsed_query {
                 nom_sql::SqlQuery::Select(q) => {
                     let execution_timer = Instant::now();
-                    let res = self
-                        .noria
-                        .handle_select(q, use_params, self.ticket.clone())
-                        .await;
+                    let res = self.noria.handle_select(q, self.ticket.clone()).await;
                     let execution_time = execution_timer.elapsed().as_micros();
 
                     measure_parse_and_execution_time(
@@ -1176,28 +1164,13 @@ where
         &self.ticket
     }
 
-    fn parse_query(
-        &mut self,
-        query: &str,
-        collapse_where_ins: bool,
-    ) -> ReadySetResult<(SqlQuery, Vec<Literal>)> {
+    fn parse_query(&mut self, query: &str) -> ReadySetResult<SqlQuery> {
         match self.parsed_query_cache.entry(query.to_owned()) {
             Entry::Occupied(entry) => Ok(entry.get().clone()),
             Entry::Vacant(entry) => {
                 trace!("Parsing query");
                 match nom_sql::parse_query(self.dialect, query) {
-                    Ok(mut parsed_query) => {
-                        trace!("collapsing where-in clauses");
-                        let mut use_params = Vec::new();
-                        if collapse_where_ins {
-                            if let Some((_, p)) =
-                                rewrite::collapse_where_in(&mut parsed_query, true)?
-                            {
-                                use_params = p;
-                            }
-                        }
-                        Ok(entry.insert((parsed_query, use_params)).clone())
-                    }
+                    Ok(parsed_query) => Ok(entry.insert(parsed_query).clone()),
                     Err(_) => {
                         // error is useless anyway
                         error!(%query, "query can't be parsed: \"{}\"", query);
