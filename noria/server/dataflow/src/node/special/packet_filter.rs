@@ -11,25 +11,24 @@ use vec1::Vec1;
 
 type ColumnIndexes = Vec<usize>;
 
-/// The goal of the [`PacketFilter`] is to avoid sending updates for keys when the destination domain
-/// does not have those keys materialized (to avoid unnecessary network traffic),
-/// given that those updates will just be discarded at said domain.
-/// The [`PacketFilter`] then works by observing which keys are replayed and evicted to build
-/// an internal whitelist, which is then used to filter regular update messages.
-/// Filtering is disabled by default, and can be enabled by adding the desired destination domain's
-/// ingress node to the filter list.
+/// The set of keys that have been requested for a particular node
+#[derive(Serialize, Deserialize, PartialEq, Clone, Default, Debug)]
+pub struct NodeKeys {
+    /// The allowed keys, grouped by the column indexes they act upon.
+    keys: HashMap<ColumnIndexes, HashSet<KeyComparison>>,
+}
+
+/// The goal of the [`PacketFilter`] is to avoid sending updates for keys when the destination
+/// domain does not have those keys materialized (to avoid unnecessary network traffic), given that
+/// those updates will just be discarded at said domain.
+/// The [`PacketFilter`] then works by observing which keys are replayed and evicted to build an
+/// internal allowlist, which is then used to filter regular update messages. Filtering is disabled
+/// by default, and can be enabled by adding the desired destination domain's ingress node to the
+/// filter list.
 #[derive(Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct PacketFilter {
     /// Stores the information needed to filter [`Record`]s from [`Packet::Message`]s.
-    whitelist: HashMap<NodeIndex, WhitelistData>,
-}
-
-/// The information required to filter updates for
-/// partially materialized nodes
-#[derive(Serialize, Deserialize, PartialEq, Clone, Default, Debug)]
-pub struct WhitelistData {
-    /// The whitelisted keys, grouped by the column indexes they act upon.
-    keys: HashMap<ColumnIndexes, HashSet<KeyComparison>>,
+    requested_keys: HashMap<NodeIndex, NodeKeys>,
 }
 
 impl PacketFilter {
@@ -37,31 +36,36 @@ impl PacketFilter {
     /// will have its packets processed (and not just skipped) by this [`PacketFilter`].
     /// See [`PacketFilter::process`] for more information on the processing logic.
     pub fn add_for_filtering(&mut self, target: NodeIndex) {
-        self.whitelist
+        self.requested_keys
             .entry(target)
-            .or_insert_with(WhitelistData::default);
+            .or_insert_with(NodeKeys::default);
     }
 
     /// Processes a given [`Packet`], provided with some contextual information.
     /// The processing modifies the packet in-place.
     ///
     /// ## Processing logic
-    /// The processing works as follows. Given a packet meant for a target node that is marked for filtering:
-    /// 1. If the packet is a replay piece ([`Packet::ReplayPiece`]), then the requested keys
-    /// are stored in the filter, along the column indexes they predicate upon.
-    /// 2. If the packet is an eviction message ([`Packet::EvictKeys`]), the evicted keys
-    /// are removed from the filter.
-    /// 3. If the packet is an update ([`Packet::Message`]), then the packet is stripped down
-    /// of any record that does not comply with the stored keys. If no record survives the filtering,
-    /// then the whole packet should be dropped.
+    ///
+    /// The processing works as follows. Given a packet meant for a target node that is marked for
+    /// filtering:
+    /// 1. If the packet is a replay piece ([`Packet::ReplayPiece`]), then the requested keys are
+    ///    stored in the filter, along the column indexes they predicate upon.
+    /// 2. If the packet is an eviction message ([`Packet::EvictKeys`]), the evicted keys are
+    ///    removed from the filter.
+    /// 3. If the packet is an update ([`Packet::Message`]), then the packet is stripped down of any
+    ///    record that does not comply with the stored keys. If no record survives the filtering,
+    ///    then the whole packet should be dropped.
     ///
     /// ## Arguments
+    ///
     /// * packet: The [`Packet`] to be analyzed and potentially modified.
-    /// * keyed_by: An [`Option`] of [`Vec<usize>`] representing the indexes of the columns of a [`Record`],
-    /// that are used by [`KeyComparison`]s. These indexes should be present whenever there's a [`Packet::ReplayPiece`].
+    /// * keyed_by: An [`Option`] of [`Vec<usize>`] representing the indexes of the columns of a
+    ///   [`Record`], that are used by [`KeyComparison`]s. These indexes should be present whenever
+    ///   there's a [`Packet::ReplayPiece`].
     /// * target: The [`NodeIndex`] of the node that will receive the [`Packet`].
     ///
     /// ## Returns
+    ///
     /// The result is a [`ReadySetResult<bool>`], which will only be an error if an invariant was
     /// violated during processing.
     /// The [`bool`] determines whether the packet should be sent or dropped.
@@ -72,7 +76,7 @@ impl PacketFilter {
         target: NodeIndex,
     ) -> ReadySetResult<bool> {
         // First, check if the target node needs to go through the filtering process.
-        return match self.whitelist.get_mut(&target) {
+        match self.requested_keys.get_mut(&target) {
             None => Ok(true),
             Some(wd) => match packet {
                 Packet::Message { data, .. } => {
@@ -127,7 +131,7 @@ impl PacketFilter {
                             // If it's not, return an error.
                             internal!("The keyed-by parameter must be present for replay messages")
                         }
-                        // We add the keys to the node's whitelist information.
+                        // We add the keys to the node's allowlist information.
                         Some(column_indexes) => self.add_keys(
                             target,
                             column_indexes.to_vec(),
@@ -144,8 +148,8 @@ impl PacketFilter {
                     // We iterate through the keys that must be evicted, as
                     // instructed by the packet.
                     for k in keys {
-                        for (_, whitelisted_keys) in wd.keys.iter_mut() {
-                            whitelisted_keys.remove(k);
+                        for (_, allowlisted_keys) in wd.keys.iter_mut() {
+                            allowlisted_keys.remove(k);
                         }
                     }
                     Ok(true)
@@ -153,12 +157,12 @@ impl PacketFilter {
                 // For any other packet, we signal to just send the Packet.
                 _ => Ok(true),
             },
-        };
+        }
     }
 
-    /// Adds the given keys to the target node's whitelist information.
+    /// Adds the given keys to the target node's allowlist information.
     fn add_keys(&mut self, target: NodeIndex, column_indexes: Vec<usize>, keys: &[KeyComparison]) {
-        match self.whitelist.entry(target) {
+        match self.requested_keys.entry(target) {
             Entry::Occupied(mut entry) => {
                 let wd = entry.get_mut();
                 wd.keys
@@ -232,8 +236,8 @@ mod test {
             "The packet should still be the same"
         );
         assert!(
-            processor.whitelist.is_empty(),
-            "The whitelist should not have been modified"
+            processor.requested_keys.is_empty(),
+            "The allowlist should not have been modified"
         );
     }
 
@@ -269,10 +273,12 @@ mod test {
             let mut keys = HashSet::new();
             keys.insert(key);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(ni, WhitelistData::default());
+            let mut allowlist = HashMap::new();
+            allowlist.insert(ni, NodeKeys::default());
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut packet, None, ni).unwrap();
 
@@ -315,15 +321,17 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes, keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut packet, None, ni).unwrap();
 
@@ -364,15 +372,17 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes, keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut packet, None, ni).unwrap();
 
@@ -425,15 +435,17 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes, keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut packet, None, ni).unwrap();
 
@@ -473,15 +485,17 @@ mod test {
             let mut packet = create_packet(Some(keys));
             let ni = NodeIndex::new(3);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: HashMap::new(),
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let result = processor.process(&mut packet, None, ni);
 
@@ -522,10 +536,12 @@ mod test {
             let mut processed_packet = original_packet.clone();
             let ni = NodeIndex::new(3);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(ni, WhitelistData::default());
+            let mut allowlist = HashMap::new();
+            allowlist.insert(ni, NodeKeys::default());
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor
                 .process(&mut processed_packet, Some(&col_indexes), ni)
@@ -539,12 +555,12 @@ mod test {
                 original_packet, processed_packet,
                 "The packet should still be the same"
             );
-            let new_whitelist = &processor.whitelist;
-            match new_whitelist.get(&ni) {
+            let new_allowlist = &processor.requested_keys;
+            match new_allowlist.get(&ni) {
                 None => panic!("Filtering should be enabled for the target node"),
                 Some(wd) => match wd.keys.get(&col_indexes) {
                     None => panic!("The column indexes should be present"),
-                    Some(k) => assert_eq!(keys, k.to_owned(), "The whitelisted keys are wrong"),
+                    Some(k) => assert_eq!(keys, k.to_owned(), "The allowlisted keys are wrong"),
                 },
             }
         }
@@ -588,15 +604,17 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes.clone(), keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
 
@@ -608,11 +626,11 @@ mod test {
                 original_packet, processed_packet,
                 "The packet should still be the same"
             );
-            match processor.whitelist.get(&ni) {
+            match processor.requested_keys.get(&ni) {
                 None => panic!("Filtering should be enabled for the target node"),
                 Some(wd) => match wd.keys.get(&column_indexes) {
                     None => panic!("The column indexes should be present"),
-                    Some(k) => assert!(k.is_empty(), "There should be no more whitelisted keys"),
+                    Some(k) => assert!(k.is_empty(), "There should be no more allowlisted keys"),
                 },
             }
         }
@@ -637,15 +655,17 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes.clone(), keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
 
-            let mut processor = PacketFilter { whitelist };
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
 
             let should_send = processor.process(&mut processed_packet, None, ni).unwrap();
 
@@ -657,22 +677,22 @@ mod test {
                 original_packet, processed_packet,
                 "The packet should still be the same"
             );
-            let new_whitelist = processor.whitelist;
+            let new_allowlist = processor.requested_keys;
             assert_eq!(
                 1,
-                new_whitelist.len(),
-                "There should be only one entry for whitelisted nodes"
+                new_allowlist.len(),
+                "There should be only one entry for allowlisted nodes"
             );
-            match new_whitelist.get(&ni) {
+            match new_allowlist.get(&ni) {
                 None => panic!("Filtering should be enabled for the target node"),
                 Some(wd) => match wd.keys.get(&column_indexes) {
                     None => panic!("The column indexes should be present"),
                     Some(k) => {
-                        assert_eq!(1, k.len(), "There should be only one whitelisted key");
+                        assert_eq!(1, k.len(), "There should be only one allowlisted key");
                         assert_eq!(
                             key,
                             k.iter().next().unwrap().to_owned(),
-                            "The whitelisted key is wrong"
+                            "The allowlisted key is wrong"
                         );
                     }
                 },
@@ -697,10 +717,10 @@ mod test {
             let mut keys_by_col_index = HashMap::new();
             keys_by_col_index.insert(column_indexes, keys);
 
-            let mut whitelist = HashMap::new();
-            whitelist.insert(
+            let mut allowlist = HashMap::new();
+            allowlist.insert(
                 ni,
-                WhitelistData {
+                NodeKeys {
                     keys: keys_by_col_index,
                 },
             );
@@ -708,7 +728,7 @@ mod test {
             let ni_alt = NodeIndex::new(4);
 
             let mut processor = PacketFilter {
-                whitelist: whitelist.clone(),
+                requested_keys: allowlist.clone(),
             };
 
             let should_send = processor
@@ -724,8 +744,8 @@ mod test {
                 "The packet should still be the same"
             );
             assert_eq!(
-                whitelist, processor.whitelist,
-                "The whitelist shouldn't have changed"
+                allowlist, processor.requested_keys,
+                "The allowlist shouldn't have changed"
             );
         }
 
