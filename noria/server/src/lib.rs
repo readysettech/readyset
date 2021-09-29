@@ -386,6 +386,7 @@ mod builder;
 mod controller;
 mod coordination;
 mod handle;
+mod http_router;
 mod startup;
 mod worker;
 
