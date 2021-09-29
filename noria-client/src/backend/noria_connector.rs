@@ -153,9 +153,8 @@ pub enum PrepareResult {
         params: Vec<ColumnSchema>,
         schema: Vec<ColumnSchema>,
     },
-    //TODO(DAN): Can id be changed to u32?
     Update {
-        statement_id: u64,
+        statement_id: u32,
         params: Vec<ColumnSchema>,
     },
 }
@@ -468,7 +467,7 @@ impl NoriaConnector {
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Update(q));
         Ok(PrepareResult::Update {
-            statement_id: statement_id as u64,
+            statement_id,
             params,
         })
     }
