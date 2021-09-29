@@ -965,7 +965,9 @@ impl SqlIncorporator {
             }
         };
 
+        trace!(query = %q, "pre-rewrite");
         let q = self.rewrite_query(q, &query_name, mig)?;
+        trace!(query = %q, "post-rewrite");
 
         // if this is a selection, we compute its `QueryGraph` and consider the existing ones we
         // hold for reuse or extension
