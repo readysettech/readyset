@@ -1,4 +1,4 @@
-use crate::controller::inner::ControllerInner;
+use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
 use crate::coordination::do_noria_rpc;
@@ -24,6 +24,7 @@ use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, info, warn};
+use tracing_futures::Instrument;
 use url::Url;
 
 mod domain_handle;
@@ -162,19 +163,17 @@ pub enum HandleRequest {
     },
 }
 
-/// A wrapper for a potential controller, also handling leader elections, HTTP requests that aren't
-/// destined for the worker, and requests originated from this server instance's `Handle`.
-pub struct ControllerOuter {
-    /// If we're the leader, the actual controller.
-    pub(crate) inner: Option<ControllerInner>,
+/// A wrapper for the control plane of the server instance that handles: leader election,
+/// control rpcs, and requests originated from this server's instance's `Handle`.
+pub struct Controller {
+    /// If we are the leader, the leader object to use for performing leader operations.
+    pub(crate) inner: Option<Leader>,
     /// The `Authority` structure used for leadership elections & such state.
     pub(crate) authority: Arc<Authority>,
     /// Channel to the `Worker` running inside this server instance.
     ///
     /// This is used to convey changes in leadership state.
     pub(crate) worker_tx: Sender<WorkerRequest>,
-    /// Receives updates from the authority thread.
-    pub(crate) authority_rx: Receiver<AuthorityUpdate>,
     /// Receives external HTTP requests.
     pub(crate) http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
@@ -187,15 +186,21 @@ pub struct ControllerOuter {
     pub(crate) replicator_url: Option<String>,
     /// A handle to the replicator task
     pub(crate) replicator_task: Option<tokio::task::JoinHandle<()>>,
+    /// The descriptor of the worker this controller's server is running.
+    pub(crate) worker_descriptor: WorkerDescriptor,
+    /// The config associated with this controller's server.
+    pub(crate) config: Config,
+    /// A handle to the authority task.
+    pub(crate) authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
 }
-impl ControllerOuter {
-    /// Run the provided *blocking* closure with the `ControllerInner` and the `Authority` if this
+impl Controller {
+    /// Run the provided *blocking* closure with the `Leader` and the `Authority` if this
     /// server instance is currently the leader.
     ///
     /// If it isn't, returns `Err(ReadySetError::NotLeader)`, and doesn't run the closure.
     async fn with_controller_blocking<F, T>(&mut self, func: F) -> ReadySetResult<T>
     where
-        F: FnOnce(&mut ControllerInner, Arc<Authority>) -> ReadySetResult<T>,
+        F: FnOnce(&mut Leader, Arc<Authority>) -> ReadySetResult<T>,
     {
         // FIXME: this is potentially slow, and it's only like this because borrowck sucks
         let auth = self.authority.clone();
@@ -236,7 +241,7 @@ impl ControllerOuter {
                 })
                 .await;
             match resp {
-                // returned from `ControllerInner::external_request`:
+                // returned from `Leader::external_request`:
                 Ok(Ok(r)) => Ok(Ok(r)),
                 Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
                 Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
@@ -327,8 +332,8 @@ impl ControllerOuter {
                 .await?;
             }
             AuthorityUpdate::WonLeaderElection(state) => {
-                info!("won leader election, creating ControllerInner");
-                self.inner = Some(ControllerInner::new(
+                info!("won leader election, creating Leader");
+                self.inner = Some(Leader::new(
                     state.clone(),
                     self.our_descriptor.controller_uri.clone(),
                 ));
@@ -368,6 +373,19 @@ impl ControllerOuter {
     /// requests (if it gets elected).
     /// This function returns if the wrapper fails, or the controller request sender is dropped.
     pub async fn run(mut self) -> ReadySetResult<()> {
+        // Start the authority thread responsible for leader election and liveness updates.
+        let (authority_tx, mut authority_rx) = tokio::sync::mpsc::channel(16);
+        self.authority_task = Some(tokio::spawn(
+            crate::controller::authority_runner(
+                authority_tx,
+                self.authority.clone(),
+                self.our_descriptor.clone(),
+                self.worker_descriptor.clone(),
+                self.config.clone(),
+            )
+            .instrument(tracing::info_span!("authority")),
+        ));
+
         loop {
             // produces a value when the `Valve` is closed
             let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
@@ -378,7 +396,7 @@ impl ControllerOuter {
                         self.handle_handle_request(req).await?;
                     }
                     else {
-                        info!("ControllerOuter shutting down after request handle dropped");
+                        info!("Controller shutting down after request handle dropped");
                         break;
                     }
                 }
@@ -387,11 +405,11 @@ impl ControllerOuter {
                         self.handle_controller_request(req).await?;
                     }
                     else {
-                        info!("ControllerOuter shutting down after HTTP handle dropped");
+                        info!("Controller shutting down after HTTP handle dropped");
                         break;
                     }
                 }
-                req = self.authority_rx.recv() => {
+                req = authority_rx.recv() => {
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
                         None if self.inner.is_some() => info!("leadership campaign terminated normally"),
@@ -403,11 +421,18 @@ impl ControllerOuter {
                     }
                 }
                 _ = shutdown_stream.next() => {
-                    info!("ControllerOuter shutting down after valve shut");
+                    info!("Controller shutting down after valve shut");
                     break;
                 }
             }
         }
+
+        // Kill the authority task if we've exited the request loop.
+        if let Some(handle) = self.authority_task.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+
         if self.inner.is_some() {
             self.stop_replication_task().await;
 
@@ -647,7 +672,6 @@ async fn authority_inner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    region: Option<String>,
 ) -> anyhow::Result<()> {
     authority.init().await?;
 
@@ -656,7 +680,7 @@ async fn authority_inner(
         authority.clone(),
         descriptor,
         config,
-        region,
+        worker_descriptor.region.clone(),
     );
 
     let mut worker_state =
@@ -708,7 +732,6 @@ pub(crate) async fn authority_runner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    region: Option<String>,
 ) -> anyhow::Result<()> {
     if let Err(e) = authority_inner(
         event_tx.clone(),
@@ -716,7 +739,6 @@ pub(crate) async fn authority_runner(
         descriptor,
         worker_descriptor,
         config,
-        region,
     )
     .await
     {

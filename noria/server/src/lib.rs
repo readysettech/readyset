@@ -105,10 +105,10 @@
 //! If you're going to hack on Noria, there are some files, modules, and types that you should
 //! know:
 //!
-//!  - `ControllerInner` in `src/controller/inner.rs`, which is held by a *single* worker, and
+//!  - `Leader` in `src/controller/inner.rs`, which is held by a *single* worker, and
 //!    "owns" the currently executing data-flow graph. If a client wishes to add or modify queries,
 //!    create new handles to base tables or views, or inspect the current data-flow, they end up
-//!    interfacing with a `ControllerInner`.
+//!    interfacing with a `Leader`.
 //!  - `Migration` in `src/controller/migrate/mod.rs`, which orchestrates any changes to the
 //!    running data-flow. This includes drawing domain boundaries, setting up sharding, and
 //!    deciding what nodes should have materialized state. This planning process is split into many
@@ -172,8 +172,8 @@
 //! ```no_run
 //! # fn main() {
 //! # // we don't have access to any internal noria-server types :'(
-//! # struct ControllerInner;
-//! # impl ControllerInner { fn migrate<F>(&self, _: F) where F: FnOnce(M) { } }
+//! # struct Leader;
+//! # impl Leader { fn migrate<F>(&self, _: F) where F: FnOnce(M) { } }
 //! # struct M;
 //! # impl M {
 //! #  fn add_ingredient<A, B, C>(&self, _: A, _: B, _: C) -> () {}
@@ -188,8 +188,8 @@
 //! # impl Join { fn new<A, B, C, D>(_: A, _: B, _: C, _: D) -> Join { Join } }
 //! # enum JoinType { Inner }
 //! # enum JoinSource { B(usize, usize), L(usize), R(usize) };
-//! # let g = ControllerInner;
-//! // assume we have some g that is a ControllerInner
+//! # let g = Leader;
+//! // assume we have some g that is a Leader
 //! g.migrate(|mig| {
 //!     // base types
 //!     let article = mig.add_ingredient("article", &["id", "title"], Base::default());

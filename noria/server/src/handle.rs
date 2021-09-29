@@ -71,7 +71,7 @@ impl Handle {
                 .send(HandleRequest::QueryReadiness(tx))
                 .await
                 .ok()
-                .expect("ControllerOuter dropped, failed, or panicked");
+                .expect("Controller dropped, failed, or panicked");
 
             if rx.await.unwrap() {
                 break;
@@ -105,7 +105,7 @@ impl Handle {
             })
             .await
             .ok()
-            .expect("ControllerOuter dropped, failed, or panicked");
+            .expect("Controller dropped, failed, or panicked");
 
         fin_rx.await.unwrap().unwrap();
         ret_rx.await.unwrap()

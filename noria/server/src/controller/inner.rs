@@ -48,16 +48,16 @@ use vec1::Vec1;
 /// for replication offsets)
 const CONCURRENT_REQUESTS: usize = 16;
 
-/// The Noria controller, responsible for making control-plane decisions for the whole of a Noria
+/// The Noria leader, responsible for making control-plane decisions for the whole of a Noria
 /// cluster.
 ///
-/// This runs inside a `ControllerOuter` when it is elected as leader.
+/// This runs inside a `Controller` when it is elected as leader.
 ///
 /// It keeps track of the structure of the underlying data flow graph and its domains. `Controller`
 /// does not allow direct manipulation of the graph. Instead, changes must be instigated through a
-/// `Migration`, which can be performed using `ControllerInner::migrate`. Only one `Migration` can
+/// `Migration`, which can be performed using `Leader::migrate`. Only one `Migration` can
 /// occur at any given point in time.
-pub struct ControllerInner {
+pub struct Leader {
     pub(super) ingredients: Graph,
     /// ID for the root node in the graph. This is used to retrieve a list of base tables.
     pub(super) source: NodeIndex,
@@ -159,7 +159,7 @@ pub(super) fn graphviz(
     s
 }
 
-impl ControllerInner {
+impl Leader {
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     pub(super) fn external_request(
         &mut self,
@@ -297,7 +297,7 @@ impl ControllerInner {
                 return_serialized!(ret);
             }
             (Method::POST, "/replication_offset") => {
-                // this method can't be `async` since `ControllerInner` isn't Send because `Graph`
+                // this method can't be `async` since `Leader` isn't Send because `Graph`
                 // isn't Send :(
                 let res = futures_executor::block_on(self.replication_offset())?;
                 return_serialized!(res);
@@ -565,7 +565,7 @@ impl ControllerInner {
         })
     }
 
-    /// Construct `ControllerInner` with a specified listening interface
+    /// Construct `Leader` with a specified listening interface
     pub(super) fn new(state: ControllerState, controller_uri: Url) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
@@ -600,7 +600,7 @@ impl ControllerInner {
         }
         recipe.set_mir_config(state.config.mir_config);
 
-        ControllerInner {
+        Leader {
             ingredients: g,
             source,
             ndomains: 0,

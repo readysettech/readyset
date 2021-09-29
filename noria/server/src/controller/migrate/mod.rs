@@ -18,10 +18,10 @@
 //! livelocks. This module defines methods for performing each step in relative isolation, as well
 //! as a function for performing them in the right order.
 //!
-//! This is split into two stages: the planning stage, where parts of the [`ControllerInner`] are
+//! This is split into two stages: the planning stage, where parts of the [`Leader`] are
 //! cloned, and the list of new domains to spin up and messages to send to new and existing domains
 //! is built (via the [`DomainMigrationPlan`]). If this completes without failing, a [`MigrationPlan`]
-//! is created and then applied to the running [`ControllerInner`].
+//! is created and then applied to the running [`Leader`].
 //!
 //! A failure during the planning stage is inconsequential, as no part of the running controller
 //! is mutated. A failure during the apply stage currently might leave the cluster in an
@@ -43,7 +43,7 @@ use tracing::{debug, debug_span, error, info, info_span, trace, warn};
 
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::{
-    ControllerInner, DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier,
+    DomainPlacementRestriction, Leader, NodeRestrictionKey, Worker, WorkerIdentifier,
 };
 
 pub(crate) mod assignment;
@@ -64,7 +64,7 @@ pub struct StoredDomainRequest {
     pub req: DomainRequest,
 }
 impl StoredDomainRequest {
-    pub fn apply(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
             ReadySetError::MigrationUnknownDomain {
                 domain_index: self.domain.index(),
@@ -104,7 +104,7 @@ impl StoredDomainRequest {
 }
 
 /// A request to place a new domain, corresponding to the arguments passed to
-/// [`ControllerInner::place_domain`].
+/// [`Leader::place_domain`].
 ///
 /// Used as part of [`DomainMigrationPlan`].
 #[derive(Debug)]
@@ -136,7 +136,7 @@ pub struct DomainMigrationPlan {
 
 /// A set of stored data sufficient to apply a migration.
 pub struct MigrationPlan {
-    // Basically all of these fields are just cloned from `ControllerInner`.
+    // Basically all of these fields are just cloned from `Leader`.
     ingredients: Graph,
     domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
     ndomains: usize,
@@ -147,12 +147,12 @@ pub struct MigrationPlan {
 }
 
 impl MigrationPlan {
-    /// Apply the migration plan to the provided `ControllerInner`.
+    /// Apply the migration plan to the provided `Leader`.
     ///
-    /// If the plan fails, the `ControllerInner`'s state is left unchanged; however, no attempt
+    /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
-    pub fn apply(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let span = info_span!("apply");
         let _g = span.enter();
         let MigrationPlan {
@@ -207,7 +207,7 @@ impl MigrationPlan {
 impl DomainMigrationPlan {
     /// Make a new `DomainMigrationPlan`, noting which domains are valid based off the provided
     /// controller.
-    pub fn new(mainline: &ControllerInner) -> Self {
+    pub fn new(mainline: &Leader) -> Self {
         Self {
             stored: vec![],
             place: vec![],
@@ -221,7 +221,7 @@ impl DomainMigrationPlan {
 
     /// Enqueues a request to add a new domain.
     ///
-    /// Arguments are passed to [`ControllerInner::place_domain`] when the plan is applied.
+    /// Arguments are passed to [`Leader::place_domain`] when the plan is applied.
     pub fn add_new_domain(
         &mut self,
         idx: DomainIndex,
@@ -247,7 +247,7 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub fn apply(&mut self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub fn apply(&mut self, mainline: &mut Leader) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
             let d = mainline.place_domain(place.idx, place.shard_workers, place.nodes)?;
             mainline.domains.insert(place.idx, d);
@@ -518,7 +518,7 @@ impl Migration {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `ControllerInner::get_getter`.
+    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain_anonymous(&mut self, n: NodeIndex, key: &[usize]) -> NodeIndex {
         self.ensure_reader_for(n, None, Default::default());
         let ri = self.readers[&n];
@@ -532,7 +532,7 @@ impl Migration {
     /// Set up the given node such that its output can be efficiently queried, with the given
     /// [`PostLookup`] operations to be performed on the results of all lookups
     ///
-    /// To query into the maintained state, use `ControllerInner::get_getter`.
+    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain_anonymous_with_post_lookup(
         &mut self,
         n: NodeIndex,
@@ -550,7 +550,7 @@ impl Migration {
 
     /// Set up the given node such that its output can be efficiently queried.
     ///
-    /// To query into the maintained state, use `ControllerInner::get_getter`.
+    /// To query into the maintained state, use `Leader::get_getter`.
     pub fn maintain(&mut self, name: String, n: NodeIndex, key: &[usize], post_lookup: PostLookup) {
         self.ensure_reader_for(n, Some(name), post_lookup);
 
@@ -561,7 +561,7 @@ impl Migration {
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
-    pub(super) fn commit(self, mainline: &mut ControllerInner) -> ReadySetResult<()> {
+    pub(super) fn commit(self, mainline: &mut Leader) -> ReadySetResult<()> {
         let start = self.start;
 
         let plan = self
@@ -584,7 +584,7 @@ impl Migration {
     ///
     /// See the module-level docs for more information on what a migration entails.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn plan(self, mainline: &ControllerInner) -> ReadySetResult<MigrationPlan> {
+    pub(super) fn plan(self, mainline: &Leader) -> ReadySetResult<MigrationPlan> {
         let span = info_span!("plan");
         let _g = span.enter();
         info!(num_nodes = self.added.len(), "finalizing migration");
