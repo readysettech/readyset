@@ -113,6 +113,7 @@ type WorkerIdentifier = Url;
 
 /// An update on the leader election and failure detection.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum AuthorityUpdate {
     /// The current leader has changed.
     ///
@@ -182,10 +183,6 @@ pub struct Controller {
     pub(crate) our_descriptor: ControllerDescriptor,
     /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
     pub(crate) valve: Valve,
-    /// Primary MySQL/PostgresSQL server connection URL that Noria replicates from
-    pub(crate) replicator_url: Option<String>,
-    /// A handle to the replicator task
-    pub(crate) replicator_task: Option<tokio::task::JoinHandle<()>>,
     /// The descriptor of the worker this controller's server is running.
     pub(crate) worker_descriptor: WorkerDescriptor,
     /// The config associated with this controller's server.
@@ -285,44 +282,6 @@ impl Controller {
         Ok(())
     }
 
-    async fn stop_replication_task(&mut self) {
-        if let Some(handle) = self.replicator_task.take() {
-            handle.abort();
-            let _ = handle.await;
-        }
-    }
-
-    /// Start replication/binlog synchronization in an infinite loop
-    /// on any error the task will retry again and again, because in case
-    /// a connection to the primary was lost for any reason, all we want is to
-    /// connect again, and catch up from the binlog
-    ///
-    /// TODO: how to handle the case where we need a full new replica
-    fn start_replication_task(&mut self) {
-        let url = match &self.replicator_url {
-            Some(url) => url.to_string(),
-            None => {
-                info!("No primary instance specified");
-                return;
-            }
-        };
-
-        let authority = Arc::clone(&self.authority);
-        self.replicator_task = Some(tokio::spawn(async move {
-            loop {
-                let noria: noria::ControllerHandle =
-                    noria::ControllerHandle::new(Arc::clone(&authority)).await;
-
-                if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
-                {
-                    // On each replication error we wait for 30 seconds and then try again
-                    tracing::error!(error = %err, "replication error");
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
-            }
-        }));
-    }
-
     async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descr) => {
@@ -333,18 +292,19 @@ impl Controller {
             }
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!("won leader election, creating Leader");
-                self.inner = Some(Leader::new(
+                let mut leader = Leader::new(
                     state.clone(),
                     self.our_descriptor.controller_uri.clone(),
-                ));
+                    self.authority.clone(),
+                    self.config.replication_url.clone(),
+                );
+                leader.start();
+
+                self.inner = Some(leader);
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
                 })
                 .await?;
-
-                // After the controller becomes the leader, we need it to start listening on
-                // the binlog, it should stop doing it if it stops being a leader
-                self.start_replication_task();
             }
             AuthorityUpdate::NewWorkers(w) if self.inner.is_some() => {
                 for worker in w {
@@ -427,14 +387,8 @@ impl Controller {
             }
         }
 
-        // Kill the authority task if we've exited the request loop.
-        if let Some(handle) = self.authority_task.take() {
-            handle.abort();
-            let _ = handle.await;
-        }
-
-        if self.inner.is_some() {
-            self.stop_replication_task().await;
+        if let Some(inner) = &mut self.inner {
+            inner.stop().await;
 
             if let Err(error) = self.authority.surrender_leadership().await {
                 error!(%error, "failed to surrender leadership");

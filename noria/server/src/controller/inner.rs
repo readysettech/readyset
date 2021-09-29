@@ -40,6 +40,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{cell, time};
 use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
@@ -92,6 +93,12 @@ pub struct Leader {
 
     quorum: usize,
     controller_uri: Url,
+
+    pub(super) replicator_url: Option<String>,
+    /// A handle to the replicator task
+    pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
+    /// A client to the current authority.
+    pub(super) authority: Arc<Authority>,
 }
 
 pub(super) fn graphviz(
@@ -160,6 +167,55 @@ pub(super) fn graphviz(
 }
 
 impl Leader {
+    /// Run all tasks required to be the leader.
+    pub(super) fn start(&mut self) {
+        // When the controller becomes the leader, we need to read updates
+        // from the binlog.
+        self.start_replication_task();
+    }
+
+    pub(super) async fn stop(&mut self) {
+        self.stop_replication_task().await;
+    }
+
+    async fn stop_replication_task(&mut self) {
+        if let Some(handle) = self.replicator_task.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    /// Start replication/binlog synchronization in an infinite loop
+    /// on any error the task will retry again and again, because in case
+    /// a connection to the primary was lost for any reason, all we want is to
+    /// connect again, and catch up from the binlog
+    ///
+    /// TODO: how to handle the case where we need a full new replica
+    fn start_replication_task(&mut self) {
+        let url = match &self.replicator_url {
+            Some(url) => url.to_string(),
+            None => {
+                info!("No primary instance specified");
+                return;
+            }
+        };
+
+        let authority = Arc::clone(&self.authority);
+        self.replicator_task = Some(tokio::spawn(async move {
+            loop {
+                let noria: noria::ControllerHandle =
+                    noria::ControllerHandle::new(Arc::clone(&authority)).await;
+
+                if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
+                {
+                    // On each replication error we wait for 30 seconds and then try again
+                    tracing::error!(error = %err, "replication error");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
+            }
+        }));
+    }
+
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     pub(super) fn external_request(
         &mut self,
@@ -566,7 +622,12 @@ impl Leader {
     }
 
     /// Construct `Leader` with a specified listening interface
-    pub(super) fn new(state: ControllerState, controller_uri: Url) -> Self {
+    pub(super) fn new(
+        state: ControllerState,
+        controller_uri: Url,
+        authority: Arc<Authority>,
+        replicator_url: Option<String>,
+    ) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
         let source = g.add_node(node::Node::new(
@@ -626,6 +687,9 @@ impl Leader {
             controller_uri,
 
             replication_offset: state.replication_offset,
+            replicator_url,
+            replicator_task: None,
+            authority,
         }
     }
 

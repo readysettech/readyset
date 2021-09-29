@@ -16,7 +16,6 @@ pub struct Builder {
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     region: Option<String>,
-    replicator_url: Option<String>,
     reader_only: bool,
     volume_id: Option<VolumeId>,
 }
@@ -31,7 +30,6 @@ impl Default for Builder {
             memory_limit: None,
             memory_check_frequency: None,
             region: None,
-            replicator_url: None,
             reader_only: false,
             volume_id: None,
         }
@@ -137,7 +135,7 @@ impl Builder {
 
     /// Sets the primary MySQL/PostgreSQL server to replicate from.
     pub fn set_replicator_url(&mut self, url: String) {
-        self.replicator_url = Some(url);
+        self.config.replication_url = Some(url);
     }
 
     /// Configures this Noria server to accept only reader domains.
@@ -168,7 +166,6 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             region,
-            replicator_url,
             reader_only,
             volume_id,
         } = self;
@@ -183,7 +180,6 @@ impl Builder {
             memory_limit,
             memory_check_frequency,
             region,
-            replicator_url,
             reader_only,
             volume_id,
         )
