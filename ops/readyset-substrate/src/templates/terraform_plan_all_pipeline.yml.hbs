@@ -12,6 +12,7 @@ steps:
           shell: false
           environment:
           - BUILDKITE_API_TOKEN
+          - BUILDKITE_GERRIT_PASSWORD
       - ecr#v2.5.0:
           account_ids: "305232526136"
           login: true

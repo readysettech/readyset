@@ -6,15 +6,17 @@ use anyhow::{anyhow, bail, Result};
 use handlebars::Handlebars;
 use std::{
     io::{ErrorKind, Write},
-    path::Path,
     process::{Command, Stdio},
 };
 use tracing::{event, Level};
 
 use serde::Serialize;
 
-use crate::substrate::{self, RootModule};
 use crate::terraform;
+use crate::{
+    gerrit,
+    substrate::{self, RootModule},
+};
 
 #[derive(Serialize)]
 struct TerraformValidateAllPipelineTemplateData {
@@ -32,16 +34,12 @@ static TERRAFORM_VALIDATE_ALL_PIPELINE_TEMPLATE: &str =
 static TERRAFORM_PLAN_ALL_PIPELINE_TEMPLATE: &str =
     include_str!("../templates/terraform_plan_all_pipeline.yml.hbs");
 
-fn upload_plan_artifact(terraform_path: &Path) -> Result<()> {
-    let plan_path = terraform_path.join(".terraform").join("terraform.tfplan");
-    if !plan_path.exists() {
-        bail!("Could not upload plan artifact since it does not exist")
-    }
+fn upload_plan_artifact(plan: &terraform::Plan) -> Result<()> {
     // TODO: Use our own S3 bucket for storing plan artifacts
     let exit_status = Command::new("buildkite-agent")
         .arg("artifact")
         .arg("upload")
-        .arg(plan_path)
+        .arg(plan.path())
         .status()?;
     if exit_status.success() {
         Ok(())
@@ -98,17 +96,15 @@ pub(crate) fn terraform_validate(root_module: &substrate::RootModule) -> Result<
 pub(crate) fn terraform_plan(root_module: &substrate::RootModule) -> Result<()> {
     let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
-    let status = terraform::run_plan(&terraform_path)?;
-    match status {
-        terraform::PlanStatus::HasDiff => {
-            event!(Level::DEBUG, "Plan has changes so upload plan artifact");
-            upload_plan_artifact(&terraform_path)
-            // TODO: Upload pipeline for apply if we are in that mode.
-        }
-        terraform::PlanStatus::NoChanges => {
-            event!(Level::DEBUG, "No changes in plan so nothing more to do");
-            Ok(())
-        }
+    let plan = terraform::run_plan(&terraform_path)?;
+    if plan.has_diff() {
+        event!(Level::DEBUG, "Plan has changes so upload plan artifact");
+        upload_plan_artifact(&plan)?;
+        gerrit::post_terraform_plan(root_module, &plan)
+        // TODO: Upload pipeline for apply if we are in that mode.
+    } else {
+        event!(Level::DEBUG, "No changes in plan so nothing more to do");
+        Ok(())
     }
 }
 

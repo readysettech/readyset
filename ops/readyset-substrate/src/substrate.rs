@@ -1,8 +1,10 @@
-/// Defintions of things specific to how Substrate organizes Terraform modules.
-use std::io::BufRead;
+//! Defintions of things specific to how Substrate organizes Terraform modules.
+
+use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
+use std::{fmt::Display, io::BufRead};
 
 use anyhow::{bail, Result};
 use serde::Serialize;
@@ -12,6 +14,12 @@ use tracing::error;
 #[derive(Serialize, Debug)]
 pub(crate) struct RootModule {
     path: PathBuf,
+}
+
+impl Display for RootModule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.path.display())
+    }
 }
 
 impl RootModule {

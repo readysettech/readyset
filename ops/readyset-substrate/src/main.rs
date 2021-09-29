@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 use substrate::RootModule;
 mod commands;
+mod gerrit;
 mod substrate;
 mod terraform;
 
