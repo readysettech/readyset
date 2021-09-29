@@ -94,7 +94,6 @@ pub(super) async fn start_instance(
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
     region: Option<String>,
-    replicator_url: Option<String>,
     reader_only: bool,
     volume_id: Option<VolumeId>,
 ) -> Result<Handle, anyhow::Error> {
@@ -203,8 +202,6 @@ pub(super) async fn start_instance(
         handle_rx,
         our_descriptor: our_descriptor.clone(),
         valve: valve.clone(),
-        replicator_url,
-        replicator_task: None,
         worker_descriptor,
         config,
         authority_task: None,
