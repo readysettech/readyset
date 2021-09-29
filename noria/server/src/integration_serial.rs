@@ -29,7 +29,17 @@ use std::time::Duration;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn it_works_basic() {
-    let mut g = start_simple("it_works_basic").await;
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(None);
+        builder.set_persistence(get_persistence_params("it_works_basic"));
+        builder.set_allow_topk(true);
+        builder.enable_packet_filters();
+        builder.start_local()
+    }
+    .await
+    .unwrap();
+
     let _ = g
         .migrate(|mig| {
             let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));

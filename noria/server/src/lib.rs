@@ -429,6 +429,14 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct Config {
     pub(crate) sharding: Option<usize>,
     pub(crate) partial_enabled: bool,
+
+    /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
+    ///
+    /// Defaults to false
+    ///
+    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
+    pub(crate) packet_filters_enabled: bool,
+
     pub(crate) frontier_strategy: FrontierStrategy,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
@@ -449,6 +457,7 @@ impl Default for Config {
             #[cfg(not(test))]
             sharding: None,
             partial_enabled: true,
+            packet_filters_enabled: false,
             frontier_strategy: Default::default(),
             domain_config: DomainConfig {
                 concurrent_replays: 512,
