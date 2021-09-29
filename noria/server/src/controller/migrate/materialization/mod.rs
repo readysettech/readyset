@@ -87,6 +87,13 @@ pub(in crate::controller) struct Materializations {
     frontier_strategy: FrontierStrategy,
 
     tag_generator: usize,
+
+    /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
+    ///
+    /// Defaults to false
+    ///
+    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
+    packet_filters_enabled: bool,
 }
 
 impl Materializations {
@@ -107,12 +114,20 @@ impl Materializations {
             frontier_strategy: FrontierStrategy::None,
 
             tag_generator: 0,
+
+            packet_filters_enabled: false,
         }
     }
 
     /// Disable partial materialization for all new materializations.
     pub(in crate::controller) fn disable_partial(&mut self) {
         self.partial_enabled = false;
+    }
+
+    /// Enable the creation of [`PacketFilter`]s for egresses before readers in all new
+    /// materializations
+    pub(in crate::controller) fn enable_packet_filters(&mut self) {
+        self.packet_filters_enabled = true;
     }
 
     /// Which nodes should be placed beyond the materialization frontier?

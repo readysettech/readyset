@@ -579,6 +579,9 @@ impl ControllerInner {
         if !state.config.partial_enabled {
             materializations.disable_partial()
         }
+        if state.config.packet_filters_enabled {
+            materializations.enable_packet_filters();
+        }
         materializations.set_frontier_strategy(state.config.frontier_strategy);
 
         let cc = Arc::new(ChannelCoordinator::new());

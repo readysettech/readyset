@@ -732,7 +732,9 @@ impl<'a> Plan<'a> {
             },
         )?;
 
-        self.setup_packet_filter()?;
+        if self.m.packet_filters_enabled {
+            self.setup_packet_filter()?;
+        }
 
         if !self.partial {
             // if we're constructing a new view, there is no reason to replay any given path more

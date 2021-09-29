@@ -122,6 +122,10 @@ struct Opts {
     #[clap(long = "nopartial")]
     no_partial: bool,
 
+    /// Enable packet filters in egresses before readers
+    #[clap(long)]
+    enable_packet_filters: bool,
+
     /// Number of workers to wait for before starting (including this one)
     #[clap(long, short = 'q', default_value = "1", env = "NORIA_QUORUM")]
     quorum: usize,
@@ -211,6 +215,9 @@ fn main() -> anyhow::Result<()> {
     builder.set_quorum(opts.quorum);
     if opts.no_partial {
         builder.disable_partial();
+    }
+    if opts.enable_packet_filters {
+        builder.enable_packet_filters();
     }
 
     if opts.enable_reuse {
