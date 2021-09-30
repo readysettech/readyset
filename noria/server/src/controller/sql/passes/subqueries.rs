@@ -35,8 +35,7 @@ fn extract_subqueries_from_function_call(
         | FunctionExpression::Sum { expr, .. }
         | FunctionExpression::Max(expr)
         | FunctionExpression::Min(expr)
-        | FunctionExpression::GroupConcat { expr, .. }
-        | FunctionExpression::Cast(expr, _) => extract_subqueries_from_expression(expr),
+        | FunctionExpression::GroupConcat { expr, .. } => extract_subqueries_from_expression(expr),
         FunctionExpression::CountStar => Ok(vec![]),
         FunctionExpression::Call { arguments, .. } => Ok(arguments
             .iter_mut()
@@ -58,7 +57,9 @@ fn extract_subqueries_from_expression(
 
             Ok(lb.into_iter().chain(rb.into_iter()).collect())
         }
-        Expression::UnaryOp { rhs, .. } => extract_subqueries_from_expression(rhs),
+        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+            extract_subqueries_from_expression(expr)
+        }
         Expression::Between {
             operand, min, max, ..
         } => {

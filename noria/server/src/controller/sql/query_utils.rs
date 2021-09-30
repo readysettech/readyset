@@ -35,8 +35,8 @@ pub(crate) fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, 
             ret.append(&mut map_aggregates(lhs));
             ret.append(&mut map_aggregates(rhs));
         }
-        Expression::UnaryOp { rhs, .. } => {
-            ret.append(&mut map_aggregates(rhs));
+        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+            ret.append(&mut map_aggregates(expr));
         }
         Expression::Exists(_) => {}
         Expression::NestedSelect(_) => {}

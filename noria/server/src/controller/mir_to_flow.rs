@@ -882,10 +882,6 @@ fn make_latest_node(
 /// - Replacing NOT with (expr != 1)
 fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<DataflowExpression> {
     match expr {
-        Expression::Call(FunctionExpression::Cast(arg, ty)) => Ok(DataflowExpression::Cast(
-            Box::new(lower_expression(parent, *arg)?),
-            ty,
-        )),
         Expression::Call(FunctionExpression::Call {
             name: fname,
             arguments,
@@ -929,6 +925,10 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             left: Box::new(lower_expression(parent, *rhs)?),
             right: Box::new(DataflowExpression::Literal(DataType::Int(1))),
         }),
+        Expression::Cast { expr, ty } => Ok(DataflowExpression::Cast(
+            Box::new(lower_expression(parent, *expr)?),
+            ty,
+        )),
         Expression::CaseWhen {
             condition,
             then_expr,

@@ -128,8 +128,11 @@ fn collapse_where_in_recursive(
                 None
             }
         }
-        Expression::UnaryOp { ref mut rhs, .. } => {
-            collapse_where_in_recursive(leftmost_param_index, rhs, mode)?
+        Expression::UnaryOp {
+            rhs: ref mut expr, ..
+        }
+        | Expression::Cast { ref mut expr, .. } => {
+            collapse_where_in_recursive(leftmost_param_index, expr, mode)?
         }
         Expression::BinaryOp {
             ref mut lhs,

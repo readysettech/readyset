@@ -123,7 +123,6 @@ impl ReplaceLiteralsWithPlaceholders for FunctionExpression {
             FunctionExpression::Max(expr) => expr.replace_literals(),
             FunctionExpression::Min(expr) => expr.replace_literals(),
             FunctionExpression::GroupConcat { expr, .. } => expr.replace_literals(),
-            FunctionExpression::Cast(expr, _) => expr.replace_literals(),
             FunctionExpression::Call { arguments, .. } => {
                 let mut values = vec![];
                 for expr in arguments.iter_mut() {
@@ -149,7 +148,9 @@ impl ReplaceLiteralsWithPlaceholders for Expression {
                 values.append(&mut rhs.replace_literals());
                 values
             }
-            Expression::UnaryOp { rhs, .. } => rhs.replace_literals(),
+            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+                expr.replace_literals()
+            }
             Expression::CaseWhen {
                 condition,
                 then_expr,

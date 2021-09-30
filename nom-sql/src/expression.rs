@@ -13,7 +13,9 @@ use nom::{
 };
 
 use crate::case::case_when;
-use crate::common::{column_function, column_identifier_no_alias, literal, ws_sep_comma};
+use crate::common::{
+    column_function, column_identifier_no_alias, literal, type_identifier, ws_sep_comma,
+};
 use crate::select::nested_selection;
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
@@ -56,12 +58,6 @@ pub enum FunctionExpression {
         separator: String,
     },
 
-    /// `CAST(expression AS type)`.
-    ///
-    /// TODO(grfn): This isn't really a function call, so should really just be a member of
-    /// Expression
-    Cast(Box<Expression>, SqlType),
-
     /// Generic function call expression
     Call {
         name: String,
@@ -78,8 +74,9 @@ impl FunctionExpression {
             | FunctionExpression::Sum { expr: arg, .. }
             | FunctionExpression::Max(arg)
             | FunctionExpression::Min(arg)
-            | FunctionExpression::GroupConcat { expr: arg, .. }
-            | FunctionExpression::Cast(arg, _) => Either::Left(iter::once(arg.as_ref())),
+            | FunctionExpression::GroupConcat { expr: arg, .. } => {
+                Either::Left(iter::once(arg.as_ref()))
+            }
             FunctionExpression::CountStar => Either::Right(Either::Left(iter::empty())),
             FunctionExpression::Call { arguments, .. } => {
                 Either::Right(Either::Right(arguments.iter()))
@@ -113,7 +110,6 @@ impl Display for FunctionExpression {
             FunctionExpression::GroupConcat { expr, separator } => {
                 write!(f, "group_concat({} separator '{}')", expr, separator)
             }
-            FunctionExpression::Cast(arg, typ) => write!(f, "CAST({} AS {})", arg, typ),
             FunctionExpression::Call { name, arguments } => {
                 write!(f, "{}({})", name, arguments.iter().join(", "))
             }
@@ -305,6 +301,9 @@ pub enum Expression {
         rhs: InValue,
         negated: bool,
     },
+
+    /// `CAST(expression AS type)`.
+    Cast { expr: Box<Expression>, ty: SqlType },
 }
 
 impl Display for Expression {
@@ -355,6 +354,7 @@ impl Display for Expression {
                 write!(f, " IN ({})", rhs)
             }
             Expression::NestedSelect(q) => write!(f, "({})", q),
+            Expression::Cast { expr, ty } => write!(f, "CAST({} as {})", expr, ty),
         }
     }
 }
@@ -664,6 +664,20 @@ named_with_dialect!(exists_expr(dialect) -> Expression, do_parse!(
         >> (Expression::Exists(Box::new(statement)))
 ));
 
+named_with_dialect!(cast(dialect) -> Expression, do_parse!(
+    complete!(tag_no_case!("cast"))
+        >> multispace0
+        >> complete!(char!('('))
+        >> arg: call!(expression(dialect))
+        >> multispace1
+        >> complete!(tag_no_case!("as"))
+        >> multispace1
+        >> ty: call!(type_identifier(dialect))
+        >> multispace0
+        >> complete!(char!(')'))
+        >> (Expression::Cast {expr: Box::new(arg), ty})
+));
+
 named_with_dialect!(nested_select(dialect) -> Expression, do_parse!(
     char!('(')
         >> multispace0
@@ -692,7 +706,8 @@ named_with_dialect!(pub(crate) simple_expr(dialect, &[u8]) -> Expression, alt!(
     call!(column_function(dialect)) => { |f| Expression::Call(f) } |
     call!(literal(dialect)) => { |l| Expression::Literal(l) } |
     call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
+    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) } |
+    call!(cast(dialect))
 ));
 
 pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {

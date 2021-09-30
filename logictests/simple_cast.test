@@ -1,0 +1,21 @@
+statement ok
+CREATE TABLE ids(id TEXT)
+
+statement ok
+INSERT INTO ids (id) VALUES ("200"), ("200")
+
+query I nosort
+SELECT CAST(id as INTEGER) FROM ids;
+----
+200
+200
+
+query I nosort
+SELECT SUM(CAST(id as INTEGER)) FROM ids;
+----
+400
+
+query I nosort
+SELECT CAST(GROUP_CONCAT(id SEPARATOR '') as INTEGER) FROM ids;
+----
+200200
