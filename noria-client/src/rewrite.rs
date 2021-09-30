@@ -157,9 +157,20 @@ pub(crate) fn collapse_where_in(
     query: &mut SqlQuery,
 ) -> ReadySetResult<Option<(usize, Vec<Literal>)>> {
     if let SqlQuery::Select(ref mut sq) = *query {
+        let has_aggregates = sq.contains_aggregate_select();
+
         if let Some(ref mut w) = sq.where_clause {
             let mut left_edge = 0;
-            return collapse_where_in_recursive(&mut left_edge, w);
+            let res = collapse_where_in_recursive(&mut left_edge, w)?;
+
+            // When a `SELECT` statement contains aggregates, such as `SUM` or `COUNT`, we can't use
+            // placeholders, as those will aggregate key lookups into a multi row response, as
+            // opposed to a single row response required by aggregates. We could support this pretty
+            // easily, but for now it's not in-scope
+            if res.is_some() && has_aggregates {
+                unsupported!("Aggregates with parametrized IN are not supported");
+            }
+            return Ok(res);
         }
     }
     Ok(None)
