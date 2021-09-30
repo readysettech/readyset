@@ -7,5 +7,5 @@ edition = "2018"
 anyhow = "1.0"
 clap = "3.0.0-beta"
 thiserror = "1.0"
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-subscriber = { version = "0.2", features = ["json"] }

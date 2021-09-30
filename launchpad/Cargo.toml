@@ -14,7 +14,7 @@ reqwest = "0.11.1"
 chrono = { version = "0.4.0", features = ["serde"] }
 tokio = { version = "1.8.1", features = ["full"] }
 futures = "0.3.15"
-tracing = "0.1.26"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 rust_decimal = { version = "1.16" }
 eui48 = "0.4"
 uuid = { version = "0.8", features = ["v4"] }

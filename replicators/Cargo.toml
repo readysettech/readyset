@@ -14,7 +14,7 @@ futures = { version = "0.3" }
 bytes = "1.0"
 chrono = "0.4"
 itertools = "0.10.1"
-tracing = "0.1.26"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-futures = "0.2.5"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 hex = "0.4.3"
