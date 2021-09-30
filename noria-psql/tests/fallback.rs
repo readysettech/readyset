@@ -11,11 +11,6 @@ fn create_table() {
     let config = setup_w_fallback();
     let mut client = config.connect(NoTls).unwrap();
 
-    // NOTE: Currently, a race condition with noria startup means we have to wait until the
-    // snapshot, which happens in the background of the noria server process, is finished before we
-    // can start issuing any DDL queries to an adapter. Once that's fixed this sleep can go away.
-    sleep();
-
     client
         .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")
         .unwrap();
@@ -41,8 +36,6 @@ fn create_table() {
 fn prepare_execute_fallback() {
     let config = setup_w_fallback();
     let mut client = config.connect(NoTls).unwrap();
-
-    sleep();
 
     client
         .simple_query("CREATE TABLE cats (id int, PRIMARY KEY(id))")

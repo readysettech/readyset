@@ -203,6 +203,7 @@ impl TestHandle {
             self.url.clone(),
             controller,
             None,
+            None,
         ));
 
         if let Some(rt) = self.replication_rt.replace(runtime) {

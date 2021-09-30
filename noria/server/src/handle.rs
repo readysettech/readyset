@@ -59,8 +59,9 @@ impl Handle {
         &self.descriptor.controller_uri
     }
 
-    #[cfg(test)]
-    pub(super) async fn backend_ready(&mut self) {
+    /// Waits for the back-end to return that it is ready to process queries.
+    /// Shold not be used in production.
+    pub async fn backend_ready(&mut self) {
         use std::time;
 
         loop {

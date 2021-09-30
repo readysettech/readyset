@@ -194,18 +194,16 @@ pub(super) async fn start_instance(
         volume_id,
     };
 
-    let controller = Controller {
-        inner: None,
-        authority: authority.clone(),
+    let controller = Controller::new(
+        authority.clone(),
         worker_tx,
-        http_rx: controller_rx,
+        controller_rx,
         handle_rx,
-        our_descriptor: our_descriptor.clone(),
-        valve: valve.clone(),
+        our_descriptor.clone(),
+        valve.clone(),
         worker_descriptor,
         config,
-        authority_task: None,
-    };
+    );
 
     tokio::spawn(maybe_abort_on_panic!(controller.run().map_err(move |e| {
         error!(error = %e, "Controller failed");

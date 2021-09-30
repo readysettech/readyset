@@ -15,6 +15,7 @@ pub fn setup_w_fallback() -> postgres::Config {
         BackendBuilder::new().require_authentication(false),
         true,
         true,
+        true,
     )
 }
 

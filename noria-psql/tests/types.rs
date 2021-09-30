@@ -10,6 +10,7 @@ fn setup() -> postgres::Config {
         BackendBuilder::new().require_authentication(false),
         true,
         true,
+        true,
     )
 }
 
