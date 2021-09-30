@@ -30,7 +30,8 @@ use tower::timeout::Timeout;
 use tower_service::Service;
 use vec1::Vec1;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// A fixed period of time after which a call to any View method will time out
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
