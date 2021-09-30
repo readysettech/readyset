@@ -120,3 +120,24 @@ fn range_query() {
         .unwrap();
     assert_eq!(rows, vec![(1, 10)]);
 }
+
+// TODO: remove this once we support aggregates on parametrized IN
+#[test]
+#[serial]
+fn aggregate_in() {
+    let mut conn = mysql::Conn::new(setup()).unwrap();
+
+    conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
+        .unwrap();
+    conn.query_drop("INSERT INTO cats (id, cuteness) values (1, 10), (2, 8)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32,)> = conn
+        .exec(
+            "SELECT sum(cuteness) FROM cats WHERE id IN (?, ?)",
+            vec![1, 2],
+        )
+        .unwrap();
+    assert_eq!(rows, vec![(18,)]);
+}
