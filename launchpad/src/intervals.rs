@@ -436,7 +436,7 @@ mod tests {
                 fn $name() {
                     assert_eq!(
                         $bound_pair.into_iter().unwrap().collect::<Vec<_>>(),
-                        $results.into_iter().collect::<Vec<_>>()
+                        $results.into_iter().collect::<Vec<u32>>()
                     );
                 }
             };

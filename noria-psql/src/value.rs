@@ -72,6 +72,26 @@ impl TryFrom<Value> for ps::Value {
                         Uuid::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
                     })?,
             )),
+            (Type::JSON, ref d @ (DataType::Text(_) | DataType::TinyText(_))) => {
+                Ok(ps::Value::Json(
+                    <&str>::try_from(d)
+                        .map_err(|e| ps::Error::InternalError(e.to_string()))
+                        .and_then(|s| {
+                            serde_json::from_str::<serde_json::Value>(s)
+                                .map_err(|e| ps::Error::ParseError(e.to_string()))
+                        })?,
+                ))
+            }
+            (Type::JSONB, ref d @ (DataType::Text(_) | DataType::TinyText(_))) => {
+                Ok(ps::Value::Jsonb(
+                    <&str>::try_from(d)
+                        .map_err(|e| ps::Error::InternalError(e.to_string()))
+                        .and_then(|s| {
+                            serde_json::from_str::<serde_json::Value>(s)
+                                .map_err(|e| ps::Error::ParseError(e.to_string()))
+                        })?,
+                ))
+            }
             (t, dt) => {
                 error!(
                     psql_type = %t,

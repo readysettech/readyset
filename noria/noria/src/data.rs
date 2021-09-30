@@ -708,8 +708,14 @@ impl DataType {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Json) => {
-                // TODO(grfn): Validate JSON here
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Json | Jsonb) => {
+                // We parse the JSON just for validation.
+                serde_json::from_str::<serde_json::Value>(<&str>::try_from(self)?).map_err(|e| {
+                    mk_err(
+                        "Could not parse value as JSON".to_owned(),
+                        Some(e.into()),
+                    )
+                })?;
                 Ok(Cow::Borrowed(self))
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), MacAddr) => {
@@ -1971,6 +1977,16 @@ impl ToSql for DataType {
                     })
                     .and_then(|m| m.to_sql(ty, out))
             }
+            (Self::Text(_) | Self::TinyText(_), &Type::JSON | &Type::JSONB) => {
+                serde_json::from_str::<serde_json::Value>(<&str>::try_from(self).unwrap())
+                    .map_err(|e| {
+                        Box::<dyn Error + Send + Sync>::from(format!(
+                            "Could not convert Text into a JSON: {}",
+                            e
+                        ))
+                    })
+                    .and_then(|v| v.to_sql(ty, out))
+            }
             (Self::Text(_) | Self::TinyText(_), _) => {
                 <&str>::try_from(self).unwrap().to_sql(ty, out)
             }
@@ -1983,7 +1999,7 @@ impl ToSql for DataType {
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR, UUID
+        TIME, TIMESTAMP, MACADDR, UUID, JSON, JSONB
     );
 
     to_sql_checked!();
@@ -2009,7 +2025,6 @@ impl<'a> FromSql<'a> for DataType {
             Type::INT4 => mk_from_sql!(i32),
             Type::INT8 => mk_from_sql!(i64),
             Type::TEXT => mk_from_sql!(&str),
-            Type::JSON => mk_from_sql!(&str),
             Type::FLOAT4 => mk_from_sql!(f32),
             Type::FLOAT8 => mk_from_sql!(f64),
             Type::VARCHAR => mk_from_sql!(&str),
@@ -2022,6 +2037,9 @@ impl<'a> FromSql<'a> for DataType {
                 MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
             )),
             Type::UUID => Ok(DataType::from(Uuid::from_sql(ty, raw)?.to_string())),
+            Type::JSON | Type::JSONB => Ok(DataType::from(
+                serde_json::Value::from_sql(ty, raw)?.to_string(),
+            )),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -2036,7 +2054,7 @@ impl<'a> FromSql<'a> for DataType {
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR
+        TIME, TIMESTAMP, MACADDR, JSON, JSONB
     );
 }
 
@@ -3824,9 +3842,19 @@ mod tests {
 
         #[test]
         fn text_to_json() {
-            let input = DataType::from("{\"foo\": \"bar\"}");
+            let input = DataType::from("{\"name\": \"John Doe\", \"age\": 43, \"phones\": [\"+44 1234567\", \"+44 2345678\"] }");
             let result = input.coerce_to(&SqlType::Json).unwrap();
             assert_eq!(&input, result.as_ref());
+
+            let result = input.coerce_to(&SqlType::Jsonb).unwrap();
+            assert_eq!(&input, result.as_ref());
+
+            let input = DataType::from("not a json");
+            let result = input.coerce_to(&SqlType::Json);
+            assert!(result.is_err());
+
+            let result = input.coerce_to(&SqlType::Jsonb);
+            assert!(result.is_err());
         }
 
         #[test]

@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use launchpad::arbitrary::{
-    arbitrary_decimal, arbitrary_naive_time, arbitrary_positive_naive_date,
+    arbitrary_decimal, arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
     arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
@@ -74,8 +74,9 @@ pub enum SqlType {
     #[weight(0)]
     Enum(Vec<Literal>),
     #[weight(0)]
-    Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=#0)] u8),
+    Decimal(#[strategy(1..=30u8)] u8, #[strategy(1..=# 0)] u8),
     Json,
+    Jsonb,
     ByteArray,
     MacAddr,
     Uuid,
@@ -163,6 +164,7 @@ impl fmt::Display for SqlType {
             SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
             SqlType::Decimal(m, d) => write!(f, "DECIMAL({}, {})", m, d),
             SqlType::Json => write!(f, "JSON"),
+            SqlType::Jsonb => write!(f, "JSONB"),
             SqlType::ByteArray => write!(f, "BYTEA"),
             SqlType::MacAddr => write!(f, "MACADDR"),
             SqlType::Uuid => write!(f, "UUID"),
@@ -385,7 +387,9 @@ impl Literal {
                 .prop_map(|nt| Self::String(nt.format("%H:%M:%S").to_string()))
                 .boxed(),
             SqlType::Enum(_) => unimplemented!("Enums aren't implemented yet"),
-            SqlType::Json => unimplemented!("Json isn't implemented yet"),
+            SqlType::Json | SqlType::Jsonb => arbitrary_json()
+                .prop_map(|v| Self::String(v.to_string()))
+                .boxed(),
             SqlType::MacAddr => any::<[u8; 6]>()
                 .prop_map(|bytes| {
                     // We know the length and format of the bytes, so this should always be parsable as a `MacAddress`.
@@ -917,10 +921,11 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
             tuple((tag_no_case("varbinary"), delim_u16, multispace0)),
             |t| SqlType::Varbinary(t.1),
         ),
-        map(tag_no_case("json"), |_| SqlType::Json),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
         map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
         map(tag_no_case("uuid"), |_| SqlType::Uuid),
+        map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
+        map(tag_no_case("json"), |_| SqlType::Json),
     ))(i)
 }
 
@@ -1650,6 +1655,18 @@ mod tests {
         fn uuid_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"uuid");
             assert_eq!(res, SqlType::Uuid);
+        }
+
+        #[test]
+        fn json_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"json");
+            assert_eq!(res, SqlType::Json);
+        }
+
+        #[test]
+        fn jsonb_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"jsonb");
+            assert_eq!(res, SqlType::Jsonb);
         }
     }
 }

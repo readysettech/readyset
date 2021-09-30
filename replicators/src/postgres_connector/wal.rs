@@ -27,6 +27,7 @@ pub enum WalError {
     IntParseError,
     BoolParseError,
     CStrParseError,
+    JsonParseError(String),
     ByteArraySyntaxError,
     ByteArrayHexParseError,
     TimestampParseError,

@@ -248,12 +248,19 @@ impl wal::TupleData {
                         PGType::NUMERIC => Decimal::from_str(str.as_ref())
                             .map_err(|_| WalError::NumericParseError)
                             .map(|d| DataType::Numeric(Arc::new(d)))?,
-                        PGType::JSON
-                        | PGType::TEXT
+                        PGType::TEXT
+                        | PGType::JSON
                         | PGType::VARCHAR
                         | PGType::CHAR
                         | PGType::MACADDR
                         | PGType::UUID => DataType::Text(str.as_ref().try_into()?),
+                        // JSONB might rearrange the json value (like the order of the keys in an object
+                        // for example), vs JSON that keeps the text as-is.
+                        // So, in order to get the same values, we parse the json into a
+                        // serde_json::Value and then convert it back to String. ♪ ┏(・o･)┛ ♪
+                        PGType::JSONB => serde_json::from_str::<serde_json::Value>(str.as_ref())
+                            .map_err(|e| WalError::JsonParseError(e.to_string()))
+                            .map(|v| DataType::from(v.to_string()))?,
                         PGType::TIMESTAMP => DataType::Timestamp({
                             // If there is a dot, there is a microseconds field attached
                             if let Some((time, micro)) = &str.split_once('.') {
