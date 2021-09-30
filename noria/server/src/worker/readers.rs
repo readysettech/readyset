@@ -532,7 +532,10 @@ impl BlockingRead {
                         return Err(());
                     }
 
-                    self.trigger_timeout *= 2;
+                    self.trigger_timeout = time::Duration::min(
+                        self.trigger_timeout * 2,
+                        noria::VIEW_REQUEST_TIMEOUT / 20,
+                    );
                     self.next_trigger = now + self.trigger_timeout;
                 }
             }

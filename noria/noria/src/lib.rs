@@ -240,7 +240,7 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use tokio::task_local;
-pub use view::{ColumnBase, ColumnSchema, ViewSchema};
+pub use view::{ColumnBase, ColumnSchema, ViewSchema, REQUEST_TIMEOUT as VIEW_REQUEST_TIMEOUT};
 
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
