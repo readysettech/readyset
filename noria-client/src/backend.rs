@@ -466,6 +466,53 @@ where
         upstream_res
     }
 
+    /// Used to link the statement ids of two prepare results, if both were successful.
+    fn link_prepare_results(
+        &mut self,
+        upstream_result: &Result<PrepareResult<DB>, DB::Error>,
+        noria_result: &ReadySetResult<noria_connector::PrepareResult>,
+    ) {
+        let query_coverage_info = match self.query_coverage_info {
+            Some(qci) => qci,
+            None => return,
+        };
+        match (upstream_result, noria_result) {
+            (
+                Ok(PrepareResult::Upstream(UpstreamPrepare {
+                    statement_id: upstream_statement_id,
+                    ..
+                })),
+                Ok(noria_connector::PrepareResult::Select {
+                    statement_id: noria_statement_id,
+                    ..
+                }),
+            )
+            | (
+                Ok(PrepareResult::Upstream(UpstreamPrepare {
+                    statement_id: upstream_statement_id,
+                    ..
+                })),
+                Ok(noria_connector::PrepareResult::Insert {
+                    statement_id: noria_statement_id,
+                    ..
+                }),
+            )
+            | (
+                Ok(PrepareResult::Upstream(UpstreamPrepare {
+                    statement_id: upstream_statement_id,
+                    ..
+                })),
+                Ok(noria_connector::PrepareResult::Update {
+                    statement_id: noria_statement_id,
+                    ..
+                }),
+            ) => {
+                query_coverage_info.link_statement_ids(*upstream_statement_id, *noria_statement_id)
+            }
+            _ => {}
+        }
+    }
+
     /// Executes the given prepare select against both noria, and the upstream database, returning
     /// the result from the upstream database regardless of outcome.
     ///
@@ -481,24 +528,145 @@ where
             .as_mut()
             .ok_or(ReadySetError::FallbackNoConnector)?;
         let mut handle = event.start_timer();
+
         let upstream_res = connector.prepare(query).await.map(|r| {
             handle.set_upstream_duration();
             PrepareResult::Upstream(r)
         });
+
         handle = event.start_timer();
-        match self
+        let noria_res = self
             .noria
             .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
-            .await
-        {
+            .await;
+
+        match noria_res {
             Ok(_) => {
                 handle.set_noria_duration();
+                self.link_prepare_results(&upstream_res, &noria_res);
             }
             Err(e) => {
                 event.set_noria_error(&e);
                 error!(error = %e, "Error received from noria during mirror_prepare()");
             }
+        }
+
+        upstream_res
+    }
+
+    /// Handles executing against only upstream.
+    async fn execute_upstream(
+        &mut self,
+        upstream_statement_id: u32,
+        params: Vec<DataType>,
+        event: &mut MaybeExecuteEvent,
+    ) -> Result<QueryResult<DB>, DB::Error> {
+        let upstream = match self.upstream.as_mut() {
+            Some(u) => u,
+            None => {
+                return Err(ReadySetError::FallbackNoConnector.into());
+            }
         };
+        let handle = event.start_timer();
+        upstream
+            .execute(upstream_statement_id, params)
+            .await
+            .map(|r| {
+                handle.set_upstream_duration();
+                QueryResult::Upstream(r)
+            })
+    }
+
+    /// Handles executing against only noria.
+    async fn execute_noria(
+        &mut self,
+        noria_statement_id: u32,
+        params: Vec<DataType>,
+        statement: SqlQuery,
+    ) -> ReadySetResult<QueryResult<DB>> {
+        let res = match statement {
+            SqlQuery::Select(_) => {
+                let try_read = self
+                    .noria
+                    .execute_prepared_select(
+                        noria_statement_id,
+                        params.clone(),
+                        self.ticket.clone(),
+                    )
+                    .await;
+                match try_read {
+                    Ok(read) => Ok(QueryResult::Noria(read)),
+                    Err(e) => {
+                        error!(error = %e);
+                        Err(e)
+                    }
+                }
+            }
+            SqlQuery::Insert(ref _q) => Ok(QueryResult::Noria(
+                self.noria
+                    .execute_prepared_insert(noria_statement_id, params)
+                    .await?,
+            )),
+            SqlQuery::Update(ref _q) => Ok(QueryResult::Noria(
+                self.noria
+                    .execute_prepared_update(noria_statement_id, params)
+                    .await?,
+            )),
+            _ => internal!(),
+        };
+
+        res
+    }
+
+    /// Issues an execute against both upstream and noria.
+    ///
+    /// If fallback is not configured, returns an error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if query coverage info is not enabled.
+    #[allow(clippy::unwrap_used)] // Should not be called unless QCA is enabled.
+    async fn mirror_execute(
+        &mut self,
+        upstream_statement_id: u32,
+        params: Vec<DataType>,
+        event: &mut MaybeExecuteEvent,
+    ) -> Result<QueryResult<DB>, DB::Error> {
+        let upstream_res = self
+            .execute_upstream(upstream_statement_id, params.clone(), event)
+            .await;
+
+        if let Some(noria_statement_id) = self
+            .query_coverage_info
+            .unwrap()
+            .noria_statement_id(upstream_statement_id)
+        {
+            let statement: SqlQuery =
+                if let Some(q_t) = self.prepared_queries.get(&noria_statement_id).cloned() {
+                    q_t
+                } else {
+                    let e = PreparedStatementMissing {
+                        statement_id: noria_statement_id,
+                    };
+                    event.set_noria_error(&e);
+                    error!(error = %e, "Error received from noria during mirror_execute()");
+                    return upstream_res;
+                };
+
+            let handle = event.start_timer();
+            match self
+                .execute_noria(noria_statement_id, params, statement)
+                .await
+            {
+                Ok(_) => {
+                    handle.set_noria_duration();
+                }
+                Err(e) => {
+                    event.set_noria_error(&e);
+                    error!(error = %e, "Error received from noria during mirror_execute()");
+                }
+            }
+        }
 
         upstream_res
     }
@@ -704,25 +872,20 @@ where
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
-        let mut handle = event.start_timer();
+        if self.mirror_reads {
+            match prepared_statement {
+                PreparedStatement::Upstream(upstream_id) => {
+                    return self.mirror_execute(*upstream_id, params, event).await;
+                }
+                PreparedStatement::Noria(_) => {
+                    // No idea how we got here. We'll fall through so we can still handle this.
+                    error!("Mirror reads were enabled, and a client gave us a statement id for a noria prepared statement. This shouldn't be possible");
+                }
+            }
+        }
 
         match prepared_statement {
-            PreparedStatement::Upstream(id) => {
-                let upstream = match self.upstream.as_mut() {
-                    Some(u) => u,
-                    None => {
-                        let err = ReadySetError::FallbackNoConnector;
-                        event.set_noria_error(&err);
-                        return Err(err.into());
-                    }
-                };
-                let res = upstream
-                    .execute(*id, params)
-                    .await
-                    .map(QueryResult::Upstream);
-                handle.set_upstream_duration();
-                res
-            }
+            PreparedStatement::Upstream(id) => self.execute_upstream(*id, params, event).await,
             PreparedStatement::Noria(statement_id) => {
                 let prep: SqlQuery = self.prepared_queries.get(statement_id).cloned().ok_or(
                     PreparedStatementMissing {
@@ -731,82 +894,35 @@ where
                 )?;
                 let res = match prep {
                     SqlQuery::Select(_) => {
-                        let try_read = self
-                            .noria
-                            .execute_prepared_select(
-                                *statement_id,
-                                params.clone(),
-                                self.ticket.clone(),
-                            )
-                            .await;
-                        // fallback on failure, however we must extract the original query because
-                        // it was not prepared on the underlying db
-                        match try_read {
-                            Ok(read) => {
-                                handle.set_noria_duration();
-                                Ok(QueryResult::Noria(read))
-                            }
+                        match self
+                            .execute_noria(*statement_id, params.clone(), prep.clone())
+                            .await
+                        {
+                            Ok(res) => Ok(res),
                             Err(e) => {
-                                drop(handle);
-                                event.set_noria_error(&e);
                                 if let Some(ref mut upstream) = self.upstream {
                                     error!(error = %e, "Error received from noria during execute, sending query to fallback");
                                     // TODO(DAN): The prepared statement id should be returned to
                                     // the backend so that it can be stored
                                     let UpstreamPrepare { statement_id, .. } =
                                         upstream.prepare(&prep.to_string()).await?;
-                                    handle = event.start_timer();
-                                    let res = upstream
+                                    upstream
                                         .execute(statement_id, params)
                                         .await
-                                        .map(QueryResult::Upstream);
-                                    handle.set_upstream_duration();
-                                    res
+                                        .map(QueryResult::Upstream)
                                 } else {
-                                    error!("{}", e);
                                     Err(e.into())
                                 }
                             }
                         }
                     }
-                    SqlQuery::Insert(ref _q) => {
-                        if let Some(ref mut upstream) = self.upstream {
-                            let res = upstream
-                                .execute(*statement_id, params)
-                                .await
-                                .map(QueryResult::Upstream);
-                            handle.set_upstream_duration();
-                            res
+                    SqlQuery::Insert(_) | SqlQuery::Update(_) => {
+                        if self.upstream.is_some() {
+                            self.execute_upstream(id, params, event).await
                         } else {
-                            Ok(QueryResult::Noria(
-                                self.noria
-                                    .execute_prepared_insert(*statement_id, params)
-                                    .await
-                                    .map_err(|e| {
-                                        event.set_noria_error(&e);
-                                        e
-                                    })?,
-                            ))
-                        }
-                    }
-                    SqlQuery::Update(ref _q) => {
-                        if let Some(ref mut upstream) = self.upstream {
-                            let res = upstream
-                                .execute(*statement_id, params)
+                            self.execute_noria(id, params, prep)
                                 .await
-                                .map(QueryResult::Upstream);
-                            handle.set_upstream_duration();
-                            res
-                        } else {
-                            Ok(QueryResult::Noria(
-                                self.noria
-                                    .execute_prepared_update(*statement_id, params)
-                                    .await
-                                    .map_err(|e| {
-                                        event.set_noria_error(&e);
-                                        e
-                                    })?,
-                            ))
+                                .map_err(|e| e.into())
                         }
                     }
                     _ => internal!(),
