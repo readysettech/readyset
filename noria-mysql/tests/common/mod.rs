@@ -70,5 +70,6 @@ pub fn setup(partial: bool) -> mysql::Opts {
         BackendBuilder::new().require_authentication(false),
         false,
         partial,
+        true,
     )
 }

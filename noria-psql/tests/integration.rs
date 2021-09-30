@@ -11,6 +11,7 @@ pub fn setup(partial: bool) -> postgres::Config {
         BackendBuilder::new().require_authentication(false),
         false,
         partial,
+        true,
     )
 }
 

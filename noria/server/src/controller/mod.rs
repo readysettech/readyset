@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::Notify;
 use tracing::{error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
@@ -170,27 +171,59 @@ pub struct Controller {
     /// If we are the leader, the leader object to use for performing leader operations.
     pub(crate) inner: Option<Leader>,
     /// The `Authority` structure used for leadership elections & such state.
-    pub(crate) authority: Arc<Authority>,
+    authority: Arc<Authority>,
     /// Channel to the `Worker` running inside this server instance.
     ///
     /// This is used to convey changes in leadership state.
-    pub(crate) worker_tx: Sender<WorkerRequest>,
+    worker_tx: Sender<WorkerRequest>,
     /// Receives external HTTP requests.
-    pub(crate) http_rx: Receiver<ControllerRequest>,
+    http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
-    pub(crate) handle_rx: Receiver<HandleRequest>,
+    handle_rx: Receiver<HandleRequest>,
     /// A `ControllerDescriptor` that describes this server instance.
-    pub(crate) our_descriptor: ControllerDescriptor,
+    our_descriptor: ControllerDescriptor,
     /// Valve for shutting down; triggered by the `Handle` when `Handle::shutdown()` is called.
-    pub(crate) valve: Valve,
+    valve: Valve,
     /// The descriptor of the worker this controller's server is running.
-    pub(crate) worker_descriptor: WorkerDescriptor,
-    /// The config associated with this controller's server.
-    pub(crate) config: Config,
+    worker_descriptor: WorkerDescriptor,
     /// A handle to the authority task.
-    pub(crate) authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    /// The config associated with this controller's server.
+    config: Config,
+    /// Whether we are the leader and ready to handle requests.
+    leader_ready: bool,
+    /// A notify to be passed to leader's when created, used to notify the Controller that the
+    /// leader is ready to handle requests.
+    leader_ready_notification: Arc<Notify>,
 }
+
 impl Controller {
+    pub(crate) fn new(
+        authority: Arc<Authority>,
+        worker_tx: Sender<WorkerRequest>,
+        controller_rx: Receiver<ControllerRequest>,
+        handle_rx: Receiver<HandleRequest>,
+        our_descriptor: ControllerDescriptor,
+        shutoff_valve: Valve,
+        worker_descriptor: WorkerDescriptor,
+        config: Config,
+    ) -> Self {
+        Self {
+            inner: None,
+            authority,
+            worker_tx,
+            http_rx: controller_rx,
+            handle_rx,
+            our_descriptor,
+            valve: shutoff_valve,
+            worker_descriptor,
+            config,
+            leader_ready: false,
+            leader_ready_notification: Arc::new(Notify::new()),
+            authority_task: None,
+        }
+    }
+
     /// Run the provided *blocking* closure with the `Leader` and the `Authority` if this
     /// server instance is currently the leader.
     ///
@@ -258,11 +291,12 @@ impl Controller {
     async fn handle_handle_request(&mut self, req: HandleRequest) -> ReadySetResult<()> {
         match req {
             HandleRequest::QueryReadiness(tx) => {
-                let done = self
-                    .inner
-                    .as_ref()
-                    .map(|ctrl| !ctrl.workers.is_empty())
-                    .unwrap_or(false);
+                let done = self.leader_ready
+                    && self
+                        .inner
+                        .as_ref()
+                        .map(|ctrl| !ctrl.workers.is_empty())
+                        .unwrap_or(false);
                 if tx.send(done).is_err() {
                     warn!("readiness query sender hung up!");
                 }
@@ -298,7 +332,8 @@ impl Controller {
                     self.authority.clone(),
                     self.config.replication_url.clone(),
                 );
-                leader.start();
+                leader.start(self.leader_ready_notification.clone()).await;
+                self.leader_ready = false;
 
                 self.inner = Some(leader);
                 self.send_worker_request(WorkerRequestKind::NewController {
@@ -379,6 +414,9 @@ impl Controller {
                         // still, good to be doubly sure
                         _ => internal!("leadership sender dropped without being elected"),
                     }
+                }
+                _ = self.leader_ready_notification.notified() => {
+                    self.leader_ready = true;
                 }
                 _ = shutdown_stream.next() => {
                     info!("Controller shutting down after valve shut");

@@ -11,6 +11,7 @@ fn setup() -> mysql::Opts {
         BackendBuilder::new().require_authentication(false),
         true,
         true,
+        true,
     )
 }
 

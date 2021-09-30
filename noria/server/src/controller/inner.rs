@@ -42,6 +42,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{cell, time};
+use tokio::sync::Notify;
 use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
@@ -167,11 +168,13 @@ pub(super) fn graphviz(
 }
 
 impl Leader {
-    /// Run all tasks required to be the leader.
-    pub(super) fn start(&mut self) {
+    /// Run all tasks required to be the leader. This may spawn tasks that
+    /// may become ready asyncronously. Use the notification to indicate
+    /// to the Controller that the leader is ready to handle requests.
+    pub(super) async fn start(&mut self, ready_notification: Arc<Notify>) {
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task();
+        self.start_replication_task(ready_notification).await;
     }
 
     pub(super) async fn stop(&mut self) {
@@ -191,10 +194,11 @@ impl Leader {
     /// connect again, and catch up from the binlog
     ///
     /// TODO: how to handle the case where we need a full new replica
-    fn start_replication_task(&mut self) {
+    async fn start_replication_task(&mut self, ready_notification: Arc<Notify>) {
         let url = match &self.replicator_url {
             Some(url) => url.to_string(),
             None => {
+                ready_notification.notify_one();
                 info!("No primary instance specified");
                 return;
             }
@@ -206,7 +210,13 @@ impl Leader {
                 let noria: noria::ControllerHandle =
                     noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
-                if let Err(err) = replicators::NoriaAdapter::start_with_url(&url, noria, None).await
+                if let Err(err) = replicators::NoriaAdapter::start_with_url(
+                    &url,
+                    noria,
+                    None,
+                    Some(ready_notification.clone()),
+                )
+                .await
                 {
                     // On each replication error we wait for 30 seconds and then try again
                     tracing::error!(error = %err, "replication error");

@@ -45,7 +45,12 @@ pub trait Adapter: Send {
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
 }
 
-pub fn setup<A>(backend_builder: BackendBuilder, fallback: bool, partial: bool) -> A::ConnectionOpts
+pub fn setup<A>(
+    backend_builder: BackendBuilder,
+    fallback: bool,
+    partial: bool,
+    wait_for_backend: bool,
+) -> A::ConnectionOpts
 where
     A: Adapter + 'static,
 {
@@ -75,7 +80,11 @@ where
             if fallback {
                 builder.set_replicator_url(A::url());
             }
-            builder.start(authority).await.unwrap()
+            let mut handle = builder.start(authority).await.unwrap();
+            if wait_for_backend {
+                handle.backend_ready().await;
+            }
+            handle
         })
     };
 

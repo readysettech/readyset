@@ -12,6 +12,8 @@ use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
@@ -87,7 +89,7 @@ impl NoriaAdapter {
         options: AdapterOpts,
     ) -> ReadySetResult<!> {
         let noria = noria::ControllerHandle::new(authority).await;
-        NoriaAdapter::start_inner(noria, options, None).await
+        NoriaAdapter::start_inner(noria, options, None, None).await
     }
 }
 
@@ -102,13 +104,14 @@ impl NoriaAdapter {
         url: U,
         noria: ControllerHandle,
         server_id: Option<u32>,
+        ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         let options = url
             .as_ref()
             .parse()
             .map_err(|e| ReadySetError::ReplicationFailed(format!("Invalid URL format: {}", e)))?;
 
-        NoriaAdapter::start_inner(noria, options, server_id)
+        NoriaAdapter::start_inner(noria, options, server_id, ready_notify)
             .instrument(info_span!("replicator"))
             .await
     }
@@ -117,13 +120,14 @@ impl NoriaAdapter {
         noria: ControllerHandle,
         options: AdapterOpts,
         server_id: Option<u32>,
+        ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         match options {
             AdapterOpts::MySql(options) => {
-                NoriaAdapter::start_inner_mysql(options, noria, server_id).await
+                NoriaAdapter::start_inner_mysql(options, noria, server_id, ready_notify).await
             }
             AdapterOpts::Postgres(options) => {
-                NoriaAdapter::start_inner_postgres(options, noria).await
+                NoriaAdapter::start_inner_postgres(options, noria, ready_notify).await
             }
         }
     }
@@ -142,6 +146,7 @@ impl NoriaAdapter {
         mysql_options: mysql::Opts,
         mut noria: ControllerHandle,
         server_id: Option<u32>,
+        ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
@@ -177,6 +182,11 @@ impl NoriaAdapter {
 
         info!("MySQL connected");
 
+        // Let waiters know that the initial snapshotting is complete.
+        if let Some(notify) = ready_notify {
+            notify.notify_one();
+        }
+
         let mut adapter = NoriaAdapter {
             noria,
             connector,
@@ -190,6 +200,7 @@ impl NoriaAdapter {
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
         mut noria: ControllerHandle,
+        ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
@@ -228,6 +239,11 @@ impl NoriaAdapter {
             }
 
             info!("Snapshot finished");
+        }
+
+        // Let waiters know that the initial snapshotting is complete.
+        if let Some(notify) = ready_notify {
+            notify.notify_one();
         }
 
         connector
