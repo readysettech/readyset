@@ -19,7 +19,7 @@ nom = "5.0.1"
 regex = "1.0.0"
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time"] }
 chrono = "0.4"
-tracing = "0.1.3"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 vec1 = "1.6.0"
 itertools = "0.9"
 derive_more = "0.99.11"

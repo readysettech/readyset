@@ -18,7 +18,7 @@ noria-client = { path = "../noria-client" }
 noria-client-adapter = { path = "../noria-client/adapter" }
 nom-sql = { path = "../nom-sql" }
 tokio = "1.8.1"
-tracing = "0.1.3"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 anyhow = "1.0.42"
 derive_more = "0.99.16"
 thiserror = "1.0.26"
