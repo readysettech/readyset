@@ -24,6 +24,8 @@ fn create_table() {
     client
         .simple_query("INSERT INTO cats (id) VALUES (1)")
         .unwrap();
+
+    sleep();
     sleep();
 
     let result = client

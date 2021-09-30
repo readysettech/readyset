@@ -62,9 +62,13 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
             );
 
         let mut management_db = config.dbname("postgres").connect(NoTls).unwrap();
-        management_db
+        while management_db
             .simple_query("DROP DATABASE IF EXISTS noria")
-            .unwrap();
+            .is_err()
+        {
+            test_helpers::sleep()
+        }
+
         management_db.simple_query("CREATE DATABASE noria").unwrap();
     }
 
