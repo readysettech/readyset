@@ -41,6 +41,11 @@ if [[ "$refname" == */meta ]]; then
     exit 0
 fi
 
+if [[ "$refname" == */robot-comments ]]; then
+    echo "Ignoring update to robot comments"
+    exit 0
+fi
+
 if [[ "$refname" == refs/notes* ]]; then
     echo "Ignoring update to refs/notes"
     exit 0
