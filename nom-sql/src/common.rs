@@ -17,7 +17,7 @@ use nom::combinator::{opt, recognize};
 use nom::error::{ErrorKind, ParseError};
 use nom::multi::{many0, many1, separated_list};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
-use nom::{call, char, complete, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
+use nom::{call, do_parse, map, named, opt, tag_no_case, IResult, InputLength};
 use proptest::prelude as prop;
 use proptest::prop_oneof;
 use proptest::strategy::Strategy;
@@ -988,20 +988,6 @@ fn delim_fx_args(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Vec<Expre
     }
 }
 
-named_with_dialect!(cast(dialect) -> FunctionExpression, do_parse!(
-    complete!(tag_no_case!("cast"))
-        >> multispace0
-        >> complete!(char!('('))
-        >> arg: call!(expression(dialect))
-        >> multispace1
-        >> complete!(tag_no_case!("as"))
-        >> multispace1
-        >> type_: call!(type_identifier(dialect))
-        >> multispace0
-        >> complete!(char!(')'))
-        >> (FunctionExpression::Cast(Box::new(arg), type_))
-));
-
 pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], FunctionExpression> {
     move |i| {
         alt((
@@ -1032,7 +1018,6 @@ pub fn column_function(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Fun
             map(preceded(tag_no_case("min"), agg_fx_args(dialect)), |args| {
                 FunctionExpression::Min(Box::new(args.0))
             }),
-            cast(dialect),
             map(
                 preceded(
                     tag_no_case("group_concat"),
@@ -1436,15 +1421,24 @@ mod tests {
 
     #[test]
     fn nested_function_call() {
-        let res = column_function(Dialect::MySQL)(b"max(cast(foo as int))");
-        let (rem, res) = res.unwrap();
-        assert!(rem.is_empty());
+        let res = test_parse!(column_function(Dialect::MySQL), b"max(min(foo))");
         assert_eq!(
             res,
-            FunctionExpression::Max(Box::new(Expression::Call(FunctionExpression::Cast(
-                Box::new(Expression::Column("foo".into())),
-                SqlType::Int(None)
+            FunctionExpression::Max(Box::new(Expression::Call(FunctionExpression::Min(
+                Box::new(Expression::Column("foo".into()))
             ))))
+        )
+    }
+
+    #[test]
+    fn nested_cast() {
+        let res = test_parse!(column_function(Dialect::MySQL), b"max(cast(foo as int))");
+        assert_eq!(
+            res,
+            FunctionExpression::Max(Box::new(Expression::Cast {
+                expr: Box::new(Expression::Column("foo".into())),
+                ty: SqlType::Int(None)
+            }))
         )
     }
 
@@ -1536,15 +1530,15 @@ mod tests {
         #[test]
         fn cast() {
             let qs = b"cast(`lp`.`start_ddtm` as date)";
-            let expected = FunctionExpression::Cast(
-                Box::new(Expression::Column(Column {
+            let expected = Expression::Cast {
+                expr: Box::new(Expression::Column(Column {
                     table: Some("lp".to_owned()),
                     name: "start_ddtm".to_owned(),
                     function: None,
                 })),
-                SqlType::Date,
-            );
-            let res = column_function(Dialect::MySQL)(qs);
+                ty: SqlType::Date,
+            };
+            let res = expression(Dialect::MySQL)(qs);
             assert_eq!(res.unwrap().1, expected);
         }
 
@@ -1585,15 +1579,15 @@ mod tests {
         #[test]
         fn cast() {
             let qs = b"cast(\"lp\".\"start_ddtm\" as date)";
-            let expected = FunctionExpression::Cast(
-                Box::new(Expression::Column(Column {
+            let expected = Expression::Cast {
+                expr: Box::new(Expression::Column(Column {
                     table: Some("lp".to_owned()),
                     name: "start_ddtm".to_owned(),
                     function: None,
                 })),
-                SqlType::Date,
-            );
-            let res = column_function(Dialect::PostgreSQL)(qs);
+                ty: SqlType::Date,
+            };
+            let res = expression(Dialect::PostgreSQL)(qs);
             assert_eq!(res.unwrap().1, expected);
         }
 

@@ -31,8 +31,7 @@ where
             | FunctionExpression::Sum { box expr, .. }
             | FunctionExpression::Max(box expr)
             | FunctionExpression::Min(box expr)
-            | FunctionExpression::GroupConcat { box expr, .. }
-            | FunctionExpression::Cast(box expr, _) => {
+            | FunctionExpression::GroupConcat { box expr, .. } => {
                 rewrite_expression(expand_columns, expr);
             }
             FunctionExpression::Call { arguments, .. } => {
@@ -60,8 +59,8 @@ where
             rewrite_expression(expand_columns, lhs);
             rewrite_expression(expand_columns, rhs);
         }
-        Expression::UnaryOp { rhs, .. } => {
-            rewrite_expression(expand_columns, rhs);
+        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+            rewrite_expression(expand_columns, expr);
         }
         Expression::Between {
             operand, min, max, ..
@@ -234,7 +233,6 @@ fn rewrite_selection(
                         }
                         | Min(box Expression::Column(ref mut fe))
                         | Max(box Expression::Column(ref mut fe))
-                        | Cast(box Expression::Column(ref mut fe), _)
                         | GroupConcat {
                             expr: box Expression::Column(ref mut fe),
                             ..

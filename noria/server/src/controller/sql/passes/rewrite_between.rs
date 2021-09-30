@@ -127,9 +127,6 @@ fn rewrite_expression(expr: Expression) -> Expression {
                     separator,
                 }
             }
-            FunctionExpression::Cast(expr, typ) => {
-                FunctionExpression::Cast(Box::new(rewrite_expression(*expr)), typ)
-            }
             FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
                 name,
                 arguments: arguments.into_iter().map(rewrite_expression).collect(),
@@ -155,6 +152,10 @@ fn rewrite_expression(expr: Expression) -> Expression {
                 }
             },
             negated,
+        },
+        Cast { expr, ty } => Cast {
+            expr: Box::new(rewrite_expression(*expr)),
+            ty,
         },
     }
 }

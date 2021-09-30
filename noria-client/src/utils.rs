@@ -219,7 +219,9 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
             l
         }
         Expression::BinaryOp { .. } => vec![],
-        Expression::UnaryOp { ref rhs, .. } => get_parameter_columns_recurse(rhs),
+        Expression::UnaryOp { rhs: ref expr, .. } | Expression::Cast { ref expr, .. } => {
+            get_parameter_columns_recurse(expr)
+        }
         Expression::Call(ref f) => f
             .arguments()
             .flat_map(|expr| get_parameter_columns_recurse(expr))

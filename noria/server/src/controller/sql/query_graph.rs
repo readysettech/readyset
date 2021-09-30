@@ -478,6 +478,7 @@ fn classify_conditionals(
                     | Expression::CaseWhen { .. }
                     | Expression::Exists(_)
                     | Expression::Between { .. }
+                    | Expression::Cast { .. }
                     | Expression::In { .. } => {
                         unsupported!(
                             "Unsupported right-hand side of condition expression: {}",

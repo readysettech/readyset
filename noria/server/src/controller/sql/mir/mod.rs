@@ -100,7 +100,6 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
                     FunctionExpression::Max(..) => DataType::None,
                     FunctionExpression::Min(..) => DataType::None,
                     FunctionExpression::GroupConcat { .. } => DataType::None,
-                    FunctionExpression::Cast(..) => DataType::None,
                     FunctionExpression::Call { .. } => DataType::None,
                 },
                 _ => DataType::None,
@@ -1310,6 +1309,7 @@ impl SqlToMirConverter {
             Expression::CaseWhen { .. } => unsupported!("CASE WHEN not supported in filters"),
             Expression::NestedSelect(_) => unsupported!("Nested selects not supported in filters"),
             Expression::In { .. } => internal!("IN should have been removed earlier"),
+            Expression::Cast { .. } => internal!("CAST should have been removed earlier"),
         }
 
         Ok(pred_nodes)

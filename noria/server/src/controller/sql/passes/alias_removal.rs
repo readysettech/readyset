@@ -96,6 +96,10 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
             op: *op,
             rhs: Box::new(rewrite_expression(col_table_remap, rhs)),
         },
+        Expression::Cast { expr, ty } => Expression::Cast {
+            expr: Box::new(rewrite_expression(col_table_remap, expr)),
+            ty: ty.clone(),
+        },
         Expression::Exists(_) | Expression::NestedSelect(_) => expr.clone(),
         Expression::Between {
             operand,
@@ -157,10 +161,6 @@ fn rewrite_function_expression(
             expr: Box::new(rewrite_expression(col_table_remap, expr)),
             separator: separator.clone(),
         },
-        FunctionExpression::Cast(arg, t) => FunctionExpression::Cast(
-            Box::new(rewrite_expression(col_table_remap, arg)),
-            t.clone(),
-        ),
         FunctionExpression::Call { name, arguments } => FunctionExpression::Call {
             name: name.clone(),
             arguments: arguments

@@ -1513,10 +1513,10 @@ mod tests {
                     FieldDefinitionExpression::from(Column::from("id")),
                     FieldDefinitionExpression::Expression {
                         alias: Some("created_day".to_owned()),
-                        expr: Expression::Call(FunctionExpression::Cast(
-                            Box::new(Expression::Column(Column::from("created_at"))),
-                            SqlType::Date
-                        )),
+                        expr: Expression::Cast {
+                            expr: Box::new(Expression::Column(Column::from("created_at"))),
+                            ty: SqlType::Date
+                        },
                     },
                 ],
                 where_clause: Some(Expression::BinaryOp {

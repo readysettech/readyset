@@ -69,6 +69,10 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
                 *negated = !*negated;
             }
         }
+        Expression::Cast { ref mut expr, .. } => {
+            //TODO: should negate depend on the type of the CAST?
+            normalize_expr(expr, negate)?;
+        }
         Expression::Call(_)
         | Expression::Literal(_)
         | Expression::Column(_)

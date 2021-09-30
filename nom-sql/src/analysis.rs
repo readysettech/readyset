@@ -83,7 +83,9 @@ impl<'a> ReferredColumnsIter<'a> {
                 self.exprs_to_visit.push(lhs);
                 self.visit_expr(rhs)
             }
-            Expression::UnaryOp { rhs, .. } => self.visit_expr(rhs),
+            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+                self.visit_expr(expr)
+            }
             Expression::Exists { .. } => None,
             Expression::Between {
                 operand, min, max, ..
@@ -121,7 +123,6 @@ impl<'a> ReferredColumnsIter<'a> {
             Max(arg) => self.visit_expr(arg),
             Min(arg) => self.visit_expr(arg),
             GroupConcat { expr, .. } => self.visit_expr(expr),
-            Cast(arg, _) => self.visit_expr(arg),
             Call { arguments, .. } => arguments.first().and_then(|first_arg| {
                 if arguments.len() >= 2 {
                     self.exprs_to_visit.extend(arguments.iter().skip(1));
@@ -177,7 +178,6 @@ pub fn is_aggregate(function: &FunctionExpression) -> bool {
         | FunctionExpression::Max(_)
         | FunctionExpression::Min(_)
         | FunctionExpression::GroupConcat { .. } => true,
-        FunctionExpression::Cast(_, _) => false,
         // For now, assume all "generic" function calls are not aggregates
         FunctionExpression::Call { .. } => false,
     }
@@ -202,7 +202,9 @@ pub fn contains_aggregate(expr: &Expression) -> bool {
                     .any(|expr| contains_aggregate(expr.as_ref()))
         }
         Expression::BinaryOp { lhs, rhs, .. } => contains_aggregate(lhs) || contains_aggregate(rhs),
-        Expression::UnaryOp { rhs, .. } => contains_aggregate(rhs),
+        Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+            contains_aggregate(expr)
+        }
         Expression::Exists(_) => false,
         Expression::Between {
             operand, min, max, ..
@@ -268,7 +270,9 @@ impl Expression {
             Expression::BinaryOp { lhs, rhs, .. } => {
                 Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _
             }
-            Expression::UnaryOp { rhs, .. } => Box::new(iter::once(rhs.as_ref())) as _,
+            Expression::UnaryOp { rhs: expr, .. } | Expression::Cast { expr, .. } => {
+                Box::new(iter::once(expr.as_ref())) as _
+            }
             Expression::CaseWhen {
                 condition,
                 then_expr,
