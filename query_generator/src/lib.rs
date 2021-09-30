@@ -145,7 +145,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
         SqlType::Bool => 1i32.into(),
         SqlType::Enum(_) => unimplemented!(),
-        SqlType::Json => "{}".into(),
+        SqlType::Json | SqlType::Jsonb => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
         SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
     }
@@ -237,7 +237,7 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
         }
         SqlType::Bool => DataType::from(rng.gen_bool(0.5)),
         SqlType::Enum(_) => unimplemented!(),
-        SqlType::Json => DataType::from(format!(
+        SqlType::Json | SqlType::Jsonb => DataType::from(format!(
             "{{\"k\":\"{}\"}}",
             "a".repeat(rng.gen_range(1..255))
         )),
@@ -324,7 +324,7 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::Bool => unimplemented!(),
         SqlType::ByteArray => unimplemented!(),
         SqlType::Time => NaiveTime::from_hms(12, idx as _, 30).into(),
-        SqlType::Json => DataType::from(format!("{{\"k\": {}}}", idx)),
+        SqlType::Json | SqlType::Jsonb => DataType::from(format!("{{\"k\": {}}}", idx)),
         SqlType::MacAddr => {
             let b1: u8 = ((idx >> 24) & 0xff) as u8;
             let b2: u8 = ((idx >> 16) & 0xff) as u8;

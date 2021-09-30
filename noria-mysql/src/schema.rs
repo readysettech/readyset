@@ -78,6 +78,7 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         SqlType::Numeric(_) => MYSQL_TYPE_DECIMAL,
         SqlType::MacAddr => unimplemented!("MySQL does not support the MACADDR type"),
         SqlType::Uuid => unimplemented!("MySQL does not support the UUID type"),
+        SqlType::Jsonb => unimplemented!("MySQL does not support the JSONB type"),
     };
 
     for c in &col.constraints {

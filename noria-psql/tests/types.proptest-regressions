@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 0ba5d374f0849fbbb615879f3aa20cc312853b04cf11198b2659af3b8f170655 # shrinks to input = _BoolBoolArgs { val: false }
 cc 37001d1b8db5c8ead9f793799a73af3fcda6bb3014cc5aeab8d29ad50651693f # shrinks to input = _SmallintI16Args { val: -3971 }
+cc b6975b00a1064f5a0681f7b661cb36497b187cec2912a7e8fb67f272a9eb137f # shrinks to input = _JsonbStringArgs { val: Array([Array([Number(5.749880023132153e-107)])]) }

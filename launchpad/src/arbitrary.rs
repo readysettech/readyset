@@ -81,3 +81,67 @@ pub fn arbitrary_mac_address() -> impl Strategy<Value = MacAddress> {
 pub fn arbitrary_uuid() -> impl Strategy<Value = Uuid> {
     any::<u128>().prop_map(Uuid::from_u128)
 }
+
+/// Strategy to generate an arbitrary [`Json`] without any `f64` numbers in it.
+// TODO(fran): We are configuring if we want to generate floats, because this is causing trouble
+//  in the way we serialize/deserialize `JSONB` types (with `FromSql`/`ToSql`).
+//  The serdes is using the `arbitrary_precision` feature (which treats numbers as strings), so we
+//  are compliant with PostgreSQL way of storing JSON numbers (which are `NUMERIC`). The problem
+//  is that comparing the json values yields "differences" which are not real differences, which
+//  make our tests fail with cases like `0.0 != -0.0` or `0.0000054 != 5.4e-6`, when semantically
+//  they are indeed the same.
+pub fn arbitrary_json_without_f64() -> impl Strategy<Value = serde_json::Value> {
+    use std::iter::FromIterator;
+
+    let leaf = prop_oneof![
+        Just(serde_json::Value::Null),
+        any::<bool>().prop_map(serde_json::Value::from),
+        any::<i64>().prop_map(serde_json::Value::from),
+        "[^\u{0}]*".prop_map(serde_json::Value::from),
+    ];
+    leaf.prop_recursive(
+        3,   // 8 levels deep
+        256, // Shoot for maximum size of 256 nodes
+        10,  // We put up to 10 items per collection
+        |inner| {
+            prop_oneof![
+                // Take the inner strategy and make the two recursive cases.
+                prop::collection::vec(inner.clone(), 0..10).prop_map(serde_json::Value::from),
+                prop::collection::hash_map("[^\u{0}]*", inner, 0..10).prop_map(|h| {
+                    serde_json::Value::from(serde_json::Map::from_iter(
+                        h.iter().map(|(s, v)| (s.clone(), v.clone())),
+                    ))
+                }),
+            ]
+        },
+    )
+}
+
+/// Strategy to generate an arbitrary [`Json`].
+pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
+    use std::iter::FromIterator;
+
+    let leaf = prop_oneof![
+        Just(serde_json::Value::Null),
+        any::<bool>().prop_map(serde_json::Value::from),
+        any::<i64>().prop_map(serde_json::Value::from),
+        any::<f64>().prop_map(serde_json::Value::from),
+        "[^\u{0}]*".prop_map(serde_json::Value::from),
+    ];
+    leaf.prop_recursive(
+        3,   // 8 levels deep
+        256, // Shoot for maximum size of 256 nodes
+        10,  // We put up to 10 items per collection
+        |inner| {
+            prop_oneof![
+                // Take the inner strategy and make the two recursive cases.
+                prop::collection::vec(inner.clone(), 0..10).prop_map(serde_json::Value::from),
+                prop::collection::hash_map("[^\u{0}]*", inner, 0..10).prop_map(|h| {
+                    serde_json::Value::from(serde_json::Map::from_iter(
+                        h.iter().map(|(s, v)| (s.clone(), v.clone())),
+                    ))
+                }),
+            ]
+        },
+    )
+}

@@ -20,8 +20,8 @@ mod types {
     use super::*;
     use eui48::MacAddress;
     use launchpad::arbitrary::{
-        arbitrary_decimal, arbitrary_mac_address, arbitrary_naive_date, arbitrary_naive_time,
-        arbitrary_systemtime, arbitrary_uuid,
+        arbitrary_decimal, arbitrary_json, arbitrary_json_without_f64, arbitrary_mac_address,
+        arbitrary_naive_date, arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
@@ -114,5 +114,7 @@ mod types {
         uuid_string("uuid", #[strategy(arbitrary_uuid())] Uuid);
         date_naivedate("date", #[strategy(arbitrary_naive_date())] chrono::NaiveDate);
         time_naivetime("time", #[strategy(arbitrary_naive_time())] chrono::NaiveTime);
+        json_string("json", #[strategy(arbitrary_json())] serde_json::Value);
+        jsonb_string("jsonb", #[strategy(arbitrary_json_without_f64())] serde_json::Value);
     }
 }

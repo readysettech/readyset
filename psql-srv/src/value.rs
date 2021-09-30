@@ -24,4 +24,6 @@ pub enum Value {
     ByteArray(Vec<u8>),
     MacAddress(MacAddress),
     Uuid(Uuid),
+    Json(serde_json::Value),
+    Jsonb(serde_json::Value),
 }

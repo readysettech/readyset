@@ -50,6 +50,9 @@ pub enum DecodeError {
     #[error("invalid text uuid value: {0}")]
     InvalidTextUuidValue(uuid::Error),
 
+    #[error("invalid text json value: {0}")]
+    InvalidTextJsonValue(serde_json::Error),
+
     #[error("invalid type: {0}")]
     InvalidType(u32),
 

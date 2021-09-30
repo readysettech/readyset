@@ -355,6 +355,12 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Uuid(u) => {
             u.to_sql(&Type::UUID, dst)?;
         }
+        Value::Json(v) => {
+            v.to_sql(&Type::JSON, dst)?;
+        }
+        Value::Jsonb(v) => {
+            v.to_sql(&Type::JSONB, dst)?;
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -438,6 +444,8 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         }
         Value::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
         Value::Uuid(u) => write!(dst, "{}", u)?,
+        Value::Json(v) => write!(dst, "{}", v)?,
+        Value::Jsonb(v) => write!(dst, "{}", v)?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -1085,6 +1093,39 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_json() {
+        let mut buf = BytesMut::new();
+        let json = serde_json::from_str::<serde_json::Value>(
+            "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
+        )
+        .unwrap();
+        put_binary_value(DataValue::Json(json.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(-1); // size placeholder
+        json.to_sql(&Type::JSON, &mut exp).unwrap(); // add value
+        let value_len = exp.len() - 4;
+        let mut window = exp
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual size
+        assert_eq!(buf, exp);
+
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::Jsonb(json.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(-1); // size placeholder
+        json.to_sql(&Type::JSONB, &mut exp).unwrap(); // add value
+        let value_len = exp.len() - 4;
+        let mut window = exp
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual size
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_text_null() {
         let mut buf = BytesMut::new();
         put_text_value(DataValue::Null, &mut buf).unwrap();
@@ -1254,6 +1295,31 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(36); // length (placeholder)
         exp.extend_from_slice(b"550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_json() {
+        let mut buf = BytesMut::new();
+        let json = serde_json::from_str::<serde_json::Value>(
+            "{\"name\":\"John Doe\",\"age\":43,\"phones\":[\"+44 1234567\",\"+44 2345678\"]}",
+        )
+        .unwrap();
+        put_text_value(DataValue::Json(json.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(67); // length (placeholder)
+        exp.extend_from_slice(
+            b"{\"age\":43,\"name\":\"John Doe\",\"phones\":[\"+44 1234567\",\"+44 2345678\"]}", // keys are sorted
+        );
+        assert_eq!(buf, exp);
+
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Jsonb(json.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(67); // length (placeholder)
+        exp.extend_from_slice(
+            b"{\"age\":43,\"name\":\"John Doe\",\"phones\":[\"+44 1234567\",\"+44 2345678\"]}", // keys are sorted
+        );
         assert_eq!(buf, exp);
     }
 }

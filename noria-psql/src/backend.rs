@@ -99,6 +99,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
                 Ok(DataType::from(m.to_string(MacAddressFormat::HexString)))
             }
             ps::Value::Uuid(uuid) => Ok(DataType::from(uuid.to_string())),
+            ps::Value::Json(v) | ps::Value::Jsonb(v) => Ok(DataType::from(v.to_string())),
         }
     }
 }
