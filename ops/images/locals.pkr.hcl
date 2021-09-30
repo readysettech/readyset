@@ -18,13 +18,15 @@ locals {
 
   ubuntu_account_id = "099720109477"
 
-  deploy_account_id = "888984949675"
-  build_account_id  = "305232526136"
+  deploy_account_id  = "888984949675"
+  build_account_id   = "305232526136"
+  sandbox_account_id = "069491470376"
   # This defines what accounts besides the one it is created in which are allowed to launch the
-  # created AMI images. This will allow in the future the deploy account to launch these images
-  # there so they can be stored in the deploy account for other users.
-  # TODO: Remove build account once initial testing is done as it is being used to test deployment
-  ami_users = [local.deploy_account_id, local.build_account_id]
+  # created AMI images.
+  # Deploy is needed so that it can be used to copy images into the deploy account to share.
+  # Build is needed so that images developers built in sandbox can be tested in build.
+  # Sandbox is needed so that images built in build can be tested in sandbox.
+  ami_users = [local.deploy_account_id, local.build_account_id, local.sandbox_account_id]
 
   binaries_path = var.production ? "${path.root}/binaries/target/release" : "${path.root}/../../target/debug"
 }

@@ -46,3 +46,12 @@ general:
    it will not pull the substack templates correctly.
 7. Click Next until you get to the Review step. Make sure to check the two
     "I acknowledge" checkboxes and then click Create stack.
+
+# How to update AMI images from a build
+
+1. Make sure to unblock the release binaries step and the build packer images
+    step.
+2. Once build package images step has completed successfully, look at the
+    artifact named packer-manifest.json that was generated.
+3. Copy the AMI IDs from the manifest into
+    `templates/readyset-mysql-template.yaml`

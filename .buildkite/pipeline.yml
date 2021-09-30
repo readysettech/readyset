@@ -31,13 +31,8 @@ steps:
           diff: "git diff --name-only HEAD HEAD~1"
           dynamic_pipeline: ".buildkite/pipeline.common.yml"
           steps:
+            # Since we always want to be able to build a release binary, always build the build image.
             - label: ':docker: Build build image'
-              include:
-                - "[!ops]*"
-                - Cargo.lock
-                - Cargo.toml
-                - rust-toolchain
-                - ops/readyset-substrate
 
             - label: ':rust: Check rustfmt'
               include:
@@ -117,9 +112,8 @@ steps:
                 - rust-toolchain
 
             # --- START INTERNAL OPS STEPS --- #
+            # Since we always want to be able to build images with packer, always build the ops image.
             - label: ':docker: Build readyset-ops image'
-              include:
-                - "ops/**"
 
             - label: ':terraform: Format/Validate/Lint readyset module'
               include:
@@ -239,7 +233,7 @@ steps:
       - logictest-binlog
 
   - label: ':rust: Build noria-server release binary'
-    key: build-noria-release
+    key: build-noria-server-release
     commands:
     - 'echo +++ :rust: Running cargo build'
     - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server
@@ -251,7 +245,7 @@ steps:
     - build-release-binaries
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -262,8 +256,8 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build noria-mysql release binary'
-    key: build-noria-mysql-release
+  - label: ':rust: Build noria-mysql adapter release binary'
+    key: build-noria-mysql-adapter-release
     commands:
     - 'echo +++ :rust: Running cargo build'
     - RUSTFLAGS='-D warnings' cargo build --release --bin noria-mysql
@@ -275,7 +269,7 @@ steps:
     - build-release-binaries
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -286,8 +280,8 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':rust: Build noria-psql release binary'
-    key: build-noria-psql-release
+  - label: ':rust: Build noria-psql adapter release binary'
+    key: build-noria-psql-adapter-release
     commands:
     - 'echo +++ :rust: Running cargo build'
     - RUSTFLAGS='-D warnings' cargo build --release --bin noria-psql
@@ -299,7 +293,7 @@ steps:
     - build-release-binaries
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:latest'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
           - 'cargo-registry:/usr/local/cargo/registry'
@@ -310,12 +304,37 @@ steps:
       - ecr#v2.2.0:
           login: true
 
-  - label: ':s3: Set release binary version in S3'
-    key: set-release-version
-    commands:
-    - .buildkite/set-release-version.sh
+  - block: ":packer: Build Packer images?"
+    key: build-packer-images
     depends_on:
-    - build-noria-release
-    - build-noria-mysql-release
-    env:
-      PIPELINE_METADATA_BUCKET: buildkite-pipeline-metadata/readyset
+    - build-release-binaries
+    - build-noria-server-release
+    - build-noria-mysql-adapter-release
+    - build-noria-psql-adapter-release
+
+  - label: ':packer: Build images'
+    key: build-images
+    commands:
+    - cd ops/images
+    - mkdir binaries
+    - 'echo +++ :buildkite: Downloading binary artifacts'
+    - buildkite-agent artifact download target/release/* binaries/
+    - 'echo +++ :packer: Running packer build'
+    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server .
+    artifact_paths:
+    - ops/images/packer-manifest.json
+    depends_on:
+    - build-packer-images
+    - build-release-binaries
+    - build-noria-server-release
+    - build-noria-mysql-adapter-release
+    - build-noria-psql-adapter-release
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+          propagate-environment: true
+          environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+      - ecr#v2.2.0:
+          login: true
