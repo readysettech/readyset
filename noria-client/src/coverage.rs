@@ -183,6 +183,9 @@ pub(crate) struct QueryInfo {
     execute_events: Vec<ExecuteEvent>,
 }
 
+type UpstreamStatementId = u32;
+type NoriaStatementId = u32;
+
 /// Data structure representing information about the queries that have been run during the
 /// execution of an adapter, and statistics about those queries.
 ///
@@ -196,7 +199,12 @@ struct QueryCoverageInfo {
 
     /// Prepared statements that have been run associated with their prepared statement id. This is
     /// used to map prepared statements to their respective execute events.
-    prepared: HashMap<u32, String>,
+    prepared: HashMap<UpstreamStatementId, String>,
+
+    /// Provides a mapping between upstream statement ids, and noria statement ids so we can map
+    /// between the two, and ensure that when QCA is enabled, we always run executes against both
+    /// upstream and noria.
+    statement_id_map: HashMap<UpstreamStatementId, NoriaStatementId>,
 
     /// Full database schema for the upstream db. If none, schema has not been recorded yet.
     ///
@@ -209,8 +217,25 @@ impl QueryCoverageInfo {
         Self {
             queries: HashMap::new(),
             prepared: HashMap::new(),
+            statement_id_map: HashMap::new(),
             schema: None,
         }
+    }
+
+    fn link_statement_ids(
+        &mut self,
+        upstream_statement_id: UpstreamStatementId,
+        noria_statement_id: NoriaStatementId,
+    ) {
+        self.statement_id_map
+            .insert(upstream_statement_id, noria_statement_id);
+    }
+
+    fn noria_statement_id(
+        &mut self,
+        upstream_statement_id: UpstreamStatementId,
+    ) -> Option<&NoriaStatementId> {
+        self.statement_id_map.get(&upstream_statement_id)
     }
 
     /// Record in this QueryCoverageInfo that a query was prepared
@@ -288,6 +313,40 @@ impl QueryCoverageInfoRef {
     /// exceptional cases)
     pub(crate) fn prepare_executed(&self, statement_id: u32, event: ExecuteEvent) {
         self.0.lock().unwrap().prepare_executed(statement_id, event)
+    }
+
+    /// Links two statement ids together so we can coordinate logging prepares and executes
+    /// together between upstream and noria.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing mutex has been poisoned (this should generally only happen in
+    /// exceptional cases)
+    pub(crate) fn link_statement_ids(&self, upstream_statement_id: u32, noria_statement_id: u32) {
+        self.0
+            .lock()
+            .unwrap()
+            .link_statement_ids(upstream_statement_id, noria_statement_id)
+    }
+
+    /// Retrieves the noria statement id that is linked to the provided upstream statement id.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing mutex has been poisoned (this should generally only happen in
+    /// exceptional cases)
+    pub(crate) fn noria_statement_id(&self, upstream_statement_id: u32) -> Option<u32> {
+        if let Some(id) = self
+            .0
+            .lock()
+            .unwrap()
+            .noria_statement_id(upstream_statement_id)
+        {
+            let noria_statement_id = *id;
+            Some(noria_statement_id)
+        } else {
+            None
+        }
     }
 
     /// Serialize to JSON and return the resulting blob.
