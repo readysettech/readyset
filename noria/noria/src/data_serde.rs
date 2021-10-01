@@ -1,4 +1,5 @@
 use crate::data::DataType;
+use bit_vec::BitVec;
 use chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use rust_decimal::Decimal;
@@ -69,6 +70,9 @@ impl serde::ser::Serialize for DataType {
             DataType::Numeric(d) => {
                 serializer.serialize_newtype_variant("DataType", 9, "Numeric", &d)
             }
+            DataType::BitVector(bits) => {
+                serializer.serialize_newtype_variant("DataType", 10, "BitVector", &bits)
+            }
         }
     }
 }
@@ -89,6 +93,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             Float,
             ByteArray,
             Numeric,
+            BitVector,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -111,9 +116,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     7u64 => Ok(Field::Float),
                     8u64 => Ok(Field::ByteArray),
                     9u64 => Ok(Field::Numeric),
+                    10u64 => Ok(Field::BitVector),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 10",
+                        &"variant index 0 <= i < 11",
                     )),
                 }
             }
@@ -132,6 +138,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "TinyText" => Ok(Field::TinyText),
                     "ByteArray" => Ok(Field::ByteArray),
                     "Numeric" => Ok(Field::Numeric),
+                    "BitVector" => Ok(Field::BitVector),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -150,6 +157,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"TinyText" => Ok(Field::TinyText),
                     b"ByteArray" => Ok(Field::ByteArray),
                     b"Numeric" => Ok(Field::Numeric),
+                    b"BitVector" => Ok(Field::BitVector),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -285,6 +293,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
                             .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))
                     }
+                    (Field::BitVector, variant) => {
+                        VariantAccess::newtype_variant::<BitVec>(variant)
+                            .map(|bits| DataType::BitVector(Arc::new(bits)))
+                    }
                 }
             }
         }
@@ -299,6 +311,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "TinyText",
             "Float",
             "ByteArray",
+            "BitVector",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }

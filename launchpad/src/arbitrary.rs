@@ -1,9 +1,12 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
+use bit_vec::BitVec;
 use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use proptest::prelude::*;
+use proptest::sample::SizeRange;
 use rust_decimal::Decimal;
+use std::iter::FromIterator;
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -91,8 +94,6 @@ pub fn arbitrary_uuid() -> impl Strategy<Value = Uuid> {
 //  make our tests fail with cases like `0.0 != -0.0` or `0.0000054 != 5.4e-6`, when semantically
 //  they are indeed the same.
 pub fn arbitrary_json_without_f64() -> impl Strategy<Value = serde_json::Value> {
-    use std::iter::FromIterator;
-
     let leaf = prop_oneof![
         Just(serde_json::Value::Null),
         any::<bool>().prop_map(serde_json::Value::from),
@@ -119,8 +120,6 @@ pub fn arbitrary_json_without_f64() -> impl Strategy<Value = serde_json::Value> 
 
 /// Strategy to generate an arbitrary [`Json`].
 pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
-    use std::iter::FromIterator;
-
     let leaf = prop_oneof![
         Just(serde_json::Value::Null),
         any::<bool>().prop_map(serde_json::Value::from),
@@ -144,4 +143,12 @@ pub fn arbitrary_json() -> impl Strategy<Value = serde_json::Value> {
             ]
         },
     )
+}
+
+/// Strategy to generate an arbitrary [`BitVec`].
+pub fn arbitrary_bitvec<T>(size_range: T) -> impl Strategy<Value = BitVec>
+where
+    T: Into<SizeRange>,
+{
+    prop::collection::vec(any::<bool>(), size_range.into()).prop_map(BitVec::from_iter)
 }

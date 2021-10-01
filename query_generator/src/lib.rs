@@ -83,6 +83,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
 
+use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use launchpad::intervals::{BoundPair, IterBoundPair};
 use nom_sql::{
@@ -92,6 +93,7 @@ use nom_sql::{
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
+use rand::distributions::Standard;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
@@ -148,6 +150,10 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::Json | SqlType::Jsonb => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
         SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
+        SqlType::Bit(size_opt) => {
+            DataType::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
+        }
+        SqlType::Varbit(_) => DataType::from(BitVec::new()),
     }
 }
 
@@ -259,6 +265,19 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
         }
+        SqlType::Bit(size_opt) => DataType::from(BitVec::from_iter(
+            rng.sample_iter(Standard)
+                .take(size_opt.unwrap_or(1) as usize)
+                .collect::<Vec<bool>>(),
+        )),
+        SqlType::Varbit(max_size) => {
+            let size = rng.gen_range(0..max_size.unwrap_or(u16::MAX));
+            DataType::from(BitVec::from_iter(
+                rng.sample_iter(Standard)
+                    .take(size as usize)
+                    .collect::<Vec<bool>>(),
+            ))
+        }
     }
 }
 
@@ -348,6 +367,14 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             // We know the length and format of the bytes, so this should always be parsable as a `UUID`.
             #[allow(clippy::unwrap_used)]
             DataType::from(uuid::Uuid::from_slice(&bytes[..]).unwrap().to_string())
+        }
+        SqlType::Bit(_) | SqlType::Varbit(_) => {
+            let mut bytes = [u8::MAX; 4];
+            bytes[0] = ((idx >> 24) & 0xff) as u8;
+            bytes[1] = ((idx >> 16) & 0xff) as u8;
+            bytes[2] = ((idx >> 8) & 0xff) as u8;
+            bytes[3] = (idx & 0xff) as u8;
+            DataType::from(BitVec::from_bytes(&bytes[..]))
         }
     }
 }

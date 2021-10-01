@@ -13,6 +13,7 @@ use std::{cmp, vec};
 
 use anyhow::{anyhow, bail};
 use ascii_utils::Check;
+use bit_vec::BitVec;
 use chrono::{NaiveDate, NaiveTime, Utc};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
@@ -110,6 +111,7 @@ pub enum Type {
     Date,
     Time,
     ByteArray,
+    BitVec,
 }
 
 impl Type {
@@ -138,6 +140,7 @@ impl Display for Type {
             Self::Date => write!(f, "D"),
             Self::Time => write!(f, "M"),
             Self::ByteArray => write!(f, "B"),
+            Self::BitVec => write!(f, "BV"),
         }
     }
 }
@@ -189,6 +192,7 @@ pub enum Value {
     ByteArray(Vec<u8>),
     Numeric(Decimal),
     Null,
+    BitVector(BitVec),
 }
 
 impl TryFrom<mysql::Value> for Value {
@@ -262,6 +266,7 @@ impl TryFrom<Literal> for Value {
             Literal::CurrentDate => Value::Date(Utc::now().naive_utc()),
             Literal::CurrentTimestamp => Value::Date(Utc::now().naive_utc()),
             Literal::ByteArray(b) => Value::ByteArray(b),
+            Literal::BitVector(b) => Value::BitVector(BitVec::from_bytes(b.as_slice())),
             Literal::Placeholder(_) => bail!("Placeholders are not valid values"),
         })
     }
@@ -290,8 +295,9 @@ impl From<Value> for mysql::Value {
                 t.seconds(),
                 t.microseconds(),
             ),
-            // This type is PostgreSQL-specific
+            // These types are PostgreSQL-specific
             Value::ByteArray(_) => unimplemented!(),
+            Value::BitVector(_) => unimplemented!(),
         }
     }
 }
@@ -311,10 +317,14 @@ impl pgsql::types::ToSql for Value {
             Value::Time(x) => NaiveTime::from(*x).to_sql(ty, out),
             Value::ByteArray(array) => array.to_sql(ty, out),
             Value::Null => None::<i8>.to_sql(ty, out),
+            Value::BitVector(b) => b.to_sql(ty, out),
         }
     }
 
-    accepts!(BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP);
+    accepts!(
+        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, TEXT, VARCHAR, DATE, TIME, TIMESTAMP, BIT,
+        VARBIT
+    );
 
     to_sql_checked!();
 }
@@ -338,6 +348,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::TEXT => Ok(Self::Text(String::from_sql(ty, raw)?)),
             Type::DATE => Ok(Self::Date(NaiveDateTime::from_sql(ty, raw)?)),
             Type::TIME => Ok(Self::Time(NaiveTime::from_sql(ty, raw)?.into())),
+            Type::BIT | Type::VARBIT => Ok(Self::BitVector(BitVec::from_sql(ty, raw)?)),
             _ => Err("Invalid type".into()),
         }
     }
@@ -362,6 +373,7 @@ impl TryFrom<DataType> for Value {
             DataType::Time(t) => Ok(Value::Time(*t)),
             DataType::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Value::Numeric(*d.as_ref())),
+            DataType::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
         }
     }
 }
@@ -401,6 +413,13 @@ impl Display for Value {
             Self::ByteArray(a) => {
                 // TODO(fran): This is gonna be more complicated than this, probably.
                 write!(f, "{:?}", a)
+            }
+            Self::BitVector(b) => {
+                write!(
+                    f,
+                    "{}",
+                    b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
+                )
             }
         }
     }
@@ -444,6 +463,7 @@ impl Value {
             Self::Time(_) => Some(Type::Time),
             Self::ByteArray(_) => Some(Type::ByteArray),
             Self::Null => None,
+            Self::BitVector(_) => Some(Type::BitVec),
         }
     }
 
@@ -479,7 +499,9 @@ impl Value {
                 }
                 _ => bail!("Could not convert {:?} to Time", val),
             })),
+            // These types are PostgreSQL specific.
             Type::ByteArray => unimplemented!(),
+            Type::BitVec => unimplemented!(),
         }
     }
 

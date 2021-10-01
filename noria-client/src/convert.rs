@@ -2,6 +2,7 @@ use nom_sql::{Double, Float, Literal};
 use noria::{DataType, ReadySetError, ReadySetResult};
 
 use arccstr::ArcCStr;
+use bit_vec::BitVec;
 use rust_decimal::Decimal;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -48,6 +49,7 @@ impl ToDataType for Literal {
                 DataType::Timestamp(chrono::Local::now().naive_local())
             }
             Literal::ByteArray(b) => DataType::ByteArray(Arc::new(b)),
+            Literal::BitVector(b) => DataType::from(BitVec::from_bytes(b.as_slice())),
             Literal::Placeholder(_) => unreachable!(),
         })
     }

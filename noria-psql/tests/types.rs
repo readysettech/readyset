@@ -20,8 +20,9 @@ mod types {
     use super::*;
     use eui48::MacAddress;
     use launchpad::arbitrary::{
-        arbitrary_decimal, arbitrary_json, arbitrary_json_without_f64, arbitrary_mac_address,
-        arbitrary_naive_date, arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
+        arbitrary_bitvec, arbitrary_decimal, arbitrary_json, arbitrary_json_without_f64,
+        arbitrary_mac_address, arbitrary_naive_date, arbitrary_naive_time, arbitrary_systemtime,
+        arbitrary_uuid,
     };
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
@@ -116,5 +117,11 @@ mod types {
         time_naivetime("time", #[strategy(arbitrary_naive_time())] chrono::NaiveTime);
         json_string("json", #[strategy(arbitrary_json())] serde_json::Value);
         jsonb_string("jsonb", #[strategy(arbitrary_json_without_f64())] serde_json::Value);
+        bit_bitvec("bit", #[strategy(arbitrary_bitvec(1..=1))] bit_vec::BitVec);
+        bit_sized_bitvec("bit(20)", #[strategy(arbitrary_bitvec(20..=20))] bit_vec::BitVec);
+        varbit_unlimited_bitvec("varbit", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
+        varbit_bitvec("varbit(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
+        bit_varying_unlimited_bitvec("bit varying", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
+        bit_varying_bitvec("bit varying(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
     }
 }

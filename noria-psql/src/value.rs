@@ -92,6 +92,8 @@ impl TryFrom<Value> for ps::Value {
                         })?,
                 ))
             }
+            (Type::BIT, DataType::BitVector(ref b)) => Ok(ps::Value::Bit(b.as_ref().clone())),
+            (Type::VARBIT, DataType::BitVector(ref b)) => Ok(ps::Value::VarBit(b.as_ref().clone())),
             (t, dt) => {
                 error!(
                     psql_type = %t,

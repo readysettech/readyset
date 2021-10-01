@@ -643,6 +643,9 @@ name = "bit-vec"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bitflags"
@@ -2547,6 +2550,7 @@ name = "launchpad"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bit-vec",
  "chrono",
  "eui48",
  "futures 0.3.17",
@@ -3513,6 +3517,7 @@ name = "nom-sql"
 version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
+ "bit-vec",
  "derive_more",
  "eui48",
  "hex",
@@ -3555,6 +3560,7 @@ dependencies = [
  "backoff",
  "base64 0.13.0",
  "bincode",
+ "bit-vec",
  "bufstream",
  "byteorder",
  "bytes 1.1.0",
@@ -3648,6 +3654,7 @@ dependencies = [
  "anyhow",
  "arccstr",
  "async-trait",
+ "bit-vec",
  "chrono",
  "derive_more",
  "futures 0.3.17",
@@ -3774,6 +3781,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ascii_utils",
+ "bit-vec",
  "bytes 1.1.0",
  "chrono",
  "clap 3.0.0-beta.4",
@@ -3859,6 +3867,7 @@ dependencies = [
  "anyhow",
  "arccstr",
  "async-trait",
+ "bit-vec",
  "chrono",
  "clap 3.0.0-beta.4",
  "eui48",
@@ -4540,6 +4549,7 @@ name = "postgres-types"
 version = "0.2.1"
 source = "git+https://github.com/readysettech/rust-postgres.git#df6df6ad805afff47fb311342897dd10e59c92d5"
 dependencies = [
+ "bit-vec",
  "bytes 1.1.0",
  "chrono",
  "eui48",
@@ -4669,6 +4679,7 @@ version = "0.1.0"
 dependencies = [
  "arccstr",
  "async-trait",
+ "bit-vec",
  "bytes 1.1.0",
  "chrono",
  "eui48",
@@ -4709,6 +4720,7 @@ name = "query_generator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bit-vec",
  "chrono",
  "clap 3.0.0-beta.4",
  "colored",
@@ -5084,6 +5096,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bit-vec",
  "bytes 1.1.0",
  "chrono",
  "clap 3.0.0-beta.4",

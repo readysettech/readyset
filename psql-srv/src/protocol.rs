@@ -467,7 +467,7 @@ fn make_field_description(
         Type::BYTEA => TYPLEN_VARLENA,
         Type::MACADDR => TYPLEN_6,
         Type::UUID => TYPLEN_16,
-        Type::JSON | Type::JSONB => TYPLEN_VARLENA,
+        Type::JSON | Type::JSONB | Type::BIT | Type::VARBIT => TYPLEN_VARLENA,
         _ => return Err(Error::UnsupportedType(col.col_type.clone())),
     };
 

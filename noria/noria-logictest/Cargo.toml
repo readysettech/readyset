@@ -48,3 +48,4 @@ lazy_static = "1.4.0"
 humantime = "2.1"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres"] }
 indicatif = "0.16.2"
+bit-vec = { version = "0.6", features = ["serde"] }

@@ -10,6 +10,7 @@ use crate::message::{
 };
 use crate::value::Value;
 use arccstr::ArcCStr;
+use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
@@ -321,8 +322,22 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
         Type::JSON => Ok(Value::Json(serde_json::Value::from_sql(t, buf)?)),
         Type::JSONB => Ok(Value::Jsonb(serde_json::Value::from_sql(t, buf)?)),
+        Type::BIT => Ok(Value::Bit(BitVec::from_sql(t, buf)?)),
+        Type::VARBIT => Ok(Value::VarBit(BitVec::from_sql(t, buf)?)),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
+}
+
+fn get_bitvec_from_str(bit_str: &str) -> Result<BitVec, Error> {
+    let mut bits = BitVec::with_capacity(bit_str.len());
+    for c in bit_str.chars() {
+        match c {
+            '0' => bits.push(false),
+            '1' => bits.push(true),
+            _ => return Err(Error::InvalidTextBitVectorValue(bit_str.to_owned())),
+        }
+    }
+    Ok(bits)
 }
 
 fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
@@ -374,6 +389,8 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::JSONB => serde_json::from_str::<serde_json::Value>(text_str)
             .map_err(DecodeError::InvalidTextJsonValue)
             .map(Value::Jsonb),
+        Type::BIT => get_bitvec_from_str(text_str).map(Value::Bit),
+        Type::VARBIT => get_bitvec_from_str(text_str).map(Value::VarBit),
         _ => Err(Error::UnsupportedType(t.clone())),
     }
 }
@@ -1110,6 +1127,29 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_bits() {
+        // bits = 000000000000100000100111010111000110010010000000
+        let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
+        let mut buf = BytesMut::new();
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        buf.put_i32(10); // size
+        bits.to_sql(&Type::BIT, &mut buf).unwrap(); // add value
+        dbg!(buf.len());
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::BIT).unwrap(),
+            DataValue::Bit(bits.clone())
+        );
+
+        let mut buf = BytesMut::new();
+        buf.put_i32(10); // size
+        bits.to_sql(&Type::VARBIT, &mut buf).unwrap(); // add value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::VARBIT).unwrap(),
+            DataValue::VarBit(bits)
+        );
+    }
+
+    #[test]
     fn test_decode_text_null() {
         let mut buf = BytesMut::new();
         buf.put_i32(-1); // size
@@ -1296,6 +1336,22 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::JSONB).unwrap(),
             DataValue::Jsonb(expected)
+        );
+    }
+
+    #[test]
+    fn test_decode_text_bits() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(48); // 48 bit characters in the text
+        buf.extend_from_slice(b"000000000000100000100111010111000110010010000000");
+        assert_eq!(
+            get_text_value(&mut buf.clone().freeze(), &Type::BIT).unwrap(),
+            DataValue::Bit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
+        );
+
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::VARBIT).unwrap(),
+            DataValue::VarBit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
         );
     }
 }

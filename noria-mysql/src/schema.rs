@@ -79,6 +79,15 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         SqlType::MacAddr => unimplemented!("MySQL does not support the MACADDR type"),
         SqlType::Uuid => unimplemented!("MySQL does not support the UUID type"),
         SqlType::Jsonb => unimplemented!("MySQL does not support the JSONB type"),
+        SqlType::Bit(size_opt) => {
+            let size = size_opt.unwrap_or(1);
+            if size < 64 {
+                MYSQL_TYPE_BIT
+            } else {
+                unimplemented!("MySQL bit type cannot have a size bigger than 64")
+            }
+        }
+        SqlType::Varbit(_) => unimplemented!("MySQL does not support the bit varying type"),
     };
 
     for c in &col.constraints {

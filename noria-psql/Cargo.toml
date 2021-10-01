@@ -17,7 +17,7 @@ nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
 tokio = "1.8.1"
 anyhow = "1.0.42"
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1"] }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 native-tls = "0.2.7"
 futures = "0.3.16"
@@ -28,6 +28,7 @@ rust_decimal = { version = "1.16" }
 eui48 = "0.4"
 uuid = "0.8"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
+bit-vec = { version = "0.6", features = ["serde"] }
 
 [dev-dependencies]
 chrono = "0.4"
