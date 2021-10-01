@@ -1,7 +1,5 @@
 # AWS Cloudformation templates
 
-TODO: Implement all the templates described below.
-
 `templates/readyset-mysql-super-template.yaml`: Creates a VPC, Bastion Host, RDS
 database, Consul Server cluster, and Readyset cluster as with substacks.
 
@@ -11,7 +9,7 @@ with our AMIs that can be used by Readyset as an authority inside a given VPC.
 `templates/readyset-mysql-template.yaml`: Creates a Readyset cluster of Adapters
 and Servers in separate ASGs inside a given VPC.
 
-# How to test using Taskcat locally
+# How to test using Taskcat
 
 1. Create a regional bucket for Taskcat to upload in development stacks to. A
     reasonable name is of the format `readysettech-tcat-<username>-<region>`.
@@ -33,3 +31,18 @@ general:
     well.
 4. Output will be put into `taskcat_outputs` and a `index.html` is viewable in
     a web browser.
+
+# How to upload and use an in development CloudFormation stack using Taskcat
+
+1. Ensure you have a `~/.taskcat.yaml` as defined in the how to test.
+2. `taskcat upload` will upload the files in templates to the S3 bucket defined
+    above.
+3. Go into the AWS Console for CloudFormation for the Sandbox account
+4. Click Create Stack
+5. For Amazon S3 URL put:
+    https://<bucket name>.s3.<region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml
+6. Fill out the parameters screen.
+   Make sure that ReadysetS3BucketName is configured to <bucket name> otherwise
+   it will not pull the substack templates correctly.
+7. Click Next until you get to the Review step. Make sure to check the two
+    "I acknowledge" checkboxes and then click Create stack.
