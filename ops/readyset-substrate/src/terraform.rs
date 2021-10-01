@@ -1,7 +1,10 @@
 /// Interface to the various Terraform commands that need to be run with no connection to Substrate
 /// or anything else. Runs the commands in a standard way along with some help to get information
 /// out from Terraform.
-use std::{path::Path, process::Command};
+use std::path::Path;
+use std::process::{Command, ExitStatus};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 use tracing::{event, Level};
@@ -76,18 +79,46 @@ pub(crate) fn run_plan(chdir: &Path) -> Result<PlanStatus> {
         .to_str()
         .take()
         .ok_or_else(|| anyhow!("Could not convert chdir path to string"))?;
-    let exit_status = Command::new("terraform")
+
+    let mut child = Command::new("terraform")
         .arg(format!("-chdir={}", chdir))
         .arg("plan")
         .arg("-input=false")
         .arg("-detailed-exitcode")
         .arg("-out=.terraform/terraform.tfplan")
-        .status()?;
-    match exit_status.code() {
-        Some(0) => Ok(PlanStatus::NoChanges),
-        Some(2) => Ok(PlanStatus::HasDiff),
-        Some(code) => bail!("`terraform plan` failed with exit code {:?}", code),
-        None => bail!("`terraform plan` terminated by signal"),
+        .spawn()?;
+
+    let term = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;
+    let mut exit_status: Option<ExitStatus> = None;
+    while !term.load(Ordering::Relaxed) {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                exit_status = Some(status);
+                break;
+            }
+            Ok(None) => {
+                std::hint::spin_loop();
+                continue;
+            }
+            Err(e) => bail!("`terraform plan` failed to wait {:?}", e),
+        }
+    }
+
+    if let Some(exit_status) = exit_status {
+        match exit_status.code() {
+            Some(0) => Ok(PlanStatus::NoChanges),
+            Some(2) => Ok(PlanStatus::HasDiff),
+            Some(code) => bail!("`terraform plan` failed with exit code {:?}", code),
+            None => bail!("`terraform plan` terminated by signal"),
+        }
+    } else {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(child.id() as nix::libc::pid_t),
+            nix::sys::signal::SIGTERM,
+        )?;
+        child.wait()?;
+        bail!("`terraform plan` was canceled by SIGTERM")
     }
 }
 
