@@ -7,7 +7,11 @@ upload_artifacts() {
     exit 1
 }
 
-echo "+++ :rust: Running tests"
+echo "+++ :rust: Compile tests"
+cargo --locked test --all --exclude clustertest --no-run
+echo "+++ :rust: Run tests"
 cargo --locked test --all --exclude clustertest -- --skip integration_serial || upload_artifacts
-echo "+++ :rust: Running serial integration tests"
+echo "+++ :rust: Compile serial integration tests"
+cargo --locked test -p noria-server integration_serial --no-run
+echo "+++ :rust: Run serial integration tests"
 cargo --locked test -p noria-server integration_serial -- --test-threads=1 || upload_artifacts
