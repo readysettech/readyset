@@ -17,8 +17,8 @@ use demo_utils::generate::load_to_backend;
 use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
-use noria::{consensus::Authority, ControllerHandle, ZookeeperAuthority};
-use noria::{DataType, KeyComparison, View, ViewQuery};
+use noria::consensus::AuthorityType;
+use noria::{ControllerHandle, DataType, KeyComparison, View, ViewQuery};
 use noria_client::backend::Backend;
 use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
 use noria_client::UpstreamDatabase;
@@ -54,9 +54,14 @@ struct Writer {
     #[clap(long)]
     database_url: String,
 
-    /// ReadySet's zookeeper connection string.
-    #[clap(long)]
-    zookeeper_url: String,
+    #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
+    authority_address: String,
+
+    #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    authority: AuthorityType,
+
+    #[clap(short, long, env("NORIA_DEPLOYMENT"))]
+    deployment: String,
 
     /// Path to the fastly data model SQL schema.
     #[clap(long, value_hint = ValueHint::AnyPath)]
@@ -336,9 +341,11 @@ impl Writer {
             let schema = fastly_schema.clone();
             let articles = current_articles.clone();
             let thread_tx = tx.clone();
-            let zk_auth =
-                Authority::from(ZookeeperAuthority::new(&self.zookeeper_url).await.unwrap());
-            let ch = ControllerHandle::new(zk_auth).await;
+            let auth = self
+                .authority
+                .to_authority(&self.authority_address, &self.deployment)
+                .await;
+            let ch = ControllerHandle::new(auth).await;
 
             threads.push(tokio::spawn(async move {
                 self.generate_writes(articles, thread_tx, schema, &self.run_for, ch)

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mysql::chrono::Utc;
-use noria::consensus::{Authority, ZookeeperAuthority};
+use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 use noria::DataType;
 use noria::KeyComparison;
@@ -12,7 +12,6 @@ use rand::prelude::*;
 use rinfluxdb::line_protocol::LineBuilder;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, fs, mem};
 use structopt::clap::{arg_enum, ArgGroup};
@@ -36,6 +35,26 @@ struct NoriaClientOpts {
     /// ReadySet's zookeeper connection string.
     #[structopt(long, required_if("database_type", "noria"))]
     zookeeper_url: Option<String>,
+
+    #[structopt(
+        short,
+        long,
+        required_if("database_type", "noria"),
+        env("AUTHORITY_ADDRESS"),
+        default_value("127.0.0.1:2181")
+    )]
+    authority_address: String,
+
+    #[structopt(long, env("AUTHORITY"), required_if("database_type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    authority: AuthorityType,
+
+    #[structopt(
+        short,
+        required_if("database_type", "noria"),
+        long,
+        env("NORIA_DEPLOYMENT")
+    )]
+    deployment: String,
 
     /// The region used when requesting a view.
     #[structopt(long)]
@@ -288,11 +307,10 @@ struct NoriaExecutor {
 
 impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
-        let authority = Arc::new(Authority::from(
-            ZookeeperAuthority::new(&opts.zookeeper_url.unwrap())
-                .await
-                .unwrap(),
-        ));
+        let authority = opts
+            .authority
+            .to_authority(&opts.authority_address, &opts.deployment)
+            .await;
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
 
