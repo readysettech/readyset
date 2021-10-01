@@ -1,0 +1,32 @@
+version: "3.8"
+services:
+  influxdb:
+    image: influxdb:1.8.6
+    ports:
+      - '8086:8086' 
+    environment:
+      DOCKER_INFLUXDB_INIT_USERNAME: benchmarkuser
+      DOCKER_INFLUXDB_INIT_PASSWORD: benchmark
+    volumes:
+      - ./influx/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+  prometheus:
+    image: prom/prometheus
+    # Required to access a local noria-server.
+    network_mode: "host"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  grafana:
+    image: grafana/grafana:8.0.6
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning
