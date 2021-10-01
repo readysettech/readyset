@@ -139,7 +139,7 @@ pub(crate) fn run_validate(chdir: &Path) -> Result<()> {
     }
 }
 
-pub(crate) fn run_plan(chdir: &Path) -> Result<Plan> {
+pub(crate) fn run_plan(chdir: &Path, lock: bool) -> Result<Plan> {
     event!(Level::DEBUG, "Running terraform plan");
 
     let module_dir = chdir.to_owned();
@@ -148,13 +148,19 @@ pub(crate) fn run_plan(chdir: &Path) -> Result<Plan> {
         .take()
         .ok_or_else(|| anyhow!("Could not convert chdir path to string"))?;
 
-    let mut child = Command::new("terraform")
+    let mut command = Command::new("terraform");
+    command
         .arg(format!("-chdir={}", chdir))
         .arg("plan")
         .arg("-input=false")
         .arg("-detailed-exitcode")
-        .arg("-out=.terraform/terraform.tfplan")
-        .spawn()?;
+        .arg("-out=.terraform/terraform.tfplan");
+    if !lock {
+        // TODO consider removing this if we do apply from buildkite (but then we'll have to solve locks
+        // getting left around from canceled builds)
+        command.arg("-lock=false");
+    }
+    let mut child = command.spawn()?;
 
     let term = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;

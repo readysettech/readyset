@@ -96,7 +96,7 @@ pub(crate) fn terraform_validate(root_module: &substrate::RootModule) -> Result<
 pub(crate) fn terraform_plan(root_module: &substrate::RootModule) -> Result<()> {
     let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
-    let plan = terraform::run_plan(&terraform_path)?;
+    let plan = terraform::run_plan(&terraform_path, false)?;
     if plan.has_diff() {
         event!(Level::DEBUG, "Plan has changes so upload plan artifact");
         upload_plan_artifact(&plan)?;

@@ -14,7 +14,7 @@ pub(crate) fn validate(root_module: &substrate::RootModule) -> Result<()> {
 pub(crate) fn plan(root_module: &substrate::RootModule) -> Result<()> {
     let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
-    terraform::run_plan(&terraform_path)?;
+    terraform::run_plan(&terraform_path, true)?;
     Ok(())
 }
 
