@@ -1,0 +1,22 @@
+# Docker-compose override to open up each images ports to the local
+# machine. To use, copy this file to docker-compose.override.yml and
+# use docker-compose as usual to start the dev docker containers.
+version: "3.8"
+services:
+  zookeeper:
+   ports:
+      - '2181:2181'
+  consul-server:
+    ports:
+      - '8500:8500'
+      - '8600:8600/tcp'
+      - '8600:8600/udp'
+  mysql:
+    ports:
+      - '3306:3306'
+  postgres:
+    ports:
+      - '5432:5432'
+  redis:
+    ports:
+      - '6379:6379'
