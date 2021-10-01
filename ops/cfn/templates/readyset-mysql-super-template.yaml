@@ -89,6 +89,7 @@ Parameters:
   ReadysetAdapterNodes:
     Type: String
     Description: Number of adapter nodes to create
+    Default: 3
   ReadysetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for server instances.
@@ -96,6 +97,7 @@ Parameters:
   ReadysetServerNodes:
     Type: String
     Description: Number of server nodes to create
+    Default: 3
   DatabaseName:
     Type: String
     Description: Name of MySQL Database
@@ -198,7 +200,7 @@ Resources:
         ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
         ReadysetServerNodes: !Ref ReadysetServerNodes
         MySQLDatabaseURL: !Sub
-          - mysql://${DatabaseUsername}:$DatabasePassword@${EndpointAddress}:${EndpointPort}/${DatabaseName}
+          - mysql://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
           - EndpointAddress: !GetAtt
               - MySQLDatabaseInstance
               - Endpoint.Address
@@ -207,6 +209,9 @@ Resources:
               - Endpoint.Port
         DeploymentName: !Ref DeploymentName
         KeyPairName: !Ref KeyPairName
+        ConsulJoinManagedPolicyArn: !GetAtt
+          - ReadysetConsulStack
+          - Outputs.ConsulJoinManagedPolicyArn
         PrivateSubnet1ID: !GetAtt
           - VPCStack
           - Outputs.PrivateSubnet1AID

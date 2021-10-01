@@ -78,21 +78,11 @@ Resources:
             - "-"
             - - !Ref "AWS::StackName"
               - ConsulSecGroup
-  ConsulServerRole:
-    Type: AWS::IAM::Role
+  ConsulJoinManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
     Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-          - Action: "sts:AssumeRole"
-            Principal:
-              Service: ec2.amazonaws.com
-            Effect: Allow
-            Sid: ""
-  ConsulJoinPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: ConsulJoin
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
@@ -100,8 +90,18 @@ Resources:
               - "ec2:DescribeTags"
               - "autoscaling:DescribeAutoScalingGroups"
             Resource: "*"
-      Roles:
-        - !Ref ConsulServerRole
+  ConsulServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref ConsulJoinManagedPolicy
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ""
   ConsulServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -164,8 +164,8 @@ Resources:
         Count: !Ref ConsulServerNodes
         Timeout: PT20M
 Outputs:
-  ConsulJoinPolicy:
-    Value: !Ref ConsulJoinPolicy
+  ConsulJoinManagedPolicyArn:
+    Value: !Ref ConsulJoinManagedPolicy
     Description: IAM Policy that allows an instance to find the Consul server nodes.
   ConsulEc2RetryJoinTagKey:
     Value: !Ref ConsulEc2RetryJoinTagKey

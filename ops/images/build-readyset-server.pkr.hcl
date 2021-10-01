@@ -42,6 +42,7 @@ build {
       "provisioners/scripts/consul-client/10-aws.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/readyset-server/00-init.sh",
+      "provisioners/scripts/readyset-server/10-aws.sh",
     ]
   }
 

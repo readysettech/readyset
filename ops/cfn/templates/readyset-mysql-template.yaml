@@ -6,13 +6,13 @@ Parameters:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
     Default: t3.small
-  ReadysetAdapterNodes:
-    Type: String
-    Description: Number of Adapter nodes to create
   ReadysetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for server instances.
     Default: t3.small
+  ReadysetAdapterNodes:
+    Type: String
+    Description: Number of Adapter nodes to create
   ReadysetServerNodes:
     Type: String
     Description: Number of Adapter nodes to create
@@ -34,26 +34,43 @@ Parameters:
     Type: String
     AllowedPattern: >-
       ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+  ConsulJoinManagedPolicyArn:
+    Description: ARN of an managed IAM policy that the permissions to find Consul Servers
+    Type: String
+  ConsulEc2RetryJoinTagKey:
+    Description:
+      The EC2 instance tag key to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "ReadysetConsulNodeType"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+  ConsulEc2RetryJoinTagValue:
+    Description:
+      The EC2 instance tag value to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "Server"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
   MySQLDatabaseURL:
     Type: String
     NoEcho: True
-    Default: ""
     # TODO: Allowed Pattern
   DeploymentName:
     Type: String
-    Default: ""
     # TODO: Allowed Pattern
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      READYSETMYSQLADAPTER: ami-075c98b2cfac6fc49
-      READYSETSERVER: ami-0fc98d2bf180a8038
+      READYSETMYSQLADAPTER: ami-018e1de1889a85dc3
+      READYSETSERVER: ami-00dd29e2246acfe9c
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadysetMySQLAdapterRole:
     Type: AWS::IAM::Role
     Properties:
+      ManagedPolicyArns:
+        - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
           - Action: "sts:AssumeRole"
@@ -76,6 +93,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
           FromPort: 3306
@@ -127,6 +148,8 @@ Resources:
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
             export AWS_CLOUDFORMATION_RESOURCE="ReadysetMySQLAdapterASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
+            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export MYSQL_URL="${MySQLDatabaseURL}"
             export DEPLOYMENT="${DeploymentName}"
             exec /usr/local/bin/user-data-init.sh
@@ -148,6 +171,10 @@ Resources:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-MySQLAdapter"]]
           PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadysetAdapterNodes
+        Timeout: PT20M
   ReadysetMySQLAdapterNLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -171,6 +198,8 @@ Resources:
   ReadysetServerRole:
     Type: AWS::IAM::Role
     Properties:
+      ManagedPolicyArns:
+        - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
           - Action: "sts:AssumeRole"
@@ -193,6 +222,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
           FromPort: 6603
@@ -243,14 +276,16 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadysetMySQLAdapterASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadysetServerASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
+            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${DeploymentName}"
             export NORIA_MEMORY_BYTES="0"
             export NORIA_PRIMARY_REGION="${AWS::Region}"
             export NORIA_QUORUM="1"
             export NORIA_REGION="${AWS::Region}"
-            export NORIA_SHARDS=1
+            export NORIA_SHARDS="1"
             export REPLICATION_URL="${MySQLDatabaseURL}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
@@ -269,6 +304,10 @@ Resources:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-Server"]]
           PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadysetServerNodes
+        Timeout: PT20M
   # --- END SERVER --- #
 Outputs:
   ReadysetDBSecurityGroup:
