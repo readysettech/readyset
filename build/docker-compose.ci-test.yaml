@@ -5,14 +5,25 @@ version: '3.8'
 services:
   zookeeper:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/zookeeper
+    expose:
+      - '2181'
   consul-server:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    expose:
+      - '8500'
+      - '8600'
   mysql:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql
+    expose:
+      - '3306'
   postgres:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/postgres
+    expose:
+      - '5432'
   redis:
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/redis:6.2
+    expose:
+      - '6379'
   app:
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
     working_dir: /workdir

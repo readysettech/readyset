@@ -8,25 +8,17 @@ services:
       timeout: 2s
       retries: 5
       start_period: 5s
-    ports:
-      - '2181:2181'
   consul-server:
     image: consul
     restart: always
     volumes:
       - ./docker/consul/server.json:/consul/config/server.json:ro
-    ports:
-      - '8500:8500'
-      - '8600:8600/tcp'
-      - '8600:8600/udp'
     command: 'agent -bootstrap-expect=1'
   mysql:
     image: mysql
     environment:
       - MYSQL_ROOT_PASSWORD=noria
       - MYSQL_DATABASE=noria
-    ports:
-      - '3306:3306'
   postgres:
     image: postgres
     environment:
@@ -36,9 +28,5 @@ services:
       - "postgres"
       - "-c"
       - "wal_level=logical"
-    ports:
-      - '5432:5432'
   redis:
     image: redis:6.2
-    ports:
-      - '6379:6379'
