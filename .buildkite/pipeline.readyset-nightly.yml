@@ -4,8 +4,9 @@ steps:
     key: build-image
     command: .buildkite/build_image.sh build/Dockerfile readyset-build
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: 'Run MySQL generated logictests'
     key: logictest-generated-mysql
@@ -24,8 +25,9 @@ steps:
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     env:
       SCCACHE_BUCKET: readyset-sccache
     agents:

@@ -3,14 +3,16 @@ steps:
     key: readyset-server-image
     command: .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
     command: .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
   - key: list-frameworks
     label: "List frameworks"
     depends_on:
@@ -24,8 +26,9 @@ steps:
           mount-ssh-agent: true
           environment:
           - NIGHTLY=true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
   - key: generate-pipeline
     label: "Generate test pipeline"
     depends_on:
@@ -38,7 +41,8 @@ steps:
           propagate-environment: true
           environment:
           - NIGHTLY=true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     artifact_paths:
       - ".buildkite/gen/*"

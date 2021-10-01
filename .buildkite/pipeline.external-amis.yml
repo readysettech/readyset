@@ -14,8 +14,9 @@ steps:
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
 
   - label: ":packer: Run production build for all external images"
@@ -33,8 +34,9 @@ steps:
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   - block: "Release external images?"
     fields:
@@ -58,5 +60,6 @@ steps:
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3

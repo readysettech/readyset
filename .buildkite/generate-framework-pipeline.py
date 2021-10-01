@@ -29,8 +29,9 @@ build_template = """
     label: "Build test container image for ${FRAMEWORK} on ${DIALECT}"
     command: ./.buildkite/build-framework-image.sh '${DIALECT}' '${FRAMEWORK}'
     plugins:
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 """
 
 
@@ -65,8 +66,9 @@ test_template = """
             - RS_NUM_SHARDS=${NUM_SHARDS}
             - RS_DIALECT=${DIALECT_VERSION}
             - BUILDKITE_COMMIT
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     env:
       SOFT_FAIL: ${SOFT_FAIL}
 """
@@ -114,8 +116,9 @@ push_template = """
     depends_on:
       - test-${DIALECT}-${FRAMEWORK_SLUG}
     plugins:
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
         login: true
+        retries: 3
 """
 
 

@@ -28,8 +28,9 @@ cat << EOF
       - docker save ${image}:${release_name} | gzip > ${image}-${release_name}.tar.gz
       - buildkite-agent artifact upload ${image}-${release_name}.tar.gz
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - name: ":amazon-s3: Upload Docker archive for $image to S3"
     depends_on:

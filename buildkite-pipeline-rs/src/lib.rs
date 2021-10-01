@@ -549,11 +549,12 @@ mod tests {
     #[test]
     fn ecr_plugin() {
         let src = "
-ecr#v2.2.0:
-  login: true";
+ecr#v2.5.0:
+  login: true
+  retries: 3";
         let res = yaml::from_str::<Plugin>(src);
         assert!(res.is_ok(), "{}", res.err().unwrap());
-        assert_eq!(res.unwrap().name, "ecr#v2.2.0");
+        assert_eq!(res.unwrap().name, "ecr#v2.5.0");
     }
 
     macro_rules! serde_round_trips {
@@ -594,7 +595,7 @@ label: ':docker: Build build image'
 key: build-image
 command: .buildkite/build_image.sh build/Dockerfile readyset-build
 plugins:
-  ecr#v2.2.0:
+  ecr#v2.5.0:
     login: true");
 
     run_logictests_command_step(CommandStep, "
@@ -615,7 +616,7 @@ plugins:
         config:
         - docker-compose.yml
         - build/docker-compose.ci-test.yaml
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
 env:
     SCCACHE_BUCKET: readyset-sccache
@@ -641,7 +642,7 @@ plugins:
         config:
         - docker-compose.yml
         - build/docker-compose.ci-test.yaml
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
 env:
     SCCACHE_BUCKET: readyset-sccache

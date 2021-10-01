@@ -14,9 +14,9 @@ steps:
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
-
+        retries: 3
 
   - label: ":packer: Run production build for all internal images"
     depends_on: packer-internal-base
@@ -31,7 +31,8 @@ steps:
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   # TODO: Use Packer to launch the images created in build in the deploy account and save them there.

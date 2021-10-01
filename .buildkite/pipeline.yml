@@ -253,8 +253,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':rust: Build noria-mysql adapter release binary'
     key: build-noria-mysql-adapter-release
@@ -277,8 +278,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':rust: Build noria-psql adapter release binary'
     key: build-noria-psql-adapter-release
@@ -301,8 +303,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - block: ":packer: Build Packer images?"
     key: build-packer-images

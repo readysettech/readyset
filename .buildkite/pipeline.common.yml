@@ -3,8 +3,9 @@ steps:
     key: build-image
     command: .buildkite/build_image.sh build/Dockerfile readyset-build
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ":docker: Build readyset-server image"
     key: readyset-server-image
@@ -15,8 +16,9 @@ steps:
         .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
       fi
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
@@ -27,8 +29,9 @@ steps:
         .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
       fi
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ":docker: Build readyset-psql image"
     key: readyset-psql-image
@@ -41,22 +44,25 @@ steps:
         .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
       fi
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':docker: Build prettier image'
     key: prettier-image
     command: .buildkite/build_image.sh build/Dockerfile.prettier prettier
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':docker: Build cargo-audit image'
     key: cargo-audit-image
     command: .buildkite/build_image.sh build/Dockerfile.cargo-audit cargo-audit
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':rust: Check rustfmt'
     key: check-rustfmt
@@ -73,8 +79,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':prettier: Check prettier'
     commands:
@@ -88,8 +95,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':rust: :lock: Check cargo-audit'
     commands:
@@ -103,8 +111,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':clippy: Check clippy'
     key: check-clippy
@@ -121,8 +130,9 @@ steps:
           - SCCACHE_BUCKET=readyset-sccache-e1
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ":rust: Build js-client shared library"
     key: build-js-client-lib
@@ -144,8 +154,9 @@ steps:
             - SCCACHE_BUCKET=readyset-sccache-e1
             - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
             - CARGO_INCREMENTAL=0
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ":nodejs: Test js-client"
     timeout_in_minutes: 60
@@ -167,8 +178,9 @@ steps:
           env:
             - BUILDKITE_COMMIT
           mount-buildkite-agent: true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':rust: Run tests'
     key: rust-tests
@@ -187,8 +199,9 @@ steps:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
           mount-buildkite-agent: true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     env:
       SCCACHE_BUCKET: readyset-sccache
     agents:
@@ -212,8 +225,9 @@ steps:
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     env:
       SCCACHE_BUCKET: readyset-sccache
 
@@ -237,8 +251,9 @@ steps:
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ':rust: Deploy docs'
     branches: 'master'
@@ -261,8 +276,9 @@ steps:
           - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
           - CARGO_INCREMENTAL=0
           mount-ssh-agent: true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
 # --- BEGIN INTERNAL OPS STEPS --- #
   - label: ':docker: Build readyset-ops image'
@@ -271,8 +287,9 @@ steps:
       - cd ops
       - ../.buildkite/build_image.sh build/Dockerfile readyset-ops
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':terraform: Format/Validate/Lint readyset module'
     depends_on:
@@ -287,8 +304,9 @@ steps:
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':packer: Format/Validate images'
     key: ops-packer-lint
@@ -303,8 +321,9 @@ steps:
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':shell::heavy_check_mark: shellcheck all scripts'
     key: ops-shellcheck
@@ -316,8 +335,9 @@ steps:
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   # TODO: Eventually their will be a base image and other images that will be in different steps
   - label: ':packer: Run test build for all images'
@@ -333,15 +353,17 @@ steps:
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ":rust: :docker: Build Substrate Runtime Image"
     key: build-runtime-image
     command: .buildkite/build_image.sh ops/readyset-substrate/Dockerfile substrate-runtime
     plugins:
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
   - label: ":pipeline: Upload Validate All Pipeline"
     command: buildkite-terraform-upload-validate-all-pipeline
@@ -353,8 +375,9 @@ steps:
           shell: false
           propagate-environment: true
           propagate-aws-auth-tokens: true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
       - cultureamp/aws-assume-role#v0.2.0:
           role: "arn:aws:iam::716876017850:role/Administrator"
     agents:
@@ -369,8 +392,9 @@ steps:
       - cd ops
       - ../.buildkite/build_image.sh build/Dockerfile.cfn readyset-ops-cfn
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - label: ':aws-cloudformation: Lint with taskcat :cat:'
     depends_on:
@@ -382,8 +406,9 @@ steps:
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops-cfn:${BUILDKITE_COMMIT}
-    - ecr#v2.2.0:
+    - ecr#v2.5.0:
         login: true
+        retries: 3
 
   # --- END CLOUDFORMATION STEPS --- #
 
@@ -397,8 +422,9 @@ steps:
           mount-ssh-agent: true
           environment:
           - NIGHTLY=false
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
   - key: generate-pipeline
     label: "Generate framework pipeline"
     depends_on:
@@ -412,8 +438,9 @@ steps:
           environment:
           - NIGHTLY=false
           - SOFT_FAIL=true
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3
     artifact_paths:
       - ".buildkite/gen/*"
 
@@ -434,5 +461,6 @@ steps:
           config:
             - .buildkite/docker-compose.readyset-mysql80.yml
             - build/docker-compose.test-deploy.yaml
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           login: true
+          retries: 3

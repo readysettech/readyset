@@ -47,8 +47,9 @@ cat << EOF
       - docker tag $image $ecr_repository_namespace/$image
       - docker push $ecr_repository_namespace/$image
     plugins:
-      ecr#v2.2.0:
+      ecr#v2.5.0:
         login: true
+        retries: 3
 
   - wait
 EOF

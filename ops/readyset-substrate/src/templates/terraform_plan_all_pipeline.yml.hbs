@@ -12,9 +12,10 @@ steps:
           shell: false
           environment:
           - BUILDKITE_API_TOKEN
-      - ecr#v2.2.0:
+      - ecr#v2.5.0:
           account_ids: "305232526136"
           login: true
+          retries: 3
       - cultureamp/aws-assume-role#v0.2.0:
           role: "arn:aws:iam::716876017850:role/Administrator"
     agents:
