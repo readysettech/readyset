@@ -704,7 +704,6 @@ where
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
-        let start = time::Instant::now();
         let mut handle = event.start_timer();
 
         match prepared_statement {
@@ -812,22 +811,6 @@ where
                     }
                     _ => internal!(),
                 };
-                if self.slowlog {
-                    let took = start.elapsed();
-                    if took.as_secs() > 0 || took.subsec_nanos() > 5_000_000 {
-                        let query: &dyn std::fmt::Display = match prep {
-                            SqlQuery::Select(ref q) => q,
-                            SqlQuery::Insert(ref q) => q,
-                            SqlQuery::Update(ref q) => q,
-                            _ => internal!(),
-                        };
-                        warn!(
-                            %query,
-                            time = ?took,
-                            "slow query",
-                        );
-                    }
-                }
 
                 res
             }
