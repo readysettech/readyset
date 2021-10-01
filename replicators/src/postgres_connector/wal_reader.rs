@@ -1,4 +1,5 @@
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
+use bit_vec::BitVec;
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use mysql_time::MysqlTime;
 use noria::{ReadySetError, ReadySetResult};
@@ -287,6 +288,22 @@ impl wal::TupleData {
                             .and_hms(0, 0, 0)
                         }),
                         PGType::TIME => DataType::Time(Arc::new(MysqlTime::from_str(&str)?)),
+                        PGType::BIT | PGType::VARBIT => {
+                            let mut bits = BitVec::with_capacity(str.len());
+                            for c in str.chars() {
+                                match c {
+                                    '0' => bits.push(false),
+                                    '1' => bits.push(true),
+                                    _ => {
+                                        return Err(WalError::BitVectorParseError(format!(
+                                            "\"{}\" is not a valid binary digit",
+                                            c
+                                        )))
+                                    }
+                                }
+                            }
+                            DataType::from(bits)
+                        }
                         ref t => {
                             unimplemented!(
                                 "Conversion not implemented for type {:?}; value {:?}",

@@ -81,6 +81,9 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
         DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()).await,
         DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
+        DataType::BitVector(_) => {
+            internal!("Cannot write MySQL column: MySQL does not support bit vectors")
+        }
     };
     Ok(written?)
 }

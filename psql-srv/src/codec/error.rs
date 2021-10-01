@@ -53,6 +53,9 @@ pub enum DecodeError {
     #[error("invalid text json value: {0}")]
     InvalidTextJsonValue(serde_json::Error),
 
+    #[error("invalid text bit vector value: {0}")]
+    InvalidTextBitVectorValue(String),
+
     #[error("invalid type: {0}")]
     InvalidType(u32),
 

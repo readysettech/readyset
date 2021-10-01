@@ -361,6 +361,12 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Jsonb(v) => {
             v.to_sql(&Type::JSONB, dst)?;
         }
+        Value::Bit(bits) => {
+            bits.to_sql(&Type::BIT, dst)?;
+        }
+        Value::VarBit(bits) => {
+            bits.to_sql(&Type::VARBIT, dst)?;
+        }
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -446,6 +452,14 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Uuid(u) => write!(dst, "{}", u)?,
         Value::Json(v) => write!(dst, "{}", v)?,
         Value::Jsonb(v) => write!(dst, "{}", v)?,
+        Value::Bit(bits) | Value::VarBit(bits) => write!(
+            dst,
+            "{}",
+            bits.iter()
+                .map(|bit| if bit { "1".to_owned() } else { "0".to_owned() })
+                .collect::<Vec<String>>()
+                .join("")
+        )?,
     };
     // Update the length field to match the recently serialized data length in `dst`. The 4 byte
     // length field itself is excluded from the length calculation.
@@ -461,6 +475,7 @@ mod tests {
     use crate::message::{FieldDescription, SqlState};
     use crate::value::Value as DataValue;
     use arccstr::ArcCStr;
+    use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
     use chrono::NaiveDateTime;
     use eui48::MacAddress;
@@ -1069,6 +1084,27 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_bits() {
+        // bits = 000000000000100000100111010111000110010010000000
+        let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        exp.put_i32(10); // size
+        bits.to_sql(&Type::BIT, &mut exp).unwrap(); // add value
+        assert_eq!(buf, exp);
+
+        let mut exp = BytesMut::new();
+        // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
+        exp.put_i32(10); // size
+        bits.to_sql(&Type::VARBIT, &mut exp).unwrap(); // add value
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::VarBit(bits.clone()), &mut buf).unwrap();
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
@@ -1320,6 +1356,22 @@ mod tests {
         exp.extend_from_slice(
             b"{\"age\":43,\"name\":\"John Doe\",\"phones\":[\"+44 1234567\",\"+44 2345678\"]}", // keys are sorted
         );
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_bits() {
+        let mut buf = BytesMut::new();
+        // bits = 000000000000100000100111010111000110010010000000
+        let bits = BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]);
+        put_text_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(48); // size = 48 bit characters
+        exp.extend_from_slice(b"000000000000100000100111010111000110010010000000"); // add value
+        assert_eq!(buf, exp);
+
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 }

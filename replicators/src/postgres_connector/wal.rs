@@ -33,6 +33,7 @@ pub enum WalError {
     TimestampParseError,
     TimeParseError(mysql_time::ConvertError),
     NumericParseError,
+    BitVectorParseError(String),
     InvalidMapping(String),
     ToastNotSupported,
     ReadySetError(noria::ReadySetError),

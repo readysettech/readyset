@@ -130,7 +130,8 @@ named!(
         tag!("I") => { |_| Type::Integer } |
         tag!("R") => { |_| Type::Real } |
         tag!("D") => { |_| Type::Date } |
-        tag!("M") => { |_| Type::Time }
+        tag!("M") => { |_| Type::Time } |
+        tag!("BV") => { |_| Type::BitVec }
     )
 );
 

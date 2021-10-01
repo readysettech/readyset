@@ -3,10 +3,11 @@ use std::hash::{Hash, Hasher};
 use std::str;
 use std::str::FromStr;
 
+use bit_vec::BitVec;
 use itertools::Itertools;
 use launchpad::arbitrary::{
-    arbitrary_decimal, arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
-    arbitrary_timestamp_naive_date_time, arbitrary_uuid,
+    arbitrary_bitvec, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
+    arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case, take_until};
@@ -80,6 +81,8 @@ pub enum SqlType {
     ByteArray,
     MacAddr,
     Uuid,
+    Bit(Option<u16>),
+    Varbit(Option<u16>),
 }
 
 impl SqlType {
@@ -168,6 +171,14 @@ impl fmt::Display for SqlType {
             SqlType::ByteArray => write!(f, "BYTEA"),
             SqlType::MacAddr => write!(f, "MACADDR"),
             SqlType::Uuid => write!(f, "UUID"),
+            SqlType::Bit(n) => {
+                write!(f, "BIT")?;
+                if let Some(size) = n {
+                    write!(f, "({})", size)?;
+                }
+                Ok(())
+            }
+            SqlType::Varbit(n) => write_with_len(f, "VARBIT", n),
         }
     }
 }
@@ -258,6 +269,7 @@ pub enum Literal {
     // String or not.
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
+    BitVector(Vec<u8>),
 }
 
 impl From<i64> for Literal {
@@ -337,6 +349,16 @@ impl Display for Literal {
                 write!(f, "E'\\x{}'", b.iter().map(|v| format!("{:x}", v)).join(""))
             }
             Literal::Placeholder(item) => write!(f, "{}", item.to_string()),
+            Literal::BitVector(ref b) => {
+                write!(
+                    f,
+                    "B'{}'",
+                    BitVec::from_bytes(b.as_slice())
+                        .iter()
+                        .map(|bit| if bit { "1" } else { "0" })
+                        .join("")
+                )
+            }
         }
     }
 }
@@ -404,6 +426,17 @@ impl Literal {
             SqlType::Uuid => arbitrary_uuid()
                 .prop_map(|uuid| Self::String(uuid.to_string()))
                 .boxed(),
+            SqlType::Bit(n) => {
+                let size = n.unwrap_or(1) as usize;
+                arbitrary_bitvec(size..=size)
+                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .boxed()
+            }
+            SqlType::Varbit(n) => {
+                arbitrary_bitvec(0..n.map(|max_size| max_size as usize).unwrap_or(20_usize))
+                    .prop_map(|bits| Self::BitVector(bits.to_bytes()))
+                    .boxed()
+            }
         }
     }
 }
@@ -926,6 +959,29 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tag_no_case("uuid"), |_| SqlType::Uuid),
         map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
         map(tag_no_case("json"), |_| SqlType::Json),
+        map(
+            tuple((
+                alt((
+                    // The alt expects the same type to be returned for both entries,
+                    // so both have to be tuples with same number of elements
+                    map(tuple((tag_no_case("varbit"), multispace0)), |_| ()),
+                    map(
+                        tuple((
+                            tag_no_case("bit"),
+                            multispace1,
+                            tag_no_case("varying"),
+                            multispace0,
+                        )),
+                        |_| (),
+                    ),
+                )),
+                opt(delim_u16),
+            )),
+            |t| SqlType::Varbit(t.1),
+        ),
+        map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
+            SqlType::Bit(t.1)
+        }),
     ))(i)
 }
 
@@ -1248,6 +1304,9 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
                 }
             }),
             map(dialect.bytes_literal(), Literal::ByteArray),
+            map(dialect.bitvec_literal(), |bits| {
+                Literal::BitVector(bits.to_bytes())
+            }),
             map(tag_no_case("null"), |_| Literal::Null),
             map(tag_no_case("current_timestamp"), |_| {
                 Literal::CurrentTimestamp
@@ -1515,10 +1574,20 @@ mod tests {
     fn literal_to_string_parse_round_trip(lit: Literal) {
         prop_assume!(!matches!(
             lit,
-            Literal::Double(_) | Literal::Float(_) | Literal::ByteArray(_) | Literal::Numeric(_, _)
+            Literal::Double(_) | Literal::Float(_) | Literal::Numeric(_, _) | Literal::ByteArray(_)
         ));
-        let s = lit.to_string();
-        assert_eq!(literal(Dialect::MySQL)(s.as_bytes()).unwrap().1, lit)
+        match lit {
+            Literal::BitVector(_) => {
+                let s = lit.to_string();
+                assert_eq!(literal(Dialect::PostgreSQL)(s.as_bytes()).unwrap().1, lit)
+            }
+            _ => {
+                for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+                    let s = lit.to_string();
+                    assert_eq!(literal(dialect)(s.as_bytes()).unwrap().1, lit)
+                }
+            }
+        }
     }
 
     #[test]
@@ -1667,6 +1736,30 @@ mod tests {
         fn jsonb_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"jsonb");
             assert_eq!(res, SqlType::Jsonb);
+        }
+
+        #[test]
+        fn bit_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit");
+            assert_eq!(res, SqlType::Bit(None));
+        }
+
+        #[test]
+        fn bit_with_size_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit(10)");
+            assert_eq!(res, SqlType::Bit(Some(10)));
+        }
+
+        #[test]
+        fn bit_varying_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying");
+            assert_eq!(res, SqlType::Varbit(None));
+        }
+
+        #[test]
+        fn bit_varying_with_size_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying(10)");
+            assert_eq!(res, SqlType::Varbit(Some(10)));
         }
     }
 }

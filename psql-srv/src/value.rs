@@ -1,4 +1,5 @@
 use arccstr::ArcCStr;
+use bit_vec::BitVec;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use rust_decimal::Decimal;
@@ -26,4 +27,6 @@ pub enum Value {
     Uuid(Uuid),
     Json(serde_json::Value),
     Jsonb(serde_json::Value),
+    Bit(BitVec),
+    VarBit(BitVec),
 }

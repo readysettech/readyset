@@ -66,6 +66,8 @@ pub enum DataType {
     ByteArray(Arc<Vec<u8>>),
     /// A fixed-point fractional representation.
     Numeric(Arc<Decimal>),
+    /// A bit or varbit value.
+    BitVector(Arc<BitVec>),
 }
 
 impl Eq for DataType {}
@@ -96,6 +98,13 @@ impl fmt::Display for DataType {
                 )
             }
             DataType::Numeric(ref d) => write!(f, "{}", d),
+            DataType::BitVector(ref b) => {
+                write!(
+                    f,
+                    "{}",
+                    b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
+                )
+            }
         }
     }
 }
@@ -122,6 +131,9 @@ impl fmt::Debug for DataType {
             DataType::Time(ref t) => f.debug_tuple("Time").field(t.as_ref()).finish(),
             DataType::ByteArray(ref array) => write!(f, "ByteArray({:?})", array),
             DataType::Numeric(ref d) => write!(f, "Numeric({:?})", d),
+            DataType::BitVector(ref b) => {
+                write!(f, "BitVector({:?})", b)
+            }
         }
     }
 }
@@ -154,11 +166,12 @@ impl DataType {
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::min_value())),
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
+            DataType::BitVector(_) => DataType::from(BitVec::new()),
         }
     }
 
     /// Generates the maximum DataType corresponding to the type of a given DataType.
-    /// Note that there is no possible maximum for the `Text` or `ByteArray` variants,
+    /// Note that there is no possible maximum for the `Text`, `ByteArray` or `BitVector` variants,
     /// hence it is not implemented.
     pub fn max_value(other: &Self) -> Self {
         match other {
@@ -175,8 +188,8 @@ impl DataType {
             DataType::BigInt(_) => DataType::BigInt(i64::max_value()),
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
-            DataType::Text(_) | DataType::ByteArray(_) => unimplemented!(),
             DataType::Numeric(_) => DataType::from(Decimal::MAX),
+            DataType::Text(_) | DataType::ByteArray(_) | DataType::BitVector(_) => unimplemented!(),
         }
     }
 
@@ -188,6 +201,7 @@ impl DataType {
         match *self {
             DataType::Text(ref cstr) => DataType::Text(ArcCStr::from(&**cstr)),
             DataType::ByteArray(ref bytes) => DataType::ByteArray(Arc::new(bytes.as_ref().clone())),
+            DataType::BitVector(ref bits) => DataType::from(bits.as_ref().clone()),
             ref dt => dt.clone(),
         }
     }
@@ -257,6 +271,7 @@ impl DataType {
             DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
             DataType::ByteArray(ref array) => !array.is_empty(),
             DataType::Numeric(ref d) => !d.is_zero(),
+            DataType::BitVector(ref bits) => !bits.is_empty(),
         }
     }
 
@@ -317,6 +332,7 @@ impl DataType {
             Self::Time(_) => Some(Time),
             Self::ByteArray(_) => Some(ByteArray),
             Self::Numeric(_) => Some(Numeric(None)),
+            Self::BitVector(_) => Some(Varbit(None)),
         }
     }
 
@@ -738,6 +754,26 @@ impl DataType {
                 })?;
                 Ok(Cow::Borrowed(self))
             }
+            (Self::BitVector(_), Some(Bit(size_opt)), Varbit(max_size_opt)) => {
+                let size = size_opt.unwrap_or(1);
+                match max_size_opt {
+                    Some(max_size) if size > *max_size =>
+                        Err(mk_err(format!("Cannot coerce BIT({}) to VARBIT({})", size, max_size), None)),
+                    _ => Ok(Cow::Borrowed(self))
+                }
+            }
+            (Self::BitVector(ref bits), Some(Varbit(max_size_opt)), Bit(size_opt)) => {
+                let size = size_opt.unwrap_or(1);
+                match max_size_opt {
+                    Some(max_size) if size > max_size =>
+                        Err(mk_err(format!("Cannot coerce VARBIT({}) to BIT({})", size, max_size), None)),
+                    _ => if bits.len() as u16 != size {
+                        Err(mk_err(format!("Cannot coerce VARBIT to BIT({}). VARBIT has length {}", size, bits.len()), None))
+                    } else {
+                        Ok(Cow::Borrowed(self))
+                    }
+                }
+            }
             (_, Some(_), _) => Err(mk_err("Cannot coerce with these types".to_owned(), None)),
         }
     }
@@ -893,14 +929,17 @@ impl PartialEq for DataType {
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.as_ref() == array_b.as_ref()
             }
+            (&DataType::BitVector(ref bits_a), &DataType::BitVector(ref bits_b)) => {
+                bits_a.as_ref() == bits_b.as_ref()
+            }
             (&DataType::None, &DataType::None) => true,
-
             _ => false,
         }
     }
 }
 
 use crate::errors::internal_err;
+use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use launchpad::arbitrary::arbitrary_decimal;
 use mysql_time::MysqlTime;
@@ -1069,6 +1108,10 @@ impl Ord for DataType {
                 array_a.cmp(array_b)
             }
             (&DataType::ByteArray(_), _) => Ordering::Greater,
+            (&DataType::BitVector(ref bits_a), &DataType::BitVector(ref bits_b)) => {
+                bits_a.cmp(bits_b)
+            }
+            (&DataType::BitVector(_), _) => Ordering::Greater,
         }
     }
 }
@@ -1110,6 +1153,7 @@ impl Hash for DataType {
             DataType::Time(ref t) => t.hash(state),
             DataType::ByteArray(ref array) => array.hash(state),
             DataType::Numeric(ref d) => d.hash(state),
+            DataType::BitVector(ref bits) => bits.hash(state),
         }
     }
 }
@@ -1279,6 +1323,29 @@ impl<'a> TryFrom<&'a DataType> for Decimal {
     }
 }
 
+/// Bit vectors are represented as [`BitVec`].
+impl From<BitVec> for DataType {
+    fn from(b: BitVec) -> Self {
+        DataType::BitVector(Arc::new(b))
+    }
+}
+
+impl<'a> TryFrom<&'a DataType> for BitVec {
+    type Error = ReadySetError;
+
+    fn try_from(dt: &'a DataType) -> Result<Self, Self::Error> {
+        match dt {
+            DataType::BitVector(ref bits) => Ok(bits.as_ref().clone()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", dt),
+                src_type: "DataType".to_string(),
+                target_type: "Decimal".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+}
+
 /// Booleans are represented as `u32`s which are equal to either 0 or 1
 impl From<bool> for DataType {
     fn from(b: bool) -> Self {
@@ -1317,6 +1384,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
                 .map(|d| DataType::Numeric(Arc::new(d))),
             Literal::Blob(b) => DataType::try_from(b.as_slice()),
             Literal::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
+            Literal::BitVector(b) => Ok(DataType::from(BitVec::from_bytes(b.as_slice()))),
             Literal::Placeholder(_) => {
                 internal!("Tried to convert a Placeholder literal to a DataType")
             }
@@ -1354,6 +1422,7 @@ impl TryFrom<DataType> for Literal {
             )?)),
             DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
+            DataType::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
         }
     }
 }
@@ -1994,12 +2063,13 @@ impl ToSql for DataType {
             (Self::Timestamp(x), _) => x.to_sql(ty, out),
             (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
+            (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
         }
     }
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR, UUID, JSON, JSONB
+        TIME, TIMESTAMP, MACADDR, UUID, JSON, JSONB, BIT, VARBIT
     );
 
     to_sql_checked!();
@@ -2040,6 +2110,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::JSON | Type::JSONB => Ok(DataType::from(
                 serde_json::Value::from_sql(ty, raw)?.to_string(),
             )),
+            Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
             _ => Err(format!(
                 "Conversion from Postgres type '{}' to DataType is not implemented.",
                 ty
@@ -2054,7 +2125,7 @@ impl<'a> FromSql<'a> for DataType {
 
     accepts!(
         BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR, JSON, JSONB
+        TIME, TIMESTAMP, MACADDR, JSON, JSONB, BIT, VARBIT
     );
 }
 
@@ -2086,6 +2157,7 @@ impl TryFrom<DataType> for mysql_common::value::Value {
                 val.microseconds(),
             )),
             DataType::ByteArray(array) => Ok(Value::Bytes(array.as_ref().clone())),
+            DataType::BitVector(_) => internal!("MySQL does not support bit vector types"),
         }
     }
 }
@@ -2514,8 +2586,7 @@ mod tests {
 
         prop_assume!(match dt {
             DataType::Timestamp(t) if t.date().year() < 1000 || t.date().year() > 9999 => false,
-            DataType::ByteArray(_) => false,
-            DataType::Numeric(_) => false,
+            DataType::ByteArray(_) | DataType::Numeric(_) | DataType::BitVector(_) => false,
             _ => true,
         });
 
@@ -2852,6 +2923,8 @@ mod tests {
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
+        // bits = 000000000000100000100111010111000110010010000000
+        let bits = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
         assert_eq!(format!("{:?}", tiny_text), "TinyText(\"hi\")");
         assert_eq!(format!("{:?}", text), "Text(\"I contain ' and \\\"\")");
         assert_eq!(format!("{:?}", float_from_real), "Float(-0.05, 255)");
@@ -2869,6 +2942,10 @@ mod tests {
             format!("{:?}", bytes),
             "ByteArray([0, 8, 39, 92, 100, 128])"
         );
+        assert_eq!(
+            format!("{:?}", bits),
+            "BitVector(000000000000100000100111010111000110010010000000)"
+        );
     }
 
     #[test]
@@ -2884,6 +2961,8 @@ mod tests {
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
+        // bits = 000000000000100000100111010111000110010010000000
+        let bits = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
         assert_eq!(format!("{}", tiny_text), "hi");
         assert_eq!(format!("{}", text), "this is a very long text indeed");
         assert_eq!(format!("{}", float_from_real), "-8.99");
@@ -2895,6 +2974,10 @@ mod tests {
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
         assert_eq!(format!("{}", bytes), "E'\\x0008275c6480'");
+        assert_eq!(
+            format!("{}", bits),
+            "000000000000100000100111010111000110010010000000"
+        );
     }
 
     fn _data_type_fungibility_test_eq<T>(f: &dyn for<'a> Fn(&'a DataType) -> T)
@@ -2928,6 +3011,8 @@ mod tests {
         let ulong6 = DataType::UnsignedBigInt(6);
         let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
         let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
+        let bits = DataType::BitVector(Arc::new(BitVec::from_bytes("hi".as_bytes())));
+        let bits2 = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
 
         assert_eq!(f(&txt1), f(&txt1));
         assert_eq!(f(&txt2), f(&txt2));
@@ -2943,6 +3028,7 @@ mod tests {
         assert_eq!(f(&double_from_real), f(&double_from_real));
         assert_eq!(f(&time), f(&time));
         assert_eq!(f(&bytes), f(&bytes));
+        assert_eq!(f(&bits), f(&bits));
 
         // coercion
         assert_eq!(f(&txt1), f(&txt2));
@@ -2974,6 +3060,7 @@ mod tests {
         assert_ne!(f(&txt1), f(&ushrt));
         assert_ne!(f(&txt1), f(&ulong));
         assert_ne!(f(&txt1), f(&bytes));
+        assert_ne!(f(&txt1), f(&bits));
 
         assert_ne!(f(&txt2), f(&txt12));
         assert_ne!(f(&txt2), f(&text));
@@ -2988,6 +3075,7 @@ mod tests {
         assert_ne!(f(&txt2), f(&ushrt));
         assert_ne!(f(&txt2), f(&ulong));
         assert_ne!(f(&txt2), f(&bytes));
+        assert_ne!(f(&txt2), f(&bits));
 
         assert_ne!(f(&text), f(&text2));
         assert_ne!(f(&text), f(&txt1));
@@ -3003,6 +3091,7 @@ mod tests {
         assert_ne!(f(&text), f(&ushrt));
         assert_ne!(f(&text), f(&ulong));
         assert_ne!(f(&text), f(&bytes));
+        assert_ne!(f(&text), f(&bits));
 
         assert_ne!(f(&float), f(&float2));
         assert_ne!(f(&float_from_real), f(&float_from_real2));
@@ -3060,6 +3149,7 @@ mod tests {
         assert_ne!(f(&time), f(&ushrt));
         assert_ne!(f(&time), f(&ulong));
         assert_ne!(f(&time), f(&bytes));
+        assert_ne!(f(&time), f(&bits));
 
         assert_ne!(f(&shrt), f(&shrt6));
         assert_ne!(f(&shrt), f(&txt1));
@@ -3069,6 +3159,7 @@ mod tests {
         assert_ne!(f(&shrt), f(&time));
         assert_ne!(f(&shrt), f(&long6));
         assert_ne!(f(&shrt), f(&bytes));
+        assert_ne!(f(&shrt), f(&bits));
 
         assert_ne!(f(&long), f(&long6));
         assert_ne!(f(&long), f(&txt1));
@@ -3089,6 +3180,7 @@ mod tests {
         assert_ne!(f(&ushrt), f(&shrt6));
         assert_ne!(f(&ushrt), f(&long6));
         assert_ne!(f(&ushrt), f(&bytes));
+        assert_ne!(f(&ushrt), f(&bits));
 
         assert_ne!(f(&ulong), f(&ulong6));
         assert_ne!(f(&ulong), f(&txt1));
@@ -3100,6 +3192,7 @@ mod tests {
         assert_ne!(f(&ulong), f(&shrt6));
         assert_ne!(f(&ulong), f(&long6));
         assert_ne!(f(&ulong), f(&bytes));
+        assert_ne!(f(&ulong), f(&bits));
 
         assert_ne!(f(&bytes), f(&ulong));
         assert_ne!(f(&bytes), f(&ulong6));
@@ -3111,7 +3204,20 @@ mod tests {
         assert_ne!(f(&bytes), f(&ushrt6));
         assert_ne!(f(&bytes), f(&shrt6));
         assert_ne!(f(&bytes), f(&long6));
+        assert_ne!(f(&bytes), f(&bits));
         assert_ne!(f(&bytes), f(&bytes2));
+
+        assert_ne!(f(&bits), f(&ulong));
+        assert_ne!(f(&bits), f(&ulong6));
+        assert_ne!(f(&bits), f(&txt1));
+        assert_ne!(f(&bits), f(&txt2));
+        assert_ne!(f(&bits), f(&text));
+        assert_ne!(f(&bits), f(&float_from_real));
+        assert_ne!(f(&bits), f(&time));
+        assert_ne!(f(&bits), f(&ushrt6));
+        assert_ne!(f(&bits), f(&shrt6));
+        assert_ne!(f(&bits), f(&long6));
+        assert_ne!(f(&bits), f(&bits2));
     }
 
     #[test]
@@ -3331,6 +3437,8 @@ mod tests {
         let ulong6 = DataType::UnsignedBigInt(6);
         let bytes = DataType::ByteArray(Arc::new("hi".as_bytes().to_vec()));
         let bytes2 = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 101, 128]));
+        let bits = DataType::BitVector(Arc::new(BitVec::from_bytes("hi".as_bytes())));
+        let bits2 = DataType::BitVector(Arc::new(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128])));
 
         use std::cmp::Ordering;
         assert_eq!(txt1.cmp(&txt1), Ordering::Equal);
@@ -3347,6 +3455,7 @@ mod tests {
         assert_eq!(numeric.cmp(&numeric), Ordering::Equal);
         assert_eq!(time.cmp(&time), Ordering::Equal);
         assert_eq!(bytes.cmp(&bytes), Ordering::Equal);
+        assert_eq!(bits.cmp(&bits), Ordering::Equal);
 
         // coercion
         assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
@@ -3374,6 +3483,7 @@ mod tests {
         assert_ne!(txt1.cmp(&long), Ordering::Equal);
         assert_ne!(txt1.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt1.cmp(&bytes), Ordering::Equal);
+        assert_ne!(txt1.cmp(&bits), Ordering::Equal);
 
         assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
         assert_ne!(txt2.cmp(&text), Ordering::Equal);
@@ -3388,6 +3498,7 @@ mod tests {
         assert_ne!(txt2.cmp(&long), Ordering::Equal);
         assert_ne!(txt2.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt2.cmp(&bytes), Ordering::Equal);
+        assert_ne!(txt2.cmp(&bits), Ordering::Equal);
 
         assert_ne!(text.cmp(&text2), Ordering::Equal);
         assert_ne!(text.cmp(&txt1), Ordering::Equal);
@@ -3403,6 +3514,7 @@ mod tests {
         assert_ne!(text.cmp(&long), Ordering::Equal);
         assert_ne!(text.cmp(&ulong), Ordering::Equal);
         assert_ne!(text.cmp(&bytes), Ordering::Equal);
+        assert_ne!(text.cmp(&bits), Ordering::Equal);
 
         assert_ne!(float.cmp(&float2), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&float_from_real2), Ordering::Equal);
@@ -3472,6 +3584,7 @@ mod tests {
         assert_ne!(time.cmp(&long), Ordering::Equal);
         assert_ne!(time.cmp(&ulong), Ordering::Equal);
         assert_ne!(time.cmp(&bytes), Ordering::Equal);
+        assert_ne!(time.cmp(&bits), Ordering::Equal);
 
         assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ushrt6), Ordering::Equal);
@@ -3487,6 +3600,7 @@ mod tests {
         assert_ne!(shrt.cmp(&long6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(shrt.cmp(&bytes), Ordering::Equal);
+        assert_ne!(shrt.cmp(&bits), Ordering::Equal);
 
         assert_ne!(ushrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ushrt6), Ordering::Equal);
@@ -3502,6 +3616,7 @@ mod tests {
         assert_ne!(ushrt.cmp(&long6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&bytes), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&bits), Ordering::Equal);
 
         assert_ne!(long.cmp(&long6), Ordering::Equal);
         assert_ne!(long.cmp(&ulong6), Ordering::Equal);
@@ -3517,6 +3632,7 @@ mod tests {
         assert_ne!(long.cmp(&shrt6), Ordering::Equal);
         assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(long.cmp(&bytes), Ordering::Equal);
+        assert_ne!(long.cmp(&bits), Ordering::Equal);
 
         assert_ne!(ulong.cmp(&long6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ulong6), Ordering::Equal);
@@ -3532,6 +3648,7 @@ mod tests {
         assert_ne!(ulong.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&bytes), Ordering::Equal);
+        assert_ne!(ulong.cmp(&bits), Ordering::Equal);
 
         assert_ne!(bytes.cmp(&long6), Ordering::Equal);
         assert_ne!(bytes.cmp(&ulong), Ordering::Equal);
@@ -3546,6 +3663,22 @@ mod tests {
         assert_ne!(bytes.cmp(&shrt6), Ordering::Equal);
         assert_ne!(bytes.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(bytes.cmp(&bytes2), Ordering::Equal);
+        assert_ne!(bytes.cmp(&bits), Ordering::Equal);
+
+        assert_ne!(bits.cmp(&long6), Ordering::Equal);
+        assert_ne!(bits.cmp(&ulong), Ordering::Equal);
+        assert_ne!(bits.cmp(&txt1), Ordering::Equal);
+        assert_ne!(bits.cmp(&txt2), Ordering::Equal);
+        assert_ne!(bits.cmp(&text), Ordering::Equal);
+        assert_ne!(bits.cmp(&float), Ordering::Equal);
+        assert_ne!(bits.cmp(&float_from_real), Ordering::Equal);
+        assert_ne!(bits.cmp(&double), Ordering::Equal);
+        assert_ne!(bits.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(bits.cmp(&time), Ordering::Equal);
+        assert_ne!(bits.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(bits.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(bits.cmp(&bytes), Ordering::Equal);
+        assert_ne!(bits.cmp(&bits2), Ordering::Equal);
 
         // Test invariants
         // 1. Text types always > everythign else

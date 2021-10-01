@@ -19,6 +19,7 @@ tracing-futures = "0.2.5"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 hex = "0.4.3"
 rust_decimal = { version = "1.16" }
+bit-vec = { version = "0.6", features = ["serde"] }
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-serde_json-1"] }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-serde_json-1"] }
