@@ -462,6 +462,7 @@ impl Leader {
         for wi in failed {
             info!(worker = ?wi, "handling failure of worker");
             affected_nodes.extend(self.get_failed_nodes(&wi));
+            self.workers.remove(&wi);
         }
 
         // then, figure out which queries are affected (and thus must be removed and added again in
