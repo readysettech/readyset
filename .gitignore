@@ -12,3 +12,4 @@ provider.tf
 *.vi
 *.emacs
 tags
+docker-compose.override.yml
