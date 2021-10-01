@@ -9,6 +9,16 @@ with our AMIs that can be used by Readyset as an authority inside a given VPC.
 `templates/readyset-mysql-template.yaml`: Creates a Readyset cluster of Adapters
 and Servers in separate ASGs inside a given VPC.
 
+# Taskcat
+[Taskcat](https://github.com/aws-quickstart/taskcat) is a tool for testing
+AWS CloudFormation templates. We use it to test our Readyset CloudFormation
+deployments.
+
+Taskcat can be installed via pip.
+```
+pip3 install taskcat --user
+```
+
 # How to test using Taskcat
 
 1. Create a regional bucket for Taskcat to upload in development stacks to. A

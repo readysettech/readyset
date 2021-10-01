@@ -228,8 +228,8 @@ Resources:
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
-          FromPort: 6603
-          ToPort: 6603
+          FromPort: 6033
+          ToPort: 6033
           SourceSecurityGroupId:
             Fn::GetAtt:
             - ReadysetMySQLAdapterSecurityGroup
