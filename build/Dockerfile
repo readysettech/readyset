@@ -32,3 +32,14 @@ RUN apt-get install -y \
 ENV CXX /bin/sccache c++
 
 RUN mkdir -p /root/.sccache
+
+ADD https://github.com/readysettech/flaky-finder/releases/download/v0.0.1/flaky-finder-v0.0.1-x86_64-linux.tar.gz \
+    flaky-finder-v0.0.1-x86_64-linux.tar.gz
+
+RUN tar \
+    -xf flaky-finder-v0.0.1-x86_64-linux.tar.gz \
+    -C /bin
+
+RUN chmod a+x /bin/flaky-finder
+
+
