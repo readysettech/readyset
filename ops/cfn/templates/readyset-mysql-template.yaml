@@ -239,6 +239,15 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+  # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
+  ReadySetServerSecurityGroupIngressControllerRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      GroupId: !Ref ReadysetServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6033
+      ToPort: 6033
+      SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup 
   ReadysetServerSecurityGroupIngressWorkerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
