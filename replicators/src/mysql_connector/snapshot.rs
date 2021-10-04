@@ -210,7 +210,9 @@ impl MySqlReplicator {
         // Read the list of tables and views
         let tables = load_table_list(&mut tx, TableKind::BaseTable).await?;
         let views = load_table_list(&mut tx, TableKind::View).await?;
-        lock_tables(&mut tx, tables.into_iter().chain(views)).await?;
+        if !tables.is_empty() || !views.is_empty() {
+            lock_tables(&mut tx, tables.into_iter().chain(views)).await?;
+        }
         debug!("Acquired table read locks");
         // Get current binlog position, since all table are locked no action can take place that would
         // advance the binlog *and* affect the tables
