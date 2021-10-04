@@ -13,17 +13,6 @@ pub mod futures;
 pub mod hash;
 pub mod intervals;
 
-/// If `a` is `Some`, wrap it in `Ok`. If `a` is `None`, run `b` and return it.
-pub fn or_else_result<T, E, F>(a: Option<T>, b: F) -> Result<Option<T>, E>
-where
-    F: FnOnce() -> Result<Option<T>, E>,
-{
-    match a {
-        Some(a) => Ok(Some(a)),
-        None => b(),
-    }
-}
-
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]

@@ -17,7 +17,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 
-use crate::rewrite;
+use crate::rewrite::{self, explode_params, RewrittenIn};
 use crate::utils;
 
 use crate::backend::SelectSchema;
@@ -31,12 +31,12 @@ use tracing::{error, info, trace};
 type StatementID = u32;
 
 #[derive(Clone)]
-pub enum PreparedStatement {
+pub(crate) enum PreparedStatement {
     Select {
         name: String,
         statement: nom_sql::SelectStatement,
         key_column_indices: Vec<usize>,
-        rewritten_columns: Option<(usize, usize)>,
+        rewritten_in_conditions: Vec<RewrittenIn>,
     },
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
@@ -916,7 +916,7 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let rewritten = rewrite::collapse_where_in(&mut sql_q)?;
+        let rewritten_in_conditions = rewrite::collapse_where_in(&mut sql_q)?;
         let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
             q
         } else {
@@ -953,7 +953,7 @@ impl NoriaConnector {
             name: qname,
             statement: q,
             key_column_indices,
-            rewritten_columns: rewritten.map(|(a, b)| (a, b.len())),
+            rewritten_in_conditions,
         };
         self.prepared_statement_cache.insert(statement_id, ps);
         Ok(PrepareResult::Select {
@@ -981,43 +981,25 @@ impl NoriaConnector {
                 name,
                 statement: q,
                 key_column_indices,
-                rewritten_columns: rewritten,
+                rewritten_in_conditions,
             } => {
                 trace!("apply where-in rewrites");
-                let keys = match rewritten {
-                    Some((first_rewritten, nrewritten)) => {
-                        // this is a little tricky
-                        // the user is giving us some params [a, b, c, d]
-                        // for the query WHERE x = ? AND y IN (?, ?) AND z = ?
-                        // that we rewrote to WHERE x = ? AND y = ? AND z = ?
-                        // so we need to turn that into the keys:
-                        // [[a, b, d], [a, c, d]]
-                        if params.is_empty() {
-                            return Err(ReadySetError::EmptyKey);
-                        }
-                        (0..*nrewritten)
-                            .map(|poffset| {
-                                params
-                                    .iter()
-                                    .take(*first_rewritten)
-                                    .chain(params.iter().skip(first_rewritten + poffset).take(1))
-                                    .chain(params.iter().skip(first_rewritten + nrewritten))
-                                    .cloned()
-                                    .collect()
-                            })
-                            .collect()
-                    }
-                    None => {
-                        if !params.is_empty() {
-                            vec![params]
-                        } else {
-                            vec![]
-                        }
-                    }
-                };
-
                 return self
-                    .do_read(name, q, keys, key_column_indices, ticket)
+                    .do_read(
+                        name,
+                        q,
+                        explode_params(params, rewritten_in_conditions)
+                            .collect::<Result<Vec<_>, _>>()?,
+                        // key_column_indices has not been rewritten for the collapsing of IN yet
+                        // (since it was used to communicate the params back to the client, which
+                        // doesn't know about IN collapsing), so we have to do that here
+                        explode_params(key_column_indices.to_vec(), rewritten_in_conditions)
+                            .next()
+                            .transpose()?
+                            .map_or(Cow::Borrowed(key_column_indices), Cow::Owned)
+                            .as_ref(),
+                        ticket,
+                    )
                     .await;
             }
             _ => {
