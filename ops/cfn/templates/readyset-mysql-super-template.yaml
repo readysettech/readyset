@@ -202,6 +202,13 @@ Resources:
         - !GetAtt VPCStack.Outputs.PrivateSubnet1AID
         - !GetAtt VPCStack.Outputs.PrivateSubnet2AID
         - !GetAtt VPCStack.Outputs.PrivateSubnet3AID
+  ReadySetRDSParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: "ReadySet RDS MySQL Parameter Group"
+      Family: "mysql8.0"
+      Parameters:
+        binlog_format: ROW
   MySQLDatabaseInstance:
     Type: "AWS::RDS::DBInstance"
     Properties:
@@ -215,6 +222,7 @@ Resources:
       MasterUserPassword: !Ref DatabasePassword
       VPCSecurityGroups:
         - !Ref ReadysetRDSSecurityGroup
+      DBParameterGroupName: !Ref ReadySetRDSParameterGroup
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
