@@ -579,6 +579,33 @@ fn select_collapse_where_in() {
 }
 
 #[test]
+fn multiple_in() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255))")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (1, \"Robert\")")
+        .unwrap();
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (2, \"Jane\")")
+        .unwrap();
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (2, \"Janeway\")")
+        .unwrap();
+    sleep();
+
+    let names: Vec<(String,)> = conn
+        .exec(
+            "SELECT name from Cats where id in (?, ?) and name in (?, ?)",
+            (1, 2, "Bob", "Jane"),
+        )
+        .unwrap();
+
+    assert_eq!(names, vec![("Bob".to_owned(),), ("Jane".to_owned(),)]);
+}
+
+#[test]
 fn basic_select() {
     let mut conn = mysql::Conn::new(setup(true)).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
