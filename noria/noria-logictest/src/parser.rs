@@ -22,7 +22,8 @@ use nom::character::complete::{
 use nom::character::is_space;
 use nom::{
     alt, char, complete, count, do_parse, eof, flat_map, many0, many1, many_till, map, map_opt,
-    named, one_of, opt, parse_to, peek, preceded, tag, take_while, take_while1, terminated,
+    named, one_of, opt, parse_to, peek, preceded, recognize, tag, take_while, take_while1,
+    terminated,
 };
 
 named!(
@@ -173,15 +174,14 @@ named!(
 
 named!(
     float<Value>,
-    do_parse!(
-        sign: opt!(tag!("-"))
-            >> whole: flat_map!(digit1, parse_to!(i64))
-            >> tag!(".")
-            >> fractional: flat_map!(digit1, parse_to!(u32))
-            >> (Value::Real(
-                if sign.is_some() { -whole } else { whole },
-                (fractional as u64) * 100_000_000
-            ))
+    map!(
+        flat_map!(
+            recognize!(do_parse!(
+                opt!(tag!("-")) >> digit1 >> tag!(".") >> digit1 >> (())
+            )),
+            parse_to!(f64)
+        ),
+        |f| Value::from(f)
     )
 );
 
@@ -827,5 +827,12 @@ SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END
                 params: Default::default(),
             })]
         );
+    }
+
+    #[test]
+    fn float_trailing_zeros() {
+        let input = b"0.7500";
+        let expected = Value::from(0.75_f64);
+        assert_eq!(complete(float)(input).unwrap().1, expected);
     }
 }
