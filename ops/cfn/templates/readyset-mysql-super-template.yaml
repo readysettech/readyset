@@ -179,16 +179,42 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
+  ReadysetRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to the RDS from inside the VPC
+      VpcId: !GetAtt VPCStack.Outputs.VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VPCCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: "Include RDS in VPC"
+      SubnetIds: 
+        - !GetAtt VPCStack.Outputs.PrivateSubnet1AID
+        - !GetAtt VPCStack.Outputs.PrivateSubnet2AID
+        - !GetAtt VPCStack.Outputs.PrivateSubnet3AID
   MySQLDatabaseInstance:
     Type: "AWS::RDS::DBInstance"
     Properties:
       Engine: "mysql"
       DBInstanceClass: db.m5.large
+      DBSubnetGroupName: !Ref RDSSubnetGroup
       AllocatedStorage: !Ref DatabaseAllocatedStorage
       StorageType: !Ref DatabaseStorageType
       DBName: !Ref DatabaseName
       MasterUsername: !Ref DatabaseUsername
       MasterUserPassword: !Ref DatabasePassword
+      VPCSecurityGroups:
+        - !Ref ReadysetRDSSecurityGroup
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
