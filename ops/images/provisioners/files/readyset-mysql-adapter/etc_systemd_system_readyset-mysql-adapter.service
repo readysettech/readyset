@@ -6,6 +6,8 @@ Description=ReadySet MySQL Adapter
 ExecStart=/usr/local/bin/readyset-mysql-adapter --allow-unauthenticated-connections --address 0.0.0.0:3306 --prometheus-metrics --authority consul
 EnvironmentFile=/etc/default/readyset-mysql-adapter
 Restart=on-failure
+RestartSec=1
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

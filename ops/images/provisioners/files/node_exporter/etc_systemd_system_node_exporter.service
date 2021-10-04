@@ -11,7 +11,7 @@ ExecStart=/usr/local/bin/node_exporter
 SyslogIdentifier=node_exporter
 Restart=always
 RestartSec=1
-StartLimitInterval=0
+StartLimitIntervalSec=0
 
 ProtectHome=yes
 NoNewPrivileges=yes
