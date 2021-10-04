@@ -903,29 +903,24 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_select(
         &mut self,
-        mut sql_q: nom_sql::SqlQuery,
+        mut statement: nom_sql::SelectStatement,
         statement_id: u32,
     ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns
         // note that we have to do this *before* collapsing WHERE IN, otherwise the
         // client will be confused about the number of parameters it's supposed to
         // give.
-        let param_columns: Vec<_> = utils::get_parameter_columns(&sql_q)
+        let param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
             .into_iter()
             .cloned()
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let rewritten_in_conditions = rewrite::collapse_where_in(&mut sql_q)?;
-        let q = if let nom_sql::SqlQuery::Select(q) = sql_q {
-            q
-        } else {
-            internal!();
-        };
+        let rewritten_in_conditions = rewrite::collapse_where_in(&mut statement)?;
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self.get_or_create_view(&q, true).await?;
+        let qname = self.get_or_create_view(&statement, true).await?;
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
@@ -951,7 +946,7 @@ impl NoriaConnector {
         trace!(id = statement_id, "select::registered");
         let ps = PreparedStatement::Select {
             name: qname,
-            statement: q,
+            statement,
             key_column_indices,
             rewritten_in_conditions,
         };
