@@ -535,10 +535,7 @@ where
         });
 
         handle = event.start_timer();
-        let noria_res = self
-            .noria
-            .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
-            .await;
+        let noria_res = self.noria.prepare_select(q, self.prepared_count).await;
 
         match noria_res {
             Ok(_) => {
@@ -709,11 +706,7 @@ where
         q: nom_sql::SelectStatement,
         query: &str,
     ) -> Result<PrepareResult<DB>, DB::Error> {
-        match self
-            .noria
-            .prepare_select(nom_sql::SqlQuery::Select(q), self.prepared_count)
-            .await
-        {
+        match self.noria.prepare_select(q, self.prepared_count).await {
             Ok(res) => Ok(PrepareResult::Noria(res)),
             Err(e) => {
                 if self.upstream.is_some() {
