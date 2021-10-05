@@ -2,7 +2,6 @@
 #![deny(macro_use_extern_crate)]
 
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
@@ -21,6 +20,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::{QueryHandler, UpstreamDatabase};
 use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 use tokio::net;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, span, Level};
@@ -298,8 +298,6 @@ where
                     let mut upstream = H::UpstreamDatabase::connect(url).await?;
                     let schema = upstream.schema_dump().await?;
                     let mut header = tokio_tar::Header::new_gnu();
-                    header.set_size(schema.len().try_into()?);
-                    header.set_cksum();
                     tar.append_data(&mut header, "schema.sql", schema.as_slice())
                         .await?;
                     Ok(())
@@ -311,11 +309,19 @@ where
 
             let qci = query_coverage_info.unwrap().serialize()?;
             let mut header = tokio_tar::Header::new_gnu();
-            header.set_size(qci.len().try_into()?);
-            header.set_cksum();
-            rt.block_on(tar.append_data(&mut header, "query-info.json", qci.as_ref()))?;
-
-            rt.block_on(tar.finish())?;
+            let result: Result<(), anyhow::Error> = rt.block_on(async {
+                tar.append_data(&mut header, "query-info.json", qci.as_slice())
+                    .await?;
+                let mut gz = tar.into_inner().await?;
+                gz.shutdown().await?;
+                let mut file = gz.into_inner();
+                file.flush().await?;
+                file.sync_all().await?;
+                Ok(())
+            });
+            if let Err(e) = result {
+                error!("Failed to write query info: {}", e);
+            }
         }
 
         drop(ch);
