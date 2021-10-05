@@ -1,5 +1,7 @@
 locals {
   stack_name = "buildkite-${var.buildkite_queue}"
+
+  stack_version = "5.7.2"
 }
 
 data "aws_vpc" "vpc" {
@@ -24,7 +26,7 @@ resource "aws_cloudformation_stack" "main" {
   name = local.stack_name
 
   # TODO: Upgrade this to latest when possible
-  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/v5.5.1/aws-stack.yml"
+  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/v${local.stack_version}/aws-stack.yml"
 
   capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
   parameters = {
