@@ -30,3 +30,9 @@ services:
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - ./grafana/provisioning:/etc/grafana/provisioning
+  vector:
+    image: timberio/vector:0.16.1-debian
+    ports: 
+      - 8383:9000
+    volumes:
+      - ./vector/aggregator.toml:/etc/vector/vector.toml
