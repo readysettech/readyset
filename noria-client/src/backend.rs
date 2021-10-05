@@ -827,8 +827,21 @@ where
             nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::RenameTable(..) => {
-                error!("unsupported query");
-                unsupported!("query type unsupported");
+                match self.upstream {
+                    Some(ref mut upstream) if self.mirror_reads => {
+                        // Mirror reads is enabled. That means that we can simply prepare against
+                        // upstream. All read results will always be returned from upstream in this
+                        // mode anyways.
+                        upstream.prepare(query).await.map(|r| {
+                            handle.set_upstream_duration();
+                            PrepareResult::Upstream(r)
+                        })
+                    }
+                    _ => {
+                        error!("unsupported query");
+                        unsupported!("query type unsupported");
+                    }
+                }
             }
         };
 
