@@ -69,6 +69,7 @@ Mappings:
       # short commit id associated with AMIs: 3ce7621
       READYSETMYSQLADAPTER: ami-00766736074b7efc2
       READYSETSERVER: ami-0471aa1298712fab7
+      LOGSAGGREGATOR: ami-0dd25fd72d9b1b415
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadysetMySQLAdapterRole:

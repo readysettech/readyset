@@ -327,7 +327,7 @@ steps:
     - 'echo +++ :buildkite: Downloading binary artifacts'
     - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server .
+    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server,amazon-ebs.readyset-vector-aggregator .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:

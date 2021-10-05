@@ -1,0 +1,9 @@
+[sources.in]
+type = "vector"
+address = "0.0.0.0:9000"
+
+[sinks.out]
+inputs = ["in"]
+type = "console"
+target = "stdout"
+encoding.codec = "text"
