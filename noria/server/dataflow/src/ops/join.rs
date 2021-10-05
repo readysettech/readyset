@@ -4,7 +4,7 @@ use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::mem;
+use std::{iter, mem};
 use vec1::{vec1, Vec1};
 
 use super::Side;
@@ -422,6 +422,16 @@ impl Ingredient for Join {
                 .indices(from_key.clone())
                 .map_err(|_| ReadySetError::InvalidRecordLength)?;
 
+            // [note: null-join-keys]
+            // The semantics of NULL in SQL are tri-state - while obviously `1 = 1`, it is *not* the
+            // case that `null = null`. Usually this is irrelevant for lookups into state since it's
+            // impossible to upquery for null keys (since IS and IS NOT can't be parametrized,
+            // syntatically), but we *do* have to have an extra case here in the case of join
+            // lookups - two NULL join keys should *not* match each other in the semantics of the
+            // join, even though they *would* match normally due to the semantics of the DataType
+            // type.
+            let nulls = prev_join_key.iter().any(|dt| dt.is_none());
+
             if from == *self.right && self.kind == JoinType::Left {
                 let rc = self
                     .lookup(
@@ -443,7 +453,7 @@ impl Ingredient for Join {
                     .unwrap();
 
                 if let Some(rc) = rc {
-                    if replay_key_cols.is_some() {
+                    if replay_key_cols.is_some() && !nulls {
                         lookups.push(Lookup {
                             on: *self.right,
                             cols: self.on_right(),
@@ -484,8 +494,11 @@ impl Ingredient for Join {
             }
 
             // get rows from the other side
-            let mut other_rows = self
-                .lookup(
+            let mut other_rows = if nulls {
+                // see [note: null-join-keys]
+                Some(Box::new(iter::empty()) as _)
+            } else {
+                self.lookup(
                     other,
                     &other_key,
                     &KeyType::from(prev_join_key.clone()),
@@ -501,7 +514,8 @@ impl Ingredient for Join {
                         LookupMode::Weak
                     },
                 )
-                .unwrap();
+                .unwrap()
+            };
 
             if other_rows.is_none() {
                 // we missed in the other side!
@@ -536,7 +550,7 @@ impl Ingredient for Join {
                 continue;
             }
 
-            if replay_key_cols.is_some() {
+            if replay_key_cols.is_some() && !nulls {
                 lookups.push(Lookup {
                     on: other,
                     cols: other_key.clone(),
@@ -1078,6 +1092,46 @@ mod tests {
         j.seed(r, r_v4.clone());
         let rs = j.one_row(r, r_v4, false);
         assert_eq!(rs.len(), 0);
+    }
+
+    #[test]
+    fn nulls_from_left() {
+        let (mut j, l, r) = setup();
+
+        let r_1x = vec![1.into(), "x".try_into().unwrap()];
+        j.seed(r, r_1x.clone());
+        j.one_row(r, r_1x, false);
+
+        let r_nullx = vec![DataType::None, "y".try_into().unwrap()];
+        j.seed(r, r_nullx.clone());
+        j.one_row(r, r_nullx, false);
+
+        let l_nulla = vec![DataType::None, "a".try_into().unwrap()];
+
+        j.seed(l, l_nulla.clone());
+        let rs = j.one_row(l, l_nulla, false);
+        assert_eq!(
+            rs,
+            vec![(
+                vec![DataType::None, "a".try_into().unwrap(), DataType::None],
+                true
+            )]
+            .into()
+        );
+    }
+
+    #[test]
+    fn nulls_from_right() {
+        let (mut j, l, r) = setup();
+
+        let l_nulla = vec![DataType::None, "a".try_into().unwrap()];
+        j.seed(l, l_nulla.clone());
+        j.one_row(l, l_nulla, false);
+
+        let r_nullx = vec![DataType::None, "y".try_into().unwrap()];
+        j.seed(r, r_nullx.clone());
+        let rs = j.one_row(r, r_nullx, false);
+        assert_eq!(rs, Records::default());
     }
 
     #[test]
