@@ -8,6 +8,8 @@ use noria::errors::ReadySetResult;
 use noria::{internal, KeyComparison, PacketData, ReadySetError, ReplicationOffset};
 use std::collections::{HashMap, HashSet};
 use std::mem;
+use tracing::debug_span;
+use tracing::trace;
 
 /// The results of running a forward pass on a node
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -117,6 +119,10 @@ impl Node {
     ) -> ReadySetResult<NodeProcessingResult> {
         let addr = self.local_addr();
         let gaddr = self.global_addr();
+
+        let span = debug_span!("node:process", local = %addr, global = %gaddr.index());
+        let _guard = span.enter();
+
         match self.inner {
             NodeType::Ingress => {
                 let m = m.as_mut().unwrap();
@@ -205,6 +211,14 @@ impl Node {
                             ..
                         } => {
                             invariant!(keyed_by.is_some());
+                            trace!(
+                                ?data,
+                                ?for_keys,
+                                requesting_shard,
+                                unishard,
+                                %tag,
+                                "received partial replay"
+                            );
                             (
                                 data,
                                 ReplayContext::Partial {
@@ -220,8 +234,14 @@ impl Node {
                             ref mut data,
                             context: payload::ReplayPieceContext::Regular { last },
                             ..
-                        } => (data, ReplayContext::Full { last }),
-                        Packet::Message { ref mut data, .. } => (data, ReplayContext::None),
+                        } => {
+                            trace!(?data, last, "received full replay");
+                            (data, ReplayContext::Full { last })
+                        }
+                        Packet::Message { ref mut data, .. } => {
+                            trace!(?data, "received regular message");
+                            (data, ReplayContext::None)
+                        }
                         _ => {
                             // TODO: Scoped for a future refactor:
                             // https://readysettech.atlassian.net/browse/ENG-455
