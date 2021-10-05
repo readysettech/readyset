@@ -112,6 +112,10 @@ Parameters:
     Type: String
     Description: Number of server nodes to create
     Default: 3
+  ReadysetLogsAggregatorInstanceType:
+    Type: String
+    Description: The EC2 instance type to use for the logs aggregation instance.
+    Default: t3.small
   DatabaseStorageType:
     Description: Database storage type
     Type: String
@@ -235,6 +239,7 @@ Resources:
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
         DatabasePassword: !Ref DatabasePassword
+        ReadysetLogsAggregatorInstanceType: !Ref ReadysetLogsAggregatorInstanceType
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:

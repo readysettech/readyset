@@ -13,6 +13,10 @@ Parameters:
     Type: String
     Description: The EC2 instance type to use for server instances.
     Default: t3.small
+  ReadysetLogsAggregatorInstanceType:
+    Type: String
+    Description: The EC2 instance type to use for the logs aggregation instance.
+    Default: t3.small
   ReadysetAdapterNodes:
     Type: String
     Description: Number of Adapter nodes to create
@@ -337,6 +341,82 @@ Resources:
         Count: !Ref ReadysetServerNodes
         Timeout: PT20M
   # --- END SERVER --- #
+  # --- START LOGS AGGREGATOR --- #
+  ReadysetLogsAggregatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - !Ref ConsulJoinManagedPolicyArn
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: ec2.amazonaws.com
+            Effect: Allow
+            Sid: ""
+  ReadysetLogsAggregatorProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ReadysetLogsAggregatorRole
+  ReadysetLogsAggregatorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to and from the aggregator within the VPC.
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  ReadysetLogsAggregatorInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref ReadysetLogsAggregatorInstanceType
+      SubnetId: !Ref PrivateSubnet1ID
+      SecurityGroupIds:
+        - !Ref ReadysetLogsAggregatorSecurityGroup
+      KeyName: !Ref KeyPairName
+      ImageId: !FindInMap
+          - AWSAMIRegionMap
+          - !Ref "AWS::Region"
+          - LOGSAGGREGATOR
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref "AWS::StackName", "Logs-Aggregator"]]
+      IamInstanceProfile: !Ref ReadysetLogsAggregatorProfile
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+            MIME-Version: 1.0
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            #!/bin/bash -v
+            set -eu -o pipefail
+            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadysetServerASG"
+            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
+            export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
+            exec /usr/local/bin/user-data-init.sh
+            --==BOUNDARY==
+          - {}
+  # --- END LOGS AGGREGATOR --- #
 Outputs:
   ReadysetDBSecurityGroup:
     Value: !Ref ReadysetDBSecurityGroup
