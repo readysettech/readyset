@@ -13,8 +13,8 @@ on_error() {
 trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
-
 /usr/local/bin/configure-consul-client.sh
+/usr/local/bin/configure-vector.sh
 
 cat > /etc/default/readyset-mysql-adapter <<EOF
 MYSQL_URL=${MYSQL_URL}

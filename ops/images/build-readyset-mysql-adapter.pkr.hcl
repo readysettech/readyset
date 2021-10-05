@@ -17,6 +17,16 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/vector-agent"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "provisioners/files/vector"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "provisioners/files/readyset-mysql-adapter"
     destination = "/tmp/"
   }
@@ -34,6 +44,9 @@ build {
       "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/consul-client/00-init.sh",
       "provisioners/scripts/consul-client/10-aws.sh",
+      "provisioners/scripts/vector-agent/00-init.sh",
+      "provisioners/scripts/vector/00-init.sh",
+      "provisioners/scripts/vector/10-aws.sh",
       "provisioners/scripts/readyset-mysql-adapter/00-init.sh",
       "provisioners/scripts/readyset-mysql-adapter/10-aws.sh",
     ]

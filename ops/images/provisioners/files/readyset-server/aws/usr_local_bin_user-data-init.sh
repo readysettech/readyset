@@ -13,8 +13,8 @@ on_error() {
 trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
-
 /usr/local/bin/configure-consul-client.sh
+/usr/local/bin/configure-vector.sh
 
 mkdir -p /var/lib/readyset-server
 # TODO: Maintain state in a separate EBS volume

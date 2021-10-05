@@ -1,0 +1,17 @@
+[sources.in]
+type = "journald"
+include_units = [ "readyset-server", "readyset-mysql-adapter" ]
+
+[transforms.metadata]
+type = "remap"
+inputs = ["in"]
+source = """
+  del(.timestamp)
+"""
+
+[sinks.out]
+inputs = ["metadata"]
+type = "vector"
+address = "0.0.0.0:8383"
+version = "1"
+
