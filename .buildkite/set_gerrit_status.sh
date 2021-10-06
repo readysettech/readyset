@@ -54,6 +54,7 @@ body="{
 url="https://gerrit.readyset.name/a/changes/$GERRIT_CHANGE_ID/revisions/$GERRIT_PATCHSET/review"
 
 curl \
+    --retry 3 \
     -v \
     -X POST \
     --fail-with-body \
