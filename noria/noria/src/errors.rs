@@ -66,11 +66,6 @@ pub enum ReadySetError {
         statement: String,
     },
 
-    /// Query fallback failed because mysql_connector is not present. This error
-    /// would indicate a bug if seen.
-    #[error("Fallback failed because mysql_connector is not present")]
-    FallbackNoConnector,
-
     /// Could not connect to the mysql database provided
     #[error("Could not connect to the mysql database provided")]
     InvalidMySqlDatabase,

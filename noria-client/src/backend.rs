@@ -363,11 +363,9 @@ where
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
     pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
-        let upstream = self
-            .upstream
-            .as_mut()
-            .ok_or(ReadySetError::FallbackNoConnector)?;
-
+        let upstream = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This case requires an upstream connector".to_string())
+        })?;
         upstream.query(query).await.map(QueryResult::Upstream)
     }
 
@@ -377,10 +375,9 @@ where
         &mut self,
         query: nom_sql::SqlQuery,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        let upstream = self
-            .upstream
-            .as_mut()
-            .ok_or(ReadySetError::FallbackNoConnector)?;
+        let upstream = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This case requires an upstream connector".to_string())
+        })?;
 
         match query {
             nom_sql::SqlQuery::StartTransaction(_) => {
@@ -401,10 +398,9 @@ where
         &mut self,
         query: &str,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
-        let upstream = self
-            .upstream
-            .as_mut()
-            .ok_or(ReadySetError::FallbackNoConnector)?;
+        let upstream = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This case requires an upstream connector".to_string())
+        })?;
         upstream.prepare(query).await
     }
 
@@ -523,10 +519,9 @@ where
         query: &str,
         event: &mut MaybePrepareEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
-        let connector = self
-            .upstream
-            .as_mut()
-            .ok_or(ReadySetError::FallbackNoConnector)?;
+        let connector = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This case requires an upstream connector".to_string())
+        })?;
         let mut handle = event.start_timer();
 
         let upstream_res = connector.prepare(query).await.map(|r| {
@@ -558,12 +553,9 @@ where
         params: Vec<DataType>,
         event: &mut MaybeExecuteEvent,
     ) -> Result<QueryResult<DB>, DB::Error> {
-        let upstream = match self.upstream.as_mut() {
-            Some(u) => u,
-            None => {
-                return Err(ReadySetError::FallbackNoConnector.into());
-            }
-        };
+        let upstream = self.upstream.as_mut().ok_or_else(|| {
+            ReadySetError::Internal("This condition requires an upstream connector".to_string())
+        })?;
         let handle = event.start_timer();
         upstream
             .execute(upstream_statement_id, params)
