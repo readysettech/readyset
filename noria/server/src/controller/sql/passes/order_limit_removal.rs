@@ -1,5 +1,6 @@
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery, TableKey,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, SqlQuery, Table,
+    TableKey,
 };
 use noria::{ReadySetError, ReadySetResult};
 use std::collections::HashMap;
@@ -19,6 +20,7 @@ pub trait OrderLimitRemoval: Sized {
 fn is_unique_or_primary(
     col: &Column,
     base_schemas: &HashMap<String, CreateTableStatement>,
+    tables: &[Table],
 ) -> ReadySetResult<bool> {
     // This assumes that we will find exactly one table matching col.table and exactly one col
     // matching col.name. The pass also assumes that col will always have an associated table.
@@ -31,9 +33,32 @@ fn is_unique_or_primary(
             "All columns must have an associated table name at this point".to_string(),
         )
     })?;
-    let table = base_schemas.get(table_name).ok_or_else(|| {
-        ReadySetError::Internal("Table name must match table in base schema".to_string())
-    })?;
+
+    let table = match base_schemas.get(table_name) {
+        None => {
+            // Attempt to resolve alias. Most queries are not likely to do this, so we resolve
+            // reactively
+            let err_str = "Table name must match table in base schema".to_string();
+            let table_name = tables
+                .iter()
+                .find_map(|table| {
+                    if let Some(_alias) = table.alias.as_ref() {
+                        if table_name == _alias {
+                            Some(&table.name)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| ReadySetError::Internal(err_str.clone()))?;
+            base_schemas
+                .get(table_name)
+                .ok_or(ReadySetError::Internal(err_str))?
+        }
+        Some(table) => table,
+    };
 
     // check to see if column is in table.keys (and whether we have a compound primary key)
     let col_in_keys = if let Some(ref keys) = table.keys {
@@ -69,6 +94,7 @@ fn is_unique_or_primary(
 fn compares_unique_key_against_literal(
     expr: &Expression,
     base_schemas: &HashMap<String, CreateTableStatement>,
+    tables: &[Table],
 ) -> ReadySetResult<bool> {
     match expr {
         Expression::BinaryOp {
@@ -80,13 +106,15 @@ fn compares_unique_key_against_literal(
             lhs: box Expression::Column(ref c),
             rhs: box Expression::Literal(_),
             op: BinaryOperator::Equal | BinaryOperator::Is,
-        } => Ok(is_unique_or_primary(c, base_schemas)?),
+        } => Ok(is_unique_or_primary(c, base_schemas, tables)?),
         Expression::BinaryOp {
             op: BinaryOperator::And,
             ref lhs,
             ref rhs,
-        } => Ok(compares_unique_key_against_literal(lhs, base_schemas)?
-            || compares_unique_key_against_literal(rhs, base_schemas)?),
+        } => Ok(
+            compares_unique_key_against_literal(lhs, base_schemas, tables)?
+                || compares_unique_key_against_literal(rhs, base_schemas, tables)?,
+        ),
         // TODO(DAN): it may be possible to determine that a query will return a single (or no)
         // resut if it has a nested select in the conditional
         _ => Ok(false),
@@ -105,7 +133,7 @@ impl OrderLimitRemoval for SqlQuery {
                 return Ok(self);
             }
             if let Some(ref expr) = stmt.where_clause {
-                if compares_unique_key_against_literal(expr, base_schemas)? {
+                if compares_unique_key_against_literal(expr, base_schemas, &stmt.tables)? {
                     stmt.limit = None;
                     stmt.order = None;
                     return Ok(self);
@@ -270,6 +298,12 @@ mod tests {
     fn primary_key_clause() {
         // condition on unique key, when the constraints field is empty
         removes_limit_order("SELECT t.c1 FROM t WHERE t.c4 = 1 ORDER BY c1 ASC LIMIT 10")
+    }
+
+    #[test]
+    fn primary_key_with_table_alias() {
+        // condition on primary key with table alias
+        removes_limit_order("SELECT p.c1 FROM t as p where p.c1 = 1 ORDER BY c1 ASC LIMIT 10")
     }
 
     #[test]
