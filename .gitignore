@@ -13,3 +13,4 @@ provider.tf
 *.emacs
 tags
 docker-compose.override.yml
+ops/cfn/templates/dev.yaml

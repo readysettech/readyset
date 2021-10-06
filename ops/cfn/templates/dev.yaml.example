@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Resources:
+  ReadysetStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      Parameters:
+        AccessCIDR: <CIDR including machine to SSH from>
+        AvailabilityZones: !Join [",", [us-east-2a, us-east-2b, us-east-2c]]
+        DatabaseAllocatedStorage: "20"
+        DatabaseName: devtestdb
+        DatabasePassword: testnoria
+        DatabaseUsername: root
+        DeploymentName: devdeployment
+        KeyPairName: <Key pair to ssh with>
+        ReadysetAdapterNodes: 1
+        ReadysetS3BucketName: <s3 bucket with templates>
+        ReadysetServerNodes: 1
+      TemplateURL: "https://<s3 bucket with templates>.s3.<s3 bucket region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml"
