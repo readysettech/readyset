@@ -294,6 +294,16 @@ where
                             ).ok_or_else(|| internal_err("grouped operators must have their parents' state materialized"))?
                             {
                                 None => {
+                                    // We missed in our parent! This is fine, we can just emit a
+                                    // miss and drop the write like normal.
+                                    //
+                                    // Note that despite what you may think (and what we thought
+                                    // originally), this *doesn't* need to do any downstream
+                                    // evictions the way joins do (see [note:
+                                    // downstream-join-evictions] for more about that). This is
+                                    // because if we miss, that means our child *can't* have this
+                                    // key, so any update we'd emit would hit a hole anyway! See
+                                    // also: https://readysettech.atlassian.net/browse/ENG-471
                                     let rs = group_rs
                                         .map(|r| {
                                             Ok(Miss {
