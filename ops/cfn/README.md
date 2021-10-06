@@ -34,7 +34,6 @@ general:
     KeyPairName: <Name of AWS keypair from step 2>
     ReadysetS3BucketName: <Bucket Name created in step 1>
     AccessCIDR: <CIDR that you will be able to SSH to the Bastion Host from>
-    DatabaseName: <Name of Database created in RDS>
 ```
 3. Run `taskcat test run` from this directory. You can watch some progress from
     the console but otherwise you can now look at things in the AWS console as

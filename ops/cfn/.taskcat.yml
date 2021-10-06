@@ -2,13 +2,14 @@ project:
   name: readyset
   package_lambda: false
 tests:
-  readyset:
+  readyset-mysql-with-vpc:
     parameters:
       ReadysetAdapterNodes: 3
       ReadysetServerNodes: 3
       AvailabilityZones: $[taskcat_genaz_3]
-      DatabaseUsername: $[taskcat_random-string]
-      DatabasePassword: $[taskcat_genpass_16S]
+      DatabaseUsername: readyset
+      DatabasePassword: readyset
+      DatabaseName: readyset
       DatabaseStorageType: gp2
       DatabaseAllocatedStorage: 20
     template: templates/readyset-mysql-super-template.yaml

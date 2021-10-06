@@ -1,0 +1,109 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: New RDS DB Instance configured for Readyset
+Parameters:
+  PrivateSubnet1ID:
+    Description: "ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  PrivateSubnet2ID:
+    Description: "ID of the private subnet 2 in Availability Zone 2 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  PrivateSubnet3ID:
+    Description: "ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)"
+    Type: "AWS::EC2::Subnet::Id"
+  VPCID:
+    Description: VPC ID
+    Type: "AWS::EC2::VPC::Id"
+  VPCCIDR:
+    AllowedPattern: >-
+      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Description: CIDR block for the VPC
+    Type: String
+  DatabaseStorageType:
+    Description: Database storage type
+    Type: String
+    Default: gp2
+  DatabaseInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.m5.large
+  DatabaseAllocatedStorage:
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: 20
+    MaxValue: 65536
+    Default: 20
+  DatabaseName:
+    Description: Database name
+    Type: String
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+  DatabaseUsername:
+    Description: Username to log into the MySQL Database
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    Description: Password to log into the MySQL Database
+    MinLength: 8
+    MaxLength: 41
+Resources:
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to the RDS from inside the VPC
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VPCCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Include RDS in VPC"
+      SubnetIds:
+        - !Ref PrivateSubnet1ID
+        - !Ref PrivateSubnet2ID
+        - !Ref PrivateSubnet3ID
+  DatabaseParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: "ReadySet RDS MySQL Parameter Group"
+      Family: "mysql8.0"
+      Parameters:
+        binlog_format: ROW
+  DatabaseInstance:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      Engine: "mysql"
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      StorageType: !Ref DatabaseStorageType
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref DatabaseUsername
+      MasterUserPassword: !Ref DatabasePassword
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBParameterGroupName: !Ref DatabaseParameterGroup
+Outputs:
+  DatabaseURL:
+    Description: Database connection URL for RDS instance
+    Value: !Sub
+      - mysql://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
+      - EndpointAddress: !GetAtt
+          - DatabaseInstance
+          - Endpoint.Address
+        EndpointPort: !GetAtt
+          - DatabaseInstance
+          - Endpoint.Port

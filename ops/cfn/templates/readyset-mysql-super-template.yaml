@@ -98,23 +98,38 @@ Parameters:
     Type: String
     Description: Number of server nodes to create
     Default: 3
-  DatabaseName:
-    Type: String
-    Description: Name of MySQL Database
   DatabaseStorageType:
+    Description: Database storage type
     Type: String
     Default: gp2
-    Description: Storage  type for MySQL Database
+  DatabaseInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.m5.large
   DatabaseAllocatedStorage:
+    Description: The size of the database (GiB)
+    Type: Number
+    MinValue: 20
+    MaxValue: 65536
+    Default: 20
+  DatabaseName:
+    Description: Database name
     Type: String
-    Description: Allocated storage for MySQL Database
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
   DatabaseUsername:
-    Type: String
     Description: Username to log into the MySQL Database
+    Type: String
+    MinLength: 1
+    MaxLength: 16
   DatabasePassword:
     Type: String
     NoEcho: true
     Description: Password to log into the MySQL Database
+    MinLength: 8
+    MaxLength: 41
   DeploymentName:
     Type: String
     Default: ""
@@ -179,70 +194,40 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
-  ReadysetRDSSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  ReadysetRDSMySQLStack:
+    Type: 'AWS::CloudFormation::Stack'
     Properties:
-      GroupDescription: Allow connections to the RDS from inside the VPC
-      VpcId: !GetAtt VPCStack.Outputs.VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
-  RDSSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties: 
-      DBSubnetGroupDescription: "Include RDS in VPC"
-      SubnetIds: 
-        - !GetAtt VPCStack.Outputs.PrivateSubnet1AID
-        - !GetAtt VPCStack.Outputs.PrivateSubnet2AID
-        - !GetAtt VPCStack.Outputs.PrivateSubnet3AID
-  ReadySetRDSParameterGroup:
-    Type: AWS::RDS::DBParameterGroup
-    Properties:
-      Description: "ReadySet RDS MySQL Parameter Group"
-      Family: "mysql8.0"
+      TemplateURL: !Sub >-
+        https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml
       Parameters:
-        binlog_format: ROW
-  MySQLDatabaseInstance:
-    Type: "AWS::RDS::DBInstance"
-    Properties:
-      Engine: "mysql"
-      DBInstanceClass: db.m5.large
-      DBSubnetGroupName: !Ref RDSSubnetGroup
-      AllocatedStorage: !Ref DatabaseAllocatedStorage
-      StorageType: !Ref DatabaseStorageType
-      DBName: !Ref DatabaseName
-      MasterUsername: !Ref DatabaseUsername
-      MasterUserPassword: !Ref DatabasePassword
-      VPCSecurityGroups:
-        - !Ref ReadysetRDSSecurityGroup
-      DBParameterGroupName: !Ref ReadySetRDSParameterGroup
+        PrivateSubnet1ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet1AID
+        PrivateSubnet2ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet2AID
+        PrivateSubnet3ID: !GetAtt
+          - VPCStack
+          - Outputs.PrivateSubnet3AID
+        VPCID: !GetAtt
+          - VPCStack
+          - Outputs.VPCID
+        VPCCIDR: !Ref VPCCIDR
+        DatabaseStorageType: !Ref DatabaseStorageType
+        DatabaseInstanceClass: !Ref DatabaseInstanceClass
+        DatabaseAllocatedStorage: !Ref DatabaseAllocatedStorage
+        DatabaseName: !Ref DatabaseName
+        DatabaseUsername: !Ref DatabaseUsername
+        DatabasePassword: !Ref DatabasePassword
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
       TemplateURL: !Sub >-
         https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml
       Parameters:
-        ReadysetAdapterInstanceType: !Ref ReadysetAdapterInstanceType
-        ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
-        ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
-        ReadysetServerNodes: !Ref ReadysetServerNodes
-        MySQLDatabaseURL: !Sub
-          - mysql://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
-          - EndpointAddress: !GetAtt
-              - MySQLDatabaseInstance
-              - Endpoint.Address
-            EndpointPort: !GetAtt
-              - MySQLDatabaseInstance
-              - Endpoint.Port
-        DeploymentName: !Ref DeploymentName
-        KeyPairName: !Ref KeyPairName
+        BastionSecurityGroupID: !GetAtt
+          - BastionStack
+          - Outputs.BastionSecurityGroupID
         ConsulJoinManagedPolicyArn: !GetAtt
           - ReadysetConsulStack
           - Outputs.ConsulJoinManagedPolicyArn
@@ -259,3 +244,12 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
+        KeyPairName: !Ref KeyPairName
+        MySQLDatabaseURL: !GetAtt
+          - ReadysetRDSMySQLStack
+          - Outputs.DatabaseURL
+        ReadysetAdapterInstanceType: !Ref ReadysetAdapterInstanceType
+        ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
+        ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
+        ReadysetServerNodes: !Ref ReadysetServerNodes
+        DeploymentName: !Ref DeploymentName

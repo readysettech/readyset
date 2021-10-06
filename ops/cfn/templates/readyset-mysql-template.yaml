@@ -2,6 +2,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Readyset MySQL Cluster
 Parameters:
+  BastionSecurityGroupID:
+    Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
+    Type: "AWS::EC2::SecurityGroup::Id"
   ReadysetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
@@ -93,7 +96,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: !Ref VPCCIDR
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
         - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
@@ -222,7 +225,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: !Ref VPCCIDR
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
         - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
@@ -242,12 +245,12 @@ Resources:
   # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
   ReadySetServerSecurityGroupIngressControllerRule:
     Type: AWS::EC2::SecurityGroupIngress
-    Properties: 
+    Properties:
       GroupId: !Ref ReadysetServerSecurityGroup
       IpProtocol: tcp
       FromPort: 6033
       ToPort: 6033
-      SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup 
+      SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
   ReadysetServerSecurityGroupIngressWorkerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
