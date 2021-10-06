@@ -237,6 +237,13 @@ Resources:
             Fn::GetAtt:
             - ReadysetMySQLAdapterSecurityGroup
             - GroupId
+        - IpProtocol: tcp
+          FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
+          ToPort: 61000
+          SourceSecurityGroupId:
+            Fn::GetAtt:
+            - ReadysetMySQLAdapterSecurityGroup
+            - GroupId 
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
