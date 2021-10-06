@@ -157,7 +157,7 @@ impl ViewSchema {
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
 
-    /// Convert the schema to a `Vec` of [`msql_srv::Column`], for the speicified indices
+    /// Convert the schema to a `Vec` of [`ColumnSchema`], for the speicified indices
     pub fn to_cols_with_indices<'a>(
         &'a self,
         indices: &[usize],
