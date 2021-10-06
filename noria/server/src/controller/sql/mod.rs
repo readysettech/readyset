@@ -795,7 +795,8 @@ impl SqlIncorporator {
             .expand_implied_tables(&self.view_schemas)?
             .normalize_topk_with_aggregate()?
             .rewrite_count_star(&self.view_schemas)?
-            .detect_problematic_self_joins()?;
+            .detect_problematic_self_joins()?
+            .order_limit_removal(&self.base_schemas)?;
 
         // need to increment here so that each subquery has a unique name.
         // (subqueries call recursively into `nodes_for_named_query` via `add_parsed_query` below,

@@ -1,0 +1,61 @@
+statement ok
+create table t (a int PRIMARY KEY, b int UNIQUE, c int); 
+
+statement ok
+insert into t values (1,2,3)
+
+query  nosort
+select * from t where a = 1 LIMIT ?
+? = 1
+----
+1
+2
+3
+
+query  nosort
+select * from t where a = 1 LIMIT ?
+? = 0
+----
+
+query  nosort
+select * from t where a = 1 LIMIT ? OFFSET ?
+? = 1
+? = 0
+----
+1
+2
+3
+
+query  nosort
+select * from t where a = 1 LIMIT ? OFFSET ?
+? = 1
+? = 1
+----
+
+query  nosort
+select * from t where b = 2 LIMIT ?
+? = 1
+----
+1
+2
+3
+
+query  nosort
+select * from t where b = 2 LIMIT ?
+? = 0
+----
+
+query  nosort
+select * from t where b = 2 LIMIT ? OFFSET ?
+? = 1
+? = 0
+----
+1
+2
+3
+
+query  nosort
+select * from t where b = 2 LIMIT ? OFFSET ?
+? = 1
+? = 1
+----

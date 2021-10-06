@@ -37,6 +37,10 @@ pub(crate) enum PreparedStatement {
         statement: nom_sql::SelectStatement,
         key_column_indices: Vec<usize>,
         rewritten_in_conditions: Vec<RewrittenIn>,
+        /// Parameter columns ignored by noria server
+        /// The adapter assumes that all LIMIT/OFFSET parameters are ignored by the
+        /// server. (If the server cannot ignore them, it will fail to install the query).
+        ignored_columns: Vec<ColumnSchema>,
     },
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
@@ -225,6 +229,31 @@ pub struct NoriaConnector {
     region: Option<String>,
 }
 
+/// Removes limit and offset params passed in with an execute function. These are not sent to the
+/// server.
+fn pop_limit_offset_params(
+    mut params: Vec<DataType>,
+    ignored_columns: &[ColumnSchema],
+) -> (Option<DataType>, Option<DataType>, Vec<DataType>) {
+    let mut offset = None;
+    let mut row_count = None;
+
+    if ignored_columns
+        .iter()
+        .any(|col| matches!(col.spec.column.name.as_str(), "__offset"))
+    {
+        offset = params.pop();
+    }
+    if ignored_columns
+        .iter()
+        .any(|col| matches!(col.spec.column.name.as_str(), "__row_count"))
+    {
+        row_count = params.pop();
+    }
+
+    (offset, row_count, params)
+}
+
 impl Clone for NoriaConnector {
     fn clone(&self) -> Self {
         Self {
@@ -255,12 +284,35 @@ impl NoriaConnector {
         }
     }
 
+    /// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
+    /// with an execute statement will result in an empty resultset
+    async fn short_circuit_empty_resultset(
+        &mut self,
+        query_name: &str,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        let getter = self
+            .inner
+            .ensure_getter(query_name, self.region.clone())
+            .await?;
+        let getter_schema = getter
+            .schema()
+            .ok_or_else(|| internal_err("No schema for view"))?;
+        Ok(QueryResult::Select {
+            data: vec![],
+            select_schema: SelectSchema {
+                use_bogo: false,
+                schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
+                columns: Cow::Borrowed(getter.columns()),
+            },
+        })
+    }
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
         let table_handle = self.inner.noria.table(table_name).await?;
         Ok(table_handle.node)
     }
+
     pub async fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
@@ -950,6 +1002,19 @@ impl NoriaConnector {
         trace!("select::collapse where-in clauses");
         let rewritten_in_conditions = rewrite::collapse_where_in(&mut statement)?;
 
+        let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
+            .into_iter()
+            .map(|c| ColumnSchema {
+                spec: nom_sql::ColumnSpecification {
+                    column: c,
+                    sql_type: nom_sql::SqlType::UnsignedBigint(None),
+                    constraints: vec![],
+                    comment: None,
+                },
+                base: None,
+            })
+            .collect();
+
         // check if we already have this query prepared
         trace!("select::access view");
         let qname = self.get_or_create_view(&statement, true).await?;
@@ -965,7 +1030,7 @@ impl NoriaConnector {
 
         let key_column_indices =
             getter_schema.indices_for_cols(param_columns.iter(), SchemaType::ProjectedSchema)?;
-        let params = getter_schema
+        let mut params: Vec<_> = getter_schema
             .to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?
             .into_iter()
             .map(|cs| {
@@ -981,8 +1046,11 @@ impl NoriaConnector {
             statement,
             key_column_indices,
             rewritten_in_conditions,
+            ignored_columns: limit_columns.clone(),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
+
+        params.extend(limit_columns);
         Ok(PrepareResult::Select {
             statement_id,
             params,
@@ -1009,8 +1077,18 @@ impl NoriaConnector {
                 statement: q,
                 key_column_indices,
                 rewritten_in_conditions,
+                ignored_columns,
             } => {
                 trace!("apply where-in rewrites");
+                // ignore LIMIT and OFFSET params (and return empty resultset according to value)
+                let (offset, limit, params) = pop_limit_offset_params(params, ignored_columns);
+                // TODO(DAN): These should have been passed as UnsignedBigInt
+                if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
+                    || matches!(limit, Some(DataType::BigInt(0)))
+                {
+                    return self.short_circuit_empty_resultset(name).await;
+                }
+
                 return self
                     .do_read(
                         name,

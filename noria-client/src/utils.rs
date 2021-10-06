@@ -302,6 +302,27 @@ pub(crate) fn select_statement_parameter_columns(query: &SelectStatement) -> Vec
     }
 }
 
+pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
+    let mut limit_params = vec![];
+    if let Some(ref limit) = query.limit {
+        if let Expression::Literal(Literal::Placeholder(_)) = limit.limit {
+            limit_params.push(Column {
+                name: "__row_count".to_string(),
+                table: None,
+                function: None,
+            });
+        }
+        if let Some(Expression::Literal(Literal::Placeholder(_))) = limit.offset {
+            limit_params.push(Column {
+                name: "__offset".to_string(),
+                table: None,
+                function: None,
+            });
+        }
+    }
+    limit_params
+}
+
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     match *query {
         SqlQuery::Select(ref query) => select_statement_parameter_columns(query),
