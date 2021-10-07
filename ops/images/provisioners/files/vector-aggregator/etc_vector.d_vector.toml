@@ -6,4 +6,4 @@ address = "0.0.0.0:9000"
 inputs = ["in"]
 type = "console"
 target = "stdout"
-encoding.codec = "text"
+encoding.codec = "json"

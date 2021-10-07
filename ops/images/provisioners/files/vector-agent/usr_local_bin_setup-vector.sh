@@ -16,9 +16,11 @@ include_units = [ "readyset-server", "readyset-mysql-adapter" ]
 [transforms.metadata]
 type = "remap"
 inputs = ["in"]
-source = """
-  del(.timestamp)
-"""
+source = '''
+  log_json = parse_json!(.message)
+  server_info = { "host": .host, "app": .SYSLOG_IDENTIFIER }
+  . = merge!(log_json, server_info)
+'''
 
 [sinks.out]
 inputs = ["metadata"]
