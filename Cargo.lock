@@ -3971,7 +3971,7 @@ name = "noria-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 2.33.3",
+ "clap 3.0.0-beta.4",
  "noria",
  "tokio 1.11.0",
 ]

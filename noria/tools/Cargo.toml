@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.38"
-clap = "2.33.3"
+clap = "3.0.0-beta.2"
 noria = { path = "../noria" }
 tokio = { version = "1.8.1", features = ["macros"] }
 
@@ -19,5 +19,5 @@ name = "query_installer"
 path = "src/query_installer.rs"
 
 [[bin]]
-name = "metrics_client"
-path = "src/metrics_client.rs"
+name = "metrics_dump"
+path = "src/metrics_dump.rs"

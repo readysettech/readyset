@@ -1,10 +1,13 @@
+//! Tool to retrieve a metrics dump for the current leader in a
+//! deployment.
 use clap::Clap;
 use noria::consensus::AuthorityType;
+use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
 
 #[derive(Clap)]
-#[clap(name = "view_checker")]
-struct ViewChecker {
+#[clap(name = "metrics_dump")]
+struct MetricsDump {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
     authority_address: String,
 
@@ -13,12 +16,9 @@ struct ViewChecker {
 
     #[clap(short, long, env("NORIA_DEPLOYMENT"))]
     deployment: String,
-
-    #[clap(short, long)]
-    query: String,
 }
 
-impl ViewChecker {
+impl MetricsDump {
     pub async fn run(self) -> anyhow::Result<()> {
         let authority = self
             .authority
@@ -28,10 +28,9 @@ impl ViewChecker {
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
 
-        println!("Waiting for noria");
-        let mut getter = handle.view(&self.query).await?;
-        let results = getter.lookup(&[0.into()], true).await?;
-        println!("Results: {:?}", results);
+        let mut client = MetricsClient::new(handle).unwrap();
+        let res = client.get_metrics().await?;
+        println!("{:?}", res);
 
         Ok(())
     }
@@ -39,6 +38,6 @@ impl ViewChecker {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let view_checker = ViewChecker::parse();
-    view_checker.run().await
+    let metrics_dump = MetricsDump::parse();
+    metrics_dump.run().await
 }
