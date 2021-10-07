@@ -72,7 +72,7 @@ struct Opts {
     use_aws_external_address: bool,
 
     /// Noria deployment ID.
-    #[clap(long, env = "NORIA_DEPLOYMENT")]
+    #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
 
     /// How to maintain base table state

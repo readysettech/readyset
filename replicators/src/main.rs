@@ -15,7 +15,7 @@ use tokio_postgres as pgsql;
 #[clap(version = "1.0")]
 struct Opts {
     /// Noria deployment ID to attach to.
-    #[clap(short, long, env("NORIA_DEPLOYMENT"))]
+    #[clap(short, long, env("NORIA_DEPLOYMENT"), forbid_empty_values = true)]
     deployment: String,
     /// IP:PORT for Zookeeper.
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]
