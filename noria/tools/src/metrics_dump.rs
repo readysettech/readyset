@@ -14,7 +14,7 @@ struct MetricsDump {
     #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
-    #[clap(short, long, env("NORIA_DEPLOYMENT"))]
+    #[clap(short, long, env("NORIA_DEPLOYMENT"), forbid_empty_values = true)]
     deployment: String,
 }
 
