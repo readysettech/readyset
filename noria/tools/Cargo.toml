@@ -21,3 +21,7 @@ path = "src/query_installer.rs"
 [[bin]]
 name = "metrics_dump"
 path = "src/metrics_dump.rs"
+
+[[bin]]
+name = "controller_request"
+path = "src/controller_request.rs"
