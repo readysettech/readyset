@@ -186,3 +186,25 @@ async fn query_failure_recovery_with_volume_id() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn new_leader_worker_set() {
+    let cluster_name = "ct_failure_recovery_with_volume_id";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.set_sharding(1);
+    deployment.add_server(ServerParams::default());
+    deployment.add_server(ServerParams::default());
+    deployment.add_server(ServerParams::default());
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+
+    // Kill the first server to trigger failure recovery.
+    deployment.kill_server(&controller_uri).await.unwrap();
+
+    // Check the number of healthy workers in the system.
+    assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+
+    deployment.teardown().await.unwrap();
+}
