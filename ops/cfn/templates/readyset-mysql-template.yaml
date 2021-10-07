@@ -60,6 +60,7 @@ Parameters:
     # TODO: Allowed Pattern
   DeploymentName:
     Type: String
+    MinLength: 1
     # TODO: Allowed Pattern
 # Update this with the latest AMI
 Mappings:

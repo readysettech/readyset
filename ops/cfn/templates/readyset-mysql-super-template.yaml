@@ -82,6 +82,20 @@ Parameters:
       The CIDR IP range that is permitted to access Readyset. Note: a value of
       0.0.0.0/0 will allow access from ANY IP address
     Type: String
+  ConsulEc2RetryJoinTagKey:
+    Description:
+      The EC2 instance tag key to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "ReadysetConsulNodeType"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
+  ConsulEc2RetryJoinTagValue:
+    Description:
+      The EC2 instance tag value to filter on when joining to other Consul
+      nodes.
+    Type: String
+    Default: "Server"
+    ConstraintDescription: Must match EC2 Tag Name requirements.
   ReadysetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
@@ -132,7 +146,7 @@ Parameters:
     MaxLength: 41
   DeploymentName:
     Type: String
-    Default: ""
+    MinLength: 1
     # TODO: Allowed Pattern
 Resources:
   VPCStack:
@@ -194,6 +208,8 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
+        ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
   ReadysetRDSMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -244,6 +260,12 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
+        ConsulEc2RetryJoinTagKey: !GetAtt
+          - ReadysetConsulStack
+          - Outputs.ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !GetAtt
+          - ReadysetConsulStack
+          - Outputs.ConsulEc2RetryJoinTagValue
         KeyPairName: !Ref KeyPairName
         MySQLDatabaseURL: !GetAtt
           - ReadysetRDSMySQLStack
