@@ -25,6 +25,7 @@ steps:
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
+          pull-retries: 3
       - ecr#v2.5.0:
           login: true
           retries: 3
@@ -50,6 +51,7 @@ steps:
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
+          pull-retries: 3
       - ecr#v2.2.0:
           login: true
     env:
@@ -83,6 +85,7 @@ steps:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
           mount-buildkite-agent: true
+          pull-retries: 3
       - ecr#v2.2.0:
           login: true
     env:
