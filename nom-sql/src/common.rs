@@ -6,7 +6,7 @@ use std::str::FromStr;
 use bit_vec::BitVec;
 use itertools::Itertools;
 use launchpad::arbitrary::{
-    arbitrary_bitvec, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
+    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json, arbitrary_naive_time,
     arbitrary_positive_naive_date, arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use nom::branch::alt;
@@ -68,6 +68,7 @@ pub enum SqlType {
     DateTime(#[strategy(proptest::option::of(1..=6u16))] Option<u16>),
     Time,
     Timestamp,
+    TimestampTz,
     #[weight(0)]
     Binary(Option<u16>),
     #[weight(0)]
@@ -162,6 +163,7 @@ impl fmt::Display for SqlType {
             SqlType::DateTime(len) => write_with_len(f, "DATETIME", len),
             SqlType::Time => write!(f, "TIME"),
             SqlType::Timestamp => write!(f, "TIMESTAMP"),
+            SqlType::TimestampTz => write!(f, "TIMESTAMP WITH TIME ZONE"),
             SqlType::Binary(len) => write_with_len(f, "BINARY", len),
             SqlType::Varbinary(len) => write!(f, "VARBINARY({})", len),
             SqlType::Enum(ref variants) => write!(f, "ENUM({})", variants.iter().join(", ")),
@@ -404,6 +406,9 @@ impl Literal {
                 .boxed(),
             SqlType::DateTime(_) | SqlType::Timestamp => arbitrary_timestamp_naive_date_time()
                 .prop_map(|ndt| Self::String(ndt.format("%Y-%m-%d %H:%M:%S").to_string()))
+                .boxed(),
+            SqlType::TimestampTz => arbitrary_date_time()
+                .prop_map(|dt| Self::String(dt.format("%Y-%m-%d %H:%M:%S %:z").to_string()))
                 .boxed(),
             SqlType::Time => arbitrary_naive_time()
                 .prop_map(|nt| Self::String(nt.format("%H:%M:%S").to_string()))
@@ -901,7 +906,37 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
             ),
             map(tag_no_case("text"), |_| SqlType::Text),
             map(
-                tuple((tag_no_case("timestamp"), opt(delim_digit), multispace0)),
+                tuple((
+                    tag_no_case("timestamp"),
+                    opt(preceded(multispace0, delim_digit)),
+                    preceded(
+                        multispace1,
+                        tuple((
+                            tag_no_case("with"),
+                            multispace1,
+                            tag_no_case("time"),
+                            multispace1,
+                            tag_no_case("zone"),
+                        )),
+                    ),
+                )),
+                |_| SqlType::TimestampTz,
+            ),
+            map(
+                tuple((
+                    tag_no_case("timestamp"),
+                    opt(preceded(multispace0, delim_digit)),
+                    opt(preceded(
+                        multispace1,
+                        tuple((
+                            tag_no_case("without"),
+                            multispace1,
+                            tag_no_case("time"),
+                            multispace1,
+                            tag_no_case("zone"),
+                        )),
+                    )),
+                )),
                 |_| SqlType::Timestamp,
             ),
             map(
@@ -1760,6 +1795,54 @@ mod tests {
         fn bit_varying_with_size_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bit varying(10)");
             assert_eq!(res, SqlType::Varbit(Some(10)));
+        }
+
+        #[test]
+        fn timestamp_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamp");
+            assert_eq!(res, SqlType::Timestamp);
+        }
+
+        #[test]
+        fn timestamp_with_prec_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"timestamp (5)");
+            assert_eq!(res, SqlType::Timestamp);
+        }
+
+        #[test]
+        fn timestamp_without_timezone_type() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"timestamp without time zone"
+            );
+            assert_eq!(res, SqlType::Timestamp);
+        }
+
+        #[test]
+        fn timestamp_with_prec_without_timezone_type() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"timestamp (5)   without time zone"
+            );
+            assert_eq!(res, SqlType::Timestamp);
+        }
+
+        #[test]
+        fn timestamp_tz_type() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"timestamp with time zone"
+            );
+            assert_eq!(res, SqlType::TimestampTz);
+        }
+
+        #[test]
+        fn timestamp_tz_with_prec_type() {
+            let res = test_parse!(
+                type_identifier(Dialect::PostgreSQL),
+                b"timestamp (5)    with time zone"
+            );
+            assert_eq!(res, SqlType::TimestampTz);
         }
     }
 }

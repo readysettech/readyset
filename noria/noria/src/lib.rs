@@ -305,7 +305,7 @@ pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
     DataType, Modification, Operation, ReplicationOffset, TableOperation, DATE_FORMAT,
-    TIMESTAMP_FORMAT, TIME_FORMAT,
+    TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
 };
 pub use crate::map::Map;
 pub use crate::table::{Table, TableRequest};
@@ -398,7 +398,10 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
         DataType::UnsignedInt(n) => n as usize % shards,
         DataType::BigInt(n) => n as usize % shards,
         DataType::UnsignedBigInt(n) => n as usize % shards,
-        DataType::Text(..) | DataType::TinyText(..) | DataType::Timestamp(..) => {
+        DataType::Text(..)
+        | DataType::TinyText(..)
+        | DataType::Timestamp(..)
+        | DataType::TimestampTz(_) => {
             use std::hash::Hasher;
             let mut hasher = ahash::AHasher::new_with_keys(0x3306, 0x6033);
             // this unwrap should be safe because there are no error paths with a Text, TinyText, nor Timestamp converting to Text

@@ -1,6 +1,6 @@
 use super::wal::{self, RelationMapping, WalData, WalError, WalRecord};
 use bit_vec::BitVec;
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime};
 use mysql_time::MysqlTime;
 use noria::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::FromStr;
@@ -274,6 +274,27 @@ impl wal::TupleData {
                                 NaiveDateTime::parse_from_str(&str, noria::TIMESTAMP_FORMAT)?
                             }
                         }),
+                        PGType::TIMESTAMPTZ => match str.strip_suffix(" BC") {
+                            Some(str_without_epoch) => {
+                                let dt = DateTime::<FixedOffset>::parse_from_str(
+                                    str_without_epoch,
+                                    "%Y-%m-%d %H:%M:%S%#z",
+                                )
+                                .map_err(|_| WalError::TimestampTzParseError)?;
+                                let year = dt.year();
+                                DataType::from(
+                                    dt.with_year(-year + 1)
+                                        .ok_or(WalError::TimestampTzParseError)?,
+                                )
+                            }
+                            None => DataType::from(
+                                DateTime::<FixedOffset>::parse_from_str(
+                                    &str,
+                                    "%Y-%m-%d %H:%M:%S%#z",
+                                )
+                                .map_err(|_| WalError::TimestampTzParseError)?,
+                            ),
+                        },
                         PGType::BYTEA => hex::decode(str.strip_prefix("\\x").unwrap_or(&str))
                             .map_err(|_| WalError::ByteArrayHexParseError)
                             .map(|bytes| DataType::ByteArray(Arc::new(bytes)))?,

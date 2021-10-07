@@ -20,9 +20,9 @@ mod types {
     use super::*;
     use eui48::MacAddress;
     use launchpad::arbitrary::{
-        arbitrary_bitvec, arbitrary_decimal, arbitrary_json, arbitrary_json_without_f64,
-        arbitrary_mac_address, arbitrary_naive_date, arbitrary_naive_time, arbitrary_systemtime,
-        arbitrary_uuid,
+        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_json,
+        arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
+        arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
@@ -123,5 +123,6 @@ mod types {
         varbit_bitvec("varbit(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
         bit_varying_unlimited_bitvec("bit varying", #[strategy(arbitrary_bitvec(0..=20))] bit_vec::BitVec);
         bit_varying_bitvec("bit varying(10)", #[strategy(arbitrary_bitvec(0..=10))] bit_vec::BitVec);
+        timestamp_tz_datetime("timestamp with time zone", #[strategy(arbitrary_date_time())] chrono::DateTime::<chrono::FixedOffset>);
     }
 }

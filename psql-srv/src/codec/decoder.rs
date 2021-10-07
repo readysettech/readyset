@@ -12,7 +12,7 @@ use crate::value::Value;
 use arccstr::ArcCStr;
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use postgres_types::{FromSql, Type};
 use rust_decimal::prelude::FromStr;
@@ -49,6 +49,7 @@ const HEADER_LENGTH: usize = 5;
 const LENGTH_NULL_SENTINEL: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 
 impl<R: IntoIterator<Item: TryInto<Value, Error = BackendError>>> Decoder for Codec<R> {
     type Item = FrontendMessage;
@@ -317,6 +318,9 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
         Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
         Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
+        Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::from_sql(
+            t, buf,
+        )?)),
         Type::BYTEA => Ok(Value::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
         Type::MACADDR => Ok(Value::MacAddress(MacAddress::from_sql(t, buf)?)),
         Type::UUID => Ok(Value::Uuid(Uuid::from_sql(t, buf)?)),
@@ -373,6 +377,10 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
                 TIMESTAMP_FORMAT,
             )?))
         }
+        Type::TIMESTAMPTZ => Ok(Value::TimestampTz(DateTime::<FixedOffset>::parse_from_str(
+            text_str,
+            TIMESTAMP_TZ_FORMAT,
+        )?)),
         Type::BYTEA => {
             let bytes = hex::decode(text_str).map_err(InvalidTextByteArrayValue)?;
             Ok(Value::ByteArray(bytes))
@@ -1150,6 +1158,30 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_timestamp_tz() {
+        let dt = DateTime::<FixedOffset>::from_utc(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(2020, 01, 02),
+                NaiveTime::from_hms_milli(03, 04, 05, 660),
+            ),
+            FixedOffset::east(18000), // +05:00
+        );
+        let mut buf = BytesMut::new();
+        buf.put_i32(-1); // size (placeholder)
+        dt.to_sql(&Type::TIMESTAMPTZ, &mut buf).unwrap(); // add value
+        let value_len = buf.len() - 4;
+        let mut window = buf
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual length
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
+            DataValue::TimestampTz(dt)
+        );
+    }
+
+    #[test]
     fn test_decode_text_null() {
         let mut buf = BytesMut::new();
         buf.put_i32(-1); // size
@@ -1352,6 +1384,25 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::VARBIT).unwrap(),
             DataValue::VarBit(BitVec::from_bytes(&[0, 8, 39, 92, 100, 128]))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_timestamp_tz() {
+        let dt_string = "2020-01-02 08:04:05.660 +05:00";
+        let expected = DateTime::<FixedOffset>::from_utc(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(2020, 01, 02),
+                NaiveTime::from_hms_milli(03, 04, 05, 660),
+            ),
+            FixedOffset::east(18000), // +05:00
+        );
+        let mut buf = BytesMut::new();
+        buf.put_i32(30); // size (placeholder)
+        buf.extend_from_slice(dt_string.as_bytes());
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap(),
+            DataValue::TimestampTz(expected)
         );
     }
 }

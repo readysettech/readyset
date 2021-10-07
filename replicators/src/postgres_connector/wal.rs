@@ -31,6 +31,7 @@ pub enum WalError {
     ByteArraySyntaxError,
     ByteArrayHexParseError,
     TimestampParseError,
+    TimestampTzParseError,
     TimeParseError(mysql_time::ConvertError),
     NumericParseError,
     BitVectorParseError(String),

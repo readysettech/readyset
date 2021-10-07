@@ -61,7 +61,7 @@
 //! [3]: QueryOperation::permute
 
 use anyhow::anyhow;
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use clap::Clap;
 use derive_more::{Display, From, Into};
 use itertools::{Either, Itertools};
@@ -143,6 +143,11 @@ fn value_of_type(typ: &SqlType) -> DataType {
         SqlType::DateTime(_) | SqlType::Timestamp => {
             NaiveDate::from_ymd(2020, 1, 1).and_hms(12, 30, 45).into()
         }
+        SqlType::TimestampTz => DataType::from(
+            FixedOffset::west(18_000)
+                .ymd(2020, 1, 1)
+                .and_hms(12, 30, 45),
+        ),
         SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
         SqlType::Date => NaiveDate::from_ymd(2020, 1, 1).into(),
         SqlType::Bool => 1i32.into(),
@@ -237,6 +242,11 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
                 .and_hms(12, 30, 45)
                 .into()
         }
+        SqlType::TimestampTz => DataType::from(
+            FixedOffset::west(18_000)
+                .ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28))
+                .and_hms(12, 30, 45),
+        ),
         SqlType::Time => NaiveTime::from_hms(12, 30, 45).into(),
         SqlType::Date => {
             NaiveDate::from_ymd(2020, rng.gen_range(1..12), rng.gen_range(1..28)).into()
@@ -338,6 +348,11 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
         SqlType::DateTime(_) | SqlType::Timestamp => NaiveDate::from_ymd(2020, 1, 1)
             .and_hms(12, idx as _, 30)
             .into(),
+        SqlType::TimestampTz => DataType::from(
+            FixedOffset::west(18_000)
+                .ymd(2020, 1, 1)
+                .and_hms(12, idx as _, 30),
+        ),
         SqlType::Date => unimplemented!(),
         SqlType::Enum(_) => unimplemented!(),
         SqlType::Bool => unimplemented!(),

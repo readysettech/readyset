@@ -92,6 +92,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::Numeric(d) => Ok(DataType::from(*d)),
             ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
             ps::Value::Timestamp(v) => Ok((*v).into()),
+            ps::Value::TimestampTz(v) => Ok(DataType::from(*v)),
             ps::Value::Date(v) => Ok((*v).into()),
             ps::Value::Time(v) => Ok((*v).into()),
             ps::Value::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
