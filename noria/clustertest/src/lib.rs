@@ -16,21 +16,20 @@ use server::{NoriaMySQLRunner, NoriaServerRunner, ProcessHandle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
+use tokio::time::sleep;
 use url::Url;
 
 /// The set of environment variables that need to be set for the
 /// tests to run. Each variable is the upper case of their respective,
 /// struct variable name, i.e. AUTHORITY_ADDRESS.
-// TODO(justin): Support optional variables and defaults.
 #[derive(Deserialize, Debug)]
 struct Env {
-    authority_address: String,
-    authority: String,
+    authority_address: Option<String>,
+    authority: Option<String>,
     binary_path: PathBuf,
-    mysql_host: String,
-    mysql_root_password: String,
+    mysql_host: Option<String>,
+    mysql_root_password: Option<String>,
 }
 
 /// Source of the noria binaries.
@@ -118,10 +117,15 @@ impl DeploymentParams {
             servers: vec![],
             mysql_adapter: false,
             mysql: false,
-            authority: AuthorityType::from_str(&env.authority).unwrap(),
-            authority_address: env.authority_address,
-            mysql_host: env.mysql_host,
-            mysql_root_password: env.mysql_root_password,
+            authority: AuthorityType::from_str(
+                &env.authority.unwrap_or_else(|| "consul".to_string()),
+            )
+            .unwrap(),
+            authority_address: env
+                .authority_address
+                .unwrap_or_else(|| "127.0.0.1:8500".to_string()),
+            mysql_host: env.mysql_host.unwrap_or_else(|| "127.0.0.1".to_string()),
+            mysql_root_password: env.mysql_root_password.unwrap_or_else(|| "".to_string()),
         }
     }
 
@@ -325,17 +329,18 @@ async fn wait_until_worker_count(
 ) -> Result<()> {
     let start = Instant::now();
     loop {
-        let workers = handle.healthy_workers().await.unwrap().len();
-        if workers == num_workers {
-            return Ok(());
-        }
-
         let now = Instant::now();
         if (now - start) > max_wait {
             break;
         }
 
-        sleep(Duration::from_millis(500));
+        if let Ok(workers) = handle.healthy_workers().await {
+            if workers.len() == num_workers {
+                return Ok(());
+            }
+        }
+
+        sleep(Duration::from_millis(500)).await;
     }
 
     Err(anyhow!("Exceeded maximum time to wait for workers"))
@@ -530,7 +535,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             mysql_addr.as_ref(),
         )?;
         // Sleep to give the adapter time to startup.
-        sleep(Duration::from_millis(500));
+        sleep(Duration::from_millis(500)).await;
         Some(MySQLAdapterHandle {
             conn_str: format!("mysql://127.0.0.1:{}", port),
             process,
