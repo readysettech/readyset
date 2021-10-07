@@ -22,11 +22,15 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 anyhow = "1.0.42"
 derive_more = "0.99.16"
 thiserror = "1.0.26"
+mysql_common = "0.27.5"
 
 [dev-dependencies]
 chrono = "0.4.19"
+itertools = "0.10.1"
 maplit = "1.0.2"
+proptest = "1.0.0"
 serial_test = "0.5.1"
+test-strategy = "0.1.2"
 
 [[example]]
 name = "basic_demo"
