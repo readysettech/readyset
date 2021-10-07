@@ -312,10 +312,10 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             v.to_sql(&Type::BOOL, dst)?;
         }
         Value::Char(v) => {
-            v.to_bytes().to_sql(&Type::CHAR, dst)?;
+            v.as_bytes().to_sql(&Type::CHAR, dst)?;
         }
         Value::Varchar(v) => {
-            v.to_bytes().to_sql(&Type::VARCHAR, dst)?;
+            v.as_bytes().to_sql(&Type::VARCHAR, dst)?;
         }
         Value::Int(v) => {
             v.to_sql(&Type::INT4, dst)?;
@@ -336,7 +336,7 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             v.to_sql(&Type::NUMERIC, dst)?;
         }
         Value::Text(v) => {
-            v.to_bytes().to_sql(&Type::TEXT, dst)?;
+            v.as_bytes().to_sql(&Type::TEXT, dst)?;
         }
         Value::Timestamp(v) => {
             v.to_sql(&Type::TIMESTAMP, dst)?;
@@ -403,10 +403,10 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", text)?;
         }
         Value::Char(v) => {
-            dst.extend_from_slice(v.to_bytes());
+            dst.extend_from_slice(v.as_bytes());
         }
         Value::Varchar(v) => {
-            dst.extend_from_slice(v.to_bytes());
+            dst.extend_from_slice(v.as_bytes());
         }
         Value::Int(v) => {
             write!(dst, "{}", v)?;
@@ -429,7 +429,7 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", v)?;
         }
         Value::Text(v) => {
-            dst.extend_from_slice(v.to_bytes());
+            dst.extend_from_slice(v.as_bytes());
         }
         Value::Timestamp(v) => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
@@ -479,11 +479,9 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::message::{FieldDescription, SqlState};
     use crate::value::Value as DataValue;
-    use arccstr::ArcCStr;
     use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
     use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
@@ -673,7 +671,7 @@ mod tests {
                     values: vec![
                         Value(DataValue::Int(42)),
                         Value(DataValue::Null),
-                        Value(DataValue::Text(ArcCStr::try_from("some text").unwrap())),
+                        Value(DataValue::Text("some text".into())),
                     ],
                     explicit_transfer_formats: Some(Arc::new(vec![Binary, Binary, Binary])),
                 },
@@ -958,11 +956,7 @@ mod tests {
     #[test]
     fn test_encode_binary_char() {
         let mut buf = BytesMut::new();
-        put_binary_value(
-            DataValue::Char(ArcCStr::try_from("some stuff").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_binary_value(DataValue::Char("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -972,11 +966,7 @@ mod tests {
     #[test]
     fn test_encode_binary_varchar() {
         let mut buf = BytesMut::new();
-        put_binary_value(
-            DataValue::Varchar(ArcCStr::try_from("some stuff").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_binary_value(DataValue::Varchar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1053,11 +1043,7 @@ mod tests {
     #[test]
     fn test_encode_binary_text() {
         let mut buf = BytesMut::new();
-        put_binary_value(
-            DataValue::Text(ArcCStr::try_from("some text").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_binary_value(DataValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value
@@ -1215,11 +1201,7 @@ mod tests {
     #[test]
     fn test_encode_text_char() {
         let mut buf = BytesMut::new();
-        put_text_value(
-            DataValue::Char(ArcCStr::try_from("some stuff").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_text_value(DataValue::Char("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1229,11 +1211,7 @@ mod tests {
     #[test]
     fn test_encode_text_varchar() {
         let mut buf = BytesMut::new();
-        put_text_value(
-            DataValue::Varchar(ArcCStr::try_from("some stuff").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_text_value(DataValue::Varchar("some stuff".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(10); // length
         exp.extend_from_slice(b"some stuff"); // value
@@ -1304,11 +1282,7 @@ mod tests {
     #[test]
     fn test_encode_text_text() {
         let mut buf = BytesMut::new();
-        put_text_value(
-            DataValue::Text(ArcCStr::try_from("some text").unwrap()),
-            &mut buf,
-        )
-        .unwrap();
+        put_text_value(DataValue::Text("some text".into()), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(9); // length
         exp.extend_from_slice(b"some text"); // value

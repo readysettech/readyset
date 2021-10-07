@@ -1,6 +1,5 @@
-use arccstr::ArcCStr;
 use eui48::MacAddress;
-use noria::{DataType, ReadySetError};
+use noria::DataType;
 use psql_srv as ps;
 use std::convert::TryFrom;
 use tokio_postgres::types::Type;
@@ -22,26 +21,16 @@ impl TryFrom<Value> for ps::Value {
     type Error = ps::Error;
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
-        let from_tiny_text = |v| {
-            // TODO Avoid this allocation by adding a TinyText storage option in psql-srv.
-            ArcCStr::try_from(
-                <&str>::try_from(v)
-                    .map_err(|e: ReadySetError| ps::Error::InternalError(e.to_string()))?,
-            )
-            .map_err(|_| ps::Error::InternalError("unexpected nul within TinyText".to_string()))
-        };
-
         // TODO: Implement this for the rest of the types, including at least:
         // - Type::Time
         // - Unsigned{Int,Smallint,Bigint}
         match (v.col_type, v.value) {
             (_, DataType::None) => Ok(ps::Value::Null),
             (Type::CHAR, DataType::Text(v)) => Ok(ps::Value::Char(v)),
-            (Type::CHAR, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Char(from_tiny_text(v)?)),
+            (Type::CHAR, DataType::TinyText(t)) => Ok(ps::Value::Char(t.as_str().into())),
             (Type::VARCHAR, DataType::Text(v)) => Ok(ps::Value::Varchar(v)),
-            (Type::VARCHAR, ref v @ DataType::TinyText(_)) => {
-                Ok(ps::Value::Varchar(from_tiny_text(v)?))
-            }
+            (Type::VARCHAR, DataType::TinyText(t)) => Ok(ps::Value::Varchar(t.as_str().into())),
+
             (Type::INT2, DataType::Int(v)) => Ok(ps::Value::Smallint(v as _)),
             (Type::INT4, DataType::Int(v)) => Ok(ps::Value::Int(v)),
             (Type::INT8, DataType::BigInt(v)) => Ok(ps::Value::Bigint(v)),
@@ -51,7 +40,7 @@ impl TryFrom<Value> for ps::Value {
             (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
             (Type::NUMERIC, DataType::Numeric(ref d)) => Ok(ps::Value::Numeric(*d.as_ref())),
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
-            (Type::TEXT, ref v @ DataType::TinyText(_)) => Ok(ps::Value::Text(from_tiny_text(v)?)),
+            (Type::TEXT, DataType::TinyText(t)) => Ok(ps::Value::Text(t.as_str().into())),
             (Type::TIMESTAMP, DataType::Timestamp(v)) => Ok(ps::Value::Timestamp(v)),
             (Type::TIMESTAMPTZ, DataType::TimestampTz(v)) => {
                 Ok(ps::Value::TimestampTz(*v.as_ref()))
@@ -60,20 +49,15 @@ impl TryFrom<Value> for ps::Value {
             (Type::TIME, DataType::Time(t)) => Ok(ps::Value::Time((*t.as_ref()).into())),
             (Type::BOOL, DataType::UnsignedInt(v)) => Ok(ps::Value::Bool(v != 0)),
             (Type::BOOL, DataType::Int(v)) => Ok(ps::Value::Bool(v != 0)),
-            (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(b.as_ref().clone())),
+            (Type::BYTEA, DataType::ByteArray(b)) => Ok(ps::Value::ByteArray(
+                std::sync::Arc::try_unwrap(b).unwrap_or_else(|v| v.as_ref().to_vec()),
+            )),
             (Type::MACADDR, DataType::Text(m)) => Ok(ps::Value::MacAddress(
-                m.to_str()
-                    .map_err(|e| ps::Error::EncodeError(e.into()))
-                    .and_then(|s| {
-                        MacAddress::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
-                    })?,
+                MacAddress::parse_str(m.as_str())
+                    .map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
             (Type::UUID, DataType::Text(u)) => Ok(ps::Value::Uuid(
-                u.to_str()
-                    .map_err(|e| ps::Error::EncodeError(e.into()))
-                    .and_then(|s| {
-                        Uuid::parse_str(s).map_err(|e| ps::Error::ParseError(e.to_string()))
-                    })?,
+                Uuid::parse_str(u.as_str()).map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
             (Type::JSON, ref d @ (DataType::Text(_) | DataType::TinyText(_))) => {
                 Ok(ps::Value::Json(
@@ -112,17 +96,19 @@ impl TryFrom<Value> for ps::Value {
 #[cfg(test)]
 mod tests {
 
+    use noria::TinyText;
+
     use super::*;
 
     #[test]
     fn tiny_text_char() {
         let val = Value {
             col_type: Type::CHAR,
-            value: DataType::TinyText([b'a'; 15]),
+            value: DataType::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
         };
         assert_eq!(
             ps::Value::try_from(val).unwrap(),
-            ps::Value::Char(ArcCStr::try_from("aaaaaaaaaaaaaaa").unwrap())
+            ps::Value::Char("aaaaaaaaaaaaaa".into())
         );
     }
 
@@ -130,11 +116,11 @@ mod tests {
     fn tiny_text_varchar() {
         let val = Value {
             col_type: Type::VARCHAR,
-            value: DataType::TinyText([b'a'; 15]),
+            value: DataType::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
         };
         assert_eq!(
             ps::Value::try_from(val).unwrap(),
-            ps::Value::Varchar(ArcCStr::try_from("aaaaaaaaaaaaaaa").unwrap())
+            ps::Value::Varchar("aaaaaaaaaaaaaa".into())
         );
     }
 
@@ -142,11 +128,11 @@ mod tests {
     fn tiny_text_text() {
         let val = Value {
             col_type: Type::TEXT,
-            value: DataType::TinyText([b'a'; 15]),
+            value: DataType::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa")),
         };
         assert_eq!(
             ps::Value::try_from(val).unwrap(),
-            ps::Value::Text(ArcCStr::try_from("aaaaaaaaaaaaaaa").unwrap())
+            ps::Value::Text("aaaaaaaaaaaaaa".into())
         );
     }
 }

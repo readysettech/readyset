@@ -31,7 +31,6 @@ tokio = { version = "1.8.1", features = ["full"] }
 bincode = "1.3.3"
 vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
-arccstr = { version = "1.3.0", features = ["serde"] }
 ahash = "0.3"
 chrono = { version = "0.4.0", features = ["serde"] }
 tower-service = "0.3.1"
@@ -60,6 +59,7 @@ rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"]
 eui48 = "0.4"
 uuid = { version = "0.8", features = ["v4"] }
 bit-vec = { version = "0.6", features = ["serde"] }
+triomphe = "0.1"
 
 # consensus/
 zookeeper-async = "4.0.1"

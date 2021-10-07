@@ -1,5 +1,3 @@
-use arccstr::ArcCStr;
-
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone};
 use derive_more::{From, Into};
@@ -7,7 +5,7 @@ use itertools::{Either, Itertools};
 use serde::{Deserialize, Serialize};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
-use crate::{internal, ReadySetError, ReadySetResult};
+use crate::{internal, ReadySetError, ReadySetResult, Text, TinyText};
 use nom_sql::{Double, Float, Literal, SqlType};
 
 use std::convert::{TryFrom, TryInto};
@@ -18,8 +16,6 @@ use std::{borrow::Cow, mem};
 use std::{fmt, iter};
 
 use proptest::prelude::{prop_oneof, Arbitrary};
-
-const TINYTEXT_WIDTH: usize = 15;
 
 /// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
 /// either case), and we don't care about seconds, so our maximum offset is gonna be
@@ -38,7 +34,7 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 /// Also note that DataType uses a custom implementation of the Serialize trait, which must be
 /// manually updated if the DataType enum changes:
 /// https://www.notion.so/Text-TinyText-Serialization-Deserialization-9dff56b6974b4bcdae28f236882783a8
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[warn(variant_size_differences)]
 pub enum DataType {
     /// An empty value.
@@ -58,9 +54,9 @@ pub enum DataType {
     /// supporting DECIMAL, as well as characteristics of how FLOAT and DOUBLE behave in MySQL.
     Double(f64, u8),
     /// A reference-counted string-like value.
-    Text(ArcCStr),
+    Text(Text),
     /// A tiny string that fits in a pointer
-    TinyText([u8; TINYTEXT_WIDTH]),
+    TinyText(TinyText),
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
     /// A timestamp with time zone.
@@ -117,36 +113,6 @@ impl fmt::Display for DataType {
     }
 }
 
-impl fmt::Debug for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            DataType::None => write!(f, "None"),
-            DataType::Text(..) => {
-                let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
-                write!(f, "Text({:?})", text)
-            }
-            DataType::TinyText(..) => {
-                let text: &str = <&str>::try_from(self).map_err(|_| fmt::Error)?;
-                write!(f, "TinyText({:?})", text)
-            }
-            DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
-            DataType::TimestampTz(ref ts) => write!(f, "TimestampTz({:?})", ts),
-            DataType::Float(real, p) => write!(f, "Float({}, {})", real, p),
-            DataType::Double(real, p) => write!(f, "Double({}, {})", real, p),
-            DataType::Int(n) => write!(f, "Int({})", n),
-            DataType::UnsignedInt(n) => write!(f, "UnsignedInt({})", n),
-            DataType::BigInt(n) => write!(f, "BigInt({})", n),
-            DataType::UnsignedBigInt(n) => write!(f, "UnsignedBigInt({})", n),
-            DataType::Time(ref t) => f.debug_tuple("Time").field(t.as_ref()).finish(),
-            DataType::ByteArray(ref array) => write!(f, "ByteArray({:?})", array),
-            DataType::Numeric(ref d) => write!(f, "Numeric({:?})", d),
-            DataType::BitVector(ref b) => {
-                write!(f, "BitVector({:?})", b)
-            }
-        }
-    }
-}
-
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -164,7 +130,7 @@ impl DataType {
     pub fn min_value(other: &Self) -> Self {
         match other {
             DataType::None => DataType::None,
-            DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText([0; 15]),
+            DataType::Text(_) | DataType::TinyText(_) => DataType::TinyText("".try_into().unwrap()), // Safe because fits in length
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MIN_DATE,
                 NaiveTime::from_hms(0, 0, 0),
@@ -193,7 +159,6 @@ impl DataType {
     pub fn max_value(other: &Self) -> Self {
         match other {
             DataType::None => DataType::None,
-            DataType::TinyText(_) => DataType::TinyText([u8::max_value(); 15]),
             DataType::Timestamp(_) => DataType::Timestamp(NaiveDateTime::new(
                 chrono::naive::MAX_DATE,
                 NaiveTime::from_hms(23, 59, 59),
@@ -211,7 +176,10 @@ impl DataType {
             DataType::UnsignedBigInt(_) => DataType::UnsignedBigInt(u64::max_value()),
             DataType::Time(_) => DataType::Time(Arc::new(MysqlTime::max_value())),
             DataType::Numeric(_) => DataType::from(Decimal::MAX),
-            DataType::Text(_) | DataType::ByteArray(_) | DataType::BitVector(_) => unimplemented!(),
+            DataType::TinyText(_)
+            | DataType::Text(_)
+            | DataType::ByteArray(_)
+            | DataType::BitVector(_) => unimplemented!(),
         }
     }
 
@@ -221,7 +189,7 @@ impl DataType {
     /// (i.e., the owner of `self`), at the cost of requiring additional allocation and copying.
     pub fn deep_clone(&self) -> Self {
         match *self {
-            DataType::Text(ref cstr) => DataType::Text(ArcCStr::from(&**cstr)),
+            DataType::Text(ref text) => DataType::Text(text.as_str().into()),
             DataType::ByteArray(ref bytes) => DataType::ByteArray(Arc::new(bytes.as_ref().clone())),
             DataType::BitVector(ref bits) => DataType::from(bits.as_ref().clone()),
             DataType::TimestampTz(ref ts) => DataType::from(*ts.as_ref()),
@@ -285,11 +253,8 @@ impl DataType {
             DataType::UnsignedBigInt(x) => x != 0,
             DataType::Float(f, _) => f != 0.0,
             DataType::Double(f, _) => f != 0.0,
-            DataType::Text(_) | DataType::TinyText(_) => {
-                // Use of TryFrom for these DataTypes always yields an Ok(..) result.
-                #[allow(clippy::unwrap_used)]
-                !<&str>::try_from(self).unwrap().is_empty()
-            }
+            DataType::Text(ref t) => !t.as_str().is_empty(),
+            DataType::TinyText(ref tt) => !tt.as_bytes().is_empty(),
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
             DataType::TimestampTz(ref dt) => {
                 *dt.as_ref()
@@ -1001,7 +966,6 @@ impl PartialEq for DataType {
     }
 }
 
-use crate::errors::internal_err;
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use launchpad::arbitrary::arbitrary_decimal;
@@ -1022,7 +986,7 @@ impl Ord for DataType {
     fn cmp(&self, other: &DataType) -> Ordering {
         match (self, other) {
             (&DataType::Text(ref a), &DataType::Text(ref b)) => a.cmp(b),
-            (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.cmp(b),
+            (&DataType::TinyText(ref a), &DataType::TinyText(ref b)) => a.as_str().cmp(b.as_str()),
             (&DataType::Text(..), &DataType::TinyText(..))
             | (&DataType::TinyText(..), &DataType::Text(..)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
@@ -1463,7 +1427,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
                     details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
                 })
                 .map(|d| DataType::Numeric(Arc::new(d))),
-            Literal::Blob(b) => DataType::try_from(b.as_slice()),
+            Literal::Blob(b) => Ok(DataType::from(b.as_slice())),
             Literal::ByteArray(b) => Ok(DataType::ByteArray(Arc::new(b.clone()))),
             Literal::BitVector(b) => Ok(DataType::from(BitVec::from_bytes(b.as_slice()))),
             Literal::Placeholder(_) => {
@@ -1633,34 +1597,8 @@ impl<'a> TryFrom<&'a DataType> for &'a str {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
-            DataType::Text(ref s) => Ok(s.to_str().map_err(|e| {
-                ReadySetError::BadRequest(format!("unable to create str from &ArcCStr: {}", e))
-            })?),
-            DataType::TinyText(ref bts) => {
-                if bts[TINYTEXT_WIDTH - 1] == 0 {
-                    // NULL terminated CStr
-                    use std::ffi::CStr;
-                    // this is safe, since we are checking that bts[TINYTEXT_WIDTH - 1] == 0
-                    // (so there is at least one 0 element in bts)
-                    #[allow(clippy::unwrap_used)]
-                    let null = bts.iter().position(|&i| i == 0).unwrap() + 1;
-                    // CStr::from_bytes_with_nul only fails if there is no 0 char or if the 0 char
-                    // is not at the end of the byte array, which is not the case for bts[0..null]
-                    // since we already found the first 0 (null) char position.
-                    // So it's safe to use unwrap and to use index slicing.
-                    #[allow(clippy::unwrap_used)]
-                    #[allow(clippy::indexing_slicing)]
-                    let cstr = CStr::from_bytes_with_nul(&bts[0..null]).unwrap();
-                    Ok(cstr.to_str().map_err(|e| {
-                        internal_err(format!("unable to create str from CStr: {}", e))
-                    })?)
-                } else {
-                    // String is exactly eight bytes
-                    Ok(std::str::from_utf8(bts).map_err(|e| {
-                        internal_err(format!("unable to create str from bytes: {}", e))
-                    })?)
-                }
-            }
+            DataType::Text(ref t) => Ok(t.as_str()),
+            DataType::TinyText(ref tt) => Ok(tt.as_str()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
                 src_type: match data.sql_type() {
@@ -1679,17 +1617,8 @@ impl TryFrom<DataType> for Vec<u8> {
 
     fn try_from(data: DataType) -> Result<Self, Self::Error> {
         match data {
-            DataType::Text(t) => Ok(t.to_bytes().to_vec()),
-            DataType::TinyText(t) => {
-                if t[TINYTEXT_WIDTH - 1] == 0 {
-                    // guaranteed to have at least one 0
-                    let null = t.iter().position(|&i| i == 0).unwrap();
-                    Ok(t[0..null].to_vec())
-                } else {
-                    // entire [u8] contains data
-                    Ok(t.to_vec())
-                }
-            }
+            DataType::Text(t) => Ok(t.as_bytes().to_vec()),
+            DataType::TinyText(tt) => Ok(tt.as_str().as_bytes().to_vec()),
             DataType::ByteArray(bytes) => Ok(bytes.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
@@ -2035,34 +1964,21 @@ impl TryFrom<DataType> for String {
 
 impl<'a> From<&'a str> for DataType {
     fn from(s: &'a str) -> Self {
-        #[allow(clippy::unwrap_used)]
-        // The only way for this to fail is if the `&str` is not a valid UTF-8 string,
-        // which can never happen since all String slices in Rust are valid UTF-8 encoded.
-        DataType::try_from(s.as_bytes()).unwrap()
+        if let Ok(tt) = TinyText::try_from(s) {
+            DataType::TinyText(tt)
+        } else {
+            DataType::Text(s.into())
+        }
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for DataType {
-    type Error = ReadySetError;
-
-    fn try_from(b: &[u8]) -> Result<Self, Self::Error> {
-        let len = b.len();
-        if len <= TINYTEXT_WIDTH {
-            let mut bytes = [0; TINYTEXT_WIDTH];
-            if len != 0 {
-                // We know at this point that `len` is less or equal to `TINYTEXT_WIDTH`,
-                // which is the size of the `bytes` array.
-                #[allow(clippy::indexing_slicing)]
-                let bts = &mut bytes[0..len];
-                bts.copy_from_slice(b);
-            }
-
-            Ok(DataType::TinyText(bytes))
+impl From<&[u8]> for DataType {
+    fn from(b: &[u8]) -> Self {
+        // NOTE: should we *really* be converting to Text here?
+        if let Ok(s) = std::str::from_utf8(b) {
+            s.into()
         } else {
-            match ArcCStr::try_from(b) {
-                Ok(arc_c_str) => Ok(DataType::Text(arc_c_str)),
-                Err(_) => Ok(DataType::ByteArray(Arc::new(b.to_vec()))),
-            }
+            DataType::ByteArray(b.to_vec().into())
         }
     }
 }
@@ -2083,7 +1999,7 @@ impl TryFrom<&mysql_common::value::Value> for DataType {
 
         match v {
             Value::NULL => Ok(DataType::None),
-            Value::Bytes(v) => DataType::try_from(&v[..]),
+            Value::Bytes(v) => Ok(DataType::from(&v[..])),
             Value::Int(v) => Ok(DataType::from(*v)),
             Value::UInt(v) => Ok(DataType::from(*v)),
             Value::Float(v) => DataType::try_from(*v),
@@ -2797,26 +2713,22 @@ mod tests {
         assert_eq!(a_dt.unwrap(), DataType::None);
 
         // Test Value::Bytes.
-        // Can't build a CString with interior nul-terminated chars, but now it can be mapped
+
+        // Can't build a String from non-utf8 chars, but now it can be mapped
         // to a ByteArray.
-        let a = Value::Bytes(vec![0; 30]);
+        let a = Value::Bytes(vec![0xff; 30]);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
-        assert_eq!(a_dt.unwrap(), DataType::ByteArray(Arc::new(vec![0; 30])));
+        assert_eq!(a_dt.unwrap(), DataType::ByteArray(Arc::new(vec![0xff; 30])));
 
-        let a = Value::Bytes(vec![1; 30]);
+        let s = "abcdef";
+        let a = Value::Bytes(s.as_bytes().to_vec());
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());
         assert_eq!(
             a_dt.unwrap(),
-            DataType::Text(ArcCStr::try_from(&vec![1; 30][..]).unwrap())
+            DataType::TinyText(TinyText::from_arr(b"abcdef"))
         );
-
-        let s = [1; 15];
-        let a = Value::Bytes(s.to_vec());
-        let a_dt = DataType::try_from(a);
-        assert!(a_dt.is_ok());
-        assert_eq!(a_dt.unwrap(), DataType::TinyText(s));
 
         // Test Value::Int.
         let a = Value::Int(-5);
@@ -3146,7 +3058,7 @@ mod tests {
     {
         let txt1: DataType = "hi".try_into().unwrap();
         let txt12: DataType = "no".try_into().unwrap();
-        let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
+        let txt2: DataType = DataType::Text("hi".into());
         let text: DataType = "this is a very long text indeed".try_into().unwrap();
         let text2: DataType = "this is another long text".try_into().unwrap();
         let float = DataType::Float(-8.99, 3);
@@ -3604,7 +3516,7 @@ mod tests {
 
         let txt1: DataType = "hi".try_into().unwrap();
         let txt12: DataType = "no".try_into().unwrap();
-        let txt2: DataType = DataType::Text(ArcCStr::try_from("hi").unwrap());
+        let txt2: DataType = DataType::Text("hi".into());
         let text: DataType = "this is a very long text indeed".try_into().unwrap();
         let text2: DataType = "this is another long text".try_into().unwrap();
         let float = DataType::Float(-8.99, 3);

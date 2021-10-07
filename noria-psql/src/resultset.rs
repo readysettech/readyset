@@ -130,7 +130,6 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arccstr::ArcCStr;
     use nom_sql::{ColumnSpecification, SqlType};
     use noria::{ColumnSchema, DataType};
     use noria_client::backend as cl;
@@ -282,13 +281,13 @@ mod tests {
                 vec![
                     DataType::BigInt(10),
                     DataType::BigInt(99),
-                    DataType::Text(ArcCStr::try_from("abcdef").unwrap()),
+                    DataType::Text("abcdef".into()),
                     DataType::Int(0),
                 ],
                 vec![
                     DataType::BigInt(11),
                     DataType::BigInt(99),
-                    DataType::Text(ArcCStr::try_from("ghijkl").unwrap()),
+                    DataType::Text("ghijkl".into()),
                     DataType::Int(0),
                 ],
             ],
@@ -333,14 +332,8 @@ mod tests {
         assert_eq!(
             collect_resultset_values(resultset),
             vec![
-                vec![
-                    ps::Value::Bigint(10),
-                    ps::Value::Text(ArcCStr::try_from("abcdef").unwrap())
-                ],
-                vec![
-                    ps::Value::Bigint(11),
-                    ps::Value::Text(ArcCStr::try_from("ghijkl").unwrap())
-                ]
+                vec![ps::Value::Bigint(10), ps::Value::Text("abcdef".into())],
+                vec![ps::Value::Bigint(11), ps::Value::Text("ghijkl".into())]
             ]
         );
     }
