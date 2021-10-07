@@ -196,6 +196,12 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref ReadysetMySQLAdapterTargetGroup
       LoadBalancerArn: !Ref ReadysetMySQLAdapterNLB
+  ReadysetMySQLAdapterVPCEndpoint:
+    Type: AWS::EC2::VPCEndpointService
+    Properties:
+      AcceptanceRequired: false
+      NetworkLoadBalancerArns:
+        - !Ref ReadysetMySQLAdapterNLB
   # --- END MYSQL ADAPTER --- #
   # --- START SERVER --- #
   ReadysetServerRole:
@@ -243,7 +249,7 @@ Resources:
           SourceSecurityGroupId:
             Fn::GetAtt:
             - ReadysetMySQLAdapterSecurityGroup
-            - GroupId 
+            - GroupId
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
@@ -332,5 +338,5 @@ Outputs:
   ReadysetDBSecurityGroup:
     Value: !Ref ReadysetDBSecurityGroup
     Description: Attach this Security Group to the RDS instance
-  ReadysetMySQLAdapterLoadBalancer:
-    Value: !Ref ReadysetMySQLAdapterNLB
+  ReadysetMySQLVPCEndpoint:
+    Value: !Ref ReadysetMySQLAdapterVPCEndpoint

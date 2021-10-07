@@ -253,3 +253,14 @@ Resources:
         ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
         ReadysetServerNodes: !Ref ReadysetServerNodes
         DeploymentName: !Ref DeploymentName
+Outputs:
+  ReadysetDBSecurityGroup:
+    Value: !GetAtt
+      - ReadysetMySQLStack
+      - Outputs.ReadysetDBSecurityGroup
+    Description: Security group for the RDS instance
+  ReadysetMySQLVPCEndpoint:
+    Value: !GetAtt
+      - ReadysetMySQLStack
+      - Outputs.ReadysetMySQLVPCEndpoint
+    Description: VPC Endpoint to connect to to access Readyset
