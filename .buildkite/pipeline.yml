@@ -90,22 +90,6 @@ steps:
                 - rust-toolchain
                 - ops/readyset-substrate
 
-            - label: ":rust: Build clustertest binaries"
-              include:
-                - "[!ops]*"
-                - Cargo.lock
-                - Cargo.toml
-                - rust-toolchain
-                - ops/readyset-substrate
-
-            - label: ':rust: Run clustertests'
-              include:
-                - "[!ops]*"
-                - Cargo.lock
-                - Cargo.toml
-                - rust-toolchain
-                - ops/readyset-substrate
-
             - label: 'Run logictest'
               include:
                 - "[!ops]*"
@@ -119,6 +103,10 @@ steps:
                 - Cargo.lock
                 - Cargo.toml
                 - rust-toolchain
+
+            - label: 'Run clustertests'
+              include:
+                - noria/clustertest
 
             - label: ':rust: Deploy docs'
               include:

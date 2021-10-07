@@ -259,6 +259,34 @@ steps:
           login: true
           retries: 3
 
+  - label: 'Run clustertests'
+    key: noria-clustertest
+    command:
+    - 'echo +++ Building binaries for clustertest'
+    - cargo --locked build --release --bin noria-server --bin noria-mysql
+    - 'echo +++ Running Clustertests'
+    - cargo --locked test clustertest
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/se    curity-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+          - BINARY_PATH=/workdir/target/release
+          - MYSQL_ROOT_PASSWORD=noria
+          volumes:
+          - 'target:/workdir/target'
+          config:
+          - docker-compose.yml
+          - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+      - ecr#v2.2.0:
+          login: true
+
   - label: ':rust: Deploy docs'
     branches: 'master'
     command:
