@@ -547,9 +547,9 @@ impl AuthorityLeaderElectionState {
                 .send(AuthorityUpdate::WonLeaderElection(state.unwrap()))
                 .await
                 .map_err(|_| format_err!("failed to announce who won leader election"))?;
-        }
 
-        self.is_leader = true;
+            self.is_leader = true;
+        }
 
         Ok(())
     }
@@ -594,6 +594,10 @@ impl AuthorityWorkerState {
         }
 
         Ok(AuthorityWorkerHeartbeatResponse::Failed)
+    }
+
+    fn clear_active_workers(&mut self) {
+        self.active_workers.clear();
     }
 
     async fn watch_workers(&self) -> anyhow::Result<()> {
@@ -681,6 +685,8 @@ async fn authority_inner(
         .register()
         .await
         .context("Registering worker")?;
+
+    let mut last_leader_state = false;
     loop {
         leader_election_state
             .update_leader_state()
@@ -689,7 +695,21 @@ async fn authority_inner(
         // TODO(justin): Handle detected as failed.
         worker_state.heartbeat().await?;
 
-        if leader_election_state.is_leader() {
+        let is_leader = leader_election_state.is_leader();
+        let became_leader = !last_leader_state && is_leader;
+        last_leader_state = is_leader;
+
+        // Reset the set of workers in the worker state, as we want to propagate
+        // all the workers to a new leader. Technically, since we only update
+        // worker state when we are the leader, the active workers list will
+        // be empty. However, this guards against an insidious bug in a future
+        // where a node can become the leader, lose leadership, and then regain
+        // it.
+        if became_leader {
+            worker_state.clear_active_workers();
+        }
+
+        if is_leader {
             worker_state
                 .update_worker_state()
                 .await
