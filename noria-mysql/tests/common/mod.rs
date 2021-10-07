@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use mysql::prelude::Queryable;
 use std::env;
+use std::fmt::Display;
 use tokio::net::TcpStream;
 
 use msql_srv::MysqlIntermediary;
@@ -8,6 +9,33 @@ use noria_client::backend::BackendBuilder;
 use noria_client::test_helpers;
 
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
+
+pub fn recreate_database<N>(dbname: N)
+where
+    N: Display,
+{
+    let mut management_db = mysql::Conn::new(
+        mysql::OptsBuilder::default()
+            .user(Some("root"))
+            .pass(Some("noria"))
+            .ip_or_hostname(Some(
+                env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+            ))
+            .tcp_port(
+                env::var("MYSQL_TCP_PORT")
+                    .unwrap_or_else(|_| "3306".into())
+                    .parse()
+                    .unwrap(),
+            ),
+    )
+    .unwrap();
+    management_db
+        .query_drop(format!("DROP DATABASE IF EXISTS {}", dbname))
+        .unwrap();
+    management_db
+        .query_drop(format!("CREATE DATABASE {}", dbname))
+        .unwrap();
+}
 
 pub struct MySQLAdapter;
 #[async_trait]
@@ -31,25 +59,7 @@ impl test_helpers::Adapter for MySQLAdapter {
     }
 
     fn recreate_database() {
-        let mut management_db = mysql::Conn::new(
-            mysql::OptsBuilder::default()
-                .user(Some("root"))
-                .pass(Some("noria"))
-                .ip_or_hostname(Some(
-                    env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-                ))
-                .tcp_port(
-                    env::var("MYSQL_TCP_PORT")
-                        .unwrap_or_else(|_| "3306".into())
-                        .parse()
-                        .unwrap(),
-                ),
-        )
-        .unwrap();
-        management_db
-            .query_drop("DROP DATABASE IF EXISTS noria")
-            .unwrap();
-        management_db.query_drop("CREATE DATABASE noria").unwrap();
+        recreate_database("noria");
     }
 
     async fn run_backend(
