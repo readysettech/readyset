@@ -15,12 +15,13 @@ keywords = ["internal"]
 maintenance = { status = "experimental" }
 
 [dependencies]
-arccstr = { version = "1.3.0", features = ["serde"] }
 chrono = { version = "0.4.0", features = ["serde"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 vec1 = "1.6.0"
 tuple = "0.5"
+triomphe = "0.1.3"
+
 
 # Local deps
 noria = { path = "../../noria" }

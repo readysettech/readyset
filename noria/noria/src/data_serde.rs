@@ -1,4 +1,4 @@
-use crate::data::DataType;
+use crate::{DataType, TinyText};
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use mysql_time::MysqlTime;
@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess};
 use serde::ser::SerializeTupleVariant;
 use serde_bytes::{ByteBuf, Bytes};
-use std::borrow::{Borrow, Cow};
-use std::convert::{TryFrom, TryInto};
+use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 
@@ -42,7 +42,12 @@ impl serde::ser::Serialize for DataType {
                 tv.serialize_field(prec)?;
                 tv.end()
             }
-            DataType::Text(v) => serializer.serialize_newtype_variant("DataType", 3, "Text", v),
+            DataType::Text(v) => serializer.serialize_newtype_variant(
+                "DataType",
+                3,
+                "Text",
+                Bytes::new(v.as_bytes()),
+            ),
             DataType::Timestamp(v) => {
                 // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec nanos in the high 64 bits
                 // NOTE: don't be tempted to remove the intermediate step of casting to u64, as it will propagate the sign bit
@@ -52,14 +57,7 @@ impl serde::ser::Serialize for DataType {
             }
             DataType::Time(v) => serializer.serialize_newtype_variant("DataType", 5, "Time", &v),
             DataType::TinyText(v) => {
-                let mut b = [0u8; 16];
-                b[..v.len()].copy_from_slice(v);
-                serializer.serialize_newtype_variant(
-                    "DataType",
-                    6,
-                    "TinyText",
-                    &i128::from_le_bytes(b),
-                )
+                serializer.serialize_newtype_variant("DataType", 6, "TinyText", &v.to_i128())
             }
             DataType::ByteArray(array) => serializer.serialize_newtype_variant(
                 "DataType",
@@ -279,14 +277,9 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
                         .map(|d| DataType::Numeric(Arc::new(d))),
                     (Field::Text, variant) => {
-                        VariantAccess::newtype_variant::<Cow<'_, [u8]>>(variant).and_then(|x| {
-                            let x: &[u8] = x.borrow();
-                            DataType::try_from(x).map_err(|_| {
-                                serde::de::Error::invalid_value(
-                                    serde::de::Unexpected::Bytes(x),
-                                    &"valid utf-8 or short TinyText",
-                                )
-                            })
+                        VariantAccess::newtype_variant::<Cow<'_, [u8]>>(variant).map(|v| {
+                            // This is safe, becaus we always serialize ourselves
+                            DataType::Text(unsafe { std::str::from_utf8_unchecked(&v).into() })
                         })
                     }
                     // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
@@ -295,7 +288,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
                         .map(|v| DataType::Time(Arc::new(v))),
                     (Field::TinyText, variant) => VariantAccess::newtype_variant::<i128>(variant)
-                        .map(|r| DataType::TinyText(r.to_le_bytes()[..15].try_into().unwrap())),
+                        .map(|r| DataType::TinyText(unsafe { TinyText::from_i128_unchecked(r) })),
                     (Field::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
                             .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))

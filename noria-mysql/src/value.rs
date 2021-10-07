@@ -7,7 +7,7 @@ use std::sync::Arc;
 pub(crate) fn mysql_value_to_datatype(value: Value) -> ReadySetResult<DataType> {
     Ok(match value.into_inner() {
         ValueInner::Null => DataType::None,
-        ValueInner::Bytes(b) => DataType::try_from(b)?,
+        ValueInner::Bytes(b) => DataType::from(b),
         ValueInner::Int(i) => i.into(),
         ValueInner::UInt(i) => (i as i32).into(),
         ValueInner::Double(f) => DataType::try_from(f)?,

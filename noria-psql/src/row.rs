@@ -57,7 +57,6 @@ impl Iterator for RowIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arccstr::ArcCStr;
     use psql_srv as ps;
     use rust_decimal::Decimal;
     use std::convert::TryFrom;
@@ -93,7 +92,7 @@ mod tests {
         let row = Row {
             values: vec![
                 DataType::Int(43),
-                DataType::Text(ArcCStr::try_from("abcde").unwrap()),
+                DataType::Text("abcde".into()),
                 DataType::Double(10.000000222, 9),
                 DataType::Float(8.99, 2),
                 DataType::from(Decimal::new(35901234, 4)), // 3590.1234
@@ -111,7 +110,7 @@ mod tests {
             collect_row_values(row),
             vec![
                 ps::Value::Int(43),
-                ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
+                ps::Value::Text("abcde".into()),
                 ps::Value::Double(10.000000222),
                 ps::Value::Float(8.99),
                 ps::Value::Numeric(Decimal::new(35901234, 4)),
@@ -124,7 +123,7 @@ mod tests {
         let row = Row {
             values: vec![
                 DataType::Int(43),
-                DataType::Text(ArcCStr::try_from("abcde").unwrap()),
+                DataType::Text("abcde".into()),
                 DataType::Double(10.000000222, 9),
                 DataType::Float(8.99, 2),
                 DataType::from(Decimal::new(35901234, 4)), // 3590.1234
@@ -144,7 +143,7 @@ mod tests {
             collect_row_values(row),
             vec![
                 ps::Value::Int(43),
-                ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
+                ps::Value::Text("abcde".into()),
                 ps::Value::Double(10.000000222),
                 ps::Value::Float(8.99),
                 ps::Value::Numeric(Decimal::new(35901234, 4)),
@@ -158,7 +157,7 @@ mod tests {
             values: vec![
                 DataType::Int(0),
                 DataType::Int(43),
-                DataType::Text(ArcCStr::try_from("abcde").unwrap()),
+                DataType::Text("abcde".into()),
                 DataType::Int(0),
                 DataType::Int(0),
                 DataType::Double(10.000000222, 9),
@@ -180,7 +179,7 @@ mod tests {
             collect_row_values(row),
             vec![
                 ps::Value::Int(43),
-                ps::Value::Text(ArcCStr::try_from("abcde").unwrap()),
+                ps::Value::Text("abcde".into()),
                 ps::Value::Double(10.000000222),
                 ps::Value::Float(8.99),
                 ps::Value::Numeric(Decimal::new(35901234, 4)),

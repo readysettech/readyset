@@ -4,7 +4,6 @@ use futures::{pin_mut, StreamExt};
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
 use std::convert::{TryFrom, TryInto};
-use std::ffi::CString;
 use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, Instrument};
@@ -235,8 +234,7 @@ impl TableDescription {
                 .enumerate()
                 .map(|(i, t)| match t {
                     &Type::BPCHAR | &Type::TEXT | &Type::VARCHAR => {
-                        let str = CString::new(row.try_get::<&str>(i)?).unwrap();
-                        Ok(noria::DataType::Text(str.into()))
+                        Ok(noria::DataType::from(row.try_get::<&str>(i)?))
                     }
                     &Type::INT4 => Ok(noria::DataType::Int(row.try_get(i)?)),
                     &Type::INT8 => Ok(noria::DataType::BigInt(row.try_get(i)?)),

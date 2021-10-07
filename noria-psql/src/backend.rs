@@ -80,8 +80,8 @@ impl TryFrom<ParamRef<'_>> for DataType {
         match v.0 {
             ps::Value::Null => Ok(DataType::None),
             ps::Value::Bool(b) => Ok(DataType::from(*b)),
-            ps::Value::Char(v) => Ok(DataType::Text(v.clone())),
-            ps::Value::Varchar(v) => Ok(DataType::Text(v.clone())),
+            ps::Value::Char(v) => Ok(v.as_str().into()),
+            ps::Value::Varchar(v) => Ok(v.as_str().into()),
             ps::Value::Int(v) => Ok((*v).into()),
             ps::Value::Bigint(v) => Ok((*v).into()),
             ps::Value::Smallint(v) => Ok((*v).into()),
@@ -90,7 +90,7 @@ impl TryFrom<ParamRef<'_>> for DataType {
             ps::Value::Float(v) => DataType::try_from(*v)
                 .map_err(|_| ps::Error::Unsupported(format!("f32 with value `{}`", v))),
             ps::Value::Numeric(d) => Ok(DataType::from(*d)),
-            ps::Value::Text(v) => Ok(DataType::Text(v.clone())),
+            ps::Value::Text(v) => Ok(v.as_str().into()),
             ps::Value::Timestamp(v) => Ok((*v).into()),
             ps::Value::TimestampTz(v) => Ok(DataType::from(*v)),
             ps::Value::Date(v) => Ok((*v).into()),

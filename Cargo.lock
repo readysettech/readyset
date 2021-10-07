@@ -71,15 +71,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
 
 [[package]]
-name = "arccstr"
-version = "1.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6c0dad40869af0eb0444e61c06ca96038d12bc98efcb7907fb1fa564f178409"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2405,7 +2396,6 @@ dependencies = [
 name = "js-client"
 version = "0.1.0"
 dependencies = [
- "arccstr",
  "chrono",
  "maplit",
  "msql-srv",
@@ -3206,7 +3196,6 @@ version = "0.7.0"
 dependencies = [
  "ahash 0.3.8",
  "anyhow",
- "arccstr",
  "assert_approx_eq",
  "assert_infrequent",
  "async-bincode",
@@ -3257,6 +3246,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "tracing-futures",
+ "triomphe",
  "url",
  "uuid",
  "vec1",
@@ -3306,7 +3296,6 @@ name = "noria-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arccstr",
  "async-trait",
  "bit-vec",
  "chrono",
@@ -3373,12 +3362,12 @@ dependencies = [
 name = "noria-common"
 version = "0.7.0"
 dependencies = [
- "arccstr",
  "chrono",
  "launchpad",
  "noria",
  "petgraph",
  "serde",
+ "triomphe",
  "tuple",
  "vec1",
 ]
@@ -3523,7 +3512,6 @@ name = "noria-psql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arccstr",
  "async-trait",
  "bit-vec",
  "chrono",
@@ -4324,7 +4312,6 @@ dependencies = [
 name = "psql-srv"
 version = "0.1.0"
 dependencies = [
- "arccstr",
  "async-trait",
  "bit-vec",
  "bytes 1.1.0",
@@ -4333,6 +4320,7 @@ dependencies = [
  "futures 0.3.17",
  "hex",
  "nom-sql",
+ "noria",
  "postgres 0.19.1",
  "postgres-types",
  "rust_decimal",
@@ -5188,7 +5176,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0bccbcf40c8938196944a3da0e133e031a33f4d6b72db3bda3cc556e361905d"
 dependencies = [
  "lazy_static",
- "parking_lot 0.10.2",
+ "parking_lot 0.11.2",
  "serial_test_derive",
 ]
 
@@ -5464,6 +5452,12 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
+
+[[package]]
+name = "stable_deref_trait"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "standback"
@@ -6291,6 +6285,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "triomphe"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46bddb80ec09585c58022a2c55e6e7c11e713d9bb26895f1b56cd945c4040c54"
+dependencies = [
+ "memoffset 0.6.4",
+ "serde",
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6312,8 +6317,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.4",
  "static_assertions",
 ]
 

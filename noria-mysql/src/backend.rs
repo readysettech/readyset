@@ -58,8 +58,8 @@ async fn write_column<W: AsyncWrite + Unpin>(
                 rw.write_col(i as isize).await
             }
         }
-        DataType::Text(ref t) => rw.write_col(t.to_str().unwrap()).await,
-        ref dt @ DataType::TinyText(_) => rw.write_col::<&str>(<&str>::try_from(dt)?).await,
+        DataType::Text(ref t) => rw.write_col(t.as_str()).await,
+        DataType::TinyText(ref t) => rw.write_col(t.as_str()).await,
         ref dt @ (DataType::Float(..) | DataType::Double(..)) => match cs.coltype {
             msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
                 let f = dt.to_string();

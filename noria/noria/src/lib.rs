@@ -211,6 +211,7 @@ pub mod consistency;
 mod controller;
 mod data;
 mod data_serde;
+mod data_text_types;
 pub mod errors;
 mod map;
 pub mod metrics;
@@ -307,6 +308,7 @@ pub use crate::data::{
     DataType, Modification, Operation, ReplicationOffset, TableOperation, DATE_FORMAT,
     TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
 };
+pub use crate::data_text_types::{Text, TinyText};
 pub use crate::map::Map;
 pub use crate::table::{Table, TableRequest};
 pub use crate::view::View;

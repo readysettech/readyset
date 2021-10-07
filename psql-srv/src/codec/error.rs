@@ -1,7 +1,6 @@
 use eui48::ParseError;
 use hex::FromHexError;
 use postgres_types::Type;
-use std::ffi::FromBytesWithNulError;
 use std::fmt;
 use std::marker::{Send, Sync};
 use std::num::{ParseFloatError, ParseIntError, TryFromIntError};
@@ -16,8 +15,8 @@ pub enum DecodeError {
     #[error("incorrect parameter count: {0}")]
     IncorrectParameterCount(usize),
 
-    #[error("invalid c string: {0}")]
-    InvalidCStr(#[from] FromBytesWithNulError),
+    #[error("invalid byte sequence for encoding \"UTF8\": 0x00")]
+    InvalidUtf8,
 
     #[error("invalid numeric: {0}")]
     InvalidNumeric(#[from] rust_decimal::Error),

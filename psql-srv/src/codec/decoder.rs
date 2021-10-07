@@ -9,7 +9,6 @@ use crate::message::{
     TransferFormat::{self, *},
 };
 use crate::value::Value;
-use arccstr::ArcCStr;
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
@@ -302,19 +301,20 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
     }
 
     let buf = &mut src.split_to(usize::try_from(len)?);
+
     match *t {
+        // Postgres does not allow interior 0 bytes, even thought is is valid UTF-8
+        Type::CHAR | Type::VARCHAR | Type::TEXT if buf.contains(&0) => Err(Error::InvalidUtf8),
         Type::BOOL => Ok(Value::Bool(bool::from_sql(t, buf)?)),
-        Type::CHAR => Ok(Value::Char(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
-        Type::VARCHAR => Ok(Value::Varchar(ArcCStr::try_from(<&str>::from_sql(
-            t, buf,
-        )?)?)),
+        Type::CHAR => Ok(Value::Char(<&str>::from_sql(t, buf)?.into())),
+        Type::VARCHAR => Ok(Value::Varchar(<&str>::from_sql(t, buf)?.into())),
         Type::INT4 => Ok(Value::Int(i32::from_sql(t, buf)?)),
         Type::INT8 => Ok(Value::Bigint(i64::from_sql(t, buf)?)),
         Type::INT2 => Ok(Value::Smallint(i16::from_sql(t, buf)?)),
         Type::FLOAT8 => Ok(Value::Double(f64::from_sql(t, buf)?)),
         Type::FLOAT4 => Ok(Value::Float(f32::from_sql(t, buf)?)),
         Type::NUMERIC => Ok(Value::Numeric(Decimal::from_sql(t, buf)?)),
-        Type::TEXT => Ok(Value::Text(ArcCStr::try_from(<&str>::from_sql(t, buf)?)?)),
+        Type::TEXT => Ok(Value::Text(<&str>::from_sql(t, buf)?.into())),
         Type::DATE => Ok(Value::Date(NaiveDate::from_sql(t, buf)?)),
         Type::TIME => Ok(Value::Time(NaiveTime::from_sql(t, buf)?)),
         Type::TIMESTAMP => Ok(Value::Timestamp(NaiveDateTime::from_sql(t, buf)?)),
@@ -354,8 +354,8 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
     let text_str: &str = text.borrow();
     match *t {
         Type::BOOL => Ok(Value::Bool(text_str == BOOL_TRUE_TEXT_REP)),
-        Type::CHAR => Ok(Value::Char(ArcCStr::try_from(text_str)?)),
-        Type::VARCHAR => Ok(Value::Varchar(ArcCStr::try_from(text_str)?)),
+        Type::CHAR => Ok(Value::Char(text_str.into())),
+        Type::VARCHAR => Ok(Value::Varchar(text_str.into())),
         Type::INT4 => Ok(Value::Int(text_str.parse::<i32>()?)),
         Type::INT8 => Ok(Value::Bigint(text_str.parse::<i64>()?)),
         Type::INT2 => Ok(Value::Smallint(text_str.parse::<i16>()?)),
@@ -368,7 +368,7 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<Value, Error> {
             Ok(Value::Float(text_str.parse::<f32>()?))
         }
         Type::NUMERIC => Ok(Value::Numeric(Decimal::from_str(text_str)?)),
-        Type::TEXT => Ok(Value::Text(ArcCStr::try_from(text_str)?)),
+        Type::TEXT => Ok(Value::Text(text_str.into())),
         Type::TIMESTAMP => {
             // TODO: Does not correctly handle all valid timestamp representations. For example,
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
@@ -589,10 +589,7 @@ mod tests {
         let expected = Some(Bind {
             portal_name: bytes_str("portal_name"),
             prepared_statement_name: bytes_str("prepared_statement_name"),
-            params: vec![
-                DataValue::Int(42),
-                DataValue::Text(ArcCStr::try_from("some text").unwrap()),
-            ],
+            params: vec![DataValue::Int(42), DataValue::Text("some text".into())],
             result_transfer_formats: vec![Binary, Binary, Text],
         });
         assert_eq!(codec.decode(&mut buf).unwrap(), expected);
@@ -944,7 +941,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Char("mighty".into())
         );
     }
 
@@ -955,7 +952,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::Varchar(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Varchar("mighty".into())
         );
     }
 
@@ -1039,7 +1036,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
-            DataValue::Text(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Text("mighty".into())
         );
     }
 
@@ -1209,7 +1206,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::CHAR).unwrap(),
-            DataValue::Char(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Char("mighty".into())
         );
     }
 
@@ -1220,7 +1217,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::VARCHAR).unwrap(),
-            DataValue::Varchar(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Varchar("mighty".into())
         );
     }
 
@@ -1297,7 +1294,7 @@ mod tests {
         buf.extend_from_slice(b"mighty"); // value
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::TEXT).unwrap(),
-            DataValue::Text(ArcCStr::try_from("mighty").unwrap())
+            DataValue::Text("mighty".into())
         );
     }
 

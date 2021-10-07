@@ -1,7 +1,7 @@
-use arccstr::ArcCStr;
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
+use noria::Text;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -10,15 +10,15 @@ use uuid::Uuid;
 pub enum Value {
     Null,
     Bool(bool),
-    Char(ArcCStr),
-    Varchar(ArcCStr),
+    Char(Text),
+    Varchar(Text),
     Int(i32),
     Bigint(i64),
     Smallint(i16),
     Double(f64),
     Float(f32),
     Numeric(Decimal),
-    Text(ArcCStr),
+    Text(Text),
     Timestamp(NaiveDateTime),
     TimestampTz(DateTime<FixedOffset>),
     Date(NaiveDate),

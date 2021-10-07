@@ -2,7 +2,7 @@ use mysql_async::prelude::Queryable;
 use noria::DataType as D;
 use noria::{
     consensus::{Authority, LocalAuthority, LocalAuthorityStore},
-    ControllerHandle, DataType, ReadySetResult,
+    ControllerHandle, DataType, ReadySetResult, TinyText,
 };
 use noria_server::Builder;
 use replicators::NoriaAdapter;
@@ -23,12 +23,8 @@ const POPULATE_SCHEMA: &str =
     "INSERT INTO noria VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)";
 
 /// A convinience init to convert 3 character byte slice to TinyText noria type
-const fn tiny(text: &[u8]) -> DataType {
-    let mut arr = [0u8; 15];
-    arr[0] = text[0];
-    arr[1] = text[1];
-    arr[2] = text[2];
-    D::TinyText(arr)
+const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
+    DataType::TinyText(TinyText::from_arr(text))
 }
 
 const SNAPSHOT_RESULT: &[&[DataType]] = &[
