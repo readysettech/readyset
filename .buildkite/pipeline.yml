@@ -311,7 +311,7 @@ steps:
           login: true
           retries: 3
 
-  - block: ":packer: Build Packer images?"
+  - block: ":packer: Build Readyset Packer images?"
     key: build-packer-images
     depends_on:
     - build-release-binaries
@@ -319,7 +319,7 @@ steps:
     - build-noria-mysql-adapter-release
     - build-noria-psql-adapter-release
 
-  - label: ':packer: Build images'
+  - label: ':packer: Build readyset images'
     key: build-images
     commands:
     - cd ops/images
@@ -327,7 +327,7 @@ steps:
     - 'echo +++ :buildkite: Downloading binary artifacts'
     - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server,amazon-ebs.readyset-vector-aggregator .
+    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:
@@ -336,6 +336,29 @@ steps:
     - build-noria-server-release
     - build-noria-mysql-adapter-release
     - build-noria-psql-adapter-release
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+          propagate-environment: true
+          environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':packer: Build infrastructure images'
+    key: build-infra-images
+    commands:
+    - cd ops/images
+    - mkdir binaries
+    - 'echo +++ :buildkite: Downloading binary artifacts'
+    - buildkite-agent artifact download target/release/* binaries/
+    - 'echo +++ :packer: Running packer build'
+    - packer build -only=amazon-ebs.readyset-authority-consul,amazon-ebs.readyset-vector-aggregator .
+    artifact_paths:
+    - ops/images/packer-manifest.json
+    depends_on:
+    - build-packer-images
     plugins:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
