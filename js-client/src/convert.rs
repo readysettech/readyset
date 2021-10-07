@@ -115,6 +115,11 @@ where
             .date(t.timestamp_millis() as f64)
             .or_else(|e| cx.throw_error(e.to_string()))?
             .upcast::<JsValue>()),
+        // NOTE: making a js date object from the datetime timestamp from UTC
+        DataType::TimestampTz(t) => Ok(cx
+            .date(t.naive_utc().timestamp_millis() as f64)
+            .or_else(|e| cx.throw_error(e.to_string()))?
+            .upcast::<JsValue>()),
         DataType::Time(_) => unimplemented!("Time conversion to JS type"),
         DataType::ByteArray(bytes) => {
             Ok(JsArrayBuffer::external(cx, bytes.as_ref().clone()).upcast::<JsValue>())

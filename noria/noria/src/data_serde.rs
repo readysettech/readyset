@@ -1,6 +1,6 @@
 use crate::data::DataType;
 use bit_vec::BitVec;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use mysql_time::MysqlTime;
 use rust_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess};
@@ -73,6 +73,9 @@ impl serde::ser::Serialize for DataType {
             DataType::BitVector(bits) => {
                 serializer.serialize_newtype_variant("DataType", 10, "BitVector", &bits)
             }
+            DataType::TimestampTz(ts) => {
+                serializer.serialize_newtype_variant("DataType", 11, "TimestampTz", ts.as_ref())
+            }
         }
     }
 }
@@ -94,6 +97,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             ByteArray,
             Numeric,
             BitVector,
+            TimestampTz,
         }
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -117,9 +121,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     8u64 => Ok(Field::ByteArray),
                     9u64 => Ok(Field::Numeric),
                     10u64 => Ok(Field::BitVector),
+                    11u64 => Ok(Field::TimestampTz),
                     _ => Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
-                        &"variant index 0 <= i < 11",
+                        &"variant index 0 <= i < 12",
                     )),
                 }
             }
@@ -139,6 +144,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     "ByteArray" => Ok(Field::ByteArray),
                     "Numeric" => Ok(Field::Numeric),
                     "BitVector" => Ok(Field::BitVector),
+                    "TimestampTz" => Ok(Field::TimestampTz),
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
@@ -158,6 +164,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     b"ByteArray" => Ok(Field::ByteArray),
                     b"Numeric" => Ok(Field::Numeric),
                     b"BitVector" => Ok(Field::BitVector),
+                    b"TimestampTz" => Ok(Field::TimestampTz),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
                         VARIANTS,
@@ -297,6 +304,10 @@ impl<'de> serde::Deserialize<'de> for DataType {
                         VariantAccess::newtype_variant::<BitVec>(variant)
                             .map(|bits| DataType::BitVector(Arc::new(bits)))
                     }
+                    (Field::TimestampTz, variant) => {
+                        VariantAccess::newtype_variant::<DateTime<FixedOffset>>(variant)
+                            .map(DataType::from)
+                    }
                 }
             }
         }
@@ -312,6 +323,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "Float",
             "ByteArray",
             "BitVector",
+            "TimestampTz",
         ];
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
     }

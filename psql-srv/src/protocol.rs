@@ -462,6 +462,7 @@ fn make_field_description(
         Type::FLOAT8 => TYPLEN_8,
         Type::NUMERIC => TYPLEN_VARLENA,
         Type::TIMESTAMP => TYPLEN_8,
+        Type::TIMESTAMPTZ => TYPLEN_8,
         Type::DATE => TYPLEN_4,
         Type::TIME => TYPLEN_8,
         Type::BYTEA => TYPLEN_VARLENA,

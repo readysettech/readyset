@@ -57,6 +57,9 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         }
         SqlType::Date => MYSQL_TYPE_DATE,
         SqlType::Timestamp => MYSQL_TYPE_TIMESTAMP,
+        SqlType::TimestampTz => {
+            unimplemented!("MySQL does not support the timestamp with time zone type")
+        }
         SqlType::Binary(_) => {
             // TODO(grfn): I don't know if this is right
             colflags |= msql_srv::ColumnFlags::BINARY_FLAG;

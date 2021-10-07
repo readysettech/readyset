@@ -1,7 +1,7 @@
 use arccstr::ArcCStr;
 
 use bytes::BytesMut;
-use chrono::{self, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone};
 use derive_more::{From, Into};
 use itertools::{Either, Itertools};
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,11 @@ use std::{fmt, iter};
 use proptest::prelude::{prop_oneof, Arbitrary};
 
 const TINYTEXT_WIDTH: usize = 15;
+
+/// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
+/// either case), and we don't care about seconds, so our maximum offset is gonna be
+/// 86_000 - 60 = 85_940.
+const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 
 /// The main type used for user data throughout the codebase.
 ///
@@ -58,6 +63,8 @@ pub enum DataType {
     TinyText([u8; TINYTEXT_WIDTH]),
     /// A timestamp for date/time types.
     Timestamp(NaiveDateTime),
+    /// A timestamp with time zone.
+    TimestampTz(Arc<DateTime<FixedOffset>>),
     /// A time duration
     /// NOTE: [`MysqlTime`] is from -838:59:59 to 838:59:59 whereas Postgres time is from 00:00:00 to 24:00:00
     Time(Arc<MysqlTime>),
@@ -87,6 +94,7 @@ impl fmt::Display for DataType {
             DataType::Float(n, _) => write!(f, "{}", n),
             DataType::Double(n, _) => write!(f, "{}", n),
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
+            DataType::TimestampTz(ref ts) => write!(f, "{}", ts.format(TIMESTAMP_TZ_FORMAT)),
             DataType::Time(ref t) => {
                 write!(f, "{}", t.to_string())
             }
@@ -122,6 +130,7 @@ impl fmt::Debug for DataType {
                 write!(f, "TinyText({:?})", text)
             }
             DataType::Timestamp(ts) => write!(f, "Timestamp({:?})", ts),
+            DataType::TimestampTz(ref ts) => write!(f, "TimestampTz({:?})", ts),
             DataType::Float(real, p) => write!(f, "Float({}, {})", real, p),
             DataType::Double(real, p) => write!(f, "Double({}, {})", real, p),
             DataType::Int(n) => write!(f, "Int({})", n),
@@ -141,6 +150,9 @@ impl fmt::Debug for DataType {
 /// The format for timestamps when parsed as text
 pub const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
+/// The format for timestamps with time zone when parsed as text
+pub const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
+
 /// The format for times when parsed as text
 pub const TIME_FORMAT: &str = "%H:%M:%S";
 
@@ -157,6 +169,11 @@ impl DataType {
                 chrono::naive::MIN_DATE,
                 NaiveTime::from_hms(0, 0, 0),
             )),
+            DataType::TimestampTz(_) => DataType::from(
+                FixedOffset::west(-MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
+                    &NaiveDateTime::new(chrono::naive::MIN_DATE, NaiveTime::from_hms(0, 0, 0)),
+                ),
+            ),
             DataType::Float(..) => DataType::Float(f32::MIN, u8::MAX),
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
             DataType::Int(_) => DataType::Int(i32::min_value()),
@@ -181,6 +198,11 @@ impl DataType {
                 chrono::naive::MAX_DATE,
                 NaiveTime::from_hms(23, 59, 59),
             )),
+            DataType::TimestampTz(_) => DataType::from(
+                FixedOffset::east(MAX_SECONDS_DATETIME_OFFSET).from_utc_datetime(
+                    &NaiveDateTime::new(chrono::naive::MIN_DATE, NaiveTime::from_hms(0, 0, 0)),
+                ),
+            ),
             DataType::Float(..) => DataType::Float(f32::MAX, u8::MAX),
             DataType::Double(..) => DataType::Double(f64::MIN, u8::MAX),
             DataType::Int(_) => DataType::Int(i32::max_value()),
@@ -202,6 +224,7 @@ impl DataType {
             DataType::Text(ref cstr) => DataType::Text(ArcCStr::from(&**cstr)),
             DataType::ByteArray(ref bytes) => DataType::ByteArray(Arc::new(bytes.as_ref().clone())),
             DataType::BitVector(ref bits) => DataType::from(bits.as_ref().clone()),
+            DataType::TimestampTz(ref ts) => DataType::from(*ts.as_ref()),
             ref dt => dt.clone(),
         }
     }
@@ -268,6 +291,11 @@ impl DataType {
                 !<&str>::try_from(self).unwrap().is_empty()
             }
             DataType::Timestamp(ref dt) => *dt != NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0),
+            DataType::TimestampTz(ref dt) => {
+                *dt.as_ref()
+                    != FixedOffset::west(0)
+                        .from_utc_datetime(&NaiveDate::from_ymd(0, 0, 0).and_hms(0, 0, 0))
+            }
             DataType::Time(ref t) => **t != MysqlTime::from_microseconds(0),
             DataType::ByteArray(ref array) => !array.is_empty(),
             DataType::Numeric(ref d) => !d.is_zero(),
@@ -329,6 +357,7 @@ impl DataType {
             Self::Text(_) => Some(Text),
             Self::TinyText(_) => Some(Tinytext),
             Self::Timestamp(_) => Some(Timestamp),
+            Self::TimestampTz(_) => Some(TimestampTz),
             Self::Time(_) => Some(Time),
             Self::ByteArray(_) => Some(ByteArray),
             Self::Numeric(_) => Some(Numeric(None)),
@@ -486,6 +515,17 @@ impl DataType {
                     .map(Self::Timestamp)
                     .map(Cow::Owned)
             }
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), TimestampTz) => {
+                chrono::DateTime::<FixedOffset>::parse_from_str(<&str>::try_from(self)?, TIMESTAMP_TZ_FORMAT)
+                    .map_err(|e| {
+                        mk_err(
+                            "Could not parse value as timestamp with time zone".to_owned(),
+                            Some(e.into()),
+                        )
+                    })
+                    .map(DataType::from)
+                    .map(Cow::Owned)
+            }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Date) => {
                 let text: &str = <&str>::try_from(self)?;
                 NaiveDate::parse_from_str(text, DATE_FORMAT)
@@ -529,7 +569,19 @@ impl DataType {
             (Self::Timestamp(ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
+            (Self::Timestamp(ts), Some(Timestamp), TimestampTz) => {
+                Ok(Cow::Owned(Self::from(FixedOffset::west(0).from_utc_datetime(ts))))
+            }
             (_, Some(Timestamp), DateTime(_)) => Ok(Cow::Borrowed(self)),
+            (Self::TimestampTz(ref ts), Some(Timestamp), Text | Tinytext | Mediumtext | Varchar(_)) => {
+                Ok(Cow::Owned(ts.format(TIMESTAMP_TZ_FORMAT).to_string().into()))
+            }
+            (Self::TimestampTz(ref ts), Some(Timestamp), Date) => {
+                Ok(Cow::Owned(Self::Timestamp(ts.date().naive_utc().and_hms(0, 0, 0))))
+            }
+            (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
+                Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
+            }
             (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(f.round() as i32)))
@@ -850,6 +902,14 @@ impl PartialEq for DataType {
                     .map(|other_dt| dt.eq(&other_dt))
                     .unwrap_or(false)
             }
+            (&DataType::Text(..) | &DataType::TinyText(..), &DataType::TimestampTz(ref dt)) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a = <&str>::try_from(self).unwrap();
+                chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
+                    .map(|other_dt| dt.as_ref().eq(&other_dt))
+                    .unwrap_or(false)
+            }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref t)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
                 #[allow(clippy::unwrap_used)]
@@ -921,10 +981,13 @@ impl PartialEq for DataType {
                 other == self
             }
             (
-                &DataType::Timestamp(_) | &DataType::Time(_),
+                &DataType::Timestamp(_) | &DataType::Time(_) | &DataType::TimestampTz(_),
                 &DataType::Text(..) | &DataType::TinyText(..),
             ) => other == self,
             (&DataType::Timestamp(tsa), &DataType::Timestamp(tsb)) => tsa == tsb,
+            (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => {
+                tsa.as_ref() == tsb.as_ref()
+            }
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.as_ref() == tb.as_ref(),
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.as_ref() == array_b.as_ref()
@@ -978,6 +1041,17 @@ impl Ord for DataType {
                     .map(|dt| dt.cmp(other_dt))
                     .unwrap_or(Ordering::Greater)
             }
+            (
+                &DataType::Text(..) | &DataType::TinyText(..),
+                &DataType::TimestampTz(ref other_dt),
+            ) => {
+                // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
+                #[allow(clippy::unwrap_used)]
+                let a: &str = <&str>::try_from(self).unwrap();
+                chrono::DateTime::<FixedOffset>::parse_from_str(a, TIMESTAMP_TZ_FORMAT)
+                    .map(|dt| dt.cmp(other_dt.as_ref()))
+                    .unwrap_or(Ordering::Greater)
+            }
             (&DataType::Text(..) | &DataType::TinyText(..), &DataType::Time(ref other_t)) => {
                 // this unwrap should be safe because no error path in try_from for &str on Text or TinyText
                 #[allow(clippy::unwrap_used)]
@@ -987,7 +1061,7 @@ impl Ord for DataType {
             }
             (&DataType::Text(..) | &DataType::TinyText(..), _) => Ordering::Greater,
             (
-                &DataType::Time(_) | &DataType::Timestamp(_),
+                &DataType::Time(_) | &DataType::Timestamp(_) | &DataType::TimestampTz(_),
                 &DataType::Text(..) | &DataType::TinyText(..),
             ) => other.cmp(self).reverse(),
             (_, &DataType::Text(..) | &DataType::TinyText(..)) => Ordering::Less,
@@ -1034,6 +1108,7 @@ impl Ord for DataType {
                 other.cmp(self).reverse()
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
+            (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => tsa.cmp(tsb),
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
             (&DataType::None, &DataType::None) => Ordering::Equal,
 
@@ -1102,7 +1177,9 @@ impl Ord for DataType {
             (&DataType::Double(..) | &DataType::Float(..) | &DataType::Numeric(_), _) => {
                 Ordering::Greater
             }
-            (&DataType::Timestamp(..) | DataType::Time(_), _) => Ordering::Greater,
+            (&DataType::Timestamp(..) | DataType::Time(_) | &DataType::TimestampTz(..), _) => {
+                Ordering::Greater
+            }
             (&DataType::None, _) => Ordering::Greater,
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.cmp(array_b)
@@ -1150,6 +1227,10 @@ impl Hash for DataType {
                 t.hash(state)
             }
             DataType::Timestamp(ts) => ts.hash(state),
+            DataType::TimestampTz(ref ts) => {
+                ts.as_ref().hash(state);
+                ts.offset().fix().hash(state)
+            }
             DataType::Time(ref t) => t.hash(state),
             DataType::ByteArray(ref array) => array.hash(state),
             DataType::Numeric(ref d) => d.hash(state),
@@ -1414,9 +1495,9 @@ impl TryFrom<DataType> for Literal {
             DataType::Double(value, precision) => Ok(Literal::Double(Double { value, precision })),
             DataType::Text(_) => Ok(Literal::String(String::try_from(dt)?)),
             DataType::TinyText(_) => Ok(Literal::String(String::try_from(dt)?)),
-            DataType::Timestamp(_) => Ok(Literal::String(String::try_from(
-                dt.coerce_to(&SqlType::Text)?.as_ref(),
-            )?)),
+            DataType::Timestamp(_) | DataType::TimestampTz(_) => Ok(Literal::String(
+                String::try_from(dt.coerce_to(&SqlType::Text)?.as_ref())?,
+            )),
             DataType::Time(_) => Ok(Literal::String(String::try_from(
                 dt.coerce_to(&SqlType::Text)?.as_ref(),
             )?)),
@@ -1467,6 +1548,28 @@ impl<'a> TryFrom<&'a DataType> for NaiveDateTime {
                 val: format!("{:?}", data),
                 src_type: "DataType".to_string(),
                 target_type: "NaiveDateTime".to_string(),
+                details: "".to_string(),
+            }),
+        }
+    }
+}
+
+impl From<DateTime<FixedOffset>> for DataType {
+    fn from(dt: DateTime<FixedOffset>) -> Self {
+        DataType::TimestampTz(Arc::new(dt))
+    }
+}
+
+impl<'a> TryFrom<&'a DataType> for DateTime<FixedOffset> {
+    type Error = ReadySetError;
+
+    fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
+        match *data {
+            DataType::TimestampTz(ref dt) => Ok(*dt.as_ref()),
+            _ => Err(Self::Error::DataTypeConversionError {
+                val: format!("{:?}", data),
+                src_type: "DataType".to_string(),
+                target_type: "DateTime<FixedOffset>".to_string(),
                 details: "".to_string(),
             }),
         }
@@ -2061,6 +2164,7 @@ impl ToSql for DataType {
             }
             (Self::Timestamp(x), &Type::DATE) => x.date().to_sql(ty, out),
             (Self::Timestamp(x), _) => x.to_sql(ty, out),
+            (Self::TimestampTz(ref ts), _) => ts.as_ref().to_sql(ty, out),
             (Self::Time(x), _) => NaiveTime::from(**x).to_sql(ty, out),
             (Self::ByteArray(ref array), _) => array.as_ref().to_sql(ty, out),
             (Self::BitVector(ref bits), _) => bits.as_ref().to_sql(ty, out),
@@ -2068,8 +2172,28 @@ impl ToSql for DataType {
     }
 
     accepts!(
-        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR, UUID, JSON, JSONB, BIT, VARBIT
+        BOOL,
+        BYTEA,
+        CHAR,
+        NAME,
+        INT2,
+        INT4,
+        INT8,
+        FLOAT4,
+        FLOAT8,
+        NUMERIC,
+        TEXT,
+        VARCHAR,
+        DATE,
+        TIME,
+        TIMESTAMP,
+        TIMESTAMPTZ,
+        MACADDR,
+        UUID,
+        JSON,
+        JSONB,
+        BIT,
+        VARBIT
     );
 
     to_sql_checked!();
@@ -2103,6 +2227,7 @@ impl<'a> FromSql<'a> for DataType {
             Type::BYTEA => mk_from_sql!(Vec<u8>),
             Type::NUMERIC => mk_from_sql!(Decimal),
             Type::TIMESTAMP => mk_from_sql!(NaiveDateTime),
+            Type::TIMESTAMPTZ => mk_from_sql!(chrono::DateTime<chrono::FixedOffset>),
             Type::MACADDR => Ok(DataType::from(
                 MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
             )),
@@ -2124,8 +2249,27 @@ impl<'a> FromSql<'a> for DataType {
     }
 
     accepts!(
-        BOOL, BYTEA, CHAR, NAME, INT2, INT4, INT8, FLOAT4, FLOAT8, NUMERIC, TEXT, VARCHAR, DATE,
-        TIME, TIMESTAMP, MACADDR, JSON, JSONB, BIT, VARBIT
+        BOOL,
+        BYTEA,
+        CHAR,
+        NAME,
+        INT2,
+        INT4,
+        INT8,
+        FLOAT4,
+        FLOAT8,
+        NUMERIC,
+        TEXT,
+        VARCHAR,
+        DATE,
+        TIME,
+        TIMESTAMP,
+        TIMESTAMPTZ,
+        MACADDR,
+        JSON,
+        JSONB,
+        BIT,
+        VARBIT
     );
 }
 
@@ -2148,6 +2292,9 @@ impl TryFrom<DataType> for mysql_common::value::Value {
             }
             DataType::Text(_) | DataType::TinyText(_) => Ok(Value::Bytes(Vec::<u8>::try_from(dt)?)),
             DataType::Timestamp(val) => Ok(val.into()),
+            DataType::TimestampTz(_) => {
+                internal!("MySQL does not support timestamps with time zone")
+            }
             DataType::Time(val) => Ok(Value::Time(
                 !val.is_positive(),
                 (val.hour() / 24).into(),
@@ -2920,6 +3067,10 @@ mod tests {
         let double = DataType::Double(-0.05, 3);
         let numeric = DataType::from(Decimal::new(-5, 2)); // -0.05
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let timestamp_tz = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+        );
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
@@ -2935,6 +3086,10 @@ mod tests {
         assert_eq!(
             format!("{:?}", timestamp),
             "Timestamp(1970-01-01T00:00:00.042)"
+        );
+        assert_eq!(
+            format!("{:?}", timestamp_tz),
+            "TimestampTz(1969-12-31T19:00:00.042-05:00)"
         );
         assert_eq!(format!("{:?}", int), "Int(5)");
         assert_eq!(format!("{:?}", big_int), "BigInt(5)");
@@ -2958,6 +3113,10 @@ mod tests {
         let double = DataType::Double(-8.99, 3);
         let numeric = DataType::from(Decimal::new(-899, 2)); // -8.99
         let timestamp = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
+        let timestamp_tz = DataType::from(
+            FixedOffset::west(19_800)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+        );
         let int = DataType::Int(5);
         let big_int = DataType::BigInt(5);
         let bytes = DataType::ByteArray(Arc::new(vec![0, 8, 39, 92, 100, 128]));
@@ -2971,6 +3130,7 @@ mod tests {
         assert_eq!(format!("{}", double), "-8.99");
         assert_eq!(format!("{}", numeric), "-8.99");
         assert_eq!(format!("{}", timestamp), "Thu Jan  1 00:00:00 1970");
+        assert_eq!(format!("{}", timestamp_tz), "1969-12-31 18:30:00 -05:30");
         assert_eq!(format!("{}", int), "5");
         assert_eq!(format!("{}", big_int), "5");
         assert_eq!(format!("{}", bytes), "E'\\x0008275c6480'");
@@ -3001,6 +3161,14 @@ mod tests {
         let numeric2 = DataType::from(Decimal::new(-898, 2)); // -8.99
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
+        let timestamp_tz = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+        );
+        let timestamp_tz2 = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(1, 42_000_000)),
+        );
         let shrt = DataType::Int(5);
         let shrt6 = DataType::Int(6);
         let long = DataType::BigInt(5);
@@ -3027,6 +3195,7 @@ mod tests {
         assert_eq!(f(&numeric), f(&numeric));
         assert_eq!(f(&double_from_real), f(&double_from_real));
         assert_eq!(f(&time), f(&time));
+        assert_eq!(f(&timestamp_tz), f(&timestamp_tz));
         assert_eq!(f(&bytes), f(&bytes));
         assert_eq!(f(&bits), f(&bits));
 
@@ -3061,6 +3230,7 @@ mod tests {
         assert_ne!(f(&txt1), f(&ulong));
         assert_ne!(f(&txt1), f(&bytes));
         assert_ne!(f(&txt1), f(&bits));
+        assert_ne!(f(&txt1), f(&timestamp_tz));
 
         assert_ne!(f(&txt2), f(&txt12));
         assert_ne!(f(&txt2), f(&text));
@@ -3076,6 +3246,7 @@ mod tests {
         assert_ne!(f(&txt2), f(&ulong));
         assert_ne!(f(&txt2), f(&bytes));
         assert_ne!(f(&txt2), f(&bits));
+        assert_ne!(f(&txt2), f(&timestamp_tz));
 
         assert_ne!(f(&text), f(&text2));
         assert_ne!(f(&text), f(&txt1));
@@ -3092,6 +3263,7 @@ mod tests {
         assert_ne!(f(&text), f(&ulong));
         assert_ne!(f(&text), f(&bytes));
         assert_ne!(f(&text), f(&bits));
+        assert_ne!(f(&text), f(&timestamp_tz));
 
         assert_ne!(f(&float), f(&float2));
         assert_ne!(f(&float_from_real), f(&float_from_real2));
@@ -3150,6 +3322,7 @@ mod tests {
         assert_ne!(f(&time), f(&ulong));
         assert_ne!(f(&time), f(&bytes));
         assert_ne!(f(&time), f(&bits));
+        assert_ne!(f(&time), f(&timestamp_tz));
 
         assert_ne!(f(&shrt), f(&shrt6));
         assert_ne!(f(&shrt), f(&txt1));
@@ -3169,6 +3342,7 @@ mod tests {
         assert_ne!(f(&long), f(&time));
         assert_ne!(f(&long), f(&shrt6));
         assert_ne!(f(&long), f(&bytes));
+        assert_ne!(f(&long), f(&timestamp_tz));
 
         assert_ne!(f(&ushrt), f(&ushrt6));
         assert_ne!(f(&ushrt), f(&txt1));
@@ -3181,6 +3355,7 @@ mod tests {
         assert_ne!(f(&ushrt), f(&long6));
         assert_ne!(f(&ushrt), f(&bytes));
         assert_ne!(f(&ushrt), f(&bits));
+        assert_ne!(f(&ushrt), f(&timestamp_tz));
 
         assert_ne!(f(&ulong), f(&ulong6));
         assert_ne!(f(&ulong), f(&txt1));
@@ -3193,6 +3368,7 @@ mod tests {
         assert_ne!(f(&ulong), f(&long6));
         assert_ne!(f(&ulong), f(&bytes));
         assert_ne!(f(&ulong), f(&bits));
+        assert_ne!(f(&ulong), f(&timestamp_tz));
 
         assert_ne!(f(&bytes), f(&ulong));
         assert_ne!(f(&bytes), f(&ulong6));
@@ -3205,6 +3381,7 @@ mod tests {
         assert_ne!(f(&bytes), f(&shrt6));
         assert_ne!(f(&bytes), f(&long6));
         assert_ne!(f(&bytes), f(&bits));
+        assert_ne!(f(&bytes), f(&timestamp_tz));
         assert_ne!(f(&bytes), f(&bytes2));
 
         assert_ne!(f(&bits), f(&ulong));
@@ -3217,7 +3394,22 @@ mod tests {
         assert_ne!(f(&bits), f(&ushrt6));
         assert_ne!(f(&bits), f(&shrt6));
         assert_ne!(f(&bits), f(&long6));
+        assert_ne!(f(&bits), f(&timestamp_tz));
         assert_ne!(f(&bits), f(&bits2));
+
+        assert_ne!(f(&timestamp_tz), f(&ulong));
+        assert_ne!(f(&timestamp_tz), f(&ulong6));
+        assert_ne!(f(&timestamp_tz), f(&txt1));
+        assert_ne!(f(&timestamp_tz), f(&txt2));
+        assert_ne!(f(&timestamp_tz), f(&text));
+        assert_ne!(f(&timestamp_tz), f(&float_from_real));
+        assert_ne!(f(&timestamp_tz), f(&time));
+        assert_ne!(f(&timestamp_tz), f(&ushrt6));
+        assert_ne!(f(&timestamp_tz), f(&shrt6));
+        assert_ne!(f(&timestamp_tz), f(&long6));
+        assert_ne!(f(&timestamp_tz), f(&bits));
+        assert_ne!(f(&timestamp_tz), f(&bytes));
+        assert_ne!(f(&timestamp_tz), f(&timestamp_tz2));
     }
 
     #[test]
@@ -3427,6 +3619,14 @@ mod tests {
         let numeric2 = DataType::from(Decimal::new(-898, 2)); // -8.99
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
         let time2 = DataType::Timestamp(NaiveDateTime::from_timestamp(1, 42_000_000));
+        let timestamp_tz = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(0, 42_000_000)),
+        );
+        let timestamp_tz2 = DataType::from(
+            FixedOffset::west(18_000)
+                .from_utc_datetime(&NaiveDateTime::from_timestamp(1, 42_000_000)),
+        );
         let shrt = DataType::Int(5);
         let shrt6 = DataType::Int(6);
         let long = DataType::BigInt(5);
@@ -3456,6 +3656,7 @@ mod tests {
         assert_eq!(time.cmp(&time), Ordering::Equal);
         assert_eq!(bytes.cmp(&bytes), Ordering::Equal);
         assert_eq!(bits.cmp(&bits), Ordering::Equal);
+        assert_eq!(timestamp_tz.cmp(&timestamp_tz), Ordering::Equal);
 
         // coercion
         assert_eq!(txt1.cmp(&txt2), Ordering::Equal);
@@ -3484,6 +3685,7 @@ mod tests {
         assert_ne!(txt1.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt1.cmp(&bytes), Ordering::Equal);
         assert_ne!(txt1.cmp(&bits), Ordering::Equal);
+        assert_ne!(txt1.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(txt2.cmp(&txt12), Ordering::Equal);
         assert_ne!(txt2.cmp(&text), Ordering::Equal);
@@ -3499,6 +3701,7 @@ mod tests {
         assert_ne!(txt2.cmp(&ulong), Ordering::Equal);
         assert_ne!(txt2.cmp(&bytes), Ordering::Equal);
         assert_ne!(txt2.cmp(&bits), Ordering::Equal);
+        assert_ne!(txt2.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(text.cmp(&text2), Ordering::Equal);
         assert_ne!(text.cmp(&txt1), Ordering::Equal);
@@ -3515,6 +3718,7 @@ mod tests {
         assert_ne!(text.cmp(&ulong), Ordering::Equal);
         assert_ne!(text.cmp(&bytes), Ordering::Equal);
         assert_ne!(text.cmp(&bits), Ordering::Equal);
+        assert_ne!(text.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(float.cmp(&float2), Ordering::Equal);
         assert_ne!(float_from_real.cmp(&float_from_real2), Ordering::Equal);
@@ -3585,6 +3789,7 @@ mod tests {
         assert_ne!(time.cmp(&ulong), Ordering::Equal);
         assert_ne!(time.cmp(&bytes), Ordering::Equal);
         assert_ne!(time.cmp(&bits), Ordering::Equal);
+        assert_ne!(time.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(shrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(shrt.cmp(&ushrt6), Ordering::Equal);
@@ -3601,6 +3806,7 @@ mod tests {
         assert_ne!(shrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(shrt.cmp(&bytes), Ordering::Equal);
         assert_ne!(shrt.cmp(&bits), Ordering::Equal);
+        assert_ne!(shrt.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(ushrt.cmp(&shrt6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&ushrt6), Ordering::Equal);
@@ -3617,6 +3823,7 @@ mod tests {
         assert_ne!(ushrt.cmp(&ulong6), Ordering::Equal);
         assert_ne!(ushrt.cmp(&bytes), Ordering::Equal);
         assert_ne!(ushrt.cmp(&bits), Ordering::Equal);
+        assert_ne!(ushrt.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(long.cmp(&long6), Ordering::Equal);
         assert_ne!(long.cmp(&ulong6), Ordering::Equal);
@@ -3633,6 +3840,7 @@ mod tests {
         assert_ne!(long.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(long.cmp(&bytes), Ordering::Equal);
         assert_ne!(long.cmp(&bits), Ordering::Equal);
+        assert_ne!(long.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(ulong.cmp(&long6), Ordering::Equal);
         assert_ne!(ulong.cmp(&ulong6), Ordering::Equal);
@@ -3649,6 +3857,7 @@ mod tests {
         assert_ne!(ulong.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(ulong.cmp(&bytes), Ordering::Equal);
         assert_ne!(ulong.cmp(&bits), Ordering::Equal);
+        assert_ne!(ulong.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(bytes.cmp(&long6), Ordering::Equal);
         assert_ne!(bytes.cmp(&ulong), Ordering::Equal);
@@ -3664,6 +3873,7 @@ mod tests {
         assert_ne!(bytes.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(bytes.cmp(&bytes2), Ordering::Equal);
         assert_ne!(bytes.cmp(&bits), Ordering::Equal);
+        assert_ne!(bytes.cmp(&timestamp_tz), Ordering::Equal);
 
         assert_ne!(bits.cmp(&long6), Ordering::Equal);
         assert_ne!(bits.cmp(&ulong), Ordering::Equal);
@@ -3678,7 +3888,24 @@ mod tests {
         assert_ne!(bits.cmp(&shrt6), Ordering::Equal);
         assert_ne!(bits.cmp(&ushrt6), Ordering::Equal);
         assert_ne!(bits.cmp(&bytes), Ordering::Equal);
+        assert_ne!(bits.cmp(&timestamp_tz), Ordering::Equal);
         assert_ne!(bits.cmp(&bits2), Ordering::Equal);
+
+        assert_ne!(timestamp_tz.cmp(&long6), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&ulong), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&txt1), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&txt2), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&text), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&float), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&float_from_real), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&double), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&double_from_real), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&time), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&shrt6), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&ushrt6), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&bytes), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&bits), Ordering::Equal);
+        assert_ne!(timestamp_tz.cmp(&timestamp_tz2), Ordering::Equal);
 
         // Test invariants
         // 1. Text types always > everythign else

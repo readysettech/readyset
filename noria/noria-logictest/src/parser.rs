@@ -219,6 +219,15 @@ named!(
         terminated!(map_opt!(
             not_line_ending,
             |s: &[u8]| {
+                Some(Value::Date(NaiveDateTime::parse_from_str(
+                    String::from_utf8_lossy(s).as_ref(),
+                    TIMESTAMP_FORMAT,
+                ).ok()?))
+            }
+        ), line_ending) |
+        terminated!(map_opt!(
+            not_line_ending,
+            |s: &[u8]| {
                 Some(Value::Time(MysqlTime::from_str(
                     String::from_utf8_lossy(s).as_ref(),
                 ).ok()?))

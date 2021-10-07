@@ -1,6 +1,6 @@
 use arccstr::ArcCStr;
 use bit_vec::BitVec;
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -20,6 +20,7 @@ pub enum Value {
     Numeric(Decimal),
     Text(ArcCStr),
     Timestamp(NaiveDateTime),
+    TimestampTz(DateTime<FixedOffset>),
     Date(NaiveDate),
     Time(NaiveTime),
     ByteArray(Vec<u8>),

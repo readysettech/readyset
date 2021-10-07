@@ -1,4 +1,5 @@
 use super::PostgresPosition;
+use chrono::{DateTime, FixedOffset};
 use futures::{pin_mut, StreamExt};
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
@@ -240,6 +241,9 @@ impl TableDescription {
                     &Type::INT4 => Ok(noria::DataType::Int(row.try_get(i)?)),
                     &Type::INT8 => Ok(noria::DataType::BigInt(row.try_get(i)?)),
                     &Type::TIMESTAMP => Ok(noria::DataType::Timestamp(row.try_get(i)?)),
+                    &Type::TIMESTAMPTZ => Ok(noria::DataType::from(
+                        row.try_get::<DateTime<FixedOffset>>(i)?,
+                    )),
                     &Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
                     &Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
                     &Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),

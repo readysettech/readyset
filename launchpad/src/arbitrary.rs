@@ -1,7 +1,7 @@
 //! Utilities for generating arbitrary values with [`proptest`]
 
 use bit_vec::BitVec;
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Date, DateTime, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
@@ -45,6 +45,18 @@ pub fn arbitrary_decimal() -> impl Strategy<Value = Decimal> {
 pub fn arbitrary_naive_date_time() -> impl Strategy<Value = NaiveDateTime> {
     (arbitrary_naive_date(), arbitrary_naive_time())
         .prop_map(|(date, time)| NaiveDateTime::new(date, time))
+}
+
+/// Strategy to generate an arbitrary [`Date<FixedOffset>`]
+pub fn arbitrary_date() -> impl Strategy<Value = Date<FixedOffset>> {
+    (-2000i32..3000, 1u32..365, (-1440..1440)).prop_map(|(y, doy, offset)| {
+        Date::<FixedOffset>::from_utc(NaiveDate::from_yo(y, doy), FixedOffset::west(offset * 60))
+    })
+}
+
+/// Strategy to generate an arbitrary [`DateTime<FixedOffset>`]
+pub fn arbitrary_date_time() -> impl Strategy<Value = DateTime<FixedOffset>> {
+    (arbitrary_date(), arbitrary_naive_time()).prop_map(|(date, time)| date.and_time(time).unwrap())
 }
 
 /// Strategy to generate an arbitrary [`NaiveDateTime`] within Timestamp range.

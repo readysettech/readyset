@@ -53,6 +53,7 @@ const LENGTH_PLACEHOLDER: i32 = -1;
 const NUL_BYTE: u8 = b'\0';
 const NUL_CHAR: char = '\0';
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f";
+const TIMESTAMP_TZ_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
 const TIME_FORMAT: &str = "%H:%M:%S%.f";
 const DATE_FORMAT: &str = "%Y-%m-%d";
 
@@ -340,6 +341,9 @@ fn put_binary_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
         Value::Timestamp(v) => {
             v.to_sql(&Type::TIMESTAMP, dst)?;
         }
+        Value::TimestampTz(v) => {
+            v.to_sql(&Type::TIMESTAMPTZ, dst)?;
+        }
         Value::Date(v) => {
             v.to_sql(&Type::DATE, dst)?;
         }
@@ -432,6 +436,11 @@ fn put_text_value(val: Value, dst: &mut BytesMut) -> Result<(), Error> {
             // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
             write!(dst, "{}", v.format(TIMESTAMP_FORMAT))?;
         }
+        Value::TimestampTz(v) => {
+            // TODO: Does not correctly handle all valid timestamp representations. For example,
+            // 8601/SQL timestamp format is assumed; infinity/-infinity are not supported.
+            write!(dst, "{}", v.format(TIMESTAMP_TZ_FORMAT))?;
+        }
         Value::Date(v) => {
             write!(dst, "{}", v.format(DATE_FORMAT))?;
         }
@@ -477,7 +486,7 @@ mod tests {
     use arccstr::ArcCStr;
     use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
-    use chrono::NaiveDateTime;
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
     use eui48::MacAddress;
     use rust_decimal::Decimal;
     use std::sync::Arc;
@@ -1162,6 +1171,29 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_timestamp_tz() {
+        let dt = DateTime::<FixedOffset>::from_utc(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(2020, 01, 02),
+                NaiveTime::from_hms_milli(03, 04, 05, 660),
+            ),
+            FixedOffset::east(0),
+        );
+        let mut buf = BytesMut::new();
+        put_binary_value(DataValue::TimestampTz(dt), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(-1); // size (placeholder)
+        dt.to_sql(&Type::TIMESTAMPTZ, &mut exp).unwrap(); // add value
+        let value_len = exp.len() - 4;
+        let mut window = exp
+            .get_mut(0..4)
+            .ok_or_else(|| Error::InternalError("error writing message field".to_string()))
+            .unwrap();
+        window.put_i32(value_len as i32); // put the actual length
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_text_null() {
         let mut buf = BytesMut::new();
         put_text_value(DataValue::Null, &mut buf).unwrap();
@@ -1372,6 +1404,23 @@ mod tests {
 
         let mut buf = BytesMut::new();
         put_text_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_timestamp_tz() {
+        let dt = DateTime::<FixedOffset>::from_utc(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(2020, 01, 02),
+                NaiveTime::from_hms_milli(03, 04, 05, 660),
+            ),
+            FixedOffset::east(18000), // +05:00
+        );
+        let mut buf = BytesMut::new();
+        put_text_value(DataValue::TimestampTz(dt), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(30);
+        exp.extend_from_slice(b"2020-01-02 08:04:05.660 +05:00");
         assert_eq!(buf, exp);
     }
 }
