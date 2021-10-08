@@ -16,12 +16,15 @@
 //! ```
 //! # extern crate msql_srv;
 //! extern crate mysql;
+//! extern crate mysql_common as myc;
 //! # use std::io;
 //! # use std::net;
 //! # use std::thread;
 //! use msql_srv::*;
 //! use tokio::io::AsyncWrite;
 //! use async_trait::async_trait;
+//! use mysql::prelude::*;
+//! use std::iter;
 //!
 //! struct Backend;
 //! #[async_trait]
@@ -43,26 +46,44 @@
 //!         w.ok().await
 //!     }
 //!
-//!     async fn on_query(&mut self, _: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
-//!         let cols = [
-//!             Column {
-//!                 table: "foo".to_string(),
-//!                 column: "a".to_string(),
-//!                 coltype: ColumnType::MYSQL_TYPE_LONGLONG,
-//!                 colflags: ColumnFlags::empty(),
-//!             },
-//!             Column {
-//!                 table: "foo".to_string(),
-//!                 column: "b".to_string(),
-//!                 coltype: ColumnType::MYSQL_TYPE_STRING,
-//!                 colflags: ColumnFlags::empty(),
-//!             },
-//!         ];
+//!     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
+//!         if query.starts_with("SELECT @@") || query.starts_with("select @@") {
+//!             let var = &query.get(b"SELECT @@".len()..);
+//!             return match var {
+//!                 Some("max_allowed_packet") => {
+//!                     let cols = &[Column {
+//!                         table: String::new(),
+//!                         column: "@@max_allowed_packet".to_owned(),
+//!                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
+//!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
+//!                     }];
+//!                     let mut w = results.start(cols).await?;
+//!                     w.write_row(iter::once(67108864u32)).await?;
+//!                     Ok(w.finish().await?)
+//!                 }
+//!                 _ => Ok(results.completed(0, 0, None).await?),
+//!             };
+//!         } else {
+//!             let cols = [
+//!                 Column {
+//!                     table: "foo".to_string(),
+//!                     column: "a".to_string(),
+//!                     coltype: ColumnType::MYSQL_TYPE_LONGLONG,
+//!                     colflags: ColumnFlags::empty(),
+//!                 },
+//!                 Column {
+//!                     table: "foo".to_string(),
+//!                     column: "b".to_string(),
+//!                     coltype: ColumnType::MYSQL_TYPE_STRING,
+//!                     colflags: ColumnFlags::empty(),
+//!                 },
+//!             ];
 //!
-//!         let mut rw = results.start(&cols).await?;
-//!         rw.write_col(42).await?;
-//!         rw.write_col("b's value").await?;
-//!         rw.finish().await
+//!             let mut rw = results.start(&cols).await?;
+//!             rw.write_col(42).await?;
+//!             rw.write_col("b's value").await?;
+//!             rw.finish().await
+//!         }
 //!     }
 //!
 //!     fn password_for_username(&self, _username: &[u8]) -> Option<Vec<u8>> {
@@ -85,10 +106,12 @@
 //!         }
 //!     });
 //!
-//!     let mut db =
-//!         mysql::Conn::new(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap();
+//!     let mut db = mysql::Conn::new(
+//!         mysql::Opts::from_url(&format!("mysql://root:password@127.0.0.1:{}", port)).unwrap(),
+//!     )
+//!     .unwrap();
 //!     assert_eq!(db.ping(), true);
-//!     assert_eq!(db.query("SELECT a, b FROM foo").unwrap().count(), 1);
+//!     assert_eq!(db.query::<mysql::Row, _>("SELECT a, b FROM foo").unwrap().len(), 1);
 //!     drop(db);
 //!     jh.join().unwrap();
 //! }
