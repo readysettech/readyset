@@ -239,7 +239,6 @@ Resources:
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
         DatabasePassword: !Ref DatabasePassword
-        ReadysetLogsAggregatorInstanceType: !Ref ReadysetLogsAggregatorInstanceType
   ReadysetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -279,6 +278,7 @@ Resources:
         ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
         ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
         ReadysetServerNodes: !Ref ReadysetServerNodes
+        ReadysetLogsAggregatorInstanceType: !Ref ReadysetLogsAggregatorInstanceType
         DeploymentName: !Ref DeploymentName
 Outputs:
   ReadysetDBSecurityGroup:
