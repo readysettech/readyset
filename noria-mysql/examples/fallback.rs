@@ -44,9 +44,6 @@ async fn main() {
         .enable_ryw(true)
         .build(noria, upstream);
 
-    let noria_res = b.query("select * from customers;").await;
-    let mysql_res = b.query("show tables;").await;
-
     fn print_res(res: Result<QueryResult<MySqlUpstream>, Error>) {
         match res {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
@@ -63,6 +60,10 @@ async fn main() {
             _ => println!("Select had an issue"),
         };
     }
+
+    let noria_res = b.query("select * from customers;").await;
     print_res(noria_res);
+
+    let mysql_res = b.query("show tables;").await;
     print_res(mysql_res);
 }

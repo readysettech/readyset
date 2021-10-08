@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
 use std::time;
@@ -296,11 +297,21 @@ pub struct Backend<DB, Handler> {
     _query_handler: PhantomData<Handler>,
 }
 
-#[derive(Debug)]
-pub struct SelectSchema {
+#[derive(Debug, Clone)]
+pub struct SelectSchema<'a> {
     pub use_bogo: bool,
-    pub schema: Vec<ColumnSchema>,
-    pub columns: Vec<String>,
+    pub schema: Cow<'a, [ColumnSchema]>,
+    pub columns: Cow<'a, [String]>,
+}
+
+impl<'a> SelectSchema<'a> {
+    pub fn into_owned(self) -> SelectSchema<'static> {
+        SelectSchema {
+            use_bogo: self.use_bogo,
+            schema: Cow::Owned(self.schema.into_owned()),
+            columns: Cow::Owned(self.columns.into_owned()),
+        }
+    }
 }
 
 /// The type returned when a query is prepared by `Backend` through the `prepare` function.
@@ -312,14 +323,25 @@ pub enum PrepareResult<DB: UpstreamDatabase> {
 
 /// The type returned when a query is carried out by `Backend`, through either the `query` or
 /// `execute` functions.
-pub enum QueryResult<DB: UpstreamDatabase> {
+pub enum QueryResult<'a, DB: UpstreamDatabase> {
     /// Results from noria
-    Noria(noria_connector::QueryResult),
+    Noria(noria_connector::QueryResult<'a>),
     /// Results from upstream
     Upstream(DB::QueryResult),
 }
 
-impl<DB> Debug for QueryResult<DB>
+// Because js_client needs an owned version to pass we implement a manual
+// `into_owned`, the things we do for performance
+impl<'a, DB: UpstreamDatabase> QueryResult<'a, DB> {
+    pub fn into_owned(self) -> QueryResult<'static, DB> {
+        match self {
+            QueryResult::Noria(n) => QueryResult::Noria(n.into_owned()),
+            QueryResult::Upstream(u) => QueryResult::Upstream(u),
+        }
+    }
+}
+
+impl<'a, DB> Debug for QueryResult<'a, DB>
 where
     DB: UpstreamDatabase,
 {
@@ -362,7 +384,10 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
-    pub async fn query_fallback(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
+    pub async fn query_fallback(
+        &mut self,
+        query: &str,
+    ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
@@ -374,7 +399,7 @@ where
     pub async fn handle_transaction_boundaries(
         &mut self,
         query: nom_sql::SqlQuery,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
         })?;
@@ -436,7 +461,7 @@ where
         query_str: String,
         ticket: Option<Timestamp>,
         event: &mut MaybeExecuteEvent,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let connector = self
             .upstream
             .as_mut()
@@ -552,7 +577,7 @@ where
         upstream_statement_id: u32,
         params: Vec<DataType>,
         event: &mut MaybeExecuteEvent,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This condition requires an upstream connector".to_string())
         })?;
@@ -568,20 +593,16 @@ where
 
     /// Handles executing against only noria.
     async fn execute_noria(
-        &mut self,
+        noria: &mut NoriaConnector,
         noria_statement_id: u32,
         params: Vec<DataType>,
         statement: SqlQuery,
-    ) -> ReadySetResult<QueryResult<DB>> {
+        ticket: Option<Timestamp>,
+    ) -> ReadySetResult<QueryResult<'_, DB>> {
         let res = match statement {
             SqlQuery::Select(_) => {
-                let try_read = self
-                    .noria
-                    .execute_prepared_select(
-                        noria_statement_id,
-                        params.clone(),
-                        self.ticket.clone(),
-                    )
+                let try_read = noria
+                    .execute_prepared_select(noria_statement_id, params.clone(), ticket)
                     .await;
                 match try_read {
                     Ok(read) => Ok(QueryResult::Noria(read)),
@@ -592,12 +613,12 @@ where
                 }
             }
             SqlQuery::Insert(ref _q) => Ok(QueryResult::Noria(
-                self.noria
+                noria
                     .execute_prepared_insert(noria_statement_id, params)
                     .await?,
             )),
             SqlQuery::Update(ref _q) => Ok(QueryResult::Noria(
-                self.noria
+                noria
                     .execute_prepared_update(noria_statement_id, params)
                     .await?,
             )),
@@ -620,7 +641,7 @@ where
         upstream_statement_id: u32,
         params: Vec<DataType>,
         event: &mut MaybeExecuteEvent,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream_res = self
             .execute_upstream(upstream_statement_id, params.clone(), event)
             .await;
@@ -643,9 +664,14 @@ where
                 };
 
             let handle = event.start_timer();
-            match self
-                .execute_noria(noria_statement_id, params, statement)
-                .await
+            match Self::execute_noria(
+                &mut self.noria,
+                noria_statement_id,
+                params,
+                statement,
+                self.ticket.clone(),
+            )
+            .await
             {
                 Ok(_) => {
                     handle.set_noria_duration();
@@ -670,7 +696,7 @@ where
         q: nom_sql::SelectStatement,
         query_str: &str,
         ticket: Option<Timestamp>,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
         match self.noria.handle_select(q, ticket).await {
             Ok(r) => Ok(QueryResult::Noria(r)),
             Err(e) => {
@@ -866,7 +892,7 @@ where
         params: Vec<DataType>,
         prepared_statement: &PreparedStatement,
         event: &mut MaybeExecuteEvent,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
@@ -890,27 +916,38 @@ where
                         statement_id: *statement_id,
                     },
                 )?;
-                let res = match prep {
+                match prep {
                     SqlQuery::Select(_) => {
-                        match self
-                            .execute_noria(*statement_id, params.clone(), prep.clone())
-                            .await
+                        let Backend {
+                            ref mut noria,
+                            ref mut upstream,
+                            ..
+                        } = self;
+
                         {
-                            Ok(res) => Ok(res),
-                            Err(e) => {
-                                if let Some(ref mut upstream) = self.upstream {
-                                    error!(error = %e, "Error received from noria during execute, sending query to fallback");
-                                    // TODO(DAN): The prepared statement id should be returned to
-                                    // the backend so that it can be stored
-                                    let UpstreamPrepare { statement_id, .. } =
-                                        upstream.prepare(&prep.to_string()).await?;
-                                    upstream
-                                        .execute(statement_id, params)
-                                        .await
-                                        .map(QueryResult::Upstream)
-                                } else {
-                                    Err(e.into())
-                                }
+                            match Self::execute_noria(
+                                noria,
+                                *statement_id,
+                                params.clone(),
+                                prep.clone(),
+                                self.ticket.clone(),
+                            )
+                            .await
+                            {
+                                Ok(res) => Ok(res),
+                                Err(e) => match upstream {
+                                    None => Err(e.into()),
+                                    Some(upstream) => {
+                                        error!(error = %e, "Error received from noria during execute, sending query to fallback");
+                                        let UpstreamPrepare { statement_id, .. } =
+                                            upstream.prepare(&prep.to_string()).await?;
+
+                                        upstream
+                                            .execute(statement_id, params)
+                                            .await
+                                            .map(QueryResult::Upstream)
+                                    }
+                                },
                             }
                         }
                     }
@@ -918,15 +955,19 @@ where
                         if self.upstream.is_some() {
                             self.execute_upstream(id, params, event).await
                         } else {
-                            self.execute_noria(id, params, prep)
-                                .await
-                                .map_err(|e| e.into())
+                            Self::execute_noria(
+                                &mut self.noria,
+                                id,
+                                params,
+                                prep,
+                                self.ticket.clone(),
+                            )
+                            .await
+                            .map_err(|e| e.into())
                         }
                     }
                     _ => internal!(),
-                };
-
-                res
+                }
             }
         }
     }
@@ -938,7 +979,8 @@ where
         &mut self,
         id: u32,
         params: Vec<DataType>,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        let query_coverage_info = self.query_coverage_info;
         let prepared_statement = self
             .prepared_statements
             .get(&id)
@@ -949,7 +991,7 @@ where
         let res = self
             .execute_inner(id, params, &prepared_statement, &mut maybe_event)
             .await;
-        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_event.into()) {
+        if let (Some(info), Some(e)) = (query_coverage_info, maybe_event.into()) {
             info.prepare_executed(id, e);
         }
         res
@@ -960,13 +1002,14 @@ where
         &mut self,
         query: &str,
         event: &mut MaybeExecuteEvent,
-    ) -> Result<QueryResult<DB>, DB::Error> {
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let start = time::Instant::now();
+        let slowlog = self.slowlog;
         let mut handle = event.start_timer();
 
         if self.is_in_tx() {
             let res = self.query_fallback(query).await;
-            if self.slowlog {
+            if slowlog {
                 warn_on_slow_query(&start, query);
             }
             handle.set_upstream_duration();
@@ -988,7 +1031,7 @@ where
                 if self.upstream.is_some() {
                     error!(error = %e, "Error received from noria, sending query to fallback");
                     let res = self.query_fallback(query).await;
-                    if self.slowlog {
+                    if slowlog {
                         warn_on_slow_query(&start, query);
                     }
                     handle.set_upstream_duration();
@@ -1006,7 +1049,7 @@ where
                 // Fallback is enabled, so route this query to the underlying
                 // database.
                 let res = self.query_fallback(query).await;
-                if self.slowlog {
+                if slowlog {
                     warn_on_slow_query(&start, query);
                 }
                 handle.set_upstream_duration();
@@ -1166,65 +1209,42 @@ where
             // Interacting directly with Noria writer (No RYW support)
             //
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-            Ok(QueryResult::Noria(match parsed_query {
-                nom_sql::SqlQuery::Select(q) => {
-                    let execution_timer = Instant::now();
-                    let res = self.noria.handle_select(q, self.ticket.clone()).await;
-                    let execution_time = execution_timer.elapsed().as_micros();
+            let mut execution_timer = None;
 
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_time,
-                        SqlQueryType::Read,
-                    );
-                    res?
+            let res = match parsed_query {
+                SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
+                SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await,
+
+                SqlQuery::Select(q) => {
+                    execution_timer = Some((Instant::now(), SqlQueryType::Read));
+                    self.noria.handle_select(q, self.ticket.clone()).await
                 }
-                nom_sql::SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await?,
-                nom_sql::SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await?,
-                nom_sql::SqlQuery::Insert(q) => {
-                    let execution_timer = Instant::now();
-                    let res = self.noria.handle_insert(q).await;
-                    let execution_time = execution_timer.elapsed().as_micros();
-
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_time,
-                        SqlQueryType::Write,
-                    );
-                    res?
+                SqlQuery::Insert(q) => {
+                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
+                    self.noria.handle_insert(q).await
                 }
-                nom_sql::SqlQuery::Update(q) => {
-                    let execution_timer = Instant::now();
-                    let res = self.noria.handle_update(q).await;
-                    let execution_time = execution_timer.elapsed().as_micros();
-
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_time,
-                        SqlQueryType::Write,
-                    );
-                    res?
+                SqlQuery::Update(q) => {
+                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
+                    self.noria.handle_update(q).await
                 }
-                nom_sql::SqlQuery::Delete(q) => {
-                    let execution_timer = Instant::now();
-                    let res = self.noria.handle_delete(q).await;
-                    let execution_time = execution_timer.elapsed().as_micros();
-
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_time,
-                        SqlQueryType::Write,
-                    );
-                    res?
+                SqlQuery::Delete(q) => {
+                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
+                    self.noria.handle_delete(q).await
                 }
                 _ => {
                     error!("unsupported query");
                     unsupported!("query type unsupported");
                 }
-            }))
+            }?;
+
+            if let Some((timer, kind)) = execution_timer {
+                measure_parse_and_execution_time(parse_time, timer.elapsed().as_micros(), kind);
+            }
+
+            Ok(QueryResult::Noria(res))
         };
 
-        if self.slowlog {
+        if slowlog {
             warn_on_slow_query(&start, query);
         }
 
@@ -1232,10 +1252,11 @@ where
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult<DB>, DB::Error> {
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut maybe_event = MaybeExecuteEvent::new(self.mirror_reads);
+        let query_coverage_info = self.query_coverage_info;
         let res = self.query_inner(query, &mut maybe_event).await;
-        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_event.into()) {
+        if let (Some(info), Some(e)) = (query_coverage_info, maybe_event.into()) {
             info.query_executed(query.to_string(), e);
         }
         res

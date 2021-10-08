@@ -11,5 +11,5 @@ pub trait QueryHandler: Sized + Send {
     /// Provides a default response for the given query.
     /// This should only be used in cases where the query can't be executed by Noria
     /// and there is no fallback mechanism enabled.
-    fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult>;
+    fn default_response(query: &SqlQuery) -> ReadySetResult<noria_connector::QueryResult<'static>>;
 }
