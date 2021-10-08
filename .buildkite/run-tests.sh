@@ -4,6 +4,7 @@ set -euo pipefail
 upload_artifacts() {
     echo "--- Uploading proptest-regressions to buildkite artifacts"
     buildkite-agent artifact upload '**/proptest-regressions/*.txt'
+    buildkite-agent artifact upload '**/*.proptest-regressions'
     exit 1
 }
 
