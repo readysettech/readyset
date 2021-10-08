@@ -157,7 +157,12 @@ fn async_execute(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {
-        let res = backend.lock().await.execute(statement_id, params).await;
+        let res = backend
+            .lock()
+            .await
+            .execute(statement_id, params)
+            .await
+            .map(|v| v.into_owned());
 
         queue.send(move |mut cx| {
             let (js_err, js_res) = match res {
@@ -190,7 +195,12 @@ fn async_query(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {
-        let res = backend.lock().await.query(&query).await;
+        let res = backend
+            .lock()
+            .await
+            .query(&query)
+            .await
+            .map(|v| v.into_owned());
 
         queue.send(move |mut cx| {
             let (js_err, js_res) = match res {

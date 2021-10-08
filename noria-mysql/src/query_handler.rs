@@ -5,6 +5,7 @@ use noria::{ColumnSchema, DataType, ReadySetResult};
 use noria_client::backend::noria_connector::QueryResult;
 use noria_client::backend::{noria_connector, SelectSchema};
 use noria_client::QueryHandler;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "@@max_allowed_packet";
@@ -26,7 +27,7 @@ impl QueryHandler for MySqlQueryHandler {
         }
     }
 
-    fn default_response(query: &SqlQuery) -> ReadySetResult<QueryResult> {
+    fn default_response(query: &SqlQuery) -> ReadySetResult<QueryResult<'static>> {
         // For now we only care if we are querying for the `@@max_allowed_packet`
         // (ignoring any other field), in which case we return a hardcoded result.
         // This hardcoded result is needed because some libraries expect it when
@@ -51,7 +52,7 @@ impl QueryHandler for MySqlQueryHandler {
                     )],
                     SelectSchema {
                         use_bogo: false,
-                        schema: vec![ColumnSchema {
+                        schema: Cow::Owned(vec![ColumnSchema {
                             spec: ColumnSpecification {
                                 sql_type: SqlType::UnsignedInt(Some(8)),
                                 constraints: Vec::new(),
@@ -63,8 +64,8 @@ impl QueryHandler for MySqlQueryHandler {
                                 comment: None,
                             },
                             base: None,
-                        }],
-                        columns: vec![MAX_ALLOWED_PACKET_VARIABLE_NAME.to_owned()],
+                        }]),
+                        columns: Cow::Owned(vec![MAX_ALLOWED_PACKET_VARIABLE_NAME.to_owned()]),
                     },
                 )
             }
@@ -72,8 +73,8 @@ impl QueryHandler for MySqlQueryHandler {
                 vec![Results::new(vec![vec![]], Arc::new([]))],
                 SelectSchema {
                     use_bogo: false,
-                    schema: vec![],
-                    columns: vec![],
+                    schema: Cow::Owned(vec![]),
+                    columns: Cow::Owned(vec![]),
                 },
             ),
         };

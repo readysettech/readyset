@@ -133,7 +133,7 @@ mod tests {
     use nom_sql::{ColumnSpecification, SqlType};
     use noria::{ColumnSchema, DataType};
     use noria_client::backend as cl;
-    use std::convert::TryFrom;
+    use std::{borrow::Cow, convert::TryFrom};
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {
         resultset
@@ -151,7 +151,7 @@ mod tests {
         let results = vec![];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![ColumnSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
                     sql_type: SqlType::Bigint(None),
@@ -159,8 +159,8 @@ mod tests {
                     constraints: vec![],
                 },
                 base: None,
-            }],
-            columns: vec!["col1".to_string()],
+            }]),
+            columns: Cow::Owned(vec!["col1".to_string()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(resultset.results, Vec::<Results>::new());
@@ -176,7 +176,7 @@ mod tests {
         )];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![ColumnSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
                     sql_type: SqlType::Bigint(None),
@@ -184,8 +184,8 @@ mod tests {
                     constraints: vec![],
                 },
                 base: None,
-            }],
-            columns: vec!["col1".to_string()],
+            }]),
+            columns: Cow::Owned(vec!["col1".to_string()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(
@@ -209,7 +209,7 @@ mod tests {
         ];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: false,
-            schema: vec![ColumnSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
                 spec: ColumnSpecification {
                     column: "tab1.col1".into(),
                     sql_type: SqlType::Bigint(None),
@@ -217,8 +217,8 @@ mod tests {
                     constraints: vec![],
                 },
                 base: None,
-            }],
-            columns: vec!["col1".to_string()],
+            }]),
+            columns: Cow::Owned(vec!["col1".to_string()]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(
@@ -236,7 +236,7 @@ mod tests {
         let results = vec![];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: true,
-            schema: vec![
+            schema: Cow::Owned(vec![
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
@@ -255,13 +255,13 @@ mod tests {
                     },
                     base: None,
                 },
-            ],
-            columns: vec![
+            ]),
+            columns: Cow::Owned(vec![
                 "col1".to_string(),
                 "col3".to_string(),
                 "col2".to_string(),
                 "bogokey".to_string(),
-            ],
+            ]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         assert_eq!(resultset.results, Vec::<Results>::new());
@@ -300,7 +300,7 @@ mod tests {
         )];
         let schema = SelectSchema(cl::SelectSchema {
             use_bogo: true,
-            schema: vec![
+            schema: Cow::Owned(vec![
                 ColumnSchema {
                     spec: ColumnSpecification {
                         column: "tab1.col1".into(),
@@ -319,13 +319,13 @@ mod tests {
                     },
                     base: None,
                 },
-            ],
-            columns: vec![
+            ]),
+            columns: Cow::Owned(vec![
                 "col1".to_string(),
                 "col3".to_string(),
                 "col2".to_string(),
                 "bogokey".to_string(),
-            ],
+            ]),
         });
         let resultset = Resultset::try_new(results, &schema).unwrap();
         // Only the columns to be projected (col1 and col2) are included in the collected values.

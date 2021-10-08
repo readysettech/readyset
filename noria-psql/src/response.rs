@@ -63,12 +63,12 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
 
 /// A simple wrapper around `noria_client`'s `QueryResult`, facilitating conversion to
 /// `psql_srv::QueryResponse`.
-pub struct QueryResponse(pub cl::QueryResult<PostgreSqlUpstream>);
+pub struct QueryResponse<'a>(pub cl::QueryResult<'a, PostgreSqlUpstream>);
 
-impl TryFrom<QueryResponse> for ps::QueryResponse<Resultset> {
+impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
     type Error = ps::Error;
 
-    fn try_from(r: QueryResponse) -> Result<Self, Self::Error> {
+    fn try_from(r: QueryResponse<'a>) -> Result<Self, Self::Error> {
         use cl::QueryResult::*;
         use noria_connector::QueryResult as NoriaResult;
         use ps::QueryResponse::*;

@@ -21,7 +21,7 @@ use std::sync::Arc;
 pub struct Backend(pub cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>);
 
 impl Backend {
-    async fn query(&mut self, query: &str) -> Result<QueryResponse, Error> {
+    async fn query(&mut self, query: &str) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.query(query).await?))
     }
 
@@ -29,7 +29,11 @@ impl Backend {
         Ok(PrepareResponse(self.0.prepare(query).await?))
     }
 
-    async fn execute(&mut self, id: u32, params: Vec<DataType>) -> Result<QueryResponse, Error> {
+    async fn execute(
+        &mut self,
+        id: u32,
+        params: Vec<DataType>,
+    ) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.execute(id, params).await?))
     }
 }

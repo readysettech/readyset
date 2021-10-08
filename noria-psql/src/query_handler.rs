@@ -4,6 +4,7 @@ use noria::ReadySetResult;
 use noria_client::backend::noria_connector::QueryResult;
 use noria_client::backend::{noria_connector, SelectSchema};
 use noria_client::QueryHandler;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// PostgreSQL flavor of [`QueryHandler`].
@@ -14,13 +15,13 @@ impl QueryHandler for PostgreSqlQueryHandler {
         false
     }
 
-    fn default_response(_: &SqlQuery) -> ReadySetResult<QueryResult> {
+    fn default_response(_: &SqlQuery) -> ReadySetResult<QueryResult<'static>> {
         Ok(noria_connector::QueryResult::Select {
             data: vec![Results::new(vec![vec![]], Arc::new([]))],
             select_schema: SelectSchema {
                 use_bogo: false,
-                schema: vec![],
-                columns: vec![],
+                schema: Cow::Owned(vec![]),
+                columns: Cow::Owned(vec![]),
             },
         })
     }

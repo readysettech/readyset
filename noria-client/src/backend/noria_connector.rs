@@ -159,7 +159,7 @@ pub enum PrepareResult {
 }
 
 #[derive(Debug)]
-pub enum QueryResult {
+pub enum QueryResult<'a> {
     CreateTable,
     CreateView,
     Insert {
@@ -168,7 +168,7 @@ pub enum QueryResult {
     },
     Select {
         data: Vec<Results>,
-        select_schema: SelectSchema,
+        select_schema: SelectSchema<'a>,
     },
     Update {
         num_rows_updated: u64,
@@ -177,6 +177,40 @@ pub enum QueryResult {
     Delete {
         num_rows_deleted: u64,
     },
+}
+
+impl<'a> QueryResult<'a> {
+    #[inline]
+    pub fn into_owned(self) -> QueryResult<'static> {
+        match self {
+            QueryResult::Select {
+                data,
+                select_schema,
+            } => QueryResult::Select {
+                data,
+                select_schema: select_schema.into_owned(),
+            },
+            // Have to manually pass each variant to convince rustc that the
+            // returned type is really owned
+            QueryResult::CreateTable => QueryResult::CreateTable,
+            QueryResult::CreateView => QueryResult::CreateView,
+            QueryResult::Insert {
+                num_rows_inserted,
+                first_inserted_id,
+            } => QueryResult::Insert {
+                num_rows_inserted,
+                first_inserted_id,
+            },
+            QueryResult::Update {
+                num_rows_updated,
+                last_inserted_id,
+            } => QueryResult::Update {
+                num_rows_updated,
+                last_inserted_id,
+            },
+            QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
+        }
+    }
 }
 
 pub struct NoriaConnector {
@@ -230,7 +264,7 @@ impl NoriaConnector {
     pub async fn handle_insert(
         &mut self,
         mut q: nom_sql::InsertStatement,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -336,7 +370,7 @@ impl NoriaConnector {
         &mut self,
         q_id: u32,
         params: Vec<DataType>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
@@ -369,7 +403,7 @@ impl NoriaConnector {
     pub(crate) async fn handle_delete(
         &mut self,
         q: nom_sql::DeleteStatement,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let cond = q
             .where_clause
             .ok_or_else(|| unsupported_err("only supports DELETEs with WHERE-clauses"))?;
@@ -416,7 +450,7 @@ impl NoriaConnector {
     pub(crate) async fn handle_update(
         &mut self,
         q: nom_sql::UpdateStatement,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         self.do_update(Cow::Owned(q), None).await
     }
 
@@ -475,7 +509,7 @@ impl NoriaConnector {
         &mut self,
         q_id: u32,
         params: Vec<DataType>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
             .get(&q_id)
@@ -494,7 +528,7 @@ impl NoriaConnector {
     pub(crate) async fn handle_create_table(
         &mut self,
         q: nom_sql::CreateTableStatement,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
         info!(table = %q.table.name, "table::create");
@@ -561,7 +595,7 @@ impl NoriaConnector {
         &mut self,
         q: &InsertStatement,
         data: Vec<Vec<DataType>>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table.name;
 
         // create a mutator if we don't have one for this table already
@@ -731,7 +765,7 @@ impl NoriaConnector {
         mut keys: Vec<Vec<DataType>>,
         key_column_indices: &[usize],
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         // create a getter if we don't have one for this query already
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
@@ -741,12 +775,10 @@ impl NoriaConnector {
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
         let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
-        let returned_schema = getter_schema.schema(SchemaType::ReturnedSchema).to_vec();
         let mut key_types =
             getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
         trace!("select::lookup");
         let bogo = vec![vec1![DataType::from(0i32)].into()];
-        let cols = Vec::from(getter.columns());
         let mut binops = utils::get_select_statement_binops(q);
         let mut filter_op_idx = None;
         let filter = binops
@@ -836,8 +868,8 @@ impl NoriaConnector {
             data,
             select_schema: SelectSchema {
                 use_bogo,
-                schema: returned_schema,
-                columns: cols,
+                schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), // Safe because we already unwrapped above
+                columns: Cow::Borrowed(getter.columns()),
             },
         })
     }
@@ -846,7 +878,7 @@ impl NoriaConnector {
         &mut self,
         q: Cow<'_, UpdateStatement>,
         params: Option<Vec<DataType>>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self.inner.ensure_mutator(&q.table.name).await?;
 
@@ -878,7 +910,7 @@ impl NoriaConnector {
         &mut self,
         q: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         trace!("query::select::access view");
         let qname = self.get_or_create_view(&q, false).await?;
 
@@ -963,7 +995,7 @@ impl NoriaConnector {
         q_id: u32,
         params: Vec<DataType>,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = {
             match self.prepared_statement_cache.get(&q_id) {
                 Some(e) => e.clone(),
@@ -1006,7 +1038,7 @@ impl NoriaConnector {
     pub(crate) async fn handle_create_view(
         &mut self,
         q: nom_sql::CreateViewStatement,
-    ) -> ReadySetResult<QueryResult> {
+    ) -> ReadySetResult<QueryResult<'_>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
 

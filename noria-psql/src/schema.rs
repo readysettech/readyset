@@ -10,16 +10,16 @@ use crate::Error;
 
 /// A simple wrapper around `noria_client`'s `SelectSchema` facilitating conversion to
 /// `psql_srv::Schema`.
-pub struct SelectSchema(pub cl::SelectSchema);
+pub struct SelectSchema<'a>(pub cl::SelectSchema<'a>);
 
-impl TryFrom<SelectSchema> for Vec<ps::Column> {
+impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
     type Error = Error;
     fn try_from(s: SelectSchema) -> Result<Self, Self::Error> {
         s.0.schema
-            .into_iter()
+            .iter()
             .map(|c| {
                 Ok(ps::Column {
-                    name: c.spec.column.name,
+                    name: c.spec.column.name.to_string(),
                     col_type: type_to_pgsql(&c.spec.sql_type)?,
                 })
             })
