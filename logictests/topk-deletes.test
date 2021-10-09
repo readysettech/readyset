@@ -1,0 +1,51 @@
+statement ok
+create table t1 (id int, value int, fk_id int, primary key (id))
+
+statement ok
+insert into t1 (id, value, fk_id) values
+(1, 1, 2),
+(2, 2, 3),
+(3, 3, 3),
+(4, 4, 3),
+(5, 5, 3)
+
+# fully materialized
+
+query I nosort
+select id from t1 order by value asc limit 3
+----
+1
+2
+3
+
+statement ok
+delete from t1 where id = 1
+
+
+query I nosort
+select id from t1 order by value asc limit 3
+----
+2
+3
+4
+
+# partial
+
+query I nosort
+select id from t1 where fk_id = ? order by value asc limit 3
+? = 3
+----
+2
+3
+4
+
+statement ok
+delete from t1 where id = 2
+
+query I nosort
+select id from t1 where fk_id = ? order by value asc limit 3
+? = 3
+----
+3
+4
+5
