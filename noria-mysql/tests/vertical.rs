@@ -762,4 +762,20 @@ vertical_tests! {
             key_columns: [0],
         )
     );
+
+    partial_topk(
+        "SELECT id, title FROM posts WHERE author_id = ? ORDER BY score DESC LIMIT 3";
+        "posts" => (
+            "CREATE TABLE posts (id INT, title TEXT, score INT, author_id INT, PRIMARY KEY (id))",
+            schema: [id: i32, title: String, score: i32, author_id: foreign_key("users", 0)],
+            primary_key: 0,
+            key_columns: []
+        ),
+        "users" => (
+            "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String],
+            primary_key: 0,
+            key_columns: [0],
+        )
+    );
 }

@@ -14,8 +14,8 @@ use tracing::warn;
 
 use crate::prelude::*;
 
-use crate::processing::ColumnSource;
 use crate::processing::SuggestedIndex;
+use crate::processing::{ColumnSource, LookupMode};
 use nom_sql::OrderType;
 use noria::errors::{internal_err, ReadySetResult};
 
@@ -125,6 +125,147 @@ impl TopK {
         self.project_group(rec)?.hash(&mut hasher);
         Ok(hasher.finish())
     }
+
+    /// Called inside of on_input after processing an individual group of input records, to turn
+    /// that group into a set of records in `out`.
+    ///
+    /// `current` is the final contents of the current group, where the elements are tuples of
+    /// `(row, whether the row has been newly added to the group)`.
+    ///
+    /// `current_group_key` contains the projected key of the group.
+    ///
+    /// `original_group_len` contains the length of the group before we started making updates to
+    /// it.
+    #[allow(clippy::too_many_arguments)]
+    fn post_group<'a>(
+        &self,
+        is_partial: bool,
+        out: &mut Vec<Record>,
+        current: &mut Vec<(Cow<'a, [DataType]>, bool)>,
+        current_group_key: &mut Vec<DataType>,
+        original_group_len: usize,
+        state: &'a StateMap,
+        nodes: &DomainNodes,
+    ) -> ReadySetResult<Option<Lookup>> {
+        let mut lookup = None;
+        current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
+
+        let start = current.len().saturating_sub(self.k);
+
+        if original_group_len == self.k {
+            if let Some(diff) = original_group_len
+                .checked_sub(current.len())
+                .and_then(NonZeroUsize::new)
+            {
+                // there used to be k things in the group, now there are fewer than k.
+                if is_partial {
+                    match self.lookup(
+                        *self.src,
+                        &self.group_by,
+                        &KeyType::from(current_group_key.iter()),
+                        nodes,
+                        state,
+                        LookupMode::Strict,
+                    ) {
+                        None => internal!("TopK must have its parent materialized"),
+                        Some(None) => internal!("We shouldn't have been able to get this record if the parent would miss"),
+                        Some(Some(rs)) => {
+                            let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
+                            rs.sort_unstable_by(|a, b| {
+                                self.order.cmp(a.as_ref(), b.as_ref()).reverse()
+                            });
+                            current.extend(
+                                rs.into_iter()
+                                    .map(|r| (r, true))
+                                    .skip(current.len())
+                                    .take(diff.get()),
+                            );
+                            lookup = Some(Lookup {
+                                on: *self.src,
+                                cols: self.group_by.clone(),
+                                key: current_group_key.clone().try_into().expect("Empty group"),
+                            })
+                        }
+                    }
+                } else {
+                    // If we're fully materialized, that means we've been keeping track of
+                    // records *out of* our topk group in `self.current_records` - let's
+                    // backfill up to k from that if we can.
+                    if let Some(ref mut extra_records) = self
+                        .extra_records
+                        .borrow_mut()
+                        .get_mut(&hash(&current_group_key))
+                    {
+                        current.extend(
+                            extra_records
+                                .drain(0..min(diff.into(), extra_records.len()))
+                                .map(|r| (r.into(), true)),
+                        );
+                    }
+                }
+            }
+
+            // FIXME: if all the elements with the smallest value in the new topk are new,
+            // then it *could* be that there exists some value that is greater than all
+            // those values, and <= the smallest old value. we would only discover that by
+            // querying. unfortunately, the check below isn't *quite* right because it does
+            // not consider old rows that were removed in this batch (which should still be
+            // counted for this condition).
+            if false {
+                let all_new_bottom = current[start..]
+                    .iter()
+                    .take_while(|(ref r, _)| {
+                        self.order.cmp(r, &current[start].0) == Ordering::Equal
+                    })
+                    .all(|&(_, is_new)| is_new);
+                if all_new_bottom {
+                    warn!("topk is guesstimating bottom row");
+                }
+            }
+        }
+
+        // optimization: if we don't *have to* remove something, we don't
+        for i in start..current.len() {
+            if current[i].1 {
+                // we found an `is_new` in current
+                // can we replace it with a !is_new with the same order value?
+                let replace = current[0..start].iter().position(|&(ref r, is_new)| {
+                    !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
+                });
+                if let Some(ri) = replace {
+                    current.swap(i, ri);
+                }
+            }
+        }
+
+        for (r, is_new) in current.drain(start..) {
+            if is_new {
+                out.push(Record::Positive(r.into_owned()));
+            }
+        }
+
+        if !current.is_empty() {
+            for (r, is_new) in current.drain(..) {
+                if !is_new {
+                    // Was in k, now isn't
+                    out.push(Record::Negative(r.clone().into()));
+                }
+
+                if !is_partial {
+                    // If we're fully materialized, save records beyond k into `extra_records`
+                    // so we can use them if we ever receive a negative.
+                    let mut extra_records = self.extra_records.borrow_mut();
+                    let entry = extra_records.entry(self.group_hash(&(*r))?).or_default();
+                    entry.push(r.into());
+                    // TODO(grfn): Sorting here every step of the way is not optimal, we should
+                    // make some sort of btree here wrapping a type with an (unsafe) reference
+                    // to self.order for comparison
+                    entry.sort_unstable_by(|a, b| self.order.cmp(b, a));
+                }
+            }
+        }
+        Ok(lookup)
+    }
 }
 
 impl Ingredient for TopK {
@@ -150,14 +291,14 @@ impl Ingredient for TopK {
     }
 
     #[allow(clippy::cognitive_complexity)]
-    fn on_input(
+    fn on_input<'a>(
         &mut self,
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
         replay_key_cols: Option<&[usize]>,
-        _: &DomainNodes,
-        state: &StateMap,
+        nodes: &DomainNodes,
+        state: &'a StateMap,
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
@@ -185,137 +326,61 @@ impl Ingredient for TopK {
             .as_ref();
 
         let mut out = Vec::new();
-        let mut grp = Vec::new();
-        let mut grpk = 0;
+        // the lookup key of the group currently being processed
+        let mut current_group_key = Vec::new();
+        // the original length of the group currently being processed before we started doing
+        // anything to it. We need to keep track of this so that we can lookup into our parent to
+        // backfill a group if processing drops us below `k` records when we were originally at `k`
+        // records (if we weren't originally at `k` records we don't need to do anything special).
+        let mut original_group_len = 0;
         let mut missed = false;
         // current holds (Cow<Row>, bool) where bool = is_new
-        let mut current: Vec<(Cow<[DataType]>, bool)> = Vec::new();
+        let mut current: Vec<(Cow<'a, [DataType]>, bool)> = Vec::new();
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
         let is_partial = db.is_partial();
 
-        let post_group = |out: &mut Vec<Record>,
-                          current: &mut Vec<(Cow<[DataType]>, bool)>,
-                          grp: &mut Vec<DataType>,
-                          grpk: usize|
-         -> ReadySetResult<_> {
-            current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
-
-            let start = current.len().saturating_sub(self.k);
-
-            if grpk == self.k {
-                if let Some(diff) = grpk.checked_sub(current.len()).and_then(NonZeroUsize::new) {
-                    // there used to be k things in the group, now there are fewer than k.
-                    if is_partial {
-                        // If we're partially materialized, we can't (currently) do anything
-                        internal!("partially materialized TopK has fewer than k")
-                    } else {
-                        // If we're fully materialized, that means we've been keeping track of
-                        // records *out of* our topk group in `self.current_records` - let's
-                        // backfill up to k from that if we can.
-                        if let Some(ref mut extra_records) =
-                            self.extra_records.borrow_mut().get_mut(&hash(&grp))
-                        {
-                            current.extend(
-                                extra_records
-                                    .drain(0..min(diff.into(), extra_records.len()))
-                                    .map(|r| (r.into(), true)),
-                            );
-                        }
-                    }
-                }
-
-                // FIXME: if all the elements with the smallest value in the new topk are new,
-                // then it *could* be that there exists some value that is greater than all
-                // those values, and <= the smallest old value. we would only discover that by
-                // querying. unfortunately, the check below isn't *quite* right because it does
-                // not consider old rows that were removed in this batch (which should still be
-                // counted for this condition).
-                if false {
-                    let all_new_bottom = current[start..]
-                        .iter()
-                        .take_while(|(ref r, _)| {
-                            self.order.cmp(r, &current[start].0) == Ordering::Equal
-                        })
-                        .all(|&(_, is_new)| is_new);
-                    if all_new_bottom {
-                        warn!("topk is guesstimating bottom row");
-                    }
-                }
-            }
-
-            // optimization: if we don't *have to* remove something, we don't
-            for i in start..current.len() {
-                if current[i].1 {
-                    // we found an `is_new` in current
-                    // can we replace it with a !is_new with the same order value?
-                    let replace = current[0..start].iter().position(|&(ref r, is_new)| {
-                        !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
-                    });
-                    if let Some(ri) = replace {
-                        current.swap(i, ri);
-                    }
-                }
-            }
-
-            for (r, is_new) in current.drain(start..) {
-                if is_new {
-                    out.push(Record::Positive(r.into_owned()));
-                }
-            }
-
-            if !current.is_empty() {
-                for (r, is_new) in current.drain(..) {
-                    if !is_new {
-                        // Was in k, now isn't
-                        out.push(Record::Negative(r.clone().into()));
-                    }
-
-                    if !is_partial {
-                        // If we're fully materialized, save records beyond k into `extra_records`
-                        // so we can use them if we ever receive a negative.
-                        let mut extra_records = self.extra_records.borrow_mut();
-                        let entry = extra_records.entry(self.group_hash(&(*r))?).or_default();
-                        entry.push(r.into());
-                        // TODO(grfn): Sorting here every step of the way is not optimal, we should
-                        // make some sort of btree here wrapping a type with an (unsafe) reference
-                        // to self.order for comparison
-                        entry.sort_unstable_by(|a, b| self.order.cmp(b, a));
-                    }
-                }
-            }
-            Ok(())
-        };
-
         // records are now chunked by group
         for r in &rs {
-            if grp.iter().cmp(self.project_group(r.rec())?) != Ordering::Equal {
+            if current_group_key.iter().cmp(self.project_group(r.rec())?) != Ordering::Equal {
                 // new group!
 
                 // first, tidy up the old one
-                if !grp.is_empty() {
-                    post_group(&mut out, &mut current, &mut grp, grpk)?;
+                if !current_group_key.is_empty() {
+                    if let Some(lookup) = self.post_group(
+                        is_partial,
+                        &mut out,
+                        &mut current,
+                        &mut current_group_key,
+                        original_group_len,
+                        state,
+                        nodes,
+                    )? {
+                        if replay_key_cols.is_some() {
+                            lookups.push(lookup)
+                        }
+                    }
                 }
                 invariant!(current.is_empty());
 
                 // make ready for the new one
                 // NOTE(grfn): Is this the most optimal way of doing this?
-                grp.clear();
-                grp.extend(self.project_group(r.rec())?.into_iter().cloned());
+                current_group_key.clear();
+                current_group_key.extend(self.project_group(r.rec())?.into_iter().cloned());
 
                 // check out current state
-                match db.lookup(&self.group_by[..], &KeyType::from(&grp[..])) {
+                match db.lookup(&self.group_by[..], &KeyType::from(&current_group_key[..])) {
                     LookupResult::Some(local_records) => {
                         if replay_key_cols.is_some() {
                             lookups.push(Lookup {
                                 on: *us,
                                 cols: self.group_by.clone(),
-                                key: grp.clone().try_into().expect("Empty group"),
+                                key: current_group_key.clone().try_into().expect("Empty group"),
                             });
                         }
 
                         missed = false;
-                        grpk = local_records.len();
+                        original_group_len = local_records.len();
                         current.extend(local_records.into_iter().map(|r| (r.clone(), false)))
                     }
                     LookupResult::Missing => {
@@ -359,8 +424,20 @@ impl Ingredient for TopK {
             }
         }
 
-        if !grp.is_empty() {
-            post_group(&mut out, &mut current, &mut grp, grpk)?;
+        if !current_group_key.is_empty() {
+            if let Some(lookup) = self.post_group(
+                is_partial,
+                &mut out,
+                &mut current,
+                &mut current_group_key,
+                original_group_len,
+                state,
+                nodes,
+            )? {
+                if replay_key_cols.is_some() {
+                    lookups.push(lookup)
+                }
+            }
         }
 
         Ok(ProcessingResult {
@@ -372,7 +449,9 @@ impl Ingredient for TopK {
 
     fn suggest_indexes(&self, this: NodeIndex) -> HashMap<NodeIndex, SuggestedIndex> {
         hashmap! {
-            this => SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone()))
+            this => SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
+            self.src.as_global() =>
+            SuggestedIndex::Strict(internal::Index::hash_map(self.group_by.clone())),
         }
     }
 
@@ -633,10 +712,15 @@ mod tests {
     fn it_suggests_indices() {
         let (g, _) = setup(false);
         let me = 2.into();
+        let parent = 1.into();
         let idx = g.node().suggest_indexes(me);
-        assert_eq!(idx.len(), 1);
+        assert_eq!(idx.len(), 2);
         assert_eq!(
-            idx.values().next().unwrap(),
+            &idx[&me],
+            &SuggestedIndex::Strict(noria::internal::Index::hash_map(vec![1]))
+        );
+        assert_eq!(
+            &idx[&parent],
             &SuggestedIndex::Strict(noria::internal::Index::hash_map(vec![1]))
         );
     }
