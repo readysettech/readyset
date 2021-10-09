@@ -309,33 +309,32 @@ impl Worker {
             };
 
             select! {
-                   req = self.rx.recv() => {
-                       if let Some(req) = req {
-                           self.process_worker_request(req).await;
-                       }
-                       else {
-                           info!("worker shutting down after request handle dropped");
-                           return;
-                       }
-                   }
-                   failed_domains = poll_domains(&mut self.domains) => {
-                       for (idx, shard, err) in failed_domains {
-                           if let Err(e) = err {
-                               // FIXME(eta): do something about this, now that we can?
-                               error!(domain_index = idx.index(), shard, error = %e, "domain failed");
-                           } else {
-                               error!(domain_index = idx.index(), shard, "domain exited unexpectedly");
-                           }
-                           self.domains.remove(&(idx, shard));
-                       }
-                   }
-                   _ = shutdown_stream.next() => {
-                       info!("worker shutting down after valve shut");
-                       return;
-                   }
-                   _ = eviction => {
-                       self.process_eviction();
-                   }
+                req = self.rx.recv() => {
+                    if let Some(req) = req {
+                        self.process_worker_request(req).await;
+                    }
+                    else {
+                        info!("worker shutting down after request handle dropped");
+                        return;
+                    }
+                }
+                failed_domains = poll_domains(&mut self.domains) => {
+                    for (idx, shard, err) in failed_domains {
+                        match err {
+                            Err(e) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
+                            Ok(Err(e)) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
+                            Ok(Ok(())) => error!(domain_index = idx.index(), shard, "domain exited unexpectedly"),
+                        }
+                        self.domains.remove(&(idx, shard));
+                    }
+                }
+                _ = shutdown_stream.next() => {
+                    info!("worker shutting down after valve shut");
+                    return;
+                }
+                _ = eviction => {
+                    self.process_eviction();
+                }
             }
         }
     }
