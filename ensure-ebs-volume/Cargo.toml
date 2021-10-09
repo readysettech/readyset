@@ -1,0 +1,16 @@
+[package]
+name = "ensure-ebs-volume"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.44"
+aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-alpha", package = "aws-config" }
+aws-sdk-ec2 = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-alpha", package = "aws-sdk-ec2" }
+aws-types = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-alpha", package = "aws-types" }
+clap = "3.0.0-beta.4"
+tokio = { version = "1.12.0", features = ["full"] }
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.2.25", features = ["fmt"] }

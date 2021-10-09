@@ -393,6 +393,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-ec2"
+version = "0.0.19-alpha"
+source = "git+https://github.com/awslabs/aws-sdk-rust?tag=v0.0.19-alpha#74bae11ae1af170e33fb695488f1f514f21884ae"
+dependencies = [
+ "aws-auth",
+ "aws-endpoint",
+ "aws-http",
+ "aws-hyper",
+ "aws-sig-auth",
+ "aws-types",
+ "bytes 1.1.0",
+ "fastrand",
+ "http",
+ "smithy-client",
+ "smithy-http",
+ "smithy-query",
+ "smithy-types",
+ "smithy-xml",
+]
+
+[[package]]
 name = "aws-sdk-s3"
 version = "0.0.19-alpha"
 source = "git+https://github.com/awslabs/aws-sdk-rust?tag=v0.0.19-alpha#74bae11ae1af170e33fb695488f1f514f21884ae"
@@ -1568,6 +1589,20 @@ name = "endian-type"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
+
+[[package]]
+name = "ensure-ebs-volume"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-ec2",
+ "aws-types",
+ "clap 3.0.0-beta.4",
+ "tokio 1.12.0",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "enum-display-derive"
@@ -5191,7 +5226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0bccbcf40c8938196944a3da0e133e031a33f4d6b72db3bda3cc556e361905d"
 dependencies = [
  "lazy_static",
- "parking_lot 0.11.2",
+ "parking_lot 0.10.2",
  "serial_test_derive",
 ]
 
@@ -6340,8 +6375,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.4",
+ "cfg-if 0.1.10",
+ "rand 0.7.3",
  "static_assertions",
 ]
 
