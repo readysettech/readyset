@@ -4240,7 +4240,6 @@ async fn self_join_param() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn non_sql_materialized_range_query() {
     let mut g = {
         let mut builder = Builder::for_tests();
@@ -4281,7 +4280,6 @@ async fn non_sql_materialized_range_query() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn non_sql_range_upquery() {
     let mut g = {
         let mut builder = Builder::for_tests();
@@ -4321,7 +4319,6 @@ async fn non_sql_range_upquery() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn range_upquery_after_point_queries() {
     let mut g = {
         let mut builder = Builder::for_tests();
@@ -4487,7 +4484,6 @@ async fn view_reuse_aliases() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn post_read_ilike() {
     let mut g = {
         let mut builder = Builder::for_tests();
