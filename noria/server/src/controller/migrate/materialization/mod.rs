@@ -233,15 +233,12 @@ impl Materializations {
             let n = &graph[ni];
 
             let mut indices: HashMap<NodeIndex, IndexObligation> = if let Some(r) = n.as_reader() {
-                if let Some(key) = r.key() {
+                if let Some(index) = r.index() {
                     // for a reader that will get lookups, we'd like to have an index above us
                     // somewhere on our key so that we can make the reader partial
-                    // TODO(grfn): once the reader knows its own index type, ask it what that is
-                    // here
                     self.new_readers.insert(ni);
-                    let index = Index::hash_map(key.to_vec());
                     hashmap! {
-                        ni => IndexObligation::Replay(index)
+                        ni => IndexObligation::Replay(index.clone())
                     }
                 } else {
                     // only streaming, no indexing needed
@@ -1115,10 +1112,8 @@ impl Materializations {
             // figure out what key that Reader is using
             if let Some(r) = graph[ni].as_reader() {
                 invariant!(r.is_materialized());
-                if let Some(rk) = r.key() {
-                    // TODO(grfn): once the reader knows its own index type, ask it what that is
-                    // here
-                    index_on.insert(Index::hash_map(rk.to_vec()));
+                if let Some(index) = r.index() {
+                    index_on.insert(index.clone());
                 }
             } else {
                 internal!("index_on cannot be empty for a non-Reader node")
