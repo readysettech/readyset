@@ -1,14 +1,17 @@
 //! This test suite implements the [Vertical Testing Design Doc][doc]
 //!
 //! [doc]: https://docs.google.com/document/d/1rTDzd4Z5jSUDqGmIu2C7R06f2HkNWxEll33-rF4WC-c
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::env;
 use std::iter;
 use std::mem;
 use std::ops::Range;
 
 use itertools::Itertools;
+use maplit::hashmap;
 use mysql::prelude::Queryable;
 use mysql_common::value::Value;
 use proptest::prelude::*;
@@ -22,15 +25,19 @@ mod common;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation<const K: usize> {
-    Query { key: [DataType; K] },
-    Insert { table: String, row: Vec<DataType> },
-    /* TODO: coming soon
+    Query {
+        key: [DataType; K],
+    },
+    Insert {
+        table: String,
+        row: Vec<DataType>,
+    },
     Update {
         table: String,
-        key: DataType,
         old_row: Vec<DataType>,
         new_row: Vec<DataType>,
     },
+    /* TODO: coming soon
     Delete {
         table: String,
         key: DataType,
@@ -61,8 +68,20 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
     fn existing_keys(&'a self) -> impl Iterator<Item = [DataType; K]> + 'a {
         let mut rows: HashMap<&'a str, Vec<&'a Vec<DataType>>> = HashMap::new();
         for op in self.already_generated {
-            if let Operation::Insert { table, row } = op {
-                rows.entry(table).or_default().push(row);
+            match op {
+                Operation::Insert { table, row } => {
+                    rows.entry(table).or_default().push(row);
+                }
+                Operation::Update {
+                    table,
+                    old_row,
+                    new_row,
+                } => {
+                    let rows = rows.entry(table).or_default();
+                    rows.retain(|r| *r != old_row);
+                    rows.push(new_row);
+                }
+                _ => (),
             }
         }
 
@@ -73,6 +92,13 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
                 self.key_columns
                     .map(|(tbl, idx)| vals.iter().find(|(t, _)| tbl == *t).unwrap().1[idx].clone())
             })
+    }
+
+    fn existing_rows(&'a self) -> impl Iterator<Item = (String, Vec<DataType>)> + 'a {
+        self.already_generated.iter().filter_map(|op| match op {
+            Operation::Insert { table, row } => Some((table.clone(), row.clone())),
+            _ => None,
+        })
     }
 
     /// Return a proptest [`Strategy`] for generating new keys for the query
@@ -115,23 +141,64 @@ where
     {
         use Operation::*;
 
-        let row_strategies = params.row_strategies.clone();
+        let row_strategies = params
+            .row_strategies
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect::<Vec<_>>();
         let non_key_ops = prop_oneof![
             params.key_strategy().prop_map(|key| Query { key }),
-            select(row_strategies.into_iter().collect::<Vec<_>>()).prop_flat_map(
-                |(table, row_strat)| row_strat.prop_map(move |row| Insert {
+            select(row_strategies).prop_flat_map(|(table, row_strat)| row_strat.prop_map(
+                move |row| Insert {
                     table: table.to_string(),
                     row,
-                })
-            )
+                }
+            ))
         ];
 
         let keys = params.existing_keys().collect::<Vec<_>>();
         if keys.is_empty() {
             non_key_ops.boxed()
         } else {
-            prop_oneof![non_key_ops, select(keys).prop_map(|key| Query { key })].boxed()
+            let key_ops = prop_oneof![non_key_ops, select(keys).prop_map(|key| Query { key })];
+
+            let rows = params.existing_rows().collect::<Vec<_>>();
+            if rows.is_empty() {
+                key_ops.boxed()
+            } else {
+                let row_strategies = params.row_strategies.clone();
+                let mk_update = select(rows).prop_flat_map(move |(table, old_row)| {
+                    let row_strategy = row_strategies[table.as_str()].clone();
+                    (row_strategy
+                        .into_iter()
+                        .zip(old_row.clone())
+                        .map(|(new_val, old_val)| prop_oneof![Just(old_val), new_val])
+                        .collect::<Vec<_>>())
+                    .prop_filter_map("No-op update", move |new_row| {
+                        (old_row != new_row).then(|| Update {
+                            table: table.clone(),
+                            old_row: old_row.clone(),
+                            new_row,
+                        })
+                    })
+                });
+                prop_oneof![key_ops, mk_update].boxed()
+            }
         }
+    }
+}
+
+#[derive(Debug)]
+struct Table {
+    name: &'static str,
+    create_statement: &'static str,
+    primary_key: usize,
+    columns: Vec<&'static str>,
+}
+
+impl Table {
+    fn primary_key_column(&self) -> &'static str {
+        self.columns[self.primary_key]
     }
 }
 
@@ -200,6 +267,7 @@ impl<const K: usize> Operation<K> {
         &self,
         conn: &mut mysql::Conn,
         query: &'static str,
+        tables: &HashMap<&'static str, Table>,
     ) -> Result<OperationResult, TestCaseError> {
         fn to_values(dts: &[DataType]) -> Result<Vec<Value>, TestCaseError> {
             dts.iter()
@@ -228,6 +296,42 @@ impl<const K: usize> Operation<K> {
                     to_values(row)?,
                 )
                 .into()),
+            Operation::Update {
+                table: table_name,
+                old_row,
+                new_row,
+            } => {
+                let table = &tables[table_name.as_str()];
+                let updates = table
+                    .columns
+                    .iter()
+                    .zip(old_row)
+                    .zip(new_row)
+                    .filter_map(|((col_name, old_val), new_val)| {
+                        (old_val != new_val).then(|| (col_name, new_val))
+                    })
+                    .collect::<Vec<_>>();
+                let set_clause = updates
+                    .iter()
+                    .map(|(col_name, _)| format!("{} = ?", col_name))
+                    .join(",");
+                let mut params = updates
+                    .into_iter()
+                    .map(|(_, val)| Value::try_from(val.clone()).unwrap())
+                    .collect::<Vec<_>>();
+                params.push(old_row[table.primary_key].clone().try_into().unwrap());
+                Ok(conn
+                    .exec_drop(
+                        format!(
+                            "UPDATE {} SET {} WHERE {} = ?",
+                            table.name,
+                            set_clause,
+                            table.primary_key_column()
+                        ),
+                        params,
+                    )
+                    .into())
+            }
         }
     }
 }
@@ -279,7 +383,7 @@ where
 }
 
 impl<const K: usize> Operations<K> {
-    fn run(self, query: &'static str, tables: Vec<&'static str>) -> TestCaseResult {
+    fn run(self, query: &'static str, tables: &HashMap<&'static str, Table>) -> TestCaseResult {
         common::recreate_database("vertical");
         let mut mysql = mysql::Conn::new(
             mysql::OptsBuilder::default()
@@ -299,13 +403,13 @@ impl<const K: usize> Operations<K> {
         .unwrap();
         let mut noria = mysql::Conn::new(common::setup(true)).unwrap();
 
-        for table in tables {
-            mysql.query_drop(table).unwrap();
-            noria.query_drop(table).unwrap();
+        for table in tables.values() {
+            mysql.query_drop(table.create_statement).unwrap();
+            noria.query_drop(table.create_statement).unwrap();
         }
 
         for op in self.0 {
-            let mysql_res = op.run(&mut mysql, query)?;
+            let mysql_res = op.run(&mut mysql, query, tables)?;
             // skip tests where mysql returns an error for the operations
             prop_assume!(
                 !mysql_res.is_err(),
@@ -313,7 +417,7 @@ impl<const K: usize> Operations<K> {
                 mysql_res.err().unwrap()
             );
 
-            let noria_res = op.run(&mut noria, query)?;
+            let noria_res = op.run(&mut noria, query, tables)?;
             assert_eq!(mysql_res, noria_res);
         }
 
@@ -337,8 +441,7 @@ macro_rules! vertical_tests {
     (@test $(#[$meta:meta])* $name:ident($query: expr; $($tables: tt)*)) => {
         fn generate_ops() -> impl Strategy<Value = Operations<{vertical_tests!(@key_len $($tables)*)}>> {
             let size_range = 1..100; // TODO make configurable
-            let mut row_strategies = HashMap::new();
-            vertical_tests!(@row_strategies row_strategies, $($tables)*);
+            let row_strategies = vertical_tests!(@row_strategies $($tables)*);
             let key_columns = vertical_tests!(@key_columns $($tables)*);
 
             let params = OperationsParams {
@@ -358,7 +461,7 @@ macro_rules! vertical_tests {
             operations: Operations<{vertical_tests!(@key_len $($tables)*)}>
         ) {
             let tables = vertical_tests!(@tables $($tables)*);
-            operations.run($query, tables)?;
+            operations.run($query, &tables)?;
         }
     };
 
@@ -385,7 +488,7 @@ macro_rules! vertical_tests {
     // collect together all of the key columns from the tables into a single array
     (@key_columns $($table_name: expr => (
         $create_table: expr,
-        schema: [$($schema_type: ty),* $(,)?],
+        schema: [$($schema:tt)*],
         primary_key: $pk_index: expr,
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
@@ -393,31 +496,37 @@ macro_rules! vertical_tests {
         [$($(($table_name, $kc),)*)*]
     };
 
-    // make a vec of create_table strings
+    // Build up the hashmap of Tables
     (@tables $($table_name: expr => (
         $create_table: expr,
-        schema: [$($schema_type: ty),* $(,)?],
+        schema: [$($col_name: ident : $schema_type: ty),* $(,)?],
         primary_key: $pk_index: expr,
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
-        vec![$($create_table,)*]
+        hashmap! {
+            $($table_name => Table {
+                name: $table_name,
+                create_statement: $create_table,
+                primary_key: $pk_index,
+                columns: vec![$(stringify!($col_name),)*],
+            },)*
+        }
     };
 
-    // Build up the hashmap of row_strategies, storing the result in the variable named `$out`
-    (@row_strategies $out: expr, $(,)?) => {};
-    (@row_strategies $out: expr, $table_name: expr => (
+    // Build up the hashmap of row_strategies
+    (@row_strategies $($table_name: expr => (
         $create_table: expr,
-        schema: [$($schema_type: ty),* $(,)?],
+        schema: [$($col_name: ident : $schema_type: ty),* $(,)?],
         primary_key: $pk_index: expr,
-        key_columns: [$($kc: expr),* $(,)?] $(,)?
-    ) $(, $tables: tt)*) => {
-        let row_strategy = vec![
-            $(any::<$schema_type>().prop_map_into::<DataType>().boxed(), )*
-        ];
-        $out.insert($table_name, row_strategy);
-
-        vertical_tests!(@row_strategies $out, $($tables)*);
+        key_columns: [$($kc: expr),* $(,)?]
+        $(,)?
+    )),* $(,)?) => {
+        hashmap! {
+            $($table_name => vec![
+                $(any::<$schema_type>().prop_map_into::<DataType>().boxed(), )*
+            ],)*
+        }
     };
 
     () => {};
@@ -428,7 +537,7 @@ vertical_tests! {
         "SELECT id, name FROM users WHERE id = ?";
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
-            schema: [i32, String],
+            schema: [id: i32, name: String],
             primary_key: 0,
             key_columns: [0],
         )
