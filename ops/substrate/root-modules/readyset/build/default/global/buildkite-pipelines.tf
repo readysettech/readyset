@@ -21,6 +21,8 @@ resource "buildkite_pipeline" "readyset" {
 steps:
   - command: "buildkite-agent pipeline upload"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -35,6 +37,8 @@ resource "buildkite_pipeline" "readyset-nightly" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.readyset-nightly.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -48,6 +52,8 @@ resource "buildkite_pipeline" "readyset-fuzz" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.readyset-fuzz.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -60,6 +66,8 @@ resource "buildkite_pipeline" "framework-testing" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.framework-testing.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -72,6 +80,8 @@ resource "buildkite_pipeline" "mirror-docker-hub-to-ecr" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.mirror-docker-hub-to-ecr.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -84,6 +94,8 @@ resource "buildkite_pipeline" "internal-amis" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.internal-amis.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -96,6 +108,8 @@ resource "buildkite_pipeline" "docker-release" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.docker-release.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
 
@@ -108,5 +122,7 @@ resource "buildkite_pipeline" "external-amis" {
 steps:
   - command: "buildkite-agent pipeline upload .buildkite/pipeline.external-amis.yml"
     label: ":pipeline:"
+    agents:
+      queue: t3a-small
 STEPS
 }
