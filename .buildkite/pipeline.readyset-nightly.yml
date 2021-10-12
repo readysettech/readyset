@@ -34,6 +34,29 @@ steps:
     agents:
       queue: nightly
 
+  - label: ':arrow_up: Run vertical tests'
+    key: vertical-tests
+    command: .buildkite/vertical_tests.sh
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+          - PROPTEST_CASES=1000
+          config:
+          - docker-compose.yml
+          - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.2.0:
+          login: true
+          retries: 3
+    agents:
+      queue: nightly
+
   - label: 'Run test flakiness check'
     key: flaky-finder
     command:
