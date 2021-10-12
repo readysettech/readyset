@@ -38,6 +38,7 @@ futures-sink = "0.3.14"
 futures-executor = "0.3.14"
 pin-project = "1.0.6"
 hyper = { version = "0.14.10", features = [ "stream", "server" ] }
+querystring = "1.1.0"
 itertools = "0.10.0"
 maths = { path = "../../maths" }
 metrics = "0.17.0"
