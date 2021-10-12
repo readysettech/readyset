@@ -529,7 +529,7 @@ impl TestScript {
 
             match database_type {
                 DatabaseType::MySQL => MysqlIntermediary::run_on_tcp(
-                    noria_mysql::Backend(make_backend!(MySqlUpstream, MySqlQueryHandler)),
+                    noria_mysql::Backend::new(make_backend!(MySqlUpstream, MySqlQueryHandler)),
                     s,
                 )
                 .await

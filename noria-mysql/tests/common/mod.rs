@@ -66,7 +66,7 @@ impl test_helpers::Adapter for MySQLAdapter {
         backend: noria_client::Backend<Self::Upstream, Self::Handler>,
         s: TcpStream,
     ) {
-        MysqlIntermediary::run_on_tcp(Backend(backend), s)
+        MysqlIntermediary::run_on_tcp(Backend::new(backend), s)
             .await
             .unwrap()
     }
