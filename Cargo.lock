@@ -3542,6 +3542,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
+ "paste",
  "proptest",
  "serial_test",
  "test-strategy",
@@ -3959,6 +3960,12 @@ checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
 dependencies = [
  "regex",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
 
 [[package]]
 name = "peeking_take_while"
