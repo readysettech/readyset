@@ -1,6 +1,14 @@
-//! This test suite implements the [Vertical Testing Design Doc][doc]
+//! This test suite implements the [Vertical Testing Design Doc][doc].
 //!
 //! [doc]: https://docs.google.com/document/d/1rTDzd4Z5jSUDqGmIu2C7R06f2HkNWxEll33-rF4WC-c
+//!
+//! Note that this test suite is ignored by default, and conditionally de-ignored with the
+//! `vertical_tests` feature to prevent it running in normal builds (since it's slow and may find
+//! new bugs); to run it locally run:
+//!
+//! ```notrust
+//! cargo test -p noria-mysql --features vertical_tests --test vertical
+//! ```
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -455,6 +463,7 @@ macro_rules! vertical_tests {
 
         #[proptest]
         #[serial_test::serial]
+        #[cfg_attr(not(feature = "vertical_tests"), ignore)]
         $(#[$meta])*
         fn $name(
             #[strategy(generate_ops())]

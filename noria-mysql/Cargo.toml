@@ -32,6 +32,9 @@ proptest = "1.0.0"
 serial_test = "0.5.1"
 test-strategy = "0.1.2"
 
+[features]
+vertical_tests = []
+
 [[example]]
 name = "basic_demo"
 
