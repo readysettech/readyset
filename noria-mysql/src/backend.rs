@@ -27,60 +27,60 @@ async fn write_column<W: AsyncWrite + Unpin>(
     cs: &msql_srv::Column,
 ) -> Result<(), Error> {
     let written = match *c {
-        DataType::None => rw.write_col(None::<i32>).await,
+        DataType::None => rw.write_col(None::<i32>),
         // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
         // this out into a helper since i has a different time depending on the DataType
         // variant.
         DataType::Int(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
+                rw.write_col(i as usize)
             } else {
-                rw.write_col(i as isize).await
+                rw.write_col(i as isize)
             }
         }
         DataType::BigInt(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
+                rw.write_col(i as usize)
             } else {
-                rw.write_col(i as isize).await
+                rw.write_col(i as isize)
             }
         }
         DataType::UnsignedInt(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
+                rw.write_col(i as usize)
             } else {
-                rw.write_col(i as isize).await
+                rw.write_col(i as isize)
             }
         }
         DataType::UnsignedBigInt(i) => {
             if cs.colflags.contains(ColumnFlags::UNSIGNED_FLAG) {
-                rw.write_col(i as usize).await
+                rw.write_col(i as usize)
             } else {
-                rw.write_col(i as isize).await
+                rw.write_col(i as isize)
             }
         }
-        DataType::Text(ref t) => rw.write_col(t.as_str()).await,
-        DataType::TinyText(ref t) => rw.write_col(t.as_str()).await,
+        DataType::Text(ref t) => rw.write_col(t.as_str()),
+        DataType::TinyText(ref t) => rw.write_col(t.as_str()),
         ref dt @ (DataType::Float(..) | DataType::Double(..)) => match cs.coltype {
             msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
                 let f = dt.to_string();
-                rw.write_col(f).await
+                rw.write_col(f)
             }
             msql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
                 let f: f64 = <f64>::try_from(dt)?;
-                rw.write_col(f).await
+                rw.write_col(f)
             }
             msql_srv::ColumnType::MYSQL_TYPE_FLOAT => {
                 let f: f32 = <f32>::try_from(dt)?;
-                rw.write_col(f).await
+                rw.write_col(f)
             }
             _ => {
                 internal!()
             }
         },
-        DataType::Timestamp(ts) => rw.write_col(ts).await,
-        DataType::Time(ref t) => rw.write_col(t.as_ref()).await,
-        DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()).await,
+        DataType::Timestamp(ts) => rw.write_col(ts),
+        DataType::Time(ref t) => rw.write_col(t.as_ref()),
+        DataType::ByteArray(ref bytes) => rw.write_col(bytes.as_ref()),
         DataType::Numeric(_) => unimplemented!("MySQL does not implement the type NUMERIC"),
         // These types are PostgreSQL specific
         DataType::BitVector(_) => {
@@ -322,7 +322,7 @@ where
                                 }
                             }
                         }
-                        rw.end_row().await?;
+                        rw.end_row()?;
                     }
                 }
                 rw.finish().await
@@ -366,9 +366,9 @@ where
                     let mut rw = results.start(&formatted_cols).await?;
                     for r in data {
                         for (coli, _) in formatted_cols.iter().enumerate() {
-                            rw.write_col(&r[coli]).await?;
+                            rw.write_col(&r[coli])?;
                         }
-                        rw.end_row().await?
+                        rw.end_row()?
                     }
                     rw.set_status_flags(status_flags).finish().await
                 } else {
@@ -501,7 +501,7 @@ where
                                 }
                             }
                         }
-                        rw.end_row().await?;
+                        rw.end_row()?;
                     }
                 }
                 rw.finish().await
@@ -538,9 +538,9 @@ where
                     let mut rw = results.start(&formatted_cols).await?;
                     for r in data {
                         for (coli, _) in formatted_cols.iter().enumerate() {
-                            rw.write_col(&r[coli]).await?;
+                            rw.write_col(&r[coli])?;
                         }
-                        rw.end_row().await?
+                        rw.end_row()?
                     }
                     rw.set_status_flags(status_flags).finish().await
                 } else {

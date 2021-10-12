@@ -1,4 +1,3 @@
-use crate::error::{other_error, OtherErrorKind};
 use crate::myc::constants::{ColumnFlags, StatusFlags};
 use crate::packet::PacketWriter;
 use crate::value::ToMysqlValue;
@@ -7,7 +6,9 @@ use crate::{Column, ErrorKind, StatementData};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWrite;
+
+const DEFAULT_ROW_CAPACITY: usize = 4096;
 
 /// Convenience type for responding to a client `USE <db>` command.
 pub struct InitWriter<'a, W: AsyncWrite + Unpin> {
@@ -242,9 +243,10 @@ impl<'a, W: AsyncWrite + Unpin> Drop for QueryResultWriter<'a, W> {
 /// call [`finish`](struct.RowWriter.html#method.finish) explicitly.
 #[must_use]
 pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
-    result: Option<QueryResultWriter<'a, W>>,
+    result: QueryResultWriter<'a, W>,
     bitmap_len: usize,
-    data: Vec<u8>,
+    /// The index where the null bitmap for the current row begins
+    bitmap_idx: usize,
     columns: &'a [Column],
 
     // next column to write for the current row
@@ -255,6 +257,8 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     // Optionally holds the status flags from the last ok packet that we have
     // received from communicating with mysql over fallback.
     last_status_flags: Option<StatusFlags>,
+    /// A buffer to hold row data
+    row_data: Vec<u8>,
 }
 
 impl<'a, W> RowWriter<'a, W>
@@ -267,15 +271,17 @@ where
     ) -> io::Result<RowWriter<'a, W>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
-            result: Some(result),
+            result,
             columns,
             bitmap_len,
-            data: Vec::new(),
+            bitmap_idx: 0,
 
             col: 0,
 
             finished: false,
             last_status_flags: None,
+
+            row_data: Vec::new(),
         };
         rw.start().await?;
         Ok(rw)
@@ -283,14 +289,7 @@ where
 
     async fn start(&mut self) -> io::Result<()> {
         if !self.columns.is_empty() {
-            writers::column_definitions(
-                self.columns,
-                self.result
-                    .as_mut()
-                    .ok_or_else(|| other_error(OtherErrorKind::PacketWriterErr))?
-                    .writer,
-            )
-            .await?;
+            writers::column_definitions(self.columns, &mut self.result.writer).await?;
         }
         Ok(())
     }
@@ -306,7 +305,7 @@ where
     /// [`QueryResultWriter::start`](struct.QueryResultWriter.html#method.start). If it does not,
     /// this method will return an error indicating that an invalid value type or specification was
     /// provided.
-    pub async fn write_col<T>(&mut self, v: T) -> io::Result<()>
+    pub fn write_col<T>(&mut self, v: T) -> io::Result<()>
     where
         T: ToMysqlValue,
     {
@@ -314,22 +313,24 @@ where
             return Ok(());
         }
 
-        if self
-            .result
-            .as_mut()
-            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-            .is_bin
-        {
-            if self.col == 0 {
-                self.result
-                    .as_mut()
-                    .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                    .writer
-                    .write_u8(0x00)
-                    .await?;
+        if self.col == 0 {
+            // We want to preallocate at least *some* capacity for the row, otherwise the incremental
+            // writes cause a whole lot of reallocations. Since Vec usually reallocates with exponential
+            // growth even small responses require at least a few reallocs unless we reserve some capacity.
+            // The specific size chosen seem safe enough for most rows, and in the worst case will require
+            // significantly fewer reallocations.
+            // NOTE: we could reserver an exact number of bytes if desired in the future by computing a bound
+            // on each column size
+            self.row_data.reserve(DEFAULT_ROW_CAPACITY);
+        }
 
+        if self.result.is_bin {
+            if self.col == 0 {
+                self.row_data.push(0x00);
                 // leave space for nullmap
-                self.data.resize(self.bitmap_len, 0);
+                self.bitmap_idx = self.row_data.len();
+                self.row_data
+                    .resize(self.row_data.len() + self.bitmap_len, 0);
             }
 
             let c = self
@@ -342,6 +343,7 @@ where
                     )
                 })?
                 .borrow();
+
             if v.is_null() {
                 if c.colflags.contains(ColumnFlags::NOT_NULL_FLAG) {
                     return Err(io::Error::new(
@@ -352,36 +354,22 @@ where
                     // https://web.archive.org/web/20170404144156/https://dev.mysql.com/doc/internals/en/null-bitmap.html
                     // NULL-bitmap-byte = ((field-pos + offset) / 8)
                     // NULL-bitmap-bit  = ((field-pos + offset) % 8)
-                    let idx = (self.col + 2) / 8;
-                    let len = self.data.len();
-                    *self.data.get_mut(idx).ok_or_else(|| {
-                        other_error(OtherErrorKind::IndexErr {
-                            data: "self.data".to_string(),
-                            index: idx,
-                            length: len,
-                        })
-                    })? |= 1u8 << ((self.col + 2) % 8);
+                    let idx = self.bitmap_idx + (self.col + 2) / 8;
+                    // Always safe to access `idx` because we allocate sufficient space in advance
+                    self.row_data[idx] |= 1u8 << ((self.col + 2) % 8);
                 }
             } else {
-                v.to_mysql_bin(&mut self.data, c)?;
+                v.to_mysql_bin(&mut self.row_data, c)?;
             }
         } else {
-            // HACK(eta): suboptimal buffering (see writers.rs too)
-            let mut buf = Vec::new();
-            v.to_mysql_text(&mut buf)?;
-            self.result
-                .as_mut()
-                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                .writer
-                .write_all(&buf)
-                .await?;
+            v.to_mysql_text(&mut self.row_data)?;
         }
         self.col += 1;
         Ok(())
     }
 
     /// Indicate that no more column data will be written for the current row.
-    pub async fn end_row(&mut self) -> io::Result<()> {
+    pub fn end_row(&mut self) -> io::Result<()> {
         if self.columns.is_empty() {
             self.col += 1;
             return Ok(());
@@ -394,26 +382,10 @@ where
             ));
         }
 
-        if self
-            .result
-            .as_mut()
-            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-            .is_bin
-        {
-            self.result
-                .as_mut()
-                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                .writer
-                .write_all(&self.data[..])
-                .await?;
-            self.data.clear();
-        }
         self.result
-            .as_mut()
-            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
             .writer
-            .end_packet()
-            .await?;
+            .enqueue_packet(std::mem::take(&mut self.row_data));
+
         self.col = 0;
 
         Ok(())
@@ -425,17 +397,17 @@ where
     /// [`QueryResultWriter::start`](struct.QueryResultWriter.html#method.start). If it does not,
     /// this method will return an error indicating that an invalid value type or specification was
     /// provided.
-    pub async fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
+    pub fn write_row<I, E>(&mut self, row: I) -> io::Result<()>
     where
         I: IntoIterator<Item = E>,
         E: ToMysqlValue,
     {
         if !self.columns.is_empty() {
             for v in row {
-                self.write_col(v).await?;
+                self.write_col(v)?;
             }
         }
-        self.end_row().await
+        self.end_row()
     }
 }
 
@@ -449,10 +421,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
         if self.columns.is_empty() {
             // response to no column query is always an OK packet
             // we've kept track of the number of rows in col (hacky, I know)
-            self.result
-                .as_mut()
-                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                .last_end = Some(Finalizer::Ok {
+            self.result.last_end = Some(Finalizer::Ok {
                 rows: self.col as u64,
                 last_insert_id: 0,
                 status_flags: self.last_status_flags.take(),
@@ -460,10 +429,7 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
             Ok(())
         } else {
             // we wrote out at least one row
-            self.result
-                .as_mut()
-                .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-                .last_end = Some(Finalizer::Eof {
+            self.result.last_end = Some(Finalizer::Eof {
                 status_flags: self.last_status_flags.take(),
             });
             Ok(())
@@ -479,15 +445,11 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
     /// Reply to the client's query with an error.
     ///
     /// This also calls `no_more_results` implicitly.
-    pub async fn error<E>(mut self, kind: ErrorKind, msg: &E) -> io::Result<()>
+    pub async fn error<E>(self, kind: ErrorKind, msg: &E) -> io::Result<()>
     where
         E: Borrow<[u8]> + ?Sized,
     {
-        self.result
-            .take()
-            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?
-            .error(kind, msg)
-            .await
+        self.result.error(kind, msg).await
     }
 
     /// Indicate to the client that no more rows are coming.
@@ -498,23 +460,9 @@ impl<'a, W: AsyncWrite + Unpin + 'a> RowWriter<'a, W> {
     /// End this resultset response, and indicate to the client that no more rows are coming.
     pub async fn finish_one(mut self) -> io::Result<QueryResultWriter<'a, W>> {
         if !self.columns.is_empty() && self.col != 0 {
-            self.end_row().await?;
+            self.end_row()?;
         }
         self.finish_inner()?;
-        // we know that dropping self will see self.finished == true,
-        // and so Drop won't try to use self.result.
-        Ok(self
-            .result
-            .take()
-            .ok_or_else(|| other_error(OtherErrorKind::QueryResultWriterErr))?)
-    }
-}
-
-impl<'a, W: AsyncWrite + Unpin + 'a> Drop for RowWriter<'a, W> {
-    fn drop(&mut self) {
-        let _ = self.finish_inner();
-        if !self.columns.is_empty() && self.col != 0 {
-            eprintln!("WARNING(msql-srv): RowWriter dropped without finishing")
-        }
+        Ok(self.result)
     }
 }

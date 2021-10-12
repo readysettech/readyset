@@ -3,21 +3,16 @@ use crate::myc::io::WriteMysqlExt;
 use crate::packet::PacketWriter;
 use crate::{Column, ErrorKind};
 use byteorder::{LittleEndian, WriteBytesExt};
-use std::io::{self, Write};
+use std::borrow::Borrow;
+use std::io::{self, Cursor, Write};
 use tokio::io::AsyncWrite;
-
-// HACK: because `mysql_common` and `byteorder` don't work with async writers,
-// we just write into a buffer and asynchronously write out that buffer.
-// This results in more allocation / copying though :(
 
 pub(crate) async fn write_eof_packet<W: AsyncWrite + Unpin>(
     w: &mut PacketWriter<W>,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = Vec::new();
-    buf.write_all(&[0xFE, 0x00, 0x00])?;
-    buf.write_u16::<LittleEndian>(s.bits())?;
-    w.write_buf_and_flush(&buf).await
+    let buf: [u8; 5] = [0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8];
+    w.write_packet(&buf).await
 }
 
 pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
@@ -26,13 +21,16 @@ pub(crate) async fn write_ok_packet<W: AsyncWrite + Unpin>(
     last_insert_id: u64,
     s: StatusFlags,
 ) -> io::Result<()> {
-    let mut buf = Vec::new();
+    const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
+    let mut inner_buf = [0u8; MAX_OK_PACKET_LEN];
+    let mut buf = Cursor::new(&mut inner_buf[..]);
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
     buf.write_u16::<LittleEndian>(s.bits())?;
     buf.write_all(&[0x00, 0x00])?; // no warnings
-    w.write_buf_and_flush(&buf).await
+    w.write_packet(&buf.get_ref()[..buf.position() as usize])
+        .await
 }
 
 pub async fn write_err<W: AsyncWrite + Unpin>(
@@ -40,16 +38,14 @@ pub async fn write_err<W: AsyncWrite + Unpin>(
     msg: &[u8],
     w: &mut PacketWriter<W>,
 ) -> io::Result<()> {
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(4 + 5 + msg.len());
     buf.write_u8(0xFF)?;
     buf.write_u16::<LittleEndian>(err as u16)?;
     buf.write_u8(b'#')?;
     buf.write_all(err.sqlstate())?;
     buf.write_all(msg)?;
-    w.write_buf_and_flush(&buf).await
+    w.write_packet(&buf).await
 }
-
-use std::borrow::Borrow;
 
 pub(crate) async fn write_prepare_ok<'a, PI, CI, W>(
     id: u32,
@@ -64,7 +60,10 @@ where
     <CI as IntoIterator>::IntoIter: ExactSizeIterator,
     W: AsyncWrite + Unpin,
 {
-    let mut buf = Vec::new();
+    const MAX_PREPARE_OK_PACKET_LEN: usize = 1 + 4 + 2 + 2 + 1 + 2;
+    let mut inner_buf = [0u8; MAX_PREPARE_OK_PACKET_LEN];
+    let mut buf = Cursor::new(&mut inner_buf[..]);
+
     let pi = params.into_iter();
     let ci = columns.into_iter();
 
@@ -75,7 +74,8 @@ where
     buf.write_u16::<LittleEndian>(pi.len() as u16)?;
     buf.write_u8(0x00)?;
     buf.write_u16::<LittleEndian>(0)?; // number of warnings
-    w.write_buf_and_flush(&buf).await?;
+    w.write_packet(&buf.get_ref()[..buf.position() as usize])
+        .await?;
 
     write_column_definitions(pi, w, true).await?;
     write_column_definitions(ci, w, true).await
@@ -92,7 +92,10 @@ where
 {
     let mut empty = true;
     for c in i {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(
+            4 + 1 + 9 + c.table.len() + 1 + 9 + c.column.len() + 1 + 1 + 2 + 4 + 1 + 2 + 1 + 2,
+        );
+
         let c = c.borrow();
         use crate::myc::constants::UTF8_GENERAL_CI;
         buf.write_lenenc_str(b"def")?;
@@ -108,7 +111,8 @@ where
         buf.write_u16::<LittleEndian>(c.colflags.bits())?;
         buf.write_all(&[0x00])?; // decimals
         buf.write_all(&[0x00, 0x00])?; // unused
-        w.write_buf_and_flush(&buf).await?;
+
+        w.enqueue_packet(buf);
         empty = false;
     }
 
@@ -128,6 +132,6 @@ where
     let mut buf = Vec::new();
     let i = i.into_iter();
     buf.write_lenenc_int(i.len() as u64)?;
-    w.write_buf_and_flush(&buf).await?;
+    w.write_packet(&buf).await?;
     write_column_definitions(i, w, false).await
 }
