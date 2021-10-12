@@ -45,11 +45,11 @@ enum Operation<const K: usize> {
         old_row: Vec<DataType>,
         new_row: Vec<DataType>,
     },
-    /* TODO: coming soon
     Delete {
         table: String,
-        key: DataType,
+        row: Vec<DataType>,
     },
+    /* TODO: coming soon
     Evict {
         /// *seed* for the node index to evict from.
         ///
@@ -89,7 +89,10 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
                     rows.retain(|r| *r != old_row);
                     rows.push(new_row);
                 }
-                _ => (),
+                Operation::Delete { table, row } => {
+                    rows.entry(table).or_default().retain(|r| *r != row);
+                }
+                Operation::Query { .. } => {}
             }
         }
 
@@ -175,7 +178,7 @@ where
                 key_ops.boxed()
             } else {
                 let row_strategies = params.row_strategies.clone();
-                let mk_update = select(rows).prop_flat_map(move |(table, old_row)| {
+                let mk_update = select(rows.clone()).prop_flat_map(move |(table, old_row)| {
                     let row_strategy = row_strategies[table.as_str()].clone();
                     (row_strategy
                         .into_iter()
@@ -190,7 +193,11 @@ where
                         })
                     })
                 });
-                prop_oneof![key_ops, mk_update].boxed()
+                let mk_delete = select(rows).prop_map(move |(table, row)| Delete {
+                    table: table.clone(),
+                    row: row.clone(),
+                });
+                prop_oneof![key_ops, mk_update, mk_delete].boxed()
             }
         }
     }
@@ -337,6 +344,22 @@ impl<const K: usize> Operation<K> {
                             table.primary_key_column()
                         ),
                         params,
+                    )
+                    .into())
+            }
+            Operation::Delete {
+                table: table_name,
+                row,
+            } => {
+                let table = &tables[table_name.as_str()];
+                Ok(conn
+                    .exec_drop(
+                        format!(
+                            "DELETE FROM {} WHERE {} = ?",
+                            table.name,
+                            table.primary_key_column()
+                        ),
+                        (Value::try_from(row[table.primary_key].clone()).unwrap(),),
                     )
                     .into())
             }
