@@ -70,10 +70,16 @@ where
                 js_schema.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::Noria(Update {
-            statement_id,
-            params,
-        }) => {
+        PrepareResult::Noria(
+            Update {
+                statement_id,
+                params,
+            }
+            | Delete {
+                statement_id,
+                params,
+            },
+        ) => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
             let js_params = convert_cols(cx, params)?;
             utils::set_jsval_field(

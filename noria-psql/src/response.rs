@@ -40,10 +40,16 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            Noria(Update {
-                statement_id,
-                params,
-            }) => Ok(ps::PrepareResponse {
+            Noria(
+                Update {
+                    statement_id,
+                    params,
+                }
+                | Delete {
+                    statement_id,
+                    params,
+                },
+            ) => Ok(ps::PrepareResponse {
                 prepared_statement_id: statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: vec![],

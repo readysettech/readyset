@@ -6,8 +6,8 @@ use noria::{
 };
 
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, InsertStatement, SelectStatement, SqlQuery,
-    UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,
+    SqlQuery, UpdateStatement,
 };
 use vec1::vec1;
 
@@ -44,6 +44,7 @@ pub(crate) enum PreparedStatement {
     },
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
+    Delete(DeleteStatement),
 }
 
 impl fmt::Debug for PreparedStatement {
@@ -54,6 +55,7 @@ impl fmt::Debug for PreparedStatement {
             } => write!(f, "{}: {}", name, statement),
             PreparedStatement::Insert(s) => write!(f, "{}", s),
             PreparedStatement::Update(s) => write!(f, "{}", s),
+            PreparedStatement::Delete(s) => write!(f, "{}", s),
         }
     }
 }
@@ -157,6 +159,10 @@ pub enum PrepareResult {
         schema: Vec<ColumnSchema>,
     },
     Update {
+        statement_id: u32,
+        params: Vec<ColumnSchema>,
+    },
+    Delete {
         statement_id: u32,
         params: Vec<ColumnSchema>,
     },
@@ -577,6 +583,67 @@ impl NoriaConnector {
         };
     }
 
+    pub(crate) async fn prepare_delete(
+        &mut self,
+        statement: &DeleteStatement,
+        statement_id: u32,
+    ) -> ReadySetResult<PrepareResult> {
+        // ensure that we have schemas and endpoints for the query
+        trace!(table = %statement.table.name, "delete::access mutator");
+        let mutator = self.inner.ensure_mutator(&statement.table.name).await?;
+        trace!("delete::extract schema");
+        let table_schema = mutator.schema().ok_or_else(|| {
+            internal_err(format!(
+                "Could not find schema for table {}",
+                statement.table.name
+            ))
+        })?;
+
+        // extract parameter columns
+        let params = utils::delete_statement_parameter_columns(statement)
+            .into_iter()
+            .map(|c| {
+                table_schema
+                    .fields
+                    .iter()
+                    // We know that only one table is mentioned, so no need to match on both table
+                    // and name - just check name here
+                    .find(|f| f.column.name == c.name)
+                    .cloned()
+                    .map(|cs| ColumnSchema::from_base(cs, statement.table.name.clone()))
+                    .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        trace!(id = statement_id, "delete::registered");
+        self.prepared_statement_cache
+            .insert(statement_id, PreparedStatement::Delete(statement.clone()));
+        Ok(PrepareResult::Delete {
+            statement_id,
+            params,
+        })
+    }
+
+    pub(crate) async fn execute_prepared_delete(
+        &mut self,
+        q_id: u32,
+        params: Vec<DataType>,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        let prep: PreparedStatement = self
+            .prepared_statement_cache
+            .get(&q_id)
+            .ok_or(PreparedStatementMissing { statement_id: q_id })?
+            .clone();
+
+        trace!("delegate");
+        match prep {
+            PreparedStatement::Delete(q) => {
+                return self.do_delete(Cow::Owned(q), Some(params)).await
+            }
+            _ => internal!(),
+        };
+    }
+
     pub(crate) async fn handle_create_table(
         &mut self,
         q: nom_sql::CreateTableStatement,
@@ -955,6 +1022,37 @@ impl NoriaConnector {
         Ok(QueryResult::Update {
             num_rows_updated: 1,
             last_inserted_id: 0,
+        })
+    }
+
+    async fn do_delete(
+        &mut self,
+        q: Cow<'_, DeleteStatement>,
+        params: Option<Vec<DataType>>,
+    ) -> ReadySetResult<QueryResult<'_>> {
+        trace!(table = %q.table.name, "delete::access mutator");
+        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+
+        let q = q.into_owned();
+        let key = {
+            trace!("delete::extract schema");
+            let schema = if let Some(cts) = mutator.schema() {
+                cts
+            } else {
+                // no delete on views
+                unsupported!();
+            };
+            let coerced_params =
+                utils::coerce_params(params, &SqlQuery::Delete(q.clone()), schema)?;
+            utils::extract_delete(q, coerced_params.map(|p| p.into_iter()), schema)?
+        };
+
+        trace!("delete::delete");
+        mutator.delete(key).await?;
+        trace!("delete::complete");
+        // TODO: return meaningful fields for (num_rows_deleted, last_inserted_id) rather than hardcoded (1,0)
+        Ok(QueryResult::Delete {
+            num_rows_deleted: 1,
         })
     }
 

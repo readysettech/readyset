@@ -152,7 +152,7 @@ where
                     .collect::<Vec<_>>();
                 info.reply(statement_id, &params, &schema).await
             }
-            Ok(PrepareResult::Noria(Update { params, .. })) => {
+            Ok(PrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
                 let params = params
                     .into_iter()
                     .map(|c| convert_column(&c.spec))
@@ -280,6 +280,9 @@ where
                 last_inserted_id,
             })) => {
                 write_query_results(Ok((num_rows_updated, last_inserted_id)), results, None).await
+            }
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Delete { num_rows_deleted })) => {
+                write_query_results(Ok((num_rows_deleted, 0)), results, None).await
             }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,

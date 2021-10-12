@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 
+use nom_sql::DeleteStatement;
 use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, Literal,
     SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
+use noria::errors::unsupported_err;
 use noria::errors::{bad_request_err, ReadySetResult};
 use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
 
@@ -323,6 +325,17 @@ pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
     limit_params
 }
 
+pub(crate) fn delete_statement_parameter_columns(query: &DeleteStatement) -> Vec<&Column> {
+    if let Some(ref wc) = query.where_clause {
+        get_parameter_columns_recurse(wc)
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     match *query {
         SqlQuery::Select(ref query) => select_statement_parameter_columns(query),
@@ -358,11 +371,12 @@ pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
 
             field_params.chain(where_params.into_iter()).collect()
         }
+        SqlQuery::Delete(ref query) => delete_statement_parameter_columns(query),
         _ => unimplemented!(),
     }
 }
 
-fn walk_update_where<I>(
+fn walk_pkey_where<I>(
     col2v: &mut HashMap<String, DataType>,
     params: &mut Option<I>,
     expr: Expression,
@@ -395,8 +409,8 @@ where
             rhs,
         } => {
             // recurse
-            walk_update_where(col2v, params, *lhs)?;
-            walk_update_where(col2v, params, *rhs)?;
+            walk_pkey_where(col2v, params, *lhs)?;
+            walk_pkey_where(col2v, params, *rhs)?;
         }
         _ => unsupported!("Fancy high-brow UPDATEs are not supported"),
     }
@@ -464,6 +478,28 @@ where
     Ok(updates)
 }
 
+pub(crate) fn extract_pkey_where<I>(
+    where_clause: Expression,
+    mut params: Option<I>,
+    schema: &CreateTableStatement,
+) -> ReadySetResult<Vec<DataType>>
+where
+    I: Iterator<Item = DataType>,
+{
+    let pkey = get_primary_key(schema);
+    let mut col_to_val: HashMap<_, _> = HashMap::new();
+    walk_pkey_where(&mut col_to_val, &mut params, where_clause)?;
+    pkey.iter()
+        .map(|&(_, c)| {
+            col_to_val.remove(&c.name).ok_or_else(|| {
+                unsupported_err(
+                    "UPDATE or DELETE on columns other than the primary key are not supported",
+                )
+            })
+        })
+        .collect()
+}
+
 type ExtractedUpdate = (Vec<DataType>, Vec<(usize, Modification)>);
 
 pub(crate) fn extract_update<I>(
@@ -475,20 +511,25 @@ where
     I: Iterator<Item = DataType>,
 {
     let updates = extract_update_params_and_fields(&mut q, &mut params, schema);
-
-    let pkey = get_primary_key(schema);
     let where_clause = q
         .where_clause
-        .expect("UPDATE without WHERE is not supported");
-    let mut col_to_val: HashMap<_, _> = HashMap::new();
-    walk_update_where(&mut col_to_val, &mut params, where_clause)?;
-
-    let key: Vec<_> = pkey
-        .iter()
-        .map(|&(_, c)| col_to_val.remove(&c.name).unwrap())
-        .collect();
-
+        .ok_or_else(|| unsupported_err("UPDATE without WHERE is not supported"))?;
+    let key = extract_pkey_where(where_clause, params, schema)?;
     Ok((key, updates?))
+}
+
+pub(crate) fn extract_delete<I>(
+    q: DeleteStatement,
+    params: Option<I>,
+    schema: &CreateTableStatement,
+) -> ReadySetResult<Vec<DataType>>
+where
+    I: Iterator<Item = DataType>,
+{
+    let where_clause = q
+        .where_clause
+        .ok_or_else(|| unsupported_err("DELETE without WHERE is not supported"))?;
+    extract_pkey_where(where_clause, params, schema)
 }
 
 /// coerce params to correct sql types
