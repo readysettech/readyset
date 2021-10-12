@@ -140,7 +140,6 @@ impl<'a> ValueInner<'a> {
             }
             ColumnType::MYSQL_TYPE_FLOAT => {
                 let f = input.read_f32::<LittleEndian>()?;
-                println!("read {}", f);
                 Ok(ValueInner::Double(f64::from(f)))
             }
             ColumnType::MYSQL_TYPE_DOUBLE => {

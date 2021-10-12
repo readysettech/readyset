@@ -58,7 +58,7 @@
 //!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
 //!                     }];
 //!                     let mut w = results.start(cols).await?;
-//!                     w.write_row(iter::once(67108864u32)).await?;
+//!                     w.write_row(iter::once(67108864u32))?;
 //!                     Ok(w.finish().await?)
 //!                 }
 //!                 _ => Ok(results.completed(0, 0, None).await?),
@@ -80,8 +80,8 @@
 //!             ];
 //!
 //!             let mut rw = results.start(&cols).await?;
-//!             rw.write_col(42).await?;
-//!             rw.write_col("b's value").await?;
+//!             rw.write_col(42)?;
+//!             rw.write_col("b's value")?;
 //!             rw.finish().await
 //!         }
 //!     }
@@ -118,6 +118,7 @@
 //! ```
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
+#![feature(io_slice_advance)]
 
 // Note to developers: you can find decent overviews of the protocol at
 //
@@ -135,7 +136,7 @@ use async_trait::async_trait;
 use error::{other_error, OtherErrorKind};
 use std::collections::HashMap;
 use std::io;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 
 use authentication::{generate_auth_data, hash_password};
@@ -306,27 +307,25 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
     async fn init(&mut self) -> Result<bool, io::Error> {
         let auth_data =
             generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
-        self.writer.write_all(&[10]).await?; // protocol 10
 
-        self.writer.write_all(CURRENT_VERSION).await?;
+        let mut init_packet =
+            Vec::with_capacity(1 + 16 + 4 + 8 + 1 + 2 + 1 + 2 + 2 + 1 + 6 + 4 + 12 + 1);
+        init_packet.extend_from_slice(&[10]); // protocol 10
+        init_packet.extend_from_slice(CURRENT_VERSION);
+        init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
+        init_packet.extend_from_slice(&auth_data[..8]);
+        init_packet.extend_from_slice(b"\0");
+        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[..2]); // just 4.1 proto
+        init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
+        init_packet.extend_from_slice(&[0x00, 0x00]); // status flags
+        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]); //extended capabilities
+        init_packet.extend_from_slice(&[0x00]); //no plugins
+        init_packet.extend_from_slice(&[0x00; 6][..]); // filler
+        init_packet.extend_from_slice(&[0x00; 4][..]); // filler
+        init_packet.extend_from_slice(&auth_data[8..]);
+        init_packet.extend_from_slice(&b"\0"[..]);
 
-        self.writer.write_all(&[0x08, 0x00, 0x00, 0x00]).await?; // TODO: connection ID
-        self.writer.write_all(&auth_data[..8]).await?;
-        self.writer.write_all(&b"\0"[..]).await?;
-        self.writer
-            .write_all(&CAPABILITIES.to_le_bytes()[..2])
-            .await?; // just 4.1 proto
-        self.writer.write_all(&[0x21]).await?; // UTF8_GENERAL_CI
-        self.writer.write_all(&[0x00, 0x00]).await?; // status flags
-        self.writer
-            .write_all(&CAPABILITIES.to_le_bytes()[2..])
-            .await?; // extended capabilities
-        self.writer.write_all(&[0x00]).await?; // no plugins
-        self.writer.write_all(&[0x00; 6][..]).await?; // filler
-        self.writer.write_all(&[0x00; 4][..]).await?; // filler
-        self.writer.write_all(&auth_data[8..]).await?;
-        self.writer.write_all(&b"\0"[..]).await?;
-        self.writer.flush().await?;
+        self.writer.write_packet(&init_packet).await?;
 
         let (seq, handshake_bytes) = self.reader.next().await?.ok_or_else(|| {
             io::Error::new(
@@ -380,7 +379,6 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             )
             .await?;
         }
-        self.writer.flush().await?;
 
         Ok(auth_success)
     }
@@ -498,7 +496,6 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                     break;
                 }
             }
-            self.writer.flush().await?;
         }
         Ok(())
     }

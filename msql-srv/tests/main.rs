@@ -101,7 +101,7 @@ where
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
                     }];
                     let mut w = results.start(cols).await?;
-                    w.write_row(iter::once(67108864u32)).await?;
+                    w.write_row(iter::once(67108864u32))?;
                     Ok(w.finish().await?)
                 }
                 _ => Ok(results.completed(0, 0, None).await?),
@@ -331,7 +331,7 @@ fn no_columns_but_rows() {
         move |_, w| {
             Box::pin(async move {
                 let mut w = w.start(&[]).await?;
-                w.write_col(42i32).await?;
+                w.write_col(42i32)?;
                 w.finish().await
             })
         },
@@ -382,7 +382,7 @@ fn it_queries_nulls() {
             }];
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(None::<i16>).await?;
+                w.write_col(None::<i16>)?;
                 w.finish().await
             })
         },
@@ -409,7 +409,7 @@ fn it_queries() {
             }];
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
+                w.write_col(1024i16)?;
                 w.finish().await
             })
         },
@@ -436,10 +436,10 @@ fn multi_result() {
             }];
             Box::pin(async move {
                 let mut row = w.start(&cols).await?;
-                row.write_col(1024i16).await?;
+                row.write_col(1024i16)?;
                 let w = row.finish_one().await?;
                 let mut row = w.start(&cols).await?;
-                row.write_col(1025i16).await?;
+                row.write_col(1025i16)?;
                 row.finish().await
             })
         },
@@ -481,10 +481,10 @@ fn it_queries_many_rows() {
             ];
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
-                w.write_col(1025i16).await?;
-                w.end_row().await?;
-                w.write_row(&[1024i16, 1025i16]).await?;
+                w.write_col(1024i16)?;
+                w.write_col(1025i16)?;
+                w.end_row()?;
+                w.write_row(&[1024i16, 1025i16])?;
                 w.finish().await
             })
         },
@@ -543,7 +543,7 @@ fn it_prepares() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
+                w.write_col(1024i16)?;
                 w.finish().await
             })
         },
@@ -742,7 +742,7 @@ fn send_long() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
+                w.write_col(1024i16)?;
                 w.finish().await
             })
         },
@@ -790,10 +790,10 @@ fn it_prepares_many() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
-                w.write_col(1025i16).await?;
-                w.end_row().await?;
-                w.write_row(&[1024i16, 1025i16]).await?;
+                w.write_col(1024i16)?;
+                w.write_col(1025i16)?;
+                w.end_row()?;
+                w.write_row(&[1024i16, 1025i16])?;
                 w.finish().await
             })
         },
@@ -868,7 +868,7 @@ fn prepared_no_params() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_col(1024i16).await?;
+                w.write_col(1024i16)?;
                 w.finish().await
             })
         },
@@ -940,7 +940,7 @@ fn prepared_nulls() {
             let cols = cols.clone();
             Box::pin(async move {
                 let mut w = w.start(&cols).await?;
-                w.write_row(vec![None::<i16>, Some(42)]).await?;
+                w.write_row(vec![None::<i16>, Some(42)])?;
                 w.finish().await
             })
         },
@@ -998,7 +998,7 @@ fn prepared_no_cols_but_rows() {
         move |_, _, w| {
             Box::pin(async move {
                 let mut w = w.start(&[]).await?;
-                w.write_col(42).await?;
+                w.write_col(42)?;
                 w.finish().await
             })
         },

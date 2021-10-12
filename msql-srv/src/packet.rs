@@ -1,147 +1,105 @@
 use crate::error::{other_error, OtherErrorKind};
-use byteorder::{ByteOrder, LittleEndian};
-use std::io;
-use std::task::{Context, Poll};
+use std::io::{self, IoSlice};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const U24_MAX: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
-    to_write: Vec<u8>,
-    bytes_written: usize,
     seq: u8,
     w: W,
+    queue: Vec<([u8; 4], Vec<u8>)>,
 }
 
-impl<W: AsyncWrite + Unpin> AsyncWrite for PacketWriter<W> {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, tokio::io::Error>> {
-        use std::cmp::min;
-        if self.to_write.len() == U24_MAX {
-            match self.as_mut().poll_end_packet(cx) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(x) => x?,
-            }
+/// A helper function that performes a vector write to completion, since
+/// the `tokio` one is not guranteed to write all of the data.
+async fn write_all_vectored<'a, W: AsyncWrite + Unpin>(
+    w: &'a mut W,
+    mut slices: &'a mut [IoSlice<'a>],
+) -> io::Result<()> {
+    let mut n: usize = slices.iter().map(|s| s.len()).sum();
+
+    loop {
+        let mut did_write = w.write_vectored(slices).await?;
+
+        if did_write == n {
+            // Done, yay
+            break Ok(());
         }
-        let left = min(buf.len(), U24_MAX - self.to_write.len());
-        self.to_write.extend(buf.get(..left).ok_or_else(|| {
-            other_error(OtherErrorKind::IndexErr {
-                data: "buf".to_string(),
-                index: left - 1,
-                length: buf.len(),
-            })
-        })?);
-        Poll::Ready(Ok(left))
-    }
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), tokio::io::Error>> {
-        match self.as_mut().poll_end_packet(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(x) => x?,
+
+        n -= did_write;
+
+        // Not done, need to advance the slices
+        while slices[0].len() >= did_write {
+            // First skip entire slices
+            did_write -= slices[0].len();
+            slices = &mut slices[1..];
         }
-        match self.as_mut().project_writer().poll_flush(cx) {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(x) => x?,
-        }
-        Poll::Ready(Ok(()))
-    }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), tokio::io::Error>> {
-        self.project_writer().poll_shutdown(cx)
+
+        // Skip a partial buffer
+        slices[0].advance(did_write);
     }
 }
 
 impl<W: AsyncWrite + Unpin> PacketWriter<W> {
-    fn project_writer(self: Pin<&mut Self>) -> Pin<&mut W> {
-        // SAFETY: W is Unpin anyway, so pinning doesn't matter
-        unsafe { self.map_unchecked_mut(|s| &mut s.w) }
-    }
     pub fn new(w: W) -> Self {
         PacketWriter {
-            to_write: vec![0, 0, 0, 0],
-            bytes_written: 0,
             seq: 0,
             w,
+            queue: Vec::new(),
         }
     }
 
-    fn poll_end_packet(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), tokio::io::Error>> {
-        let len = self.to_write.len() - 4;
-        if len != 0 || self.bytes_written > 0 {
-            if self.bytes_written == 0 {
-                LittleEndian::write_u24(
-                    &mut self.to_write.get_mut(0..3).ok_or_else(|| {
-                        other_error(OtherErrorKind::IndexErr {
-                            data: "to_write".to_string(),
-                            index: 2,
-                            length: len + 4,
-                        })
-                    })?,
-                    len as u32,
-                );
-                *self.to_write.get_mut(3).ok_or_else(|| {
-                    other_error(OtherErrorKind::IndexErr {
-                        data: "to_write".to_string(),
-                        index: 3,
-                        length: len + 4,
-                    })
-                })? = self.seq;
-            }
-            let s = Pin::into_inner(self);
-            loop {
-                let idx = s.bytes_written;
-                let len = s.to_write.len();
-                let written = match Pin::new(&mut s.w).poll_write(
-                    cx,
-                    s.to_write.get(s.bytes_written..).ok_or_else(|| {
-                        other_error(OtherErrorKind::IndexErr {
-                            data: "to_write".to_string(),
-                            index: idx,
-                            length: len,
-                        })
-                    })?,
-                ) {
-                    Poll::Pending => return Poll::Pending,
-                    Poll::Ready(x) => x?,
-                };
-                s.bytes_written += written;
-                if s.bytes_written < s.to_write.len() {
-                    continue;
-                }
-                s.bytes_written = 0;
-                s.seq = s.seq.wrapping_add(1);
-                s.to_write.truncate(4); // back to just header
-                break;
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
-
-    pub async fn write_buf_and_flush(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.write_all(buf).await?;
-        self.flush().await?;
-        Ok(())
-    }
-
-    pub async fn end_packet(&mut self) -> io::Result<()> {
-        self.flush().await?;
-        Ok(())
-    }
-}
-
-impl<W> PacketWriter<W> {
     pub fn set_seq(&mut self, seq: u8) {
         self.seq = seq;
+    }
+
+    /// Push a new packet to the outgoing packet list
+    pub fn enqueue_packet(&mut self, packet: Vec<u8>) {
+        let mut hdr = (packet.len() as u32).to_le_bytes();
+        hdr[3] = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+
+        self.queue.push((hdr, packet));
+    }
+
+    /// Send all the currently queued packets
+    pub async fn flush_packets(&mut self) -> Result<(), tokio::io::Error> {
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+
+        let mut slices = Vec::with_capacity(self.queue.len() * 2);
+        self.queue.iter().for_each(|packet| {
+            slices.push(IoSlice::new(&packet.0));
+            slices.push(IoSlice::new(&packet.1));
+        });
+
+        write_all_vectored(&mut self.w, &mut slices).await?;
+
+        self.w.flush().await?;
+        self.queue.clear();
+
+        Ok(())
+    }
+
+    /// Send a packet without queueing, flushes any queued packets beforehand
+    pub async fn write_packet(&mut self, packet: &[u8]) -> Result<(), tokio::io::Error> {
+        self.flush_packets().await?;
+
+        write_all_vectored(
+            &mut self.w,
+            &mut [
+                IoSlice::new(&packet.len().to_le_bytes()[0..3]),
+                IoSlice::new(&[self.seq]),
+                IoSlice::new(packet),
+            ],
+        )
+        .await?;
+
+        self.seq = self.seq.wrapping_add(1);
+        self.w.flush().await?;
+
+        Ok(())
     }
 }
 
@@ -284,7 +242,6 @@ impl<'a> AsRef<[u8]> for Packet<'a> {
 }
 
 use std::ops::Deref;
-use std::pin::Pin;
 
 impl<'a> Deref for Packet<'a> {
     type Target = [u8];
