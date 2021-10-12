@@ -3377,6 +3377,7 @@ dependencies = [
  "anyhow",
  "async-compression",
  "async-trait",
+ "chrono",
  "clap 3.0.0-beta.4",
  "futures-util",
  "maplit",

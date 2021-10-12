@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time;
 use std::{collections::HashMap, str::FromStr};
 use std::{
@@ -23,6 +24,7 @@ use noria_client_metrics::{EventType, QueryExecutionEvent};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::coverage::QueryCoverageInfoRef;
+use crate::query_status_cache::QueryStatusCache;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -153,6 +155,9 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
     query_coverage_info: Option<QueryCoverageInfoRef>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    // TODO(ENG-685): Remove option when live_qca flag is removed in main.
+    query_status_cache: Option<Arc<QueryStatusCache>>,
+    live_qca: bool,
 }
 
 impl Default for BackendBuilder {
@@ -168,6 +173,8 @@ impl Default for BackendBuilder {
             timestamp_client: None,
             query_coverage_info: None,
             query_log_sender: None,
+            query_status_cache: None,
+            live_qca: false,
         }
     }
 }
@@ -202,6 +209,8 @@ impl BackendBuilder {
             prepared_statements: Default::default(),
             query_coverage_info: self.query_coverage_info,
             query_log_sender: self.query_log_sender,
+            query_status_cache: self.query_status_cache,
+            live_qca: self.live_qca,
             _query_handler: PhantomData,
         }
     }
@@ -262,6 +271,16 @@ impl BackendBuilder {
         self.query_coverage_info = query_coverage_info;
         self
     }
+
+    pub fn query_status_cache(mut self, query_status_cache: Option<Arc<QueryStatusCache>>) -> Self {
+        self.query_status_cache = query_status_cache;
+        self
+    }
+
+    pub fn live_qca(mut self, live_qca: bool) -> Self {
+        self.live_qca = live_qca;
+        self
+    }
 }
 
 pub struct Backend<DB, Handler> {
@@ -307,8 +326,25 @@ pub struct Backend<DB, Handler> {
     /// If None, query coverage analysis is disabled
     #[allow(dead_code)] // TODO: Remove once this is used
     query_coverage_info: Option<QueryCoverageInfoRef>,
+
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+
+    /// A cache of queries that we've seen, and their current state, used for processing
+    #[allow(dead_code)] // TODO: remove once this is used
+    query_status_cache: Option<Arc<QueryStatusCache>>,
+
+    /// Run with query coverage analysis enabled in the serving path.
+    #[allow(dead_code)]
+    live_qca: bool,
+
     _query_handler: PhantomData<Handler>,
+}
+
+impl<DB, Handler> Backend<DB, Handler> {
+    #[allow(dead_code)]
+    fn live_qca_enabled(&self) -> bool {
+        self.live_qca
+    }
 }
 
 #[derive(Debug, Clone)]

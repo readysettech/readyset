@@ -25,3 +25,4 @@ noria-client-metrics = { path = "../metrics" }
 readyset-logging = { path = "../../readyset-logging" }
 tokio-tar = "0.3.0"
 async-compression = { version = "0.3.8", features = ["tokio", "gzip"] }
+chrono = "0.4"
