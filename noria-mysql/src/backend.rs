@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use async_trait::async_trait;
-use derive_more::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut};
 use tokio::io::{self, AsyncWrite};
 use tracing::{error, trace};
 
@@ -113,8 +114,40 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
     }
 }
 
-#[derive(Deref, DerefMut)]
-pub struct Backend(pub noria_client::Backend<MySqlUpstream, MySqlQueryHandler>);
+pub struct Backend {
+    /// Handle to the backing noria client
+    noria: noria_client::Backend<MySqlUpstream, MySqlQueryHandler>,
+    /// A cache of schemas per statement id
+    schema_cache: HashMap<u32, CachedSchema>,
+}
+
+impl Backend {
+    pub fn new(noria: noria_client::Backend<MySqlUpstream, MySqlQueryHandler>) -> Self {
+        Backend {
+            noria,
+            schema_cache: HashMap::new(),
+        }
+    }
+}
+
+impl Deref for Backend {
+    type Target = noria_client::Backend<MySqlUpstream, MySqlQueryHandler>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.noria
+    }
+}
+
+impl DerefMut for Backend {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.noria
+    }
+}
+
+struct CachedSchema {
+    mysql_schema: Vec<msql_srv::Column>,
+    column_map: Vec<Option<usize>>,
+}
 
 #[async_trait]
 impl<W> MysqlShim<W> for Backend
@@ -142,6 +175,7 @@ where
                     schema,
                 },
             )) => {
+                self.schema_cache.remove(&statement_id);
                 let params = params
                     .into_iter()
                     .map(|c| convert_column(&c.spec))
@@ -232,30 +266,54 @@ where
             }
         };
 
+        // We have to perform this check before self is mutably borrowed by execute
+        let is_cached = self.schema_cache.contains_key(&id);
+
         let res = match self.execute(id, datatype_params).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,
             })) => {
-                let schema = select_schema
-                    .schema
-                    .iter()
-                    .map(|cs| convert_column(&cs.spec))
-                    .collect::<Vec<_>>();
-                let mut rw = results.start(&schema).await?;
+                let CachedSchema {
+                    mysql_schema,
+                    column_map,
+                } = if is_cached {
+                    // Unwrap here is ok because we know the map contains that key
+                    self.schema_cache.get(&id).unwrap()
+                } else {
+                    let mysql_schema = select_schema
+                        .schema
+                        .iter()
+                        .map(|cs| convert_column(&cs.spec))
+                        .collect::<Vec<_>>();
+
+                    // Now append the right position too
+                    let column_map = mysql_schema
+                        .iter()
+                        .map(|c| select_schema.columns.iter().position(|f| f == &c.column))
+                        .collect::<Vec<_>>();
+
+                    drop(select_schema);
+                    self.schema_cache.entry(id).or_insert(CachedSchema {
+                        mysql_schema,
+                        column_map,
+                    })
+                };
+
+                let mut rw = results.start(mysql_schema).await?;
                 for resultsets in data {
                     for r in resultsets {
-                        for c in &schema {
-                            match select_schema.columns.iter().position(|f| f == &c.column) {
+                        for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
+                            match pos {
                                 Some(coli) => {
-                                    if let Err(e) = write_column(&mut rw, &r[coli], c).await {
+                                    if let Err(e) = write_column(&mut rw, &r[*coli], c).await {
                                         return handle_column_write_err(e, rw).await;
                                     };
                                 }
                                 None => {
                                     let e = Error::from(internal_err(format!(
                                         "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, select_schema.columns
+                                        c.column, mysql_schema
                                     )));
                                     error!(err = %e);
                                     return rw
