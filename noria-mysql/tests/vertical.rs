@@ -22,6 +22,7 @@ use itertools::Itertools;
 use maplit::hashmap;
 use mysql::prelude::Queryable;
 use mysql_common::value::Value;
+use paste::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
@@ -99,9 +100,17 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
         rows.into_iter()
             .map(|(tbl, rows)| rows.into_iter().map(|r| (tbl, r)).collect::<Vec<_>>())
             .multi_cartesian_product()
-            .map(move |vals| {
-                self.key_columns
-                    .map(|(tbl, idx)| vals.iter().find(|(t, _)| tbl == *t).unwrap().1[idx].clone())
+            .filter_map(move |vals| {
+                Some(
+                    self.key_columns
+                        .iter()
+                        .map(|(tbl, idx)| {
+                            Some(vals.iter().find(|(t, _)| *tbl == *t)?.1[*idx].clone())
+                        })
+                        .collect::<Option<Vec<_>>>()?
+                        .try_into()
+                        .unwrap(),
+                )
             })
     }
 
@@ -470,7 +479,8 @@ macro_rules! vertical_tests {
 
     // define the test itself
     (@test $(#[$meta:meta])* $name:ident($query: expr; $($tables: tt)*)) => {
-        fn generate_ops() -> impl Strategy<Value = Operations<{vertical_tests!(@key_len $($tables)*)}>> {
+        paste! {
+        fn [<$name _generate_ops>]() -> impl Strategy<Value = Operations<{vertical_tests!(@key_len $($tables)*)}>> {
             let size_range = 1..100; // TODO make configurable
             let row_strategies = vertical_tests!(@row_strategies $($tables)*);
             let key_columns = vertical_tests!(@key_columns $($tables)*);
@@ -489,25 +499,26 @@ macro_rules! vertical_tests {
         #[cfg_attr(not(feature = "vertical_tests"), ignore)]
         $(#[$meta])*
         fn $name(
-            #[strategy(generate_ops())]
+            #[strategy([<$name _generate_ops>]())]
             operations: Operations<{vertical_tests!(@key_len $($tables)*)}>
         ) {
             let tables = vertical_tests!(@tables $($tables)*);
             operations.run($query, &tables)?;
+        }
         }
     };
 
     // make the const literal for the K type parameter by summing up the lengths of the
     // `key_columns` in the tables
     (@key_len $(,)?) => {0usize};
-    (@key_len $table_name: expr => (
+    (@key_len $(,)? $table_name: expr => (
         $create_table: expr,
         schema: [$($schema: tt)*],
         primary_key: $pk_index: expr,
         key_columns: []
         $(,)?
     ) $($tables: tt)*) => {vertical_tests!(@key_len $($tables)*)};
-    (@key_len $table_name: expr => (
+    (@key_len $(,)? $table_name: expr => (
         $create_table: expr,
         schema: [$($schema: tt)*],
         primary_key: $pk_index: expr,
@@ -567,6 +578,25 @@ macro_rules! vertical_tests {
 vertical_tests! {
     simple_point_lookup(
         "SELECT id, name FROM users WHERE id = ?";
+        "users" => (
+            "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String],
+            primary_key: 0,
+            key_columns: [0],
+        )
+    );
+
+    partial_inner_join(
+        "SELECT posts.id, posts.title, users.name
+         FROM posts
+         JOIN users ON posts.author_id = users.id
+         WHERE users.id = ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
+            schema: [id: i32, title: String, author_id: i32],
+            primary_key: 0,
+            key_columns: [],
+        ),
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
             schema: [id: i32, name: String],
