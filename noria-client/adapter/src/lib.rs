@@ -18,6 +18,7 @@ use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use tokio::fs::OpenOptions;
@@ -100,6 +101,10 @@ pub struct Options {
     #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
     allow_unauthenticated_connections: bool,
 
+    /// Run with query coverage analysis enabled in the serving path.
+    #[clap(long)]
+    live_qca: bool,
+
     /// Make all reads run against Noria and upstream, returning the upstream result.
     #[clap(long, requires("upstream-db-url"))]
     mirror_reads: bool,
@@ -109,6 +114,18 @@ pub struct Options {
     /// Implies --race-reads
     #[clap(long, env = "COVERAGE_ANALYSIS", requires("upstream-db-url"))]
     coverage_analysis: Option<PathBuf>,
+
+    /// Set max processing time in minutes for any query within the system before it's deemed to be
+    /// unsupported by ReadySet, and will be sent exclusively to fallback.
+    ///
+    /// Defaults to 5 minutes.
+    #[clap(
+        long,
+        env = "MAX_PROCESSING_MINUTES",
+        default_value = "5",
+        requires("upstream-db-url")
+    )]
+    max_processing_minutes: i64,
 
     /// Allow database connections authenticated as this user. Ignored if
     /// --allow-unauthenticated-connections is passed
@@ -244,6 +261,14 @@ where
             None
         };
 
+        let query_status_cache = if options.live_qca {
+            Some(Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
+                options.max_processing_minutes,
+            ))))
+        } else {
+            None
+        };
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
@@ -259,7 +284,9 @@ where
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone())
-                .query_coverage_info(query_coverage_info);
+                .query_coverage_info(query_coverage_info)
+                .live_qca(options.live_qca)
+                .query_status_cache(query_status_cache.clone());
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));

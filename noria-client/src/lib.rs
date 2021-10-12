@@ -11,6 +11,8 @@ pub mod backend;
 mod convert;
 pub mod coverage;
 mod query_handler;
+#[allow(dead_code)] // TODO(ENG-685): Remove when utilized in main.
+pub mod query_status_cache;
 mod rewrite;
 pub mod test_helpers;
 mod upstream_database;
