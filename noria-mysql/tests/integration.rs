@@ -499,6 +499,29 @@ fn update_bogus() {
 }
 
 #[test]
+fn delete_pkey() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    conn.query_drop("CREATE TABLE Cats (id int PRIMARY KEY, name VARCHAR(255))")
+        .unwrap();
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (1, \"Bob\")")
+        .unwrap();
+    conn.query_drop("INSERT INTO Cats (id, name) VALUES (2, \"Jane\")")
+        .unwrap();
+    sleep();
+
+    {
+        let deleted = conn
+            .exec_iter("DELETE FROM Cats WHERE id = ?", (1,))
+            .unwrap();
+        assert_eq!(deleted.affected_rows(), 1);
+    }
+    sleep();
+
+    let names: Vec<String> = conn.query("SELECT Cats.name FROM Cats").unwrap();
+    assert_eq!(names, vec!["Jane".to_owned()]);
+}
+
+#[test]
 fn select_collapse_where_in() {
     let mut conn = mysql::Conn::new(setup(true)).unwrap();
     conn.query_drop("CREATE TABLE Cats (id int, name VARCHAR(255), PRIMARY KEY(id))")

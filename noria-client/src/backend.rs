@@ -434,12 +434,12 @@ where
         use noria_connector::PrepareResult::*;
 
         match prepare {
-            PrepareResult::Noria(Select { statement_id, .. })
-            | PrepareResult::Noria(Insert { statement_id, .. }) => {
-                self.prepared_statements
-                    .insert(self.prepared_count, PreparedStatement::Noria(*statement_id));
-            }
-            PrepareResult::Noria(Update { statement_id, .. }) => {
+            PrepareResult::Noria(
+                Select { statement_id, .. }
+                | Insert { statement_id, .. }
+                | Update { statement_id, .. }
+                | Delete { statement_id, .. },
+            ) => {
                 self.prepared_statements
                     .insert(self.prepared_count, PreparedStatement::Noria(*statement_id));
             }
@@ -620,6 +620,11 @@ where
             SqlQuery::Update(ref _q) => Ok(QueryResult::Noria(
                 noria
                     .execute_prepared_update(noria_statement_id, params)
+                    .await?,
+            )),
+            SqlQuery::Delete(..) => Ok(QueryResult::Noria(
+                noria
+                    .execute_prepared_delete(noria_statement_id, params)
                     .await?,
             )),
             _ => internal!(),
@@ -823,14 +828,22 @@ where
                     ))
                 }
             }
+            nom_sql::SqlQuery::Delete(ref stmt) => {
+                if let Some(ref mut upstream) = self.upstream {
+                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                } else {
+                    Ok(PrepareResult::Noria(
+                        self.noria.prepare_delete(stmt, self.prepared_count).await?,
+                    ))
+                }
+            }
             nom_sql::SqlQuery::CreateTable(..)
             | nom_sql::SqlQuery::CreateView(..)
             | nom_sql::SqlQuery::Set(..)
             | nom_sql::SqlQuery::StartTransaction(..)
             | nom_sql::SqlQuery::Commit(..)
             | nom_sql::SqlQuery::Rollback(..)
-            | nom_sql::SqlQuery::CompoundSelect(..)
-            | nom_sql::SqlQuery::Delete(..) => {
+            | nom_sql::SqlQuery::CompoundSelect(..) => {
                 if let Some(ref mut upstream) = self.upstream {
                     upstream.prepare(query).await.map(|r| {
                         handle.set_upstream_duration();
@@ -951,7 +964,7 @@ where
                             }
                         }
                     }
-                    SqlQuery::Insert(_) | SqlQuery::Update(_) => {
+                    SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
                         if self.upstream.is_some() {
                             self.execute_upstream(id, params, event).await
                         } else {
