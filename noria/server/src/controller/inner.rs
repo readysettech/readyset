@@ -289,17 +289,11 @@ impl Leader {
                     .map(|w| w.0)
                     .collect::<Vec<_>>());
             }
-            #[cfg(debug_assertions)] // don't include this hacky code in prod ~eta
             (Method::GET, "/nodes") => {
-                // TODO(malte): this is a pretty yucky hack, but hyper doesn't provide easy access
-                // to individual query variables unfortunately. We'll probably want to factor this
-                // out into a helper method.
-                let nodes = if let Some(query) = query {
-                    let mut vars = query.split('&').map(String::from);
-                    #[allow(clippy::indexing_slicing)]
-                    #[allow(clippy::unwrap_used)]
-                    if let Some(n) = &vars.find(|v| v.starts_with("w=")) {
-                        self.nodes_on_worker(Some(&n[2..].parse().unwrap()))
+                let nodes = if let Some(query) = &query {
+                    let pairs = querystring::querify(query);
+                    if let Some((_, worker)) = &pairs.into_iter().find(|(k, _)| *k == "w") {
+                        self.nodes_on_worker(Some(&worker.parse()?))
                     } else {
                         self.nodes_on_worker(None)
                     }
