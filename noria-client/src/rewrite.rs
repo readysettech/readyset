@@ -1,6 +1,9 @@
 use itertools::{Either, Itertools};
-use nom_sql::{BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement};
-use noria::{unsupported, ReadySetResult};
+use nom_sql::{
+    analysis::visit::{self, Visitor},
+    BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement,
+};
+use noria::{unsupported, ReadySetError, ReadySetResult};
 use std::{cmp::max, iter, mem};
 
 /// Information about a single parametrized IN condition that has been rewritten to an equality
@@ -69,77 +72,44 @@ fn where_in_to_placeholders(
     })
 }
 
-fn collapse_where_in_recursive(
-    leftmost_param_index: &mut usize,
-    expr: &mut Expression,
-    out: &mut Vec<RewrittenIn>,
-) -> ReadySetResult<()> {
-    match *expr {
-        Expression::Literal(Literal::Placeholder(_)) => {
-            *leftmost_param_index += 1;
-        }
-        Expression::NestedSelect(ref mut sq) => {
-            if let Some(ref mut w) = sq.where_clause {
-                collapse_where_in_recursive(leftmost_param_index, w, out)?;
-            }
-        }
-        Expression::UnaryOp {
-            rhs: ref mut expr, ..
-        }
-        | Expression::Cast { ref mut expr, .. } => {
-            collapse_where_in_recursive(leftmost_param_index, expr, out)?;
-        }
-        Expression::BinaryOp {
-            ref mut lhs,
-            ref mut rhs,
-            ..
-        } => {
-            collapse_where_in_recursive(leftmost_param_index, lhs, out)?;
-            collapse_where_in_recursive(leftmost_param_index, rhs, out)?;
-        }
+#[derive(Default)]
+struct CollapseWhereInVisitor {
+    leftmost_param_index: usize,
+    out: Vec<RewrittenIn>,
+}
 
-        Expression::In {
-            rhs: InValue::List(ref mut list),
+impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
+    type Error = ReadySetError;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if matches!(literal, Literal::Placeholder(_)) {
+            self.leftmost_param_index += 1;
+        }
+        Ok(())
+    }
+
+    fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        if let Expression::In {
+            rhs: InValue::List(list),
             ..
-        } => {
+        } = expression
+        {
             if list
                 .iter()
                 .any(|l| matches!(l, Expression::Literal(Literal::Placeholder(_))))
             {
                 // If the list contains placeholders, flatten them. `where_in_to_placeholders` takes
                 // care of erroring-out if the list contains any *non*-placeholders
-                out.push(where_in_to_placeholders(leftmost_param_index, expr)?);
+                self.out.push(where_in_to_placeholders(
+                    &mut self.leftmost_param_index,
+                    expression,
+                )?);
+                return Ok(());
             }
         }
-        Expression::In {
-            ref mut lhs,
-            rhs: InValue::Subquery(ref mut sq),
-            negated: false,
-        } => {
-            collapse_where_in_recursive(leftmost_param_index, lhs, out)?;
-            if let Some(ref mut w) = sq.where_clause {
-                collapse_where_in_recursive(leftmost_param_index, w, out)?;
-            }
-        }
-        Expression::In { negated: true, .. } => unsupported!("NOT IN not supported yet"),
-        ref x @ Expression::Exists(_) => unsupported!("EXISTS not supported yet: {}", x),
-        Expression::Between {
-            ref mut operand,
-            ref mut min,
-            ref mut max,
-            ..
-        } => {
-            collapse_where_in_recursive(leftmost_param_index, &mut *operand, out)?;
-            collapse_where_in_recursive(leftmost_param_index, &mut *min, out)?;
-            collapse_where_in_recursive(leftmost_param_index, &mut *max, out)?;
-        }
-        Expression::Column(_) | Expression::Literal(_) => {}
-        Expression::Call(_) | Expression::CaseWhen { .. } => {
-            unsupported!("Unsupported condition: {}", expr);
-        }
-    }
 
-    Ok(())
+        visit::walk_expression(self, expression)
+    }
 }
 
 /// Convert all instances of *parametrized* IN (`x IN (?, ?, ...)`) in the given `query` to a direct
@@ -156,8 +126,9 @@ pub(crate) fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<V
     let has_aggregates = query.contains_aggregate_select();
 
     if let Some(ref mut w) = query.where_clause {
-        let mut left_edge = 0;
-        collapse_where_in_recursive(&mut left_edge, w, &mut res)?;
+        let mut visitor = CollapseWhereInVisitor::default();
+        visitor.visit_expression(w)?;
+        res = visitor.out;
 
         // When a `SELECT` statement contains aggregates, such as `SUM` or `COUNT`, we can't use
         // placeholders, as those will aggregate key lookups into a multi row response, as
