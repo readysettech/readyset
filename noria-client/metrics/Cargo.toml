@@ -11,6 +11,7 @@ serde_json = "1.0.67"
 
 #local dependencies
 noria = { path = "../../noria/noria" }
+nom-sql = { path = "../../nom-sql" }
 
 [lib]
 path = "src/lib.rs"

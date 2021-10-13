@@ -286,7 +286,7 @@ impl BackendBuilder {
 pub struct Backend<DB, Handler> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, SqlQuery>,
-    // all queries previously prepared on noria, mapped by their ID.
+    // all queries previously prepared on noria or upstream, mapped by their ID.
     prepared_queries: HashMap<u32, SqlQuery>,
     prepared_count: u32,
     /// Noria connector used for reads, and writes when no upstream DB is present
@@ -936,12 +936,9 @@ where
             }
         };
 
-        if matches!(res, Ok(PrepareResult::Noria(_))) {
+        if let Ok(ref result) = res {
             self.prepared_queries
                 .insert(self.prepared_count, parsed_query.to_owned());
-        }
-
-        if let Ok(ref result) = res {
             self.store_prep_statement(result);
         }
         res
@@ -1063,9 +1060,10 @@ where
             .cloned()
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
-        // TODO(justin): Update this path to correctly set the query string when
-        // we can get this value for upstream db prepared statements.
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
+        let prepared_query = self.prepared_queries.get(&id).cloned();
+        query_event.query = prepared_query;
+
         let res = self
             .execute_inner(id, params, &prepared_statement, &mut query_event)
             .await;

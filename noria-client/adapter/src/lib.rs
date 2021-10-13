@@ -29,10 +29,11 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, info_span, span, Level};
 use tracing_futures::Instrument;
 
-use nom_sql::{Dialect, SelectStatement};
+use nom_sql::{Dialect, SelectStatement, SqlQuery};
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, ReadySetError};
 use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::rewrite::anonymize_literals;
 use noria_client::{Backend, BackendBuilder};
 
 #[async_trait]
@@ -383,14 +384,20 @@ async fn query_logger(mut receiver: UnboundedReceiver<QueryExecutionEvent>, db_t
     let database_label: noria_client_metrics::recorded::DatabaseType = db_type.into();
     let database_label = String::from(database_label);
 
-    while let Some(event) = receiver.recv().await {
-        let query_text = event.query.unwrap_or_else(|| "".to_string());
+    while let Some(mut event) = receiver.recv().await {
+        let query = match &mut event.query {
+            Some(SqlQuery::Select(stmt)) => {
+                anonymize_literals(stmt);
+                stmt.to_string()
+            }
+            _ => "".to_string(),
+        };
 
         if let Some(noria) = event.noria_duration {
             metrics::histogram!(
                 noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
                 noria,
-                "query" => query_text.clone(),
+                "query" => query.clone(),
                 "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
             );
         }
@@ -399,7 +406,7 @@ async fn query_logger(mut receiver: UnboundedReceiver<QueryExecutionEvent>, db_t
             metrics::histogram!(
                 noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
                 upstream,
-                "query" => query_text.clone(),
+                "query" => query.clone(),
                 "database_type" => database_label.clone()
             );
         }

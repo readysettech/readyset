@@ -3401,6 +3401,7 @@ name = "noria-client-metrics"
 version = "0.1.0"
 dependencies = [
  "metrics",
+ "nom-sql",
  "noria",
  "serde",
  "serde_json",
