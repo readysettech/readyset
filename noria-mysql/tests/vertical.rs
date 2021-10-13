@@ -702,6 +702,10 @@ macro_rules! vertical_tests {
         }
     };
 
+    (@column_strategy value($value: expr)) => {
+        ColumnStrategy::Value(Just(DataType::try_from($value).unwrap()).boxed())
+    };
+
     (@column_strategy $schema_type: ty) => {
         ColumnStrategy::Value(any::<$schema_type>().prop_map_into::<DataType>().boxed())
     };
@@ -734,6 +738,26 @@ vertical_tests! {
         "users" => (
             "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
             schema: [id: i32, name: String],
+            primary_key: 0,
+            key_columns: [0],
+        )
+    );
+
+    partial_union_inner_join(
+        "SELECT posts.id, posts.title, users.name
+         FROM posts
+         JOIN users ON posts.author_id = users.id
+         WHERE (users.name = \"a\" OR posts.title = \"a\")
+           AND users.id = ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
+            schema: [id: i32, title: value("a"), author_id: i32],
+            primary_key: 0,
+            key_columns: [],
+        ),
+        "users" => (
+            "CREATE TABLE users (id INT, name TEXT, PRIMARY KEY (id))",
+            schema: [id: i32, name: value("a")],
             primary_key: 0,
             key_columns: [0],
         )
