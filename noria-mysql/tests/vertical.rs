@@ -1,3 +1,5 @@
+#![feature(trace_macros)]
+
 //! This test suite implements the [Vertical Testing Design Doc][doc].
 //!
 //! [doc]: https://docs.google.com/document/d/1rTDzd4Z5jSUDqGmIu2C7R06f2HkNWxEll33-rF4WC-c
@@ -64,13 +66,63 @@ enum Operation<const K: usize> {
     */
 }
 
+#[derive(Debug, Clone)]
+pub enum ColumnStrategy {
+    Value(BoxedStrategy<DataType>),
+    ForeignKey {
+        table: &'static str,
+        foreign_column: usize,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct RowStrategy(Vec<ColumnStrategy>);
+
+impl RowStrategy {
+    fn no_foreign_keys(self) -> Option<Vec<BoxedStrategy<DataType>>> {
+        self.0
+            .into_iter()
+            .map(|cs| match cs {
+                ColumnStrategy::Value(strat) => Some(strat),
+                ColumnStrategy::ForeignKey { .. } => None,
+            })
+            .collect()
+    }
+
+    fn has_foreign_keys(&self) -> bool {
+        self.0
+            .iter()
+            .any(|cs| matches!(cs, ColumnStrategy::ForeignKey { .. }))
+    }
+
+    fn fill_foreign_keys<F, S>(
+        self,
+        foreign_key_strategy: F,
+    ) -> Option<Vec<BoxedStrategy<DataType>>>
+    where
+        F: Fn(&'static str, usize) -> Option<S>,
+        S: Strategy<Value = DataType> + Sized + 'static,
+    {
+        self.0
+            .into_iter()
+            .map(move |cs| match cs {
+                ColumnStrategy::Value(strat) => Some(strat),
+                ColumnStrategy::ForeignKey {
+                    table,
+                    foreign_column,
+                } => foreign_key_strategy(table, foreign_column).map(|s| s.boxed()),
+            })
+            .collect()
+    }
+}
+
 pub struct OperationParameters<'a, const K: usize> {
     already_generated: &'a [Operation<K>],
 
     /// table name, index in table
     key_columns: [(&'a str, usize); K],
 
-    row_strategies: HashMap<&'static str, Vec<BoxedStrategy<DataType>>>,
+    row_strategies: HashMap<&'static str, RowStrategy>,
 }
 
 impl<'a, const K: usize> OperationParameters<'a, K> {
@@ -131,6 +183,8 @@ impl<'a, const K: usize> OperationParameters<'a, K> {
         self.key_columns.map(move |(t, idx)| {
             self.row_strategies[t]
                 .clone()
+                .no_foreign_keys()
+                .expect("foreign key can't be a key_column")
                 .prop_map(move |mut r| r.remove(idx))
                 .boxed()
         })
@@ -146,7 +200,7 @@ where
     /// not dependent on previous operations)
     fn first_arbitrary(
         key_columns: [(&str, usize); K],
-        row_strategies: HashMap<&'static str, Vec<BoxedStrategy<DataType>>>,
+        row_strategies: HashMap<&'static str, RowStrategy>,
     ) -> impl Strategy<Value = Self> {
         Self::arbitrary(OperationParameters {
             already_generated: &[],
@@ -163,14 +217,14 @@ where
     {
         use Operation::*;
 
-        let row_strategies = params
+        let no_fk_strategies = params
             .row_strategies
             .iter()
-            .map(|(k, v)| (*k, v.clone()))
+            .filter_map(|(k, v)| Some((*k, v.clone().no_foreign_keys()?)))
             .collect::<Vec<_>>();
         let non_key_ops = prop_oneof![
             params.key_strategy().prop_map(|key| Query { key }),
-            select(row_strategies).prop_flat_map(|(table, row_strat)| row_strat.prop_map(
+            select(no_fk_strategies).prop_flat_map(|(table, row_strat)| row_strat.prop_map(
                 move |row| Insert {
                     table: table.to_string(),
                     row,
@@ -188,10 +242,55 @@ where
             if rows.is_empty() {
                 key_ops.boxed()
             } else {
+                let fk_rows = rows.clone();
+                let fill_foreign_keys = move |row_strategy: RowStrategy| {
+                    row_strategy.fill_foreign_keys(|table, col| {
+                        let vals = fk_rows
+                            .iter()
+                            .filter(|(t, _)| table == t)
+                            .map(|(_, r)| r[col].clone())
+                            .collect::<Vec<_>>();
+                        if vals.is_empty() {
+                            None
+                        } else {
+                            Some(select(vals))
+                        }
+                    })
+                };
+
+                let mk_fk_insert = {
+                    let fk_tables = params
+                        .row_strategies
+                        .iter()
+                        .filter(|(_, v)| v.has_foreign_keys())
+                        .map(|(t, v)| (*t, v.clone()))
+                        .collect::<Vec<_>>();
+                    if fk_tables.is_empty() {
+                        None
+                    } else {
+                        let fill_foreign_keys = fill_foreign_keys.clone();
+                        Some(
+                            select(fk_tables)
+                                .prop_filter_map(
+                                    "No previously-generated rows",
+                                    move |(table, row_strat)| {
+                                        Some(fill_foreign_keys(row_strat)?.prop_map(move |row| {
+                                            Insert {
+                                                table: table.to_owned(),
+                                                row,
+                                            }
+                                        }))
+                                    },
+                                )
+                                .prop_flat_map(|s| s),
+                        )
+                    }
+                };
+
                 let row_strategies = params.row_strategies.clone();
                 let mk_update = select(rows.clone()).prop_flat_map(move |(table, old_row)| {
-                    let row_strategy = row_strategies[table.as_str()].clone();
-                    (row_strategy
+                    (fill_foreign_keys(row_strategies[table.as_str()].clone())
+                        .unwrap()
                         .into_iter()
                         .zip(old_row.clone())
                         .map(|(new_val, old_val)| prop_oneof![Just(old_val), new_val])
@@ -204,11 +303,12 @@ where
                         })
                     })
                 });
-                let mk_delete = select(rows).prop_map(move |(table, row)| Delete {
-                    table: table.clone(),
-                    row: row.clone(),
-                });
-                prop_oneof![key_ops, mk_update, mk_delete].boxed()
+                let mk_delete = select(rows).prop_map(move |(table, row)| Delete { table, row });
+                if let Some(mk_fk_insert) = mk_fk_insert {
+                    prop_oneof![key_ops, mk_fk_insert, mk_update, mk_delete].boxed()
+                } else {
+                    prop_oneof![key_ops, mk_update, mk_delete].boxed()
+                }
             }
         }
     }
@@ -398,7 +498,7 @@ impl<const K: usize> Operation<K> {
 struct OperationsParams<const K: usize> {
     size_range: Range<usize>,
     key_columns: [(&'static str, usize); K],
-    row_strategies: HashMap<&'static str, Vec<BoxedStrategy<DataType>>>,
+    row_strategies: HashMap<&'static str, RowStrategy>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -561,7 +661,7 @@ macro_rules! vertical_tests {
     // Build up the hashmap of Tables
     (@tables $($table_name: expr => (
         $create_table: expr,
-        schema: [$($col_name: ident : $schema_type: ty),* $(,)?],
+        schema: [$($col_name: ident : $col_strat : expr),* $(,)?],
         primary_key: $pk_index: expr,
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
@@ -579,16 +679,31 @@ macro_rules! vertical_tests {
     // Build up the hashmap of row_strategies
     (@row_strategies $($table_name: expr => (
         $create_table: expr,
-        schema: [$($col_name: ident : $schema_type: ty),* $(,)?],
+        schema: [$($schema:tt)*],
         primary_key: $pk_index: expr,
         key_columns: [$($kc: expr),* $(,)?]
         $(,)?
     )),* $(,)?) => {
         hashmap! {
-            $($table_name => vec![
-                $(any::<$schema_type>().prop_map_into::<DataType>().boxed(), )*
-            ],)*
+            $($table_name => vertical_tests!(@row_strategy $($schema)*),)*
         }
+    };
+
+    (@row_strategy $($col_name: ident : $col_type: tt $(($($type_args: tt)*))?),* $(,)?) => {{
+        RowStrategy(vec![
+            $(vertical_tests!(@column_strategy $col_type $(($($type_args)*))*), )*
+        ])
+    }};
+
+    (@column_strategy foreign_key($table_name: expr, $foreign_column: expr)) => {
+        ColumnStrategy::ForeignKey {
+            table: $table_name,
+            foreign_column: $foreign_column,
+        }
+    };
+
+    (@column_strategy $schema_type: ty) => {
+        ColumnStrategy::Value(any::<$schema_type>().prop_map_into::<DataType>().boxed())
     };
 
     () => {};
@@ -612,7 +727,7 @@ vertical_tests! {
          WHERE users.id = ?";
         "posts" => (
             "CREATE TABLE posts (id INT, title TEXT, author_id INT, PRIMARY KEY (id))",
-            schema: [id: i32, title: String, author_id: i32],
+            schema: [id: i32, title: String, author_id: foreign_key("users", 0)],
             primary_key: 0,
             key_columns: [],
         ),
