@@ -17,8 +17,8 @@ use msql_srv::{
 use mysql_async::consts::StatusFlags;
 use noria::errors::internal_err;
 use noria::{internal, DataType, ReadySetError};
-use noria_client::backend::noria_connector;
-use noria_client::backend::{PrepareResult, QueryResult, UpstreamPrepare};
+use noria_client::backend::{noria_connector, SinglePrepareResult};
+use noria_client::backend::{QueryResult, UpstreamPrepare};
 use upstream::StatementMeta;
 
 async fn write_column<W: AsyncWrite + Unpin>(
@@ -163,8 +163,9 @@ where
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
-        let res = match self.prepare(query).await {
-            Ok(PrepareResult::Noria(
+        let prepare_result = self.prepare(query).await.map(|p| p.upstream_biased());
+        let res = match prepare_result {
+            Ok(SinglePrepareResult::Noria(
                 Select {
                     statement_id,
                     params,
@@ -187,14 +188,14 @@ where
                     .collect::<Vec<_>>();
                 info.reply(statement_id, &params, &schema).await
             }
-            Ok(PrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
+            Ok(SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
                 let params = params
                     .into_iter()
                     .map(|c| convert_column(&c.spec))
                     .collect::<Vec<_>>();
                 info.reply(self.prepared_count(), &params, &[]).await
             }
-            Ok(PrepareResult::Upstream(UpstreamPrepare {
+            Ok(SinglePrepareResult::Upstream(UpstreamPrepare {
                 meta: StatementMeta { params, schema },
                 ..
             })) => {
@@ -204,6 +205,7 @@ where
                 // TODO(grfn): make statement ID part of prepareresult
                 info.reply(self.prepared_count(), &params, &schema).await
             }
+
             Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
                 code,
                 message,

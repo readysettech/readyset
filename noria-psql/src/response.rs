@@ -1,5 +1,5 @@
-use noria_client::backend::noria_connector;
 use noria_client::backend::{self as cl, UpstreamPrepare};
+use noria_client::backend::{noria_connector, SinglePrepareResult};
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 use upstream::StatementMeta;
@@ -18,11 +18,10 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
     type Error = ps::Error;
 
     fn try_from(r: PrepareResponse) -> Result<Self, Self::Error> {
-        use cl::PrepareResult::*;
         use noria_client::backend::noria_connector::PrepareResult::*;
 
-        match r.0 {
-            Noria(Select {
+        match r.0.upstream_biased() {
+            SinglePrepareResult::Noria(Select {
                 statement_id,
                 params,
                 schema,
@@ -31,7 +30,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            Noria(Insert {
+            SinglePrepareResult::Noria(Insert {
                 statement_id,
                 params,
                 schema,
@@ -40,7 +39,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            Noria(
+            SinglePrepareResult::Noria(
                 Update {
                     statement_id,
                     params,
@@ -54,7 +53,7 @@ impl TryFrom<PrepareResponse> for ps::PrepareResponse {
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: vec![],
             }),
-            Upstream(UpstreamPrepare {
+            SinglePrepareResult::Upstream(UpstreamPrepare {
                 statement_id,
                 meta: StatementMeta { params, schema },
                 ..
