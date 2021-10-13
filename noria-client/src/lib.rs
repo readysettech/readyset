@@ -4,6 +4,7 @@
 #![feature(allow_fail)]
 #![feature(drain_filter)]
 #![feature(async_closure)]
+#![feature(never_type)]
 
 pub mod backend;
 mod convert;

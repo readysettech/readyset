@@ -192,6 +192,23 @@ where
     ))
 }
 
+struct AnonymizeLiteralsVisitor;
+impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
+    type Error = !;
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        *literal = Literal::String("<anonymized>".to_owned());
+        Ok(())
+    }
+}
+
+#[allow(dead_code)] // TODO(peter/justin): remove once this is used
+pub(crate) fn anonymize_literals(query: &mut SelectStatement) {
+    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
+    AnonymizeLiteralsVisitor
+        .visit_select_statement(query)
+        .unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,6 +513,22 @@ mod tests {
                     vec![1, 3, 4, 6, 7]
                 ]
             );
+        }
+    }
+
+    mod anonymize {
+        use super::*;
+
+        #[test]
+        fn simple_query() {
+            let mut query = parse_select_statement(
+                "SELECT id + 3 FROM users WHERE credit_card_number = \"look at this PII\"",
+            );
+            let expected = parse_select_statement(
+                "SELECT id + \"<anonymized>\" FROM users WHERE credit_card_number = \"<anonymized>\""
+            );
+            anonymize_literals(&mut query);
+            assert_eq!(query, expected);
         }
     }
 }
