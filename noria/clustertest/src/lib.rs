@@ -11,6 +11,7 @@ use mysql::prelude::Queryable;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
+use rand::Rng;
 use serde::Deserialize;
 use server::{NoriaMySQLRunner, NoriaServerRunner, ProcessHandle};
 use std::collections::HashMap;
@@ -106,8 +107,13 @@ impl DeploymentParams {
         let mut noria_mysql_path = env.binary_path;
         noria_mysql_path.push("noria-mysql");
 
+        // Append the deployment name with a random number to prevent state collisions
+        // on test repeats with failed teardowns.
+        let mut rng = rand::thread_rng();
+        let name = name.to_string() + &rng.gen::<u32>().to_string();
+
         Self {
-            name: name.to_string(),
+            name,
             noria_binaries: NoriaBinarySource {
                 noria_server: noria_server_path,
                 noria_mysql: Some(noria_mysql_path),
@@ -327,6 +333,10 @@ async fn wait_until_worker_count(
     max_wait: Duration,
     num_workers: usize,
 ) -> Result<()> {
+    if num_workers == 0 {
+        return Ok(());
+    }
+
     let start = Instant::now();
     loop {
         let now = Instant::now();
@@ -451,7 +461,6 @@ pub fn check_deployment_params(params: &DeploymentParams) -> anyhow::Result<()> 
 /// Otherwise, it returns a random available port in the range of 20000-60000.
 fn get_next_good_port(port: Option<u16>) -> u16 {
     let mut port = port.map(|p| p + 1).unwrap_or_else(|| {
-        use rand::Rng;
         let mut rng = rand::thread_rng();
         rng.gen_range(20000..60000)
     });
@@ -462,20 +471,16 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
 }
 
 /// Used to create a multi_process test deployment. This deployment
-/// consists of a docker container running zookeeper for cluster management,
-/// and a set of noria-servers. `params` can be used to setup the topology
+/// connects to an authority for cluster management, and deploys a
+/// set of noria-servers. `params` can be used to setup the topology
 /// of the deployment for testing.
-///
-/// Currently this sets up a single zookeeper node on the local machines
-/// docker daemon.
-// TODO(justin): Add support for multiple concurrent multi-process clusters by
-// dynamically assigning port ranges.
 pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<DeploymentHandle> {
     check_deployment_params(&params)?;
     let mut port = get_next_good_port(None);
     // If this deployment includes binlog replication and a mysql instance.
     let mut mysql_addr = None;
     if params.mysql {
+        // TODO(justin): Parameterize port.
         let addr = format!(
             "mysql://root:{}@{}:3306",
             &params.mysql_root_password, &params.mysql_host
