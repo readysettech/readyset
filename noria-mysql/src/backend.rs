@@ -147,6 +147,7 @@ impl DerefMut for Backend {
 struct CachedSchema {
     mysql_schema: Vec<msql_srv::Column>,
     column_map: Vec<Option<usize>>,
+    preencoded_schema: Vec<u8>,
 }
 
 #[async_trait]
@@ -277,6 +278,7 @@ where
                 let CachedSchema {
                     mysql_schema,
                     column_map,
+                    preencoded_schema,
                 } = if is_cached {
                     // Unwrap here is ok because we know the map contains that key
                     self.schema_cache.get(&id).unwrap()
@@ -286,6 +288,8 @@ where
                         .iter()
                         .map(|cs| convert_column(&cs.spec))
                         .collect::<Vec<_>>();
+
+                    let preencoded_schema = msql_srv::prepare_column_definitions(&mysql_schema);
 
                     // Now append the right position too
                     let column_map = mysql_schema
@@ -297,33 +301,32 @@ where
                     self.schema_cache.entry(id).or_insert(CachedSchema {
                         mysql_schema,
                         column_map,
+                        preencoded_schema,
                     })
                 };
 
-                let mut rw = results.start(mysql_schema).await?;
-                for resultsets in data {
-                    for r in resultsets {
-                        for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
-                            match pos {
-                                Some(coli) => {
-                                    if let Err(e) = write_column(&mut rw, &r[*coli], c).await {
-                                        return handle_column_write_err(e, rw).await;
-                                    };
-                                }
-                                None => {
-                                    let e = Error::from(internal_err(format!(
-                                        "tried to emit column {:?} not in getter with schema {:?}",
-                                        c.column, mysql_schema
-                                    )));
-                                    error!(err = %e);
-                                    return rw
-                                        .error(e.error_kind(), e.to_string().as_bytes())
-                                        .await;
-                                }
+                let mut rw = results
+                    .start_with_cache(mysql_schema, preencoded_schema)
+                    .await?;
+                for r in data.into_iter().flatten() {
+                    for (c, pos) in mysql_schema.iter().zip(column_map.iter()) {
+                        match pos {
+                            Some(coli) => {
+                                if let Err(e) = write_column(&mut rw, &r[*coli], c).await {
+                                    return handle_column_write_err(e, rw).await;
+                                };
+                            }
+                            None => {
+                                let e = Error::from(internal_err(format!(
+                                    "tried to emit column {:?} not in getter with schema {:?}",
+                                    c.column, mysql_schema
+                                )));
+                                error!(err = %e);
+                                return rw.error(e.error_kind(), e.to_string().as_bytes()).await;
                             }
                         }
-                        rw.end_row()?;
                     }
+                    rw.end_row()?;
                 }
                 rw.finish().await
             }
