@@ -3,11 +3,20 @@
 //! [rustc-ast-visit]: https://doc.rust-lang.org/stable/nightly-rustc/rustc_ast/visit/index.html
 #![warn(clippy::todo, clippy::unimplemented)]
 
+use crate::create_table_options::CreateTableOption;
+use crate::rename::{RenameTableOperation, RenameTableStatement};
 use crate::set::Variable;
+use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::{
-    Column, CommonTableExpr, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
-    GroupByClause, InValue, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
-    SelectStatement, SqlType, Table, TableExpr,
+    AlterColumnOperation, AlterTableDefinition, AlterTableStatement, CacheInner, Column,
+    ColumnConstraint, ColumnSpecification, CommonTableExpr, CompoundSelectStatement,
+    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DeleteStatement,
+    DropAllCachesStatement, DropCacheStatement, DropTableStatement, DropViewStatement,
+    ExplainStatement, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
+    InValue, InsertStatement, JoinClause, JoinConstraint, JoinRightSide, Literal, OrderClause,
+    SelectSpecification, SelectStatement, SetNames, SetPostgresParameter, SetStatement,
+    SetVariables, ShowStatement, SqlQuery, SqlType, Table, TableExpr, TableKey, UpdateStatement,
+    UseStatement,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -78,6 +87,10 @@ pub trait Visitor<'ast>: Sized {
 
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
         walk_column(self, column)
+    }
+
+    fn visit_variable(&mut self, _variable: &'ast mut Variable) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     fn visit_table_expr(&mut self, table_expr: &'ast mut TableExpr) -> Result<(), Self::Error> {
@@ -168,8 +181,212 @@ pub trait Visitor<'ast>: Sized {
         walk_select_statement(self, select_statement)
     }
 
-    fn visit_variable(&mut self, _literal: &'ast mut Variable) -> Result<(), Self::Error> {
+    fn visit_create_table_statement(
+        &mut self,
+        create_table_statement: &'ast mut CreateTableStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_table_statement(self, create_table_statement)
+    }
+
+    fn visit_column_specification(
+        &mut self,
+        column_specification: &'ast mut ColumnSpecification,
+    ) -> Result<(), Self::Error> {
+        walk_column_specification(self, column_specification)
+    }
+
+    fn visit_table_key(&mut self, table_key: &'ast mut TableKey) -> Result<(), Self::Error> {
+        walk_table_key(self, table_key)
+    }
+
+    fn visit_create_table_option(
+        &mut self,
+        _create_table_option: &'ast mut CreateTableOption,
+    ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn visit_column_constraint(
+        &mut self,
+        column_constraint: &'ast mut ColumnConstraint,
+    ) -> Result<(), Self::Error> {
+        walk_column_constraint(self, column_constraint)
+    }
+
+    fn visit_create_view_statement(
+        &mut self,
+        create_view_statement: &'ast mut CreateViewStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_view_statement(self, create_view_statement)
+    }
+
+    fn visit_alter_table_statement(
+        &mut self,
+        alter_table_statement: &'ast mut AlterTableStatement,
+    ) -> Result<(), Self::Error> {
+        walk_alter_table_statement(self, alter_table_statement)
+    }
+
+    fn visit_alter_table_definition(
+        &mut self,
+        alter_table_definition: &'ast mut AlterTableDefinition,
+    ) -> Result<(), Self::Error> {
+        walk_alter_table_definition(self, alter_table_definition)
+    }
+
+    fn visit_alter_column_operation(
+        &mut self,
+        alter_column_operation: &'ast mut AlterColumnOperation,
+    ) -> Result<(), Self::Error> {
+        walk_alter_column_operation(self, alter_column_operation)
+    }
+
+    fn visit_insert_statement(
+        &mut self,
+        insert_statement: &'ast mut InsertStatement,
+    ) -> Result<(), Self::Error> {
+        walk_insert_statement(self, insert_statement)
+    }
+
+    fn visit_compound_select_statement(
+        &mut self,
+        compound_select_statement: &'ast mut CompoundSelectStatement,
+    ) -> Result<(), Self::Error> {
+        walk_compound_select_statement(self, compound_select_statement)
+    }
+
+    fn visit_delete_statement(
+        &mut self,
+        delete_statement: &'ast mut DeleteStatement,
+    ) -> Result<(), Self::Error> {
+        walk_delete_statement(self, delete_statement)
+    }
+
+    fn visit_drop_table_statement(
+        &mut self,
+        drop_table_statement: &'ast mut DropTableStatement,
+    ) -> Result<(), Self::Error> {
+        walk_drop_table_statement(self, drop_table_statement)
+    }
+
+    fn visit_update_statement(
+        &mut self,
+        update_statement: &'ast mut UpdateStatement,
+    ) -> Result<(), Self::Error> {
+        walk_update_statement(self, update_statement)
+    }
+
+    fn visit_set_statement(
+        &mut self,
+        set_statement: &'ast mut SetStatement,
+    ) -> Result<(), Self::Error> {
+        walk_set_statement(self, set_statement)
+    }
+
+    fn visit_set_variables(
+        &mut self,
+        set_variables: &'ast mut SetVariables,
+    ) -> Result<(), Self::Error> {
+        walk_set_variables(self, set_variables)
+    }
+
+    fn visit_set_names(&mut self, _set_names: &'ast mut SetNames) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_set_postgres_parameter(
+        &mut self,
+        _set_postgres_parameter: &'ast mut SetPostgresParameter,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_start_transaction_statement(
+        &mut self,
+        _start_transaction_statement: &'ast mut StartTransactionStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_commit_statement(
+        &mut self,
+        _commit_statement: &'ast mut CommitStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_rollback_statement(
+        &mut self,
+        _rollback_statement: &'ast mut RollbackStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_rename_table_statement(
+        &mut self,
+        rename_table_statement: &'ast mut RenameTableStatement,
+    ) -> Result<(), Self::Error> {
+        walk_rename_table_statement(self, rename_table_statement)
+    }
+
+    fn visit_rename_table_operation(
+        &mut self,
+        rename_table_operation: &'ast mut RenameTableOperation,
+    ) -> Result<(), Self::Error> {
+        walk_rename_table_operation(self, rename_table_operation)
+    }
+
+    fn visit_create_cache_statement(
+        &mut self,
+        create_cache_statement: &'ast mut CreateCacheStatement,
+    ) -> Result<(), Self::Error> {
+        walk_create_cache_statement(self, create_cache_statement)
+    }
+
+    fn visit_drop_cache_statement(
+        &mut self,
+        _drop_cache_statement: &'ast mut DropCacheStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_drop_all_caches_statement(
+        &mut self,
+        _drop_all_caches_statement: &'ast mut DropAllCachesStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_drop_view_statement(
+        &mut self,
+        drop_view_statement: &'ast mut DropViewStatement,
+    ) -> Result<(), Self::Error> {
+        walk_drop_view_statement(self, drop_view_statement)
+    }
+
+    fn visit_use_statement(
+        &mut self,
+        _use_statement: &'ast mut UseStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_show_statement(
+        &mut self,
+        _show_statement: &'ast mut ShowStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_explain_statement(
+        &mut self,
+        _explain_statement: &'ast mut ExplainStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn visit_sql_query(&mut self, sql_query: &'ast mut SqlQuery) -> Result<(), Self::Error> {
+        walk_sql_query(self, sql_query)
     }
 }
 
@@ -406,6 +623,364 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
     visitor.visit_limit_clause(&mut select_statement.limit)?;
     visitor.visit_offset_clause(&mut select_statement.offset)?;
     Ok(())
+}
+
+pub fn walk_create_table_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_table_statement: &'a mut CreateTableStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut create_table_statement.table)?;
+
+    for field in &mut create_table_statement.fields {
+        visitor.visit_column_specification(field)?;
+    }
+
+    if let Some(keys) = &mut create_table_statement.keys {
+        for key in keys {
+            visitor.visit_table_key(key)?;
+        }
+    }
+
+    for option in &mut create_table_statement.options {
+        visitor.visit_create_table_option(option)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_column_specification<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    column_specification: &'a mut ColumnSpecification,
+) -> Result<(), V::Error> {
+    visitor.visit_column(&mut column_specification.column)?;
+    visitor.visit_sql_type(&mut column_specification.sql_type)?;
+    for constraint in &mut column_specification.constraints {
+        visitor.visit_column_constraint(constraint)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_table_key<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    table_key: &'a mut TableKey,
+) -> Result<(), V::Error> {
+    match table_key {
+        TableKey::PrimaryKey { name: _, columns } => {
+            for column in columns {
+                visitor.visit_column(column)?;
+            }
+        }
+        TableKey::UniqueKey {
+            name: _,
+            columns,
+            index_type: _,
+        } => {
+            for column in columns {
+                visitor.visit_column(column)?;
+            }
+        }
+        TableKey::FulltextKey { name: _, columns } => {
+            for column in columns {
+                visitor.visit_column(column)?;
+            }
+        }
+        TableKey::Key {
+            name: _,
+            columns,
+            index_type: _,
+        } => {
+            for column in columns {
+                visitor.visit_column(column)?;
+            }
+        }
+        TableKey::ForeignKey {
+            name: _,
+            index_name: _,
+            columns,
+            target_table,
+            target_columns,
+            on_delete: _,
+            on_update: _,
+        } => {
+            for column in columns {
+                visitor.visit_column(column)?;
+            }
+            visitor.visit_table(target_table)?;
+            for column in target_columns {
+                visitor.visit_column(column)?;
+            }
+        }
+        TableKey::CheckConstraint {
+            name: _,
+            expr,
+            enforced: _,
+        } => {
+            visitor.visit_expr(expr)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn walk_column_constraint<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    column_constraint: &'a mut ColumnConstraint,
+) -> Result<(), V::Error> {
+    match column_constraint {
+        ColumnConstraint::DefaultValue(lit) => visitor.visit_literal(lit),
+        ColumnConstraint::Null
+        | ColumnConstraint::NotNull
+        | ColumnConstraint::CharacterSet(_)
+        | ColumnConstraint::Collation(_)
+        | ColumnConstraint::AutoIncrement
+        | ColumnConstraint::PrimaryKey
+        | ColumnConstraint::Unique
+        | ColumnConstraint::OnUpdateCurrentTimestamp => Ok(()),
+    }
+}
+
+pub fn walk_create_view_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_view_statement: &'a mut CreateViewStatement,
+) -> Result<(), V::Error> {
+    for column in &mut create_view_statement.fields {
+        visitor.visit_column(column)?;
+    }
+
+    match create_view_statement.definition.as_mut() {
+        SelectSpecification::Compound(stmt) => visitor.visit_compound_select_statement(stmt),
+        SelectSpecification::Simple(stmt) => visitor.visit_select_statement(stmt),
+    }
+}
+
+pub fn walk_alter_table_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    alter_table_statement: &'a mut AlterTableStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut alter_table_statement.table)?;
+    for definition in &mut alter_table_statement.definitions {
+        visitor.visit_alter_table_definition(definition)?;
+    }
+    Ok(())
+}
+
+pub fn walk_alter_table_definition<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    alter_table_definition: &'a mut AlterTableDefinition,
+) -> Result<(), V::Error> {
+    match alter_table_definition {
+        AlterTableDefinition::AddColumn(spec) => visitor.visit_column_specification(spec),
+        AlterTableDefinition::AddKey(key) => visitor.visit_table_key(key),
+        AlterTableDefinition::AlterColumn { name: _, operation } => {
+            visitor.visit_alter_column_operation(operation)
+        }
+        AlterTableDefinition::ChangeColumn { name: _, spec } => {
+            visitor.visit_column_specification(spec)
+        }
+        AlterTableDefinition::DropColumn {
+            name: _,
+            behavior: _,
+        }
+        | AlterTableDefinition::RenameColumn {
+            name: _,
+            new_name: _,
+        } => Ok(()),
+    }
+}
+
+pub fn walk_alter_column_operation<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    alter_column_operation: &'a mut AlterColumnOperation,
+) -> Result<(), V::Error> {
+    match alter_column_operation {
+        AlterColumnOperation::SetColumnDefault(lit) => visitor.visit_literal(lit),
+        AlterColumnOperation::DropColumnDefault => Ok(()),
+    }
+}
+
+pub fn walk_insert_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    insert_statement: &'a mut InsertStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut insert_statement.table)?;
+    if let Some(fields) = &mut insert_statement.fields {
+        for column in fields {
+            visitor.visit_column(column)?;
+        }
+    }
+
+    for row in &mut insert_statement.data {
+        for val in row {
+            visitor.visit_literal(val)?;
+        }
+    }
+
+    if let Some(on_duplicate) = &mut insert_statement.on_duplicate {
+        for (column, expr) in on_duplicate {
+            visitor.visit_column(column)?;
+            visitor.visit_expr(expr)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn walk_compound_select_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    compound_select_statement: &'a mut CompoundSelectStatement,
+) -> Result<(), V::Error> {
+    for (_, stmt) in &mut compound_select_statement.selects {
+        visitor.visit_select_statement(stmt)?;
+    }
+
+    if let Some(order) = &mut compound_select_statement.order {
+        visitor.visit_order_clause(order)?;
+    }
+
+    if let Some(limit) = &mut compound_select_statement.limit {
+        visitor.visit_literal(limit)?;
+    }
+
+    if let Some(offset) = &mut compound_select_statement.offset {
+        visitor.visit_literal(offset)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_delete_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    delete_statement: &'a mut DeleteStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut delete_statement.table)?;
+    if let Some(expr) = &mut delete_statement.where_clause {
+        visitor.visit_where_clause(expr)?;
+    }
+    Ok(())
+}
+
+pub fn walk_drop_table_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    drop_table_statement: &'a mut DropTableStatement,
+) -> Result<(), V::Error> {
+    for table in &mut drop_table_statement.tables {
+        visitor.visit_table(table)?;
+    }
+    Ok(())
+}
+
+pub fn walk_update_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    update_statement: &'a mut UpdateStatement,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut update_statement.table)?;
+    for (col, expr) in &mut update_statement.fields {
+        visitor.visit_column(col)?;
+        visitor.visit_expr(expr)?;
+    }
+
+    if let Some(expr) = &mut update_statement.where_clause {
+        visitor.visit_where_clause(expr)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_set_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    set_statement: &'a mut SetStatement,
+) -> Result<(), V::Error> {
+    match set_statement {
+        SetStatement::Variable(set_vars) => visitor.visit_set_variables(set_vars),
+        SetStatement::Names(set_names) => visitor.visit_set_names(set_names),
+        SetStatement::PostgresParameter(set_postgres_parameter) => {
+            visitor.visit_set_postgres_parameter(set_postgres_parameter)
+        }
+    }
+}
+
+pub fn walk_set_variables<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    set_variables: &'a mut SetVariables,
+) -> Result<(), V::Error> {
+    for (var, expr) in &mut set_variables.variables {
+        visitor.visit_variable(var)?;
+        visitor.visit_expr(expr)?;
+    }
+    Ok(())
+}
+
+pub fn walk_rename_table_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    rename_table_statement: &'a mut RenameTableStatement,
+) -> Result<(), V::Error> {
+    for op in &mut rename_table_statement.ops {
+        visitor.visit_rename_table_operation(op)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_rename_table_operation<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    rename_table_operation: &'a mut RenameTableOperation,
+) -> Result<(), V::Error> {
+    visitor.visit_table(&mut rename_table_operation.from)?;
+    visitor.visit_table(&mut rename_table_operation.to)
+}
+
+pub fn walk_create_cache_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    create_cache_statement: &'a mut CreateCacheStatement,
+) -> Result<(), V::Error> {
+    match &mut create_cache_statement.inner {
+        CacheInner::Statement(stmt) => visitor.visit_select_statement(stmt)?,
+        CacheInner::Id(_) => {}
+    }
+
+    Ok(())
+}
+
+pub fn walk_drop_view_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    drop_view_statement: &'a mut DropViewStatement,
+) -> Result<(), V::Error> {
+    for view in &mut drop_view_statement.views {
+        visitor.visit_table(view)?;
+    }
+
+    Ok(())
+}
+
+pub fn walk_sql_query<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    sql_query: &'a mut SqlQuery,
+) -> Result<(), V::Error> {
+    match sql_query {
+        SqlQuery::CreateTable(statement) => visitor.visit_create_table_statement(statement),
+        SqlQuery::CreateView(statement) => visitor.visit_create_view_statement(statement),
+        SqlQuery::AlterTable(statement) => visitor.visit_alter_table_statement(statement),
+        SqlQuery::Insert(statement) => visitor.visit_insert_statement(statement),
+        SqlQuery::CompoundSelect(statement) => visitor.visit_compound_select_statement(statement),
+        SqlQuery::Select(statement) => visitor.visit_select_statement(statement),
+        SqlQuery::Delete(statement) => visitor.visit_delete_statement(statement),
+        SqlQuery::DropTable(statement) => visitor.visit_drop_table_statement(statement),
+        SqlQuery::Update(statement) => visitor.visit_update_statement(statement),
+        SqlQuery::Set(statement) => visitor.visit_set_statement(statement),
+        SqlQuery::StartTransaction(statement) => {
+            visitor.visit_start_transaction_statement(statement)
+        }
+        SqlQuery::Commit(statement) => visitor.visit_commit_statement(statement),
+        SqlQuery::Rollback(statement) => visitor.visit_rollback_statement(statement),
+        SqlQuery::RenameTable(statement) => visitor.visit_rename_table_statement(statement),
+        SqlQuery::CreateCache(statement) => visitor.visit_create_cache_statement(statement),
+        SqlQuery::DropCache(statement) => visitor.visit_drop_cache_statement(statement),
+        SqlQuery::DropAllCaches(statement) => visitor.visit_drop_all_caches_statement(statement),
+        SqlQuery::DropView(statement) => visitor.visit_drop_view_statement(statement),
+        SqlQuery::Use(statement) => visitor.visit_use_statement(statement),
+        SqlQuery::Show(statement) => visitor.visit_show_statement(statement),
+        SqlQuery::Explain(statement) => visitor.visit_explain_statement(statement),
+    }
 }
 
 #[cfg(test)]
