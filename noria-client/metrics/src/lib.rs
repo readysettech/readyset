@@ -1,3 +1,4 @@
+use nom_sql::SqlQuery;
 use noria::ReadySetError;
 use serde::Serialize;
 use std::time::{Duration, Instant};
@@ -10,8 +11,8 @@ pub mod recorded;
 pub struct QueryExecutionEvent {
     pub event: EventType,
 
-    /// Query text associated with this query.
-    pub query: Option<String>,
+    /// SqlQuery associated with this execution event.
+    pub query: Option<SqlQuery>,
 
     /// How long the execute request took to run on the upstream database
     pub upstream_duration: Option<Duration>,

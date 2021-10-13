@@ -253,8 +253,7 @@ impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
     }
 }
 
-#[allow(dead_code)] // TODO(peter/justin): remove once this is used
-fn anonymize_literals(query: &mut SelectStatement) {
+pub fn anonymize_literals(query: &mut SelectStatement) {
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     AnonymizeLiteralsVisitor
         .visit_select_statement(query)
