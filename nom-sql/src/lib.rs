@@ -29,7 +29,6 @@ pub use self::set::SetStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
 
-pub mod analysis;
 pub mod parser;
 
 #[macro_use]
@@ -38,6 +37,7 @@ mod dialect;
 mod macros;
 
 mod alter;
+pub mod analysis;
 mod case;
 mod column;
 mod common;

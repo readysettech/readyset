@@ -1,3 +1,5 @@
+pub mod visit;
+
 use maplit::hashset;
 use std::collections::{HashSet, VecDeque};
 use std::iter;
