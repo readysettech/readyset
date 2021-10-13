@@ -7121,3 +7121,299 @@ async fn aggressive_eviction() {
         assert_eq!(r.len(), keys.len());
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn partial_ingress_above_full_reader() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple("partial_ingress_above_full_reader").await;
+    g.install_recipe("CREATE TABLE t1 (a INT, b INT);")
+        .await
+        .unwrap();
+    g.extend_recipe("CREATE TABLE t2 (c int, d int);")
+        .await
+        .unwrap();
+    g.extend_recipe("query q1: select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c where t1.b = ?;")
+        .await
+        .unwrap();
+    g.extend_recipe(
+        "query q2: select t1.a, t1.b, t2.c, t2.d from t1 inner join t2 on t1.a = t2.c;",
+    )
+    .await
+    .unwrap();
+
+    let mut m1 = g.table("t1").await.unwrap();
+    let mut m2 = g.table("t2").await.unwrap();
+
+    m1.insert(vec![1.into(), 2.into()]).await.unwrap();
+    m2.insert(vec![1.into(), 1.into()]).await.unwrap();
+    m2.insert(vec![3.into(), 3.into()]).await.unwrap();
+
+    let mut g1 = g.view("q1").await.unwrap();
+    let r1 = g1.lookup(&[2i64.into()], true).await.unwrap();
+
+    let mut g2 = g.view("q2").await.unwrap();
+    let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
+
+    assert_eq!(
+        r1,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(
+        r2,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reroutes_recursively() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple("reroutes_twice").await;
+    let sql = "
+        create table t1 (a int, b int);
+        create table t2 (c int, d int);
+        create table t3 (e int, f int);
+        create table t4 (g int, h int);
+        QUERY q1: SELECT t2.c, t2.d, t3.e, t3.f FROM t2 INNER JOIN t3 ON t2.c = t3.e WHERE t2.c = ?;
+        QUERY q2: SELECT t1.a, t1.b, q1.c, q1.d FROM t1 INNER JOIN q1 on t1.a = q1.c WHERE t1.b = ?;
+        QUERY q3: SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a WHERE t4.g = ?;
+        ";
+    g.install_recipe(sql).await.unwrap();
+
+    let sql2 = "
+        QUERY q4: SELECT t4.g, t4.h, q2.a, q2.b FROM t4 INNER JOIN q2 on t4.g = q2.a;
+       ";
+    g.extend_recipe(sql2).await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
+    let mut m1 = g.table("t1").await.unwrap();
+    m1.insert(vec![1.into(), 2.into()]).await.unwrap();
+    let mut m2 = g.table("t2").await.unwrap();
+    m2.insert(vec![1.into(), 1.into()]).await.unwrap();
+    let mut m3 = g.table("t3").await.unwrap();
+    m3.insert(vec![1.into(), 1.into()]).await.unwrap();
+    let mut m4 = g.table("t4").await.unwrap();
+    m4.insert(vec![1.into(), 1.into()]).await.unwrap();
+
+    sleep().await;
+
+    let mut getter = g.view("q4").await.unwrap();
+    let res = getter.lookup(&[0i64.into()], true).await.unwrap();
+    assert_eq!(res[0][0], 1.into());
+    assert_eq!(res[0][1], 1.into());
+    assert_eq!(res[0][2], 1.into());
+    assert_eq!(res[0][3], 2.into());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reroutes_two_children_at_once() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple("reroutes_two_children_at_once").await;
+    let sql = "
+        create table t1 (a int, b int);
+        create table t2 (c int, d int);
+        ";
+    g.install_recipe(sql).await.unwrap();
+    let sql1 = " 
+        QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
+        ";
+    g.extend_recipe(sql1).await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let sql2 = "
+        QUERY q2: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        QUERY q3: SELECT t1.a, t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c; 
+        ";
+    g.extend_recipe(sql2).await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut m1 = g.table("t1").await.unwrap();
+    let mut m2 = g.table("t2").await.unwrap();
+
+    m1.insert(vec![1.into(), 2.into()]).await.unwrap();
+    m2.insert(vec![1.into(), 1.into()]).await.unwrap();
+    m2.insert(vec![3.into(), 3.into()]).await.unwrap();
+
+    let mut g1 = g.view("q1").await.unwrap();
+    let r1 = g1.lookup(&[2i64.into()], true).await.unwrap();
+
+    let mut g2 = g.view("q2").await.unwrap();
+    let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
+
+    let mut g3 = g.view("q3").await.unwrap();
+    let r3 = g3.lookup(&[0i64.into()], true).await.unwrap();
+
+    assert_eq!(
+        r1,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(
+        r2,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(
+        r3,
+        vec![vec![DataType::Int(1), DataType::Int(2), DataType::Int(1)]]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reroutes_same_migration() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple_reuse_unsharded("reroutes_same_migration").await;
+    let sql = "
+        create table t1 (a int, b int);
+        create table t2 (c int, d int);
+        QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
+        QUERY q2: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        QUERY q3: SELECT t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        ";
+    g.extend_recipe(sql).await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut m1 = g.table("t1").await.unwrap();
+    let mut m2 = g.table("t2").await.unwrap();
+
+    m1.insert(vec![1.into(), 2.into()]).await.unwrap();
+    m2.insert(vec![1.into(), 1.into()]).await.unwrap();
+    m2.insert(vec![3.into(), 3.into()]).await.unwrap();
+
+    let mut g1 = g.view("q1").await.unwrap();
+    let r1 = g1.lookup(&[2i64.into()], true).await.unwrap();
+
+    let mut g2 = g.view("q2").await.unwrap();
+    let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
+
+    let mut g3 = g.view("q3").await.unwrap();
+    let r3 = g3.lookup(&[0i64.into()], true).await.unwrap();
+
+    assert_eq!(
+        r1,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(
+        r2,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(r3, vec![vec![DataType::Int(2), DataType::Int(1)]]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reroutes_dependent_children() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple("reroutes_dependent_children").await;
+    let sql = "
+        create table t1 (a int, b int);
+        create table t2 (c int, d int);
+        ";
+    g.install_recipe(sql).await.unwrap();
+    let sql1 = " 
+        QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
+        ";
+    g.extend_recipe(sql1).await.unwrap();
+    let sql2 = "
+        QUERY q2: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
+        QUERY q3: SELECT q2.a, q2.c FROM q2;
+        ";
+    g.extend_recipe(sql2).await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let mut m1 = g.table("t1").await.unwrap();
+    let mut m2 = g.table("t2").await.unwrap();
+
+    m1.insert(vec![1.into(), 2.into()]).await.unwrap();
+    m2.insert(vec![1.into(), 1.into()]).await.unwrap();
+    m2.insert(vec![3.into(), 3.into()]).await.unwrap();
+
+    let mut g1 = g.view("q1").await.unwrap();
+    let r1 = g1.lookup(&[2i64.into()], true).await.unwrap();
+
+    let mut g2 = g.view("q2").await.unwrap();
+    let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
+
+    let mut g3 = g.view("q3").await.unwrap();
+    let r3 = g3.lookup(&[0i64.into()], true).await.unwrap();
+
+    assert_eq!(
+        r1,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(
+        r2,
+        vec![vec![
+            DataType::Int(1),
+            DataType::Int(2),
+            DataType::Int(1),
+            DataType::Int(1)
+        ]]
+    );
+    assert_eq!(r3, vec![vec![DataType::Int(1), DataType::Int(1)]]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reroutes_count() {
+    readyset_logging::init_test_logging();
+    let mut g = start_simple_reuse_unsharded("reroutes_count").await;
+    let sql = "
+            create table votes (user INT, id INT);
+            query q1: select count(user) from votes where id = ? group by id;
+            ";
+    g.install_recipe(sql).await.unwrap();
+    let sql2 = "
+            query q2: select count(user) from votes group by id;";
+    g.extend_recipe(sql2).await.unwrap();
+
+    let mut m = g.table("votes").await.unwrap();
+    let mut g1 = g.view("q1").await.unwrap();
+    let mut g2 = g.view("q2").await.unwrap();
+
+    m.insert(vec![1.into(), 1.into()]).await.unwrap();
+    m.insert(vec![1.into(), 2.into()]).await.unwrap();
+    m.insert(vec![1.into(), 3.into()]).await.unwrap();
+    m.insert(vec![2.into(), 1.into()]).await.unwrap();
+
+    let r1 = g1.lookup(&[1i64.into()], true).await.unwrap();
+    let r2 = g2.lookup(&[0i64.into()], true).await.unwrap();
+    assert_eq!(r1, vec![vec![DataType::Int(2)]]);
+    assert_eq!(
+        r2,
+        vec![
+            vec![DataType::Int(1)],
+            vec![DataType::Int(1)],
+            vec![DataType::Int(2)]
+        ]
+    );
+}

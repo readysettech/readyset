@@ -263,7 +263,7 @@ pub fn add(
 }
 
 pub(super) fn connect(
-    graph: &mut Graph,
+    graph: &Graph,
     dmp: &mut DomainMigrationPlan,
     new: &HashSet<NodeIndex>,
 ) -> ReadySetResult<()> {

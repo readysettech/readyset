@@ -24,6 +24,11 @@ mod plan;
 
 type Indices = HashSet<Index>;
 
+pub(crate) struct InvalidEdge {
+    pub parent: NodeIndex,
+    pub child: NodeIndex,
+}
+
 /// Strategy for determining which (partial) materializations should be placed beyond the
 /// materialization frontier.
 ///
@@ -81,6 +86,10 @@ pub(in crate::controller) struct Materializations {
     /// A list of replay paths for each node, indexed by tag.
     paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
 
+    /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
+    /// rerouting of full nodes found below partial nodes in migration planning.
+    redundant_partial: HashMap<NodeIndex, NodeIndex>,
+
     partial: HashSet<NodeIndex>,
     partial_enabled: bool,
     frontier_strategy: FrontierStrategy,
@@ -108,6 +117,8 @@ impl Materializations {
 
             paths: HashMap::default(),
 
+            redundant_partial: HashMap::default(),
+
             partial: HashSet::default(),
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
@@ -132,6 +143,19 @@ impl Materializations {
     /// Which nodes should be placed beyond the materialization frontier?
     pub(in crate::controller) fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
         self.frontier_strategy = f;
+    }
+
+    /// Does this partial node have a fully materialized duplicate?
+    pub(in crate::controller) fn get_redundant(&self, idx: &NodeIndex) -> Option<&NodeIndex> {
+        self.redundant_partial.get(idx)
+    }
+
+    /// Add new duplicate nodes to the redundant_partial map
+    pub(in crate::controller) fn extend_redundant_partial(
+        &mut self,
+        new_duplicates: HashMap<NodeIndex, NodeIndex>,
+    ) {
+        self.redundant_partial.extend(new_duplicates);
     }
 }
 
@@ -638,43 +662,43 @@ impl Materializations {
     /// * Checking that no node is partial over a subset of the indices in its parent
     /// * Checking that there are no cases where a subgraph is sharded by one column, and then has a
     ///   replay path on a duplicated copy of that column.
-    pub(super) fn validate(&self, graph: &Graph, new: &HashSet<NodeIndex>) -> ReadySetResult<()> {
+    ///
+    /// If the validation fails because a full node is detected below a partial node, InvalidEdge
+    /// is returned to indicate which edge must be recreated in the migration planning loop.
+    pub(super) fn validate(
+        &self,
+        graph: &Graph,
+        new: &HashSet<NodeIndex>,
+    ) -> ReadySetResult<Option<InvalidEdge>> {
         // check that we don't have fully materialized nodes downstream of partially materialized
         // nodes.
+        // returns (parent_index, child_index) if two neighbors are found where parent is partially
+        // materialized and child is fully materialized.
         {
             fn any_partial(
                 this: &Materializations,
                 graph: &Graph,
                 ni: NodeIndex,
-            ) -> Option<NodeIndex> {
+            ) -> (Option<NodeIndex>, Option<NodeIndex>) {
                 if this.partial.contains(&ni) {
-                    return Some(ni);
+                    return (Some(ni), None);
                 }
-                for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                    if let Some(ni) = any_partial(this, graph, ni) {
-                        return Some(ni);
+                for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    match any_partial(this, graph, pi) {
+                        (Some(pi), Some(ni)) => return (Some(pi), Some(ni)),
+                        (Some(pi), None) => return (Some(pi), Some(ni)),
+                        _ => {}
                     }
                 }
-                None
+                (None, None)
             }
 
             for ni in self.added.keys().copied().chain(self.new_readers.clone()) {
-                if self.partial.contains(&ni) {
-                    continue;
-                }
-
-                if let Some(pi) = any_partial(self, graph, ni) {
-                    println!("{}", graphviz(graph, true, self));
-                    error!(
-                        full = %ni.index(),
-                        partial = %pi.index(),
-                        "partial materializations above full materialization"
-                    );
-                    internal!(
-                        "partial materializations ({:?}) above full materialization ({:?})",
-                        pi.index(),
-                        ni.index()
-                    );
+                if let (Some(pi), Some(ni)) = any_partial(self, graph, ni) {
+                    return Ok(Some(InvalidEdge {
+                        parent: pi,
+                        child: ni,
+                    }));
                 }
             }
         }
@@ -856,7 +880,7 @@ impl Materializations {
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     /// Commit to all materialization decisions since the last time `commit` was called.

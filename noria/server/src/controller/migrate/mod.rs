@@ -41,7 +41,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace, warn};
 
-use crate::controller::migrate::materialization::Materializations;
+use crate::controller::migrate::materialization::{InvalidEdge, Materializations};
 use crate::controller::{
     DomainPlacementRestriction, Leader, NodeRestrictionKey, Worker, WorkerIdentifier,
 };
@@ -338,6 +338,52 @@ pub(super) enum ColumnChange {
     Drop(usize),
 }
 
+/// Add messages to the dmp to inform nodes that columns have been added or removed
+fn inform_col_changes(
+    dmp: &mut DomainMigrationPlan,
+    columns: &[(NodeIndex, ColumnChange)],
+    ingredients: &Graph,
+) -> ReadySetResult<()> {
+    // Tell all base nodes and base ingress children about newly added columns
+    for (ni, change) in columns {
+        let mut inform = if let ColumnChange::Add(..) = change {
+            // we need to inform all of the base's children too,
+            // so that they know to add columns to existing records when replaying
+            ingredients
+                .neighbors_directed(*ni, petgraph::EdgeDirection::Outgoing)
+                .filter(|&eni| ingredients[eni].is_egress())
+                .flat_map(|eni| {
+                    // find ingresses under this egress
+                    ingredients.neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
+                })
+                .collect()
+        } else {
+            // ingress nodes don't need to know about deleted columns, because those are only
+            // relevant when new writes enter the graph.
+            Vec::new()
+        };
+        inform.push(*ni);
+
+        for ni in inform {
+            let n = &ingredients[ni];
+            let m = match change.clone() {
+                ColumnChange::Add(field, default) => DomainRequest::AddBaseColumn {
+                    node: n.local_addr(),
+                    field,
+                    default,
+                },
+                ColumnChange::Drop(column) => DomainRequest::DropBaseColumn {
+                    node: n.local_addr(),
+                    column,
+                },
+            };
+
+            dmp.add_message(n.domain(), m)?;
+        }
+    }
+    Ok(())
+}
+
 /// A `Migration` encapsulates a number of changes to the Soup data flow graph.
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
@@ -601,6 +647,9 @@ impl Migration {
         let mut ndomains = mainline.ndomains;
         let mut remap = mainline.remap.clone();
         let mut topo = topo_order(&ingredients, source, &new);
+        // Tracks partially materialized nodes that were duplicated as fully materialized in this
+        // planning stage.
+        let mut local_redundant_partial: HashMap<NodeIndex, NodeIndex> = Default::default();
 
         // Shard the graph as desired
         let mut swapped0 = if let Some(shards) = mainline.sharding {
@@ -622,8 +671,6 @@ impl Migration {
 
         // Set up ingress and egress nodes
         let swapped1 = routing::add(&mut ingredients, source, &mut new, &topo)?;
-
-        topo = topo_order(&ingredients, mainline.source, &new);
 
         // Merge the swap lists
         for ((dst, src), instead) in swapped1 {
@@ -666,296 +713,307 @@ impl Migration {
                 }
             }
         }
-        let swapped = swapped0;
-        let mut sorted_new = new.iter().collect::<Vec<_>>();
-        sorted_new.sort();
+        let mut swapped = swapped0;
+        loop {
+            let mut sorted_new = new.iter().collect::<Vec<_>>();
+            sorted_new.sort();
 
-        // Find all nodes for domains that have changed
-        let changed_domains: HashSet<DomainIndex> = sorted_new
-            .iter()
-            .filter(|&&&ni| !ingredients[ni].is_dropped())
-            .map(|&&ni| ingredients[ni].domain())
-            .collect();
+            // Find all nodes for domains that have changed
+            let changed_domains: HashSet<DomainIndex> = sorted_new
+                .iter()
+                .filter(|&&&ni| !ingredients[ni].is_dropped())
+                .map(|&&ni| ingredients[ni].domain())
+                .collect();
 
-        let mut domain_new_nodes = sorted_new
-            .iter()
-            .filter(|&&&ni| ni != source)
-            .filter(|&&&ni| !ingredients[ni].is_dropped())
-            .map(|&&ni| (ingredients[ni].domain(), ni))
-            .fold(HashMap::new(), |mut dns, (d, ni)| {
-                dns.entry(d).or_insert_with(Vec::new).push(ni);
-                dns
-            });
+            let mut domain_new_nodes = sorted_new
+                .iter()
+                .filter(|&&&ni| ni != source)
+                .filter(|&&&ni| !ingredients[ni].is_dropped())
+                .map(|&&ni| (ingredients[ni].domain(), ni))
+                .fold(HashMap::new(), |mut dns, (d, ni)| {
+                    dns.entry(d).or_insert_with(Vec::new).push(ni);
+                    dns
+                });
 
-        // Assign local addresses to all new nodes, and initialize them
-        for (domain, nodes) in &mut domain_new_nodes {
-            // Number of pre-existing nodes
-            let mut nnodes = remap.get(domain).map(HashMap::len).unwrap_or(0);
+            // Assign local addresses to all new nodes, and initialize them
+            for (domain, nodes) in &mut domain_new_nodes {
+                // Number of pre-existing nodes
+                let mut nnodes = remap.get(domain).map(HashMap::len).unwrap_or(0);
 
-            if nodes.is_empty() {
-                // Nothing to do here
-                continue;
-            }
+                if nodes.is_empty() {
+                    // Nothing to do here
+                    continue;
+                }
 
-            let span = debug_span!("domain", domain = domain.index());
-            let _g = span.enter();
+                let span = debug_span!("domain", domain = domain.index());
+                let _g = span.enter();
 
-            // Give local addresses to every (new) node
-            for &ni in nodes.iter() {
-                debug!(
-                    node_type = ?ingredients[ni],
-                    node = ni.index(),
-                    local = nnodes,
-                    "assigning local index"
-                );
-                counter!(
-                    recorded::DOMAIN_NODE_ADDED,
-                    1,
-                    "domain" => domain.index().to_string(),
-                    "ntype" => (&ingredients[ni]).node_type_string(),
-                    "node" => nnodes.to_string()
-                );
+                // Give local addresses to every (new) node
+                for &ni in nodes.iter() {
+                    debug!(
+                        node_type = ?ingredients[ni],
+                        node = ni.index(),
+                        local = nnodes,
+                        "assigning local index"
+                    );
+                    counter!(
+                        recorded::DOMAIN_NODE_ADDED,
+                        1,
+                        "domain" => domain.index().to_string(),
+                        "ntype" => (&ingredients[ni]).node_type_string(),
+                        "node" => nnodes.to_string()
+                    );
 
-                let mut ip: IndexPair = ni.into();
-                ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
-                ingredients[ni].set_finalized_addr(ip);
-                remap
-                    .entry(*domain)
-                    .or_insert_with(HashMap::new)
-                    .insert(ni, ip);
-                nnodes += 1;
-            }
+                    let mut ip: IndexPair = ni.into();
+                    ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
+                    ingredients[ni].set_finalized_addr(ip);
+                    remap
+                        .entry(*domain)
+                        .or_insert_with(HashMap::new)
+                        .insert(ni, ip);
+                    nnodes += 1;
+                }
 
-            // Initialize each new node
-            for &ni in nodes.iter() {
-                if ingredients[ni].is_internal() {
-                    // Figure out all the remappings that have happened
-                    // NOTE: this has to be *per node*, since a shared parent may be remapped
-                    // differently to different children (due to sharding for example). we just
-                    // allocate it once though.
-                    let mut remap_ = remap[domain].clone();
+                // Initialize each new node
+                for &ni in nodes.iter() {
+                    if ingredients[ni].is_internal() {
+                        // Figure out all the remappings that have happened
+                        // NOTE: this has to be *per node*, since a shared parent may be remapped
+                        // differently to different children (due to sharding for example). we just
+                        // allocate it once though.
+                        let mut remap_ = remap[domain].clone();
 
-                    // Parents in other domains have been swapped for ingress nodes.
-                    // Those ingress nodes' indices are now local.
-                    for (&(dst, src), &instead) in &swapped {
-                        if dst != ni {
-                            // ignore mappings for other nodes
-                            continue;
+                        // Parents in other domains have been swapped for ingress nodes.
+                        // Those ingress nodes' indices are now local.
+                        for (&(dst, src), &instead) in &swapped {
+                            if dst != ni {
+                                // ignore mappings for other nodes
+                                continue;
+                            }
+
+                            remap_.insert(src, remap[domain][&instead]);
                         }
 
-                        let old = remap_.insert(src, remap[domain][&instead]);
-                        assert_eq!(old, None);
+                        trace!(node = ni.index(), "initializing new node");
+                        ingredients.node_weight_mut(ni).unwrap().on_commit(&remap_);
                     }
-
-                    trace!(node = ni.index(), "initializing new node");
-                    ingredients.node_weight_mut(ni).unwrap().on_commit(&remap_);
                 }
             }
-        }
 
-        if let Some(shards) = mainline.sharding {
-            sharding::validate(&ingredients, &topo, shards)?
-        };
+            topo = topo_order(&ingredients, mainline.source, &new);
 
-        // at this point, we've hooked up the graph such that, for any given domain, the graph
-        // looks like this:
-        //
-        //      o (egress)
-        //     +.\......................
-        //     :  o (ingress)
-        //     :  |
-        //     :  o-------------+
-        //     :  |             |
-        //     :  o             o
-        //     :  |             |
-        //     :  o (egress)    o (egress)
-        //     +..|...........+.|..........
-        //     :  o (ingress) : o (ingress)
-        //     :  |\          :  \
-        //     :  | \         :   o
-        //
-        // etc.
-        // println!("{}", mainline);
-
-        let mut domain_nodes = mainline.domain_nodes.clone();
-
-        for &ni in &new {
-            let n = &ingredients[ni];
-            if ni != source && !n.is_dropped() {
-                let di = n.domain();
-                domain_nodes.entry(di).or_insert_with(Vec::new).push(ni);
-            }
-        }
-        let mut uninformed_domain_nodes: HashMap<_, _> = changed_domains
-            .iter()
-            .map(|&di| {
-                let mut m = domain_nodes[&di]
-                    .iter()
-                    .cloned()
-                    .map(|ni| (ni, new.contains(&ni)))
-                    .collect::<Vec<_>>();
-                m.sort();
-                (di, m)
-            })
-            .collect();
-
-        // Boot up new domains (they'll ignore all updates for now)
-        debug!("booting new domains");
-        let mut dmp = DomainMigrationPlan::new(mainline);
-
-        /// Verifies that the worker `worker` meets the domain placement restrictions
-        /// of all dataflow nodes that will be placed in a new domain on the worker.
-        /// If the set of restrictions in this domain are too stringent, no worker
-        /// may be able to satisfy the domain placement.
-        fn worker_meets_restrictions(
-            worker: &Worker,
-            restrictions: &[&DomainPlacementRestriction],
-        ) -> bool {
-            restrictions
-                .iter()
-                .all(|r| r.worker_volume == worker.volume_id)
-        }
-
-        for domain in changed_domains {
-            if mainline.domains.contains_key(&domain) {
-                // this is not a new domain
-                continue;
-            }
-
-            let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let num_shards = ingredients[nodes[0].0].sharded_by().shards();
-
-            #[allow(clippy::indexing_slicing)] // checked above
-            let is_reader_domain = nodes.iter().any(|(n, _)| ingredients[*n].is_reader());
-
-            // If this migration has a specified worker, we attempt to place
-            // the domains on to that worker.
-            let target_worker = self.worker.clone();
-            let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
-                (target_worker.is_none())
-                    || (target_worker
-                        .as_ref()
-                        .filter(|s_worker_id| **worker_id == **s_worker_id)
-                        .is_some())
+            if let Some(shards) = mainline.sharding {
+                sharding::validate(&ingredients, &topo, shards)?
             };
 
-            let worker_set = mainline
-                .workers
-                .iter()
-                .filter(|(_, w)| w.healthy)
-                .filter(worker_selector)
-                .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
+            // at this point, we've hooked up the graph such that, for any given domain, the graph
+            // looks like this:
+            //
+            //      o (egress)
+            //     +.\......................
+            //     :  o (ingress)
+            //     :  |
+            //     :  o-------------+
+            //     :  |             |
+            //     :  o             o
+            //     :  |             |
+            //     :  o (egress)    o (egress)
+            //     +..|...........+.|..........
+            //     :  o (ingress) : o (ingress)
+            //     :  |\          :  \
+            //     :  | \         :   o
+            //
+            // etc.
+            // println!("{}", mainline);
 
-            // We create a second iterator used to assign workers in a round robin
-            // fashion.
-            let mut round_robin = worker_set.clone().cycle();
+            let mut domain_nodes = mainline.domain_nodes.clone();
 
-            let mut worker_shards: Vec<WorkerIdentifier> = Vec::new();
-            for i in 0..num_shards.unwrap_or(1) {
-                // Shards of certain dataflow nodes may have restrictions that
-                // limit the workers they are placed upon.
-                let dataflow_node_restrictions = nodes
-                    .iter()
-                    .filter_map(|(n, _)| {
-                        #[allow(clippy::indexing_slicing)] // checked above
-                        let node_name = ingredients[*n].name();
-                        mainline.node_restrictions.get(&NodeRestrictionKey {
-                            node_name: node_name.into(),
-                            shard: i,
-                        })
-                    })
-                    .collect::<Vec<_>>();
-
-                // If there are placement restrictions we select the first worker
-                // that meets the placement restrictions. This can lead to imbalance
-                // in the number of dataflow nodes placed on each server.
-                let (worker_id, _) = if !dataflow_node_restrictions.is_empty() {
-                    let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
-                        worker_meets_restrictions(*worker, &dataflow_node_restrictions)
-                    };
-                    worker_set.clone().find(restriction_filter)
-                } else {
-                    round_robin.next()
-                }
-                .ok_or(ReadySetError::NoAvailableWorkers {
-                    domain_index: domain.index(),
-                    shard: i,
-                })?;
-
-                worker_shards.push(worker_id.clone());
-            }
-
-            dmp.add_new_domain(domain, worker_shards, nodes.clone());
-            dmp.valid_domains.insert(domain, num_shards.unwrap_or(1));
-        }
-
-        // Add any new nodes to existing domains (they'll also ignore all updates for now)
-        debug!("mutating existing domains");
-        augmentation::inform(source, &mut ingredients, &mut dmp, uninformed_domain_nodes)?;
-
-        // Tell all base nodes and base ingress children about newly added columns
-        for (ni, change) in self.columns {
-            let mut inform = if let ColumnChange::Add(..) = change {
-                // we need to inform all of the base's children too,
-                // so that they know to add columns to existing records when replaying
-                ingredients
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Outgoing)
-                    .filter(|&eni| ingredients[eni].is_egress())
-                    .flat_map(|eni| {
-                        // find ingresses under this egress
-                        ingredients.neighbors_directed(eni, petgraph::EdgeDirection::Outgoing)
-                    })
-                    .collect()
-            } else {
-                // ingress nodes don't need to know about deleted columns, because those are only
-                // relevant when new writes enter the graph.
-                Vec::new()
-            };
-            inform.push(ni);
-
-            for ni in inform {
+            for &ni in &new {
                 let n = &ingredients[ni];
-                let m = match change.clone() {
-                    ColumnChange::Add(field, default) => DomainRequest::AddBaseColumn {
-                        node: n.local_addr(),
-                        field,
-                        default,
-                    },
-                    ColumnChange::Drop(column) => DomainRequest::DropBaseColumn {
-                        node: n.local_addr(),
-                        column,
-                    },
+                if ni != source && !n.is_dropped() {
+                    let di = n.domain();
+                    domain_nodes.entry(di).or_insert_with(Vec::new).push(ni);
+                }
+            }
+            let mut uninformed_domain_nodes: HashMap<_, _> = changed_domains
+                .iter()
+                .map(|&di| {
+                    let mut m = domain_nodes[&di]
+                        .iter()
+                        .cloned()
+                        .map(|ni| (ni, new.contains(&ni)))
+                        .collect::<Vec<_>>();
+                    m.sort();
+                    (di, m)
+                })
+                .collect();
+
+            // Boot up new domains (they'll ignore all updates for now)
+            debug!("booting new domains");
+            let mut dmp = DomainMigrationPlan::new(mainline);
+
+            /// Verifies that the worker `worker` meets the domain placement restrictions
+            /// of all dataflow nodes that will be placed in a new domain on the worker.
+            /// If the set of restrictions in this domain are too stringent, no worker
+            /// may be able to satisfy the domain placement.
+            fn worker_meets_restrictions(
+                worker: &Worker,
+                restrictions: &[&DomainPlacementRestriction],
+            ) -> bool {
+                restrictions
+                    .iter()
+                    .all(|r| r.worker_volume == worker.volume_id)
+            }
+
+            for domain in changed_domains {
+                if mainline.domains.contains_key(&domain) {
+                    // this is not a new domain
+                    continue;
+                }
+
+                let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
+                let num_shards = ingredients[nodes[0].0].sharded_by().shards();
+
+                #[allow(clippy::indexing_slicing)] // checked above
+                let is_reader_domain = nodes.iter().any(|(n, _)| ingredients[*n].is_reader());
+
+                // If this migration has a specified worker, we attempt to place
+                // the domains on to that worker.
+                let target_worker = self.worker.clone();
+                let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
+                    (target_worker.is_none())
+                        || (target_worker
+                            .as_ref()
+                            .filter(|s_worker_id| **worker_id == **s_worker_id)
+                            .is_some())
                 };
 
-                dmp.add_message(n.domain(), m)?;
+                let worker_set = mainline
+                    .workers
+                    .iter()
+                    .filter(|(_, w)| w.healthy)
+                    .filter(worker_selector)
+                    .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
+
+                // We create a second iterator used to assign workers in a round robin
+                // fashion.
+                let mut round_robin = worker_set.clone().cycle();
+
+                let mut worker_shards: Vec<WorkerIdentifier> = Vec::new();
+                for i in 0..num_shards.unwrap_or(1) {
+                    // Shards of certain dataflow nodes may have restrictions that
+                    // limit the workers they are placed upon.
+                    let dataflow_node_restrictions = nodes
+                        .iter()
+                        .filter_map(|(n, _)| {
+                            #[allow(clippy::indexing_slicing)] // checked above
+                            let node_name = ingredients[*n].name();
+                            mainline.node_restrictions.get(&NodeRestrictionKey {
+                                node_name: node_name.into(),
+                                shard: i,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+
+                    // If there are placement restrictions we select the first worker
+                    // that meets the placement restrictions. This can lead to imbalance
+                    // in the number of dataflow nodes placed on each server.
+                    let (worker_id, _) = if !dataflow_node_restrictions.is_empty() {
+                        let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
+                            worker_meets_restrictions(*worker, &dataflow_node_restrictions)
+                        };
+                        worker_set.clone().find(restriction_filter)
+                    } else {
+                        round_robin.next()
+                    }
+                    .ok_or(ReadySetError::NoAvailableWorkers {
+                        domain_index: domain.index(),
+                        shard: i,
+                    })?;
+
+                    worker_shards.push(worker_id.clone());
+                }
+
+                dmp.add_new_domain(domain, worker_shards, nodes.clone());
+                dmp.valid_domains.insert(domain, num_shards.unwrap_or(1));
+            }
+
+            // And now, the last piece of the puzzle -- set up materializations
+            info!("initializing new materializations");
+            let mut materializations = mainline.materializations.clone();
+
+            materializations.extend(&mut ingredients, &new)?;
+            if let Some(InvalidEdge { parent, child }) =
+                materializations.validate(&ingredients, &new)?
+            {
+                info!(
+                    ?child,
+                    ?parent,
+                    "rerouting full node found below partial node",
+                );
+
+                // Find fully materialized equivalent of parent or create one
+                let (duplicate_index, is_new) =
+                    if let Some(idx) = mainline.materializations.get_redundant(&parent) {
+                        (*idx, false)
+                    } else if let Some(idx) = local_redundant_partial.get(&parent) {
+                        (*idx, false)
+                    } else {
+                        // create new node in the same domain as old
+                        let duplicate_node = ingredients[parent].duplicate();
+                        // add to graph
+                        let idx = ingredients.add_node(duplicate_node);
+                        local_redundant_partial.insert(parent, idx);
+                        (idx, true)
+                    };
+
+                ingredients.add_edge(duplicate_index, child, ());
+                if is_new {
+                    // Recreate edges coming into parent on duplicate
+                    let incoming: Vec<_> = ingredients
+                        .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
+                        .collect();
+                    for ni in incoming {
+                        ingredients.add_edge(ni, duplicate_index, ());
+                    }
+                    // Add to new nodes for processing in next loop iteration
+                    new.insert(duplicate_index);
+                }
+                // Indicate that the incoming nodes have changed. This entry will be read during
+                // the remapping stage in the next iteration of the loop
+                swapped.insert((child, parent), duplicate_index);
+                // remove old edge
+                let old_edge = ingredients.find_edge(parent, child).unwrap();
+                ingredients.remove_edge(old_edge);
+            } else {
+                // We have successfully made a valid graph! Now we can inform the dmp of all the
+                // changes
+                inform_col_changes(&mut dmp, &self.columns, &ingredients)?;
+                // Add any new nodes to existing domains (they'll also ignore all updates for now)
+                debug!("mutating existing domains");
+                augmentation::inform(source, &mut ingredients, &mut dmp, uninformed_domain_nodes)?;
+
+                // Set up inter-domain connections
+                info!("bringing up inter-domain connections");
+                routing::connect(&ingredients, &mut dmp, &new)?;
+
+                materializations.commit(&mut ingredients, &new, &mut dmp)?;
+
+                info!(
+                    ms = ?start.elapsed().as_millis(),
+                    "migration planning completed"
+                );
+
+                materializations.extend_redundant_partial(local_redundant_partial);
+                return Ok(MigrationPlan {
+                    ingredients,
+                    domain_nodes,
+                    ndomains,
+                    remap,
+                    materializations,
+                    dmp,
+                });
             }
         }
-
-        // Set up inter-domain connections
-        // NOTE: once we do this, we are making existing domains block on new domains!
-        info!("bringing up inter-domain connections");
-        routing::connect(&mut ingredients, &mut dmp, &new)?;
-
-        // And now, the last piece of the puzzle -- set up materializations
-        info!("initializing new materializations");
-        let mut materializations = mainline.materializations.clone();
-
-        materializations.extend(&mut ingredients, &new)?;
-        materializations.validate(&ingredients, &new)?;
-        materializations.commit(&mut ingredients, &new, &mut dmp)?;
-
-        warn!(
-            ms = ?start.elapsed().as_millis(),
-            "migration planning completed"
-        );
-
-        Ok(MigrationPlan {
-            ingredients,
-            domain_nodes,
-            ndomains,
-            remap,
-            materializations,
-            dmp,
-        })
     }
 }

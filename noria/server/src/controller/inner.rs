@@ -987,7 +987,6 @@ impl Leader {
         if readers.is_empty() {
             return Ok(None);
         }
-
         let mut replicas: Vec<ViewReplica> = Vec::new();
         for r in readers {
             #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices

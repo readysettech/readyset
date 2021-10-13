@@ -84,6 +84,17 @@ impl Node {
     pub fn named_mirror<NT: Into<NodeType>>(&self, n: NT, name: String) -> Node {
         Self::new(name, &self.fields, n)
     }
+
+    /// Duplicates the existing node, clearing the index, taken flag, and timestamps
+    /// Used to create fully materialized duplicates of partially materialized nodes
+    pub fn duplicate(&self) -> Node {
+        Self {
+            index: None,
+            taken: false,
+            timestamps: HashMap::new(),
+            ..self.clone()
+        }
+    }
 }
 
 #[must_use]
