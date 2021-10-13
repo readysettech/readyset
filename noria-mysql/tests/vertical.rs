@@ -10,6 +10,8 @@
 //! cargo test -p noria-mysql --features vertical_tests --test vertical
 //! ```
 
+use std::cmp;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -250,17 +252,34 @@ impl OperationResult {
     }
 }
 
+fn compare_rows(r1: &mysql::Row, r2: &mysql::Row) -> Ordering {
+    let l = cmp::min(r1.len(), r2.len());
+    for i in 0..l {
+        match r1.as_ref(i).unwrap().partial_cmp(r2.as_ref(i).unwrap()) {
+            Some(Ordering::Equal) => {}
+            Some(non_equal) => return non_equal,
+            None => {}
+        }
+    }
+    r1.len().cmp(&r2.len())
+}
+
 impl PartialEq for OperationResult {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             // TODO: is it worth trying to check error equality here? probably not
             (Self::Err(_), Self::Err(_)) => true,
             (Self::Rows(rs1), Self::Rows(rs2)) => {
-                rs1.len() == rs2.len()
-                    && rs1.iter().zip(rs2).all(|(r1, r2)| {
+                rs1.len() == rs2.len() && {
+                    let mut rs1 = rs1.iter().collect::<Vec<_>>();
+                    rs1.sort_by(|r1, r2| compare_rows(r1, r2));
+                    let mut rs2 = rs2.iter().collect::<Vec<_>>();
+                    rs2.sort_by(|r1, r2| compare_rows(r1, r2));
+                    rs1.iter().zip(rs2).all(|(r1, r2)| {
                         r1.len() == r2.len()
                             && (0..r1.len()).all(|i| r1.as_ref(i).unwrap() == r2.as_ref(i).unwrap())
                     })
+                }
             }
             (Self::NoResults, Self::NoResults) => true,
             _ => false,
