@@ -19,7 +19,7 @@ async fn create_table_insert_test() {
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
-        value INT NOT NULL,
+        value INT NOT NULL
     );",
         )
         .unwrap();
@@ -106,4 +106,53 @@ async fn describe_table_test() {
 
     assert_eq!(vals, vals_truth);
     assert_eq!(cols, cols_truth);
+}
+
+/// This test verifies that a prepared statement can be executed
+/// on both noria and mysql.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn mirror_prepare_exec_test() {
+    let cluster_name = "ct_mirror_prepare_exec";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.add_server(ServerParams::default());
+    deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+
+    // Create a table and write to it through the adapter.
+    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut adapter_conn = mysql::Conn::new(opts.clone()).unwrap();
+    adapter_conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .unwrap();
+
+    adapter_conn
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .unwrap();
+    adapter_conn
+        .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
+        .unwrap();
+
+    let prep_stmt = adapter_conn
+        .prep(r"SELECT * FROM t1 WHERE uid = ?")
+        .unwrap();
+    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt.clone(), (2,)).unwrap();
+    assert_eq!(result, vec![(2, 5)]);
+
+    // Kill the one and only server, everything should go to fallback.
+    deployment
+        .kill_server(&deployment.server_addrs()[0])
+        .await
+        .unwrap();
+    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt, (2,)).unwrap();
+    assert_eq!(result, vec![(2, 5)]);
+
+    deployment.teardown().await.unwrap();
 }
