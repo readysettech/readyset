@@ -1,35 +1,47 @@
 steps:
-  - block: "Create external :amazon-ec2: AMIs?"
+  - block: "Create production external :amazon-ec2: AMIs?"
 
-  - label: ":packer: Run production build for external-base"
-    key: packer-external-base
+  - label: ':rust: Build readyset release binaries'
+    key: build-release-binaries
     commands:
-    - cd /workdir/ops/new-images
-    - packer init .
-    - packer build -only=amazon-ebs.external-base .
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume
+    - strip target/release/noria-server target/release/noria-mysql target/release/noria-psql target/release/ensure-ebs-volume
+    artifact_paths:
+    - target/release/noria-server
+    - target/release/noria-mysql
+    - target/release/noria-psql
+    - target/release/ensure-ebs-volume
     plugins:
-    - docker#v3.7.0:
-        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
-        propagate-environment: true
-        environment:
-          - PACKER_CREATE_AMI=true
-          - PACKER_PRODUCTION=true
-    - ecr#v2.5.0:
-        login: true
-        retries: 3
-
+      - docker#v3.9.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
 
   - label: ":packer: Run production build for all external images"
-    depends_on: packer-external-base
     key: packer-build-external
+    depends_on: build-release-binaries
     commands:
-    - cd /workdir/ops/new-images
+    - cd /workdir/ops/images
+    - mkdir binaries
+    - 'echo +++ :buildkite: Downloading binary artifacts'
+    - buildkite-agent artifact download target/release/* binaries/
     - packer init .
+    - 'echo +++ :packer: Running packer build'
     - packer build -only=amazon-ebs.readyset-* .
+    - 'echo +++ :buildkite: Uploading manifest artifact'
     - buildkite-agent artifact upload packer-manifest.json
     plugins:
-    - docker#v3.7.0:
-        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - docker#v3.9.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
         propagate-environment: true
         environment:
           - PACKER_CREATE_AMI=true
@@ -45,21 +57,29 @@ steps:
         text: Release Name (This name WILL be seen by customers)
 
   - label: ":packer: Run copy production images to deploy account"
-    key: packer-build-external
+    key: packer-deploy-external
+    depends_on: packer-build-external
     commands:
     - export RELEASE_NAME="$(buildkite-agent meta-data get release-name)"
     - cd /workdir/ops/image-deploy
-    - buildkite-agent artifact download packer-manifest.json source-packer-manifest.json
+    - buildkite-agent artifact download packer-manifest.json .
+    - mv packer-manifest.json source-packer-manifest.json
     - packer init .
     - ./run-with-manifest-as-env.sh source-packer-manifest.json packer build -only=amazon-ebs.readyset-* .
     - buildkite-agent artifact upload packer-manifest.json
     plugins:
-    - docker#v3.7.0:
-        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - docker#v3.9.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
         propagate-environment: true
+        propagate-aws-auth-tokens: true
         environment:
           - PACKER_CREATE_AMI=true
           - PACKER_PRODUCTION=true
     - ecr#v2.5.0:
         login: true
         retries: 3
+    - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/Packer
+    agents:
+      queue: ops
