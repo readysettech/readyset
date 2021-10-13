@@ -19,11 +19,13 @@ use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::{QueryHandler, UpstreamDatabase};
+use noria_client_metrics::QueryExecutionEvent;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::net;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, error, info, span, Level};
+use tracing::{debug, error, info, info_span, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement};
@@ -131,6 +133,11 @@ pub struct Options {
     #[clap(long)]
     prometheus_metrics: bool,
 
+    /// Enable logging queries and execution metrics in prometheus. This creates a
+    /// histogram per unique query.
+    #[clap(long, requires = "prometheus-metrics")]
+    query_log: bool,
+
     #[clap(flatten)]
     logging: readyset_logging::Options,
 }
@@ -228,6 +235,15 @@ where
             .is_some()
             .then(QueryCoverageInfoRef::default);
 
+        // Gate query log code path on the log flag existing.
+        let qlog_sender = if options.query_log {
+            let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
+            rt.spawn(query_logger(qlog_receiver, self.database_type));
+            Some(qlog_sender)
+        } else {
+            None
+        };
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
@@ -242,6 +258,7 @@ where
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
+                .query_log(qlog_sender.clone())
                 .query_coverage_info(query_coverage_info);
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
@@ -329,6 +346,36 @@ where
         drop(rt);
 
         Ok(())
+    }
+}
+
+/// Async task that logs query stats.
+async fn query_logger(mut receiver: UnboundedReceiver<QueryExecutionEvent>, db_type: DatabaseType) {
+    let _span = info_span!("query-logger");
+
+    let database_label: noria_client_metrics::recorded::DatabaseType = db_type.into();
+    let database_label = String::from(database_label);
+
+    while let Some(event) = receiver.recv().await {
+        let query_text = event.query.unwrap_or_else(|| "".to_string());
+
+        if let Some(noria) = event.noria_duration {
+            metrics::histogram!(
+                noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
+                noria,
+                "query" => query_text.clone(),
+                "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
+            );
+        }
+
+        if let Some(upstream) = event.upstream_duration {
+            metrics::histogram!(
+                noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
+                upstream,
+                "query" => query_text.clone(),
+                "database_type" => database_label.clone()
+            );
+        }
     }
 }
 

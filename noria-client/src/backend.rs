@@ -10,6 +10,7 @@ use std::{
 
 use metrics::histogram;
 use nom_sql::Dialect;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
@@ -151,6 +152,7 @@ pub struct BackendBuilder {
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
     query_coverage_info: Option<QueryCoverageInfoRef>,
+    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
 }
 
 impl Default for BackendBuilder {
@@ -165,6 +167,7 @@ impl Default for BackendBuilder {
             ticket: None,
             timestamp_client: None,
             query_coverage_info: None,
+            query_log_sender: None,
         }
     }
 }
@@ -198,6 +201,7 @@ impl BackendBuilder {
             timestamp_client: self.timestamp_client,
             prepared_statements: Default::default(),
             query_coverage_info: self.query_coverage_info,
+            query_log_sender: self.query_log_sender,
             _query_handler: PhantomData,
         }
     }
@@ -219,6 +223,14 @@ impl BackendBuilder {
 
     pub fn mirror_ddl(mut self, mirror_ddl: bool) -> Self {
         self.mirror_ddl = mirror_ddl;
+        self
+    }
+
+    pub fn query_log(
+        mut self,
+        query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    ) -> Self {
+        self.query_log_sender = query_log_sender;
         self
     }
 
@@ -295,6 +307,7 @@ pub struct Backend<DB, Handler> {
     /// If None, query coverage analysis is disabled
     #[allow(dead_code)] // TODO: Remove once this is used
     query_coverage_info: Option<QueryCoverageInfoRef>,
+    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     _query_handler: PhantomData<Handler>,
 }
 
@@ -1005,19 +1018,27 @@ where
         params: Vec<DataType>,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let query_coverage_info = self.query_coverage_info;
+        // Requires clone as no references are allowed after self.execute_inner
+        // due to borrow checker rules.
+        let query_logger = self.query_log_sender.clone();
         let prepared_statement = self
             .prepared_statements
             .get(&id)
             .cloned()
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
+        // TODO(justin): Update this path to correctly set the query string when
+        // we can get this value for upstream db prepared statements.
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
         let res = self
             .execute_inner(id, params, &prepared_statement, &mut query_event)
             .await;
-        if let (Some(info), e) = (query_coverage_info, query_event) {
-            info.prepare_executed(id, e);
+
+        if let Some(info) = query_coverage_info {
+            info.prepare_executed(id, query_event.clone());
         }
+
+        log_query(query_logger, query_event);
         res
     }
 
@@ -1279,10 +1300,13 @@ where
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
         let query_coverage_info = self.query_coverage_info;
+        let query_logger = self.query_log_sender.clone();
         let res = self.query_inner(query, &mut query_event).await;
-        if let (Some(info), Some(e)) = (query_coverage_info, query_event.into()) {
-            info.query_executed(query.to_string(), e);
+        if let Some(info) = query_coverage_info {
+            info.query_executed(query.to_string(), query_event.clone());
         }
+
+        log_query(query_logger, query_event);
         res
     }
 
@@ -1322,6 +1346,17 @@ where
                     }
                 }
             }
+        }
+    }
+}
+
+/// Offloads recording query metrics to a separate thread. Sends a
+/// message over a mpsc channel.
+fn log_query(sender: Option<UnboundedSender<QueryExecutionEvent>>, event: QueryExecutionEvent) {
+    if let Some(sender) = sender {
+        // Drop the error if something goes wrong with query logging.
+        if let Err(e) = sender.send(event) {
+            warn!("Error logging query with query logging enabled: {}", e);
         }
     }
 }

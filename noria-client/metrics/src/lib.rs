@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 pub mod recorded;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 /// Event logging for the execution of a single query in the adapter. Durations
 /// logged should be mirrored by an update to `QueryExecutionTimerHandle`.
 pub struct QueryExecutionEvent {
@@ -23,7 +23,7 @@ pub struct QueryExecutionEvent {
     pub noria_error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub enum EventType {
     Prepare,
     Execute,
