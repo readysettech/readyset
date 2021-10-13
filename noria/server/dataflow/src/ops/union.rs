@@ -4,7 +4,7 @@ use noria::{invariant, KeyComparison};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 use vec1::Vec1;
 
 use crate::prelude::*;
@@ -801,7 +801,7 @@ impl Ingredient for Union {
                         .flat_map(|(key, pieces)| {
                             if pieces.evict {
                                 // TODO XXX TODO XXX TODO XXX TODO
-                                eprintln!("!!! need to issue an eviction after replaying key");
+                                error!("!!! need to issue an eviction after replaying key");
                             }
                             released.insert(KeyComparison::from(key.clone()));
                             pieces.buffered.into_iter()

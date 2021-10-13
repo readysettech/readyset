@@ -16,6 +16,7 @@ use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
+use tracing::error;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -269,8 +270,8 @@ fn main() -> anyhow::Result<()> {
     let mut handle = rt.block_on(async move {
         let authority = authority.to_authority(&authority_addr, &deployment).await;
 
-        let external_addr = external_addr.await.unwrap_or_else(|err| {
-            eprintln!("Error obtaining external IP address: {}", err);
+        let external_addr = external_addr.await.unwrap_or_else(|error| {
+            error!(%error, "Error obtaining external IP address");
             process::exit(1)
         });
         builder.set_external_addr(SocketAddr::from((external_addr, external_port)));

@@ -1,4 +1,5 @@
 use metrics_exporter_prometheus::PrometheusRecorder;
+use tracing::warn;
 
 use crate::metrics::{Clear, Render};
 
@@ -10,8 +11,7 @@ impl Render for PrometheusRecorder {
 
 impl Clear for PrometheusRecorder {
     fn clear(&self) -> bool {
-        // TODO(fran): Use a real log here.
-        eprintln!("Attempted to clear PrometheusRecorder, which cannot be cleared. Ignoring...");
+        warn!("Attempted to clear PrometheusRecorder, which cannot be cleared. Ignoring...");
         false
     }
 }

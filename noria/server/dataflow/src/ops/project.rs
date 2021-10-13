@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::iter;
+use tracing::error;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
@@ -213,7 +214,7 @@ impl Ingredient for Project {
                     new_r.extend(e.iter().map(|expr| match expr.eval(r) {
                         Ok(val) => val.into_owned(),
                         Err(e) => {
-                            eprintln!("Error evaluating project expression: {}", e);
+                            error!(error = %e, "Error evaluating project expression");
                             DataType::None
                         }
                     }));

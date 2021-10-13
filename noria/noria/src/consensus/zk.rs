@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::time::Duration;
 use tokio::sync::Notify;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use zookeeper_async::{
     Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper,
 };
@@ -37,7 +37,7 @@ struct EventWatcher;
 impl Watcher for EventWatcher {
     fn handle(&self, e: WatchedEvent) {
         if e.keeper_state != KeeperState::SyncConnected {
-            eprintln!("Lost connection to ZooKeeper! Aborting");
+            error!("Lost connection to ZooKeeper! Aborting");
             process::abort();
         }
     }
