@@ -3,7 +3,9 @@ use chrono::NaiveDateTime;
 use neon::{prelude::*, types::JsDate};
 use noria::ColumnSchema;
 use noria::{results::Results, DataType};
-use noria_client::backend::{PrepareResult, QueryResult, SelectSchema, UpstreamPrepare};
+use noria_client::backend::{
+    PrepareResult, QueryResult, SelectSchema, SinglePrepareResult, UpstreamPrepare,
+};
 use noria_mysql::{Error, MySqlUpstream};
 use rust_decimal::prelude::ToPrimitive;
 use std::convert::TryFrom;
@@ -43,13 +45,13 @@ where
     use noria_client::backend::noria_connector::PrepareResult::*;
 
     let js_prepare_result = cx.empty_object();
-    match raw_prepare_result {
-        PrepareResult::Noria(Select {
+    match raw_prepare_result.noria_biased() {
+        SinglePrepareResult::Noria(Select {
             statement_id,
             params,
             schema,
         })
-        | PrepareResult::Noria(Insert {
+        | SinglePrepareResult::Noria(Insert {
             statement_id,
             params,
             schema,
@@ -70,7 +72,7 @@ where
                 js_schema.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::Noria(
+        SinglePrepareResult::Noria(
             Update {
                 statement_id,
                 params,
@@ -89,7 +91,7 @@ where
                 js_params.upcast::<JsValue>(),
             )?;
         }
-        PrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
+        SinglePrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
             utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
         }
     }
