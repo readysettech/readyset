@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use tracing::warn;
 use vec_map::VecMap;
 
 /// A batch of writes to be persisted to the state backing a [`Base`] node
@@ -301,7 +302,7 @@ impl Base {
                             }
                         }
                     }
-                    op => eprintln!("Base ignoring operation: {:?}", op),
+                    op => warn!(?op, "Base ignoring operation"),
                 }
             }
 

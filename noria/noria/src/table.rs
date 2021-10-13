@@ -7,6 +7,7 @@ use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use core::convert::TryInto;
 use futures_util::{
@@ -67,9 +68,10 @@ impl Service<()> for Endpoint {
             s.flush().await?;
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
-            Ok(multiplex::Client::with_error_handler(t, |e| {
-                eprintln!("table server went away: {}", e)
-            }))
+            Ok(multiplex::Client::with_error_handler(
+                t,
+                |e| error!(error = %e, "Table server went away"),
+            ))
         }
     }
 }

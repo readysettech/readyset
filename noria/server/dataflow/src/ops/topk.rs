@@ -10,6 +10,7 @@ use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
+use tracing::warn;
 
 use crate::prelude::*;
 
@@ -230,7 +231,7 @@ impl Ingredient for TopK {
                         })
                         .all(|&(_, is_new)| is_new);
                     if all_new_bottom {
-                        eprintln!("topk is guesstimating bottom row");
+                        warn!("topk is guesstimating bottom row");
                     }
                 }
             }

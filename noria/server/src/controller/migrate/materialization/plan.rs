@@ -342,7 +342,7 @@ impl<'a> Plan<'a> {
                 //  a domain may appear multiple times in this list if a path crosses into the same
                 //  domain more than once. currently, that will cause a deadlock.
                 if seen.contains(&domain) {
-                    eprintln!("{}", graphviz(self.graph, true, self.m));
+                    debug!("{}", graphviz(self.graph, true, self.m));
                     internal!("detected A-B-A domain replay path");
                 }
                 seen.insert(domain);

@@ -25,6 +25,8 @@ use tokio::task_local;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_tower::multiplex::server;
 use tower::service_fn;
+use tracing::error;
+use tracing::warn;
 
 /// Retry reads every this often.
 const RETRY_TIMEOUT: time::Duration = time::Duration::from_micros(100);
@@ -136,7 +138,7 @@ pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: R
                     }
                 }
             }
-            eprintln!("!!! reader client protocol error: {:?}", e);
+            error!(error = ?e, "reader client protocol error");
         }));
     }
 }
@@ -544,8 +546,8 @@ impl BlockingRead {
             if !self.pending_keys.is_empty() {
                 let waited = now - self.first;
                 if waited > time::Duration::from_secs(7) && !self.warned {
-                    eprintln!(
-                        "warning: read has been stuck waiting on {} for {:?}",
+                    warn!(
+                        "read has been stuck waiting on {} for {:?}",
                         if self.pending_keys.len() < 8 {
                             format!("{:?}", self.pending_keys)
                         } else {

@@ -4,6 +4,7 @@ use crossbeam::queue::ArrayQueue;
 use metrics::{GaugeValue, Recorder, Unit};
 
 use noria::metrics::Key;
+use tracing::warn;
 
 use crate::metrics::{Clear, MetricsOp, OpQueue, Render, METRICS_RECORDER};
 
@@ -33,7 +34,7 @@ impl<T: Recorder> BufferedRecorder<T> {
             // If the queue is full, just process one item and try again
             self.process_next(&guard);
             if self.queue.push(op).is_err() {
-                eprintln!("WARNING: failed to push metrics op after freeing one slot!");
+                warn!("Failed to push metrics op after freeing one slot!");
             }
         }
     }

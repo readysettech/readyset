@@ -28,6 +28,7 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
 use tower_service::Service;
+use tracing::error;
 use vec1::Vec1;
 
 /// A fixed period of time after which a call to any View method will time out
@@ -119,9 +120,10 @@ impl Service<()> for Endpoint {
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
-            Ok(multiplex::Client::with_error_handler(t, |e| {
-                eprintln!("view server went away: {}", e)
-            }))
+            Ok(multiplex::Client::with_error_handler(
+                t,
+                |e| error!(error = %e, "View server went away"),
+            ))
         }
     }
 }

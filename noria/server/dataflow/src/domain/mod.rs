@@ -1312,7 +1312,7 @@ impl Domain {
                                         .map(|r| {
                                             if let Err(e) = r {
                                                 // domain went away?
-                                                eprintln!("replay source went away: {:?}", e);
+                                                error!(error = %e, "replay source went away");
                                             }
                                         }),
                                 );
