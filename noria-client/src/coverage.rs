@@ -4,183 +4,19 @@
 #![allow(dead_code)] // TODO: remove once this is used
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
-use std::time::Instant;
 
+use noria_client_metrics::QueryExecutionEvent;
 use serde::Serialize;
-
-use noria::ReadySetError;
-
-#[derive(Debug, Serialize, Default)]
-pub(crate) struct PrepareEvent {
-    /// How long the prepare request took to run on the upstream database
-    pub(crate) upstream_duration: Duration,
-
-    /// How long the prepare request took to run on noria, if it was run on noria at all
-    pub(crate) noria_duration: Option<Duration>,
-
-    /// Error returned by noria, if any
-    pub(crate) noria_error: Option<String>,
-}
-
-pub(crate) struct MaybePrepareEvent(Option<PrepareEvent>);
-
-impl MaybePrepareEvent {
-    pub(crate) fn new(mirror_reads: bool) -> Self {
-        let event = if mirror_reads {
-            Some(Default::default())
-        } else {
-            None
-        };
-        MaybePrepareEvent(event)
-    }
-
-    pub(crate) fn start_timer(&mut self) -> PrepareTimerHandle {
-        if let Some(ref mut e) = self.0 {
-            PrepareTimerHandle::new(Some(e))
-        } else {
-            PrepareTimerHandle::new(None)
-        }
-    }
-
-    pub(crate) fn set_noria_error(&mut self, error: &ReadySetError) -> &mut Self {
-        if let Some(mut e) = self.0.take() {
-            e.noria_error = Some(format!("{:?}", error));
-            self.0 = Some(e)
-        }
-        self
-    }
-}
-
-impl From<MaybePrepareEvent> for Option<PrepareEvent> {
-    fn from(e: MaybePrepareEvent) -> Self {
-        e.0
-    }
-}
-
-pub(crate) struct PrepareTimerHandle<'a> {
-    event: Option<&'a mut PrepareEvent>,
-    timer: Option<Instant>,
-}
-
-impl<'a> PrepareTimerHandle<'a> {
-    pub(crate) fn new(event: Option<&'a mut PrepareEvent>) -> PrepareTimerHandle {
-        let timer = if event.is_some() {
-            Some(Instant::now())
-        } else {
-            None
-        };
-        PrepareTimerHandle { event, timer }
-    }
-
-    pub(crate) fn set_upstream_duration(mut self) {
-        if let (Some(mut e), Some(t)) = (self.event.take(), self.timer.take()) {
-            e.upstream_duration = t.elapsed();
-        }
-    }
-
-    pub(crate) fn set_noria_duration(mut self) {
-        if let (Some(mut e), Some(t)) = (self.event.take(), self.timer.take()) {
-            e.noria_duration = Some(t.elapsed());
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Default)]
-pub(crate) struct ExecuteEvent {
-    /// How long the execute request took to run on the upstream database
-    pub(crate) upstream_duration: Duration,
-
-    /// How long the execute request took to run on noria, if it was run on noria at all
-    pub(crate) noria_duration: Option<Duration>,
-
-    /// Error returned by noria, if any
-    pub(crate) noria_error: Option<String>,
-
-    /// True if the results returned by upstream and noria differed
-    pub(crate) results_differed: bool,
-}
-
-pub(crate) struct MaybeExecuteEvent(Option<ExecuteEvent>);
-
-impl MaybeExecuteEvent {
-    pub(crate) fn new(mirror_reads: bool) -> Self {
-        let event = if mirror_reads {
-            Some(Default::default())
-        } else {
-            None
-        };
-        MaybeExecuteEvent(event)
-    }
-
-    pub(crate) fn start_timer(&mut self) -> ExecuteTimerHandle {
-        if let Some(ref mut e) = self.0 {
-            ExecuteTimerHandle::new(Some(e))
-        } else {
-            ExecuteTimerHandle::new(None)
-        }
-    }
-
-    pub(crate) fn set_noria_error(&mut self, error: &ReadySetError) -> &mut Self {
-        if let Some(mut e) = self.0.take() {
-            e.noria_error = Some(format!("{:?}", error));
-            self.0 = Some(e)
-        }
-        self
-    }
-
-    pub(crate) fn set_results_differed(&mut self, differed: bool) -> &mut Self {
-        if let Some(mut e) = self.0.take() {
-            e.results_differed = differed;
-            self.0 = Some(e)
-        }
-        self
-    }
-}
-
-impl From<MaybeExecuteEvent> for Option<ExecuteEvent> {
-    fn from(e: MaybeExecuteEvent) -> Self {
-        e.0
-    }
-}
-
-pub(crate) struct ExecuteTimerHandle<'a> {
-    event: Option<&'a mut ExecuteEvent>,
-    timer: Option<Instant>,
-}
-
-impl<'a> ExecuteTimerHandle<'a> {
-    pub(crate) fn new(event: Option<&'a mut ExecuteEvent>) -> ExecuteTimerHandle {
-        let timer = if event.is_some() {
-            Some(Instant::now())
-        } else {
-            None
-        };
-        ExecuteTimerHandle { event, timer }
-    }
-
-    pub(crate) fn set_upstream_duration(mut self) {
-        if let (Some(mut e), Some(t)) = (self.event.take(), self.timer.take()) {
-            e.upstream_duration = t.elapsed();
-        }
-    }
-
-    pub(crate) fn set_noria_duration(mut self) {
-        if let (Some(mut e), Some(t)) = (self.event.take(), self.timer.take()) {
-            e.noria_duration = Some(t.elapsed());
-        }
-    }
-}
 
 /// Data structure representing information about a single, unique query run against an adapter
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct QueryInfo {
     /// Information about times this query was prepared
-    prepare_events: Vec<PrepareEvent>,
+    prepare_events: Vec<QueryExecutionEvent>,
 
     /// Information about times this query was executed, either directly or via executing a prepared
     /// statement
-    execute_events: Vec<ExecuteEvent>,
+    execute_events: Vec<QueryExecutionEvent>,
 }
 
 type UpstreamStatementId = u32;
@@ -239,7 +75,7 @@ impl QueryCoverageInfo {
     }
 
     /// Record in this QueryCoverageInfo that a query was prepared
-    fn query_prepared(&mut self, query: String, event: PrepareEvent, statement_id: u32) {
+    fn query_prepared(&mut self, query: String, event: QueryExecutionEvent, statement_id: u32) {
         self.queries
             .entry(query.clone())
             .or_default()
@@ -250,7 +86,7 @@ impl QueryCoverageInfo {
 
     /// Record in this QueryCoverageInfo that a query was executed, either directly or via executing
     /// a prepared statement
-    fn query_executed(&mut self, query: String, event: ExecuteEvent) {
+    fn query_executed(&mut self, query: String, event: QueryExecutionEvent) {
         self.queries
             .entry(query)
             .or_default()
@@ -258,7 +94,7 @@ impl QueryCoverageInfo {
             .push(event)
     }
 
-    fn prepare_executed(&mut self, statement_id: u32, event: ExecuteEvent) {
+    fn prepare_executed(&mut self, statement_id: u32, event: QueryExecutionEvent) {
         if let Some(query) = self.prepared.get(&statement_id) {
             self.queries
                 .entry(query.to_owned())
@@ -288,7 +124,12 @@ impl QueryCoverageInfoRef {
     ///
     /// Panics if the backing mutex has been poisoned (this should generally only happen in
     /// exceptional cases)
-    pub(crate) fn query_prepared(&self, query: String, event: PrepareEvent, statement_id: u32) {
+    pub(crate) fn query_prepared(
+        &self,
+        query: String,
+        event: QueryExecutionEvent,
+        statement_id: u32,
+    ) {
         self.0
             .lock()
             .unwrap()
@@ -301,7 +142,7 @@ impl QueryCoverageInfoRef {
     ///
     /// Panics if the backing mutex has been poisoned (this should generally only happen in
     /// exceptional cases)
-    pub(crate) fn query_executed(&self, query: String, event: ExecuteEvent) {
+    pub(crate) fn query_executed(&self, query: String, event: QueryExecutionEvent) {
         self.0.lock().unwrap().query_executed(query, event)
     }
 
@@ -311,7 +152,7 @@ impl QueryCoverageInfoRef {
     ///
     /// Panics if the backing mutex has been poisoned (this should generally only happen in
     /// exceptional cases)
-    pub(crate) fn prepare_executed(&self, statement_id: u32, event: ExecuteEvent) {
+    pub(crate) fn prepare_executed(&self, statement_id: u32, event: QueryExecutionEvent) {
         self.0.lock().unwrap().prepare_executed(statement_id, event)
     }
 
