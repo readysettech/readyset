@@ -56,6 +56,7 @@ resource "aws_iam_role" "packer" {
   name               = "Packer"
   assume_role_policy = data.aws_iam_policy_document.packer_assume_role.json
   inline_policy {
+    name   = "AllowPackerRequirements"
     policy = data.aws_iam_policy_document.packer.json
   }
 }
