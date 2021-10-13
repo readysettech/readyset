@@ -6,6 +6,11 @@ edition = "2018"
 
 [dependencies]
 metrics = "0.17.0"
+serde = "1.0.130"
+serde_json = "1.0.67"
+
+#local dependencies
+noria = { path = "../../noria/noria" }
 
 [lib]
 path = "src/lib.rs"

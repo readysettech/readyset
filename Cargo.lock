@@ -3400,6 +3400,9 @@ name = "noria-client-metrics"
 version = "0.1.0"
 dependencies = [
  "metrics",
+ "noria",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

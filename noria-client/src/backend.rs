@@ -18,9 +18,10 @@ use noria::errors::internal_err;
 use noria::errors::ReadySetError::PreparedStatementMissing;
 use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError, ReadySetResult};
 use noria_client_metrics::recorded::SqlQueryType;
+use noria_client_metrics::{EventType, QueryExecutionEvent};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
-use crate::coverage::{MaybeExecuteEvent, MaybePrepareEvent, QueryCoverageInfoRef};
+use crate::coverage::QueryCoverageInfoRef;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -460,7 +461,7 @@ where
         q: nom_sql::SelectStatement,
         query_str: String,
         ticket: Option<Timestamp>,
-        event: &mut MaybeExecuteEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let connector = self
             .upstream
@@ -542,7 +543,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
-        event: &mut MaybePrepareEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         let connector = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
@@ -576,7 +577,7 @@ where
         &mut self,
         upstream_statement_id: u32,
         params: Vec<DataType>,
-        event: &mut MaybeExecuteEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This condition requires an upstream connector".to_string())
@@ -645,7 +646,7 @@ where
         &mut self,
         upstream_statement_id: u32,
         params: Vec<DataType>,
-        event: &mut MaybeExecuteEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream_res = self
             .execute_upstream(upstream_statement_id, params.clone(), event)
@@ -701,16 +702,26 @@ where
         q: nom_sql::SelectStatement,
         query_str: &str,
         ticket: Option<Timestamp>,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        match self.noria.handle_select(q, ticket).await {
+        let t = event.start_timer();
+        let noria_result = self.noria.handle_select(q, ticket).await;
+        t.set_noria_duration();
+
+        match noria_result {
             Ok(r) => Ok(QueryResult::Noria(r)),
             Err(e) => {
+                event.set_noria_error(&e);
                 // Check if we have fallback setup. If not, we need to return this error,
                 // otherwise, we transition to fallback.
                 match self.upstream {
                     Some(ref mut connector) => {
                         error!(error = %e, "Error received from noria, sending query to fallback");
-                        connector.query(query_str).await.map(QueryResult::Upstream)
+
+                        let t = event.start_timer();
+                        let res = connector.query(query_str).await.map(QueryResult::Upstream);
+                        t.set_upstream_duration();
+                        res
                     }
                     None => {
                         error!("{}", e);
@@ -752,7 +763,7 @@ where
     async fn prepare_inner(
         &mut self,
         query: &str,
-        event: &mut MaybePrepareEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
@@ -891,9 +902,9 @@ where
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
     pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
-        let mut maybe_prepare_event = MaybePrepareEvent::new(self.mirror_reads);
-        let res = self.prepare_inner(query, &mut maybe_prepare_event).await;
-        if let (Some(info), Some(e)) = (self.query_coverage_info, maybe_prepare_event.into()) {
+        let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
+        let res = self.prepare_inner(query, &mut query_event).await;
+        if let (Some(info), e) = (self.query_coverage_info, query_event) {
             info.query_prepared(query.to_string(), e, self.prepared_count);
         }
         res
@@ -904,7 +915,7 @@ where
         id: u32,
         params: Vec<DataType>,
         prepared_statement: &PreparedStatement,
-        event: &mut MaybeExecuteEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
@@ -1000,11 +1011,11 @@ where
             .cloned()
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
-        let mut maybe_event = MaybeExecuteEvent::new(self.mirror_reads);
+        let mut query_event = QueryExecutionEvent::new(EventType::Execute);
         let res = self
-            .execute_inner(id, params, &prepared_statement, &mut maybe_event)
+            .execute_inner(id, params, &prepared_statement, &mut query_event)
             .await;
-        if let (Some(info), Some(e)) = (query_coverage_info, maybe_event.into()) {
+        if let (Some(info), e) = (query_coverage_info, query_event) {
             info.prepare_executed(id, e);
         }
         res
@@ -1014,7 +1025,7 @@ where
     async fn query_inner(
         &mut self,
         query: &str,
-        event: &mut MaybeExecuteEvent,
+        event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let start = time::Instant::now();
         let slowlog = self.slowlog;
@@ -1125,7 +1136,7 @@ where
                         self.mirror_read(q.clone(), query.to_owned(), self.ticket.clone(), event)
                             .await
                     } else {
-                        self.cascade_read(q.clone(), query, self.ticket.clone())
+                        self.cascade_read(q.clone(), query, self.ticket.clone(), event)
                             .await
                     };
                     //TODO(Dan): Implement fallback execution timing
@@ -1266,10 +1277,10 @@ where
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let mut maybe_event = MaybeExecuteEvent::new(self.mirror_reads);
+        let mut query_event = QueryExecutionEvent::new(EventType::Execute);
         let query_coverage_info = self.query_coverage_info;
-        let res = self.query_inner(query, &mut maybe_event).await;
-        if let (Some(info), Some(e)) = (query_coverage_info, maybe_event.into()) {
+        let res = self.query_inner(query, &mut query_event).await;
+        if let (Some(info), Some(e)) = (query_coverage_info, query_event.into()) {
             info.query_executed(query.to_string(), e);
         }
         res
