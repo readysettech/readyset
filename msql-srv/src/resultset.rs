@@ -162,7 +162,23 @@ impl<'a, W: AsyncWrite + Unpin> QueryResultWriter<'a, W> {
     /// See [`RowWriter`](struct.RowWriter.html).
     pub async fn start(mut self, columns: &'a [Column]) -> io::Result<RowWriter<'a, W>> {
         self.finalize(true).await?;
-        RowWriter::new(self, columns).await
+        RowWriter::new(self, columns, None).await
+    }
+
+    /// Start a resultset response to the client that conforms to the given `columns`.
+    /// It accepts a preencoded representation of the `columns` that can be directly
+    /// emitted to the wire as an optimization.
+    ///
+    /// Note that if no columns are emitted, any written rows are ignored.
+    ///
+    /// See [`RowWriter`](struct.RowWriter.html).
+    pub async fn start_with_cache(
+        mut self,
+        columns: &'a [Column],
+        cached: &'a [u8],
+    ) -> io::Result<RowWriter<'a, W>> {
+        self.finalize(true).await?;
+        RowWriter::new(self, columns, Some(cached)).await
     }
 
     /// Send an empty resultset response to the client indicating that `rows` rows were affected by
@@ -248,6 +264,8 @@ pub struct RowWriter<'a, W: AsyncWrite + Unpin> {
     /// The index where the null bitmap for the current row begins
     bitmap_idx: usize,
     columns: &'a [Column],
+    /// A cached pre-encoded representation of the column definitions
+    cached: Option<&'a [u8]>,
 
     // next column to write for the current row
     // NOTE: (ab)used to track number of *rows* for a zero-column resultset
@@ -268,11 +286,13 @@ where
     async fn new(
         result: QueryResultWriter<'a, W>,
         columns: &'a [Column],
+        cached_column_def: Option<&'a [u8]>,
     ) -> io::Result<RowWriter<'a, W>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
         let mut rw = RowWriter {
             result,
             columns,
+            cached: cached_column_def,
             bitmap_len,
             bitmap_idx: 0,
 
@@ -288,10 +308,16 @@ where
     }
 
     async fn start(&mut self) -> io::Result<()> {
-        if !self.columns.is_empty() {
-            writers::column_definitions(self.columns, &mut self.result.writer).await?;
+        if self.columns.is_empty() {
+            return Ok(());
         }
-        Ok(())
+
+        match self.cached {
+            Some(cached) => {
+                writers::column_definitions_cached(self.columns, cached, self.result.writer).await
+            }
+            None => writers::column_definitions(self.columns, &mut self.result.writer).await,
+        }
     }
 
     /// Write a value to the next column of the current row as a part of this resultset.

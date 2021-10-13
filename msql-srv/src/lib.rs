@@ -143,6 +143,7 @@ use authentication::{generate_auth_data, hash_password};
 use constants::{PROTOCOL_41, RESERVED, SECURE_CONNECTION};
 
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
+pub use crate::writers::prepare_column_definitions;
 
 mod authentication;
 mod commands;
@@ -400,7 +401,6 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
             match cmd {
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.writer, false);
-
                     self.shim
                         .on_query(
                             ::std::str::from_utf8(q)
@@ -414,7 +414,6 @@ impl<B: MysqlShim<W> + Send, R: AsyncRead + Unpin, W: AsyncWrite + Unpin + Send>
                         writer: &mut self.writer,
                         stmts: &mut stmts,
                     };
-
                     self.shim
                         .on_prepare(
                             ::std::str::from_utf8(q)

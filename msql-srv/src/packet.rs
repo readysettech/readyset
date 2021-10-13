@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 const U24_MAX: usize = 16_777_215;
 
 pub struct PacketWriter<W> {
-    seq: u8,
+    pub seq: u8,
     w: W,
     queue: Vec<([u8; 4], Vec<u8>)>,
 }
@@ -99,6 +99,13 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         self.seq = self.seq.wrapping_add(1);
         self.w.flush().await?;
 
+        Ok(())
+    }
+
+    /// Emit raw bytes to the wire, flushes any queued packets beforehand
+    pub async fn write_raw(&mut self, packet: &[u8]) -> Result<(), tokio::io::Error> {
+        self.flush_packets().await?;
+        self.w.write_all(packet).await?;
         Ok(())
     }
 }
