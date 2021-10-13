@@ -260,6 +260,7 @@ impl<B: MysqlShim<net::tcp::OwnedWriteHalf> + Send>
     /// disconnects or an error occurs. See also
     /// [`MysqlIntermediary::run_on`](struct.MysqlIntermediary.html#method.run_on).
     pub async fn run_on_tcp(shim: B, stream: net::TcpStream) -> Result<(), io::Error> {
+        stream.set_nodelay(true)?;
         let (reader, writer) = stream.into_split();
         MysqlIntermediary::run_on(shim, reader, writer).await
     }
