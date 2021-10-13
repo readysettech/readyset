@@ -93,7 +93,7 @@ COPY --from=shellcheck-fetcher /usr/local/bin/shellcheck /usr/local/bin/shellche
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates docker.io; \
+    apt-get install -y --no-install-recommends ca-certificates docker.io jq; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
