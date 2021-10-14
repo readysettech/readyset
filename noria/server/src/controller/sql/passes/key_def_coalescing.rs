@@ -69,6 +69,7 @@ mod tests {
             ],
             keys: None,
             if_not_exists: false,
+            options: vec![],
         };
 
         let res = SqlQuery::CreateTable(q).coalesce_key_definitions();
