@@ -3,6 +3,11 @@ set -euo pipefail
 
 LOG_AGGREGATOR_ADDRESS=`dig @127.0.0.1 -p 8600 logs-aggregator.service.consul +short`
 
+if [ -z "${LOG_AGGREGATOR_ADDRESS}" ]
+then
+  exit 1
+fi
+
 cat > /etc/vector.d/vector.toml <<EOF
 [sources.in]
 type = "journald"
