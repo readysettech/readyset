@@ -29,7 +29,7 @@ async fn write_all_vectored<'a, W: AsyncWrite + Unpin>(
         n -= did_write;
 
         // Not done, need to advance the slices
-        while slices[0].len() >= did_write {
+        while did_write >= slices[0].len() {
             // First skip entire slices
             did_write -= slices[0].len();
             slices = &mut slices[1..];
