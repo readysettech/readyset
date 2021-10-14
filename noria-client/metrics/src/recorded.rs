@@ -29,6 +29,17 @@ pub const QUERY_EXECUTION_TIME: &str = "noria-client.execution_time";
 /// | database_type | The database type being executed. Must be a ['DatabaseType'] |
 pub const QUERY_LOG_EXECUTION_TIME: &str = "query-log.execution_time";
 
+/// Counter: The total number of queries processing by the query reconciler.
+/// Incremented on each loop of the reconciler.
+pub const RECONCILER_PROCESSED: &str = "reconciler.processed";
+
+/// Counter: The number of queries the reconciler has set to allowed.
+/// Incremented on each loop of the reconciler.
+/// TODO(justin): In the future it would be good to support gauges for the
+/// counts of each query status in the reconciler cache. Requires optimization of
+/// locking.
+pub const RECONCILER_ALLOWED: &str = "reconciler.allowed";
+
 /// A query log entry representing the time spent executing a single
 /// query.
 pub struct QueryLogEntry {
