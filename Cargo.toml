@@ -1,6 +1,5 @@
 [patch.crates-io]
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
-mysql = { git = "https://github.com/readysettech/rust-mysql-simple.git" }
 
 [workspace]
 members = [
