@@ -209,6 +209,95 @@ pub(crate) fn anonymize_literals(query: &mut SelectStatement) {
         .unwrap();
 }
 
+#[derive(Default)]
+struct AutoParametrizeVisitor {
+    out: Vec<(usize, Literal)>,
+    in_supported_position: bool,
+    param_index: usize,
+    query_depth: u8,
+}
+
+impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
+    type Error = !;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if matches!(literal, Literal::Placeholder(_)) {
+            self.param_index += 1;
+        }
+        Ok(())
+    }
+
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        self.query_depth = self.query_depth.saturating_add(1);
+        visit::walk_select_statement(self, select_statement)?;
+        self.query_depth = self.query_depth.saturating_sub(1);
+        Ok(())
+    }
+
+    fn visit_where_clause(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        // We can only support parameters in the WHERE clause of the top-level query, not any
+        // subqueries it contains.
+        self.in_supported_position = self.query_depth <= 1;
+        self.visit_expression(expression)?;
+        self.in_supported_position = false;
+        Ok(())
+    }
+
+    fn visit_expression(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        let was_supported = self.in_supported_position;
+        if was_supported {
+            match expression {
+                Expression::BinaryOp {
+                    lhs: box Expression::Column(_),
+                    op: BinaryOperator::Equal,
+                    rhs: box Expression::Literal(Literal::Placeholder(_)),
+                } => {}
+                Expression::BinaryOp {
+                    lhs: box Expression::Column(_),
+                    op: BinaryOperator::Equal,
+                    rhs: box Expression::Literal(lit),
+                } => {
+                    let literal =
+                        mem::replace(lit, Literal::Placeholder(ItemPlaceholder::QuestionMark));
+                    self.out.push((self.param_index, literal));
+                    self.param_index += 1;
+                    return Ok(());
+                }
+                Expression::BinaryOp {
+                    lhs,
+                    op: BinaryOperator::And,
+                    rhs,
+                } => {
+                    self.visit_expression(lhs.as_mut())?;
+                    self.in_supported_position = true;
+                    self.visit_expression(rhs.as_mut())?;
+                    self.in_supported_position = true;
+                    return Ok(());
+                }
+                _ => self.in_supported_position = false,
+            }
+        }
+
+        visit::walk_expression(self, expression)?;
+        self.in_supported_position = was_supported;
+        Ok(())
+    }
+}
+
+/// Replace all literals that are in positions we support parameters in the given query with
+/// parameters, and return the values for those parameters alongside the index in the parameter list
+/// where they appear
+#[allow(dead_code)] // TODO(grfn): remove once this is used
+pub(crate) fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+    let mut visitor = AutoParametrizeVisitor::default();
+    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
+    visitor.visit_select_statement(query).unwrap();
+    visitor.out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +623,99 @@ mod tests {
             );
             anonymize_literals(&mut query);
             assert_eq!(query, expected);
+        }
+    }
+
+    mod parametrize {
+        use super::*;
+
+        fn test_auto_parametrize(
+            query: &str,
+            expected_query: &str,
+            expected_parameters: Vec<(usize, Literal)>,
+        ) {
+            let mut query = parse_select_statement(query);
+            let expected = parse_select_statement(expected_query);
+            let res = auto_parametrize_query(&mut query);
+            assert_eq!(query, expected, "\n  left: {}\n right: {}", query, expected);
+            assert_eq!(res, expected_parameters);
+        }
+
+        #[test]
+        fn no_literals() {
+            test_auto_parametrize("SELECT * FROM users", "SELECT * FROM users", vec![]);
+        }
+
+        #[test]
+        fn simple_parameter() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE id = 1",
+                "SELECT id FROM users WHERE id = ?",
+                vec![(0, 1.into())],
+            );
+        }
+
+        #[test]
+        fn and_parameters() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE id = 1 AND name = \"bob\"",
+                "SELECT id FROM users WHERE id = ? AND name = ?",
+                vec![(0, 1.into()), (1, "bob".into())],
+            );
+        }
+
+        #[test]
+        fn existing_param_before() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE x = ? AND id = 1 AND name = \"bob\"",
+                "SELECT id FROM users WHERE x = ? AND id = ? AND name = ?",
+                vec![(1, 1.into()), (2, "bob".into())],
+            );
+        }
+
+        #[test]
+        fn existing_param_after() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE id = 1 AND name = \"bob\" AND x = ?",
+                "SELECT id FROM users WHERE id = ? AND name = ? AND x = ?",
+                vec![(0, 1.into()), (1, "bob".into())],
+            );
+        }
+
+        #[test]
+        fn existing_param_between() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE id = 1 AND x = ? AND name = \"bob\"",
+                "SELECT id FROM users WHERE id = ? AND x = ? AND name = ?",
+                vec![(0, 1.into()), (2, "bob".into())],
+            );
+        }
+
+        #[test]
+        fn literal_in_or() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = \"bob\"",
+                "SELECT id FROM users WHERE (id = 1 OR id = 2) AND name = ?",
+                vec![(0, "bob".into())],
+            )
+        }
+
+        #[test]
+        fn literal_in_subquery_where() {
+            test_auto_parametrize(
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = 1",
+                "SELECT id FROM users JOIN (SELECT id FROM users WHERE id = 1) s ON users.id = s.id WHERE id = ?",
+                vec![(0, 1.into())],
+            )
+        }
+
+        #[test]
+        fn literal_in_field() {
+            test_auto_parametrize(
+                "SELECT id + 1 FROM users WHERE id = 1",
+                "SELECT id + 1 FROM users WHERE id = ?",
+                vec![(0, 1.into())],
+            )
         }
     }
 }
