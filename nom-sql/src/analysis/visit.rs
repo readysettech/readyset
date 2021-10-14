@@ -106,6 +106,10 @@ pub trait Visitor<'ast>: Sized {
         walk_field_definition_expression(self, fde)
     }
 
+    fn visit_where_clause(&mut self, expression: &'ast mut Expression) -> Result<(), Self::Error> {
+        self.visit_expression(expression)
+    }
+
     fn visit_join_clause(&mut self, join: &'ast mut JoinClause) -> Result<(), Self::Error> {
         walk_join_clause(self, join)
     }
@@ -301,7 +305,7 @@ pub fn walk_select_statement<'ast, V: Visitor<'ast>>(
         visitor.visit_join_clause(join)?;
     }
     if let Some(where_clause) = &mut select_statement.where_clause {
-        visitor.visit_expression(where_clause)?;
+        visitor.visit_where_clause(where_clause)?;
     }
     if let Some(group_by_clause) = &mut select_statement.group_by {
         visitor.visit_group_by_clause(group_by_clause)?;
