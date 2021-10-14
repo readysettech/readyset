@@ -18,12 +18,15 @@ use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::coverage::QueryCoverageInfoRef;
+use noria_client::query_reconciler::QueryReconciler;
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::net;
+use tokio::select;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, info_span, span, Level};
@@ -127,6 +130,15 @@ pub struct Options {
         requires("upstream-db-url")
     )]
     max_processing_minutes: i64,
+
+    /// Sets the query reconciler's loop interval in seconds.
+    #[clap(
+        long,
+        env = "RECONCILE_INTERVAL",
+        default_value = "20",
+        requires("upstream-db-url")
+    )]
+    reconciler_loop_interval: u64,
 
     /// Allow database connections authenticated as this user. Ignored if
     /// --allow-unauthenticated-connections is passed
@@ -253,19 +265,69 @@ where
             .is_some()
             .then(QueryCoverageInfoRef::default);
 
+        let (shutdown_sender, shutdown_recv) = tokio::sync::broadcast::channel(1);
+
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log {
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
-            rt.spawn(query_logger(qlog_receiver, self.database_type));
+            rt.spawn(query_logger(
+                qlog_receiver,
+                self.database_type,
+                shutdown_recv,
+            ));
             Some(qlog_sender)
         } else {
             None
         };
 
         let query_status_cache = if options.live_qca {
-            Some(Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
+            let cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
                 options.max_processing_minutes,
-            ))))
+            )));
+
+            // Only start the live qca task if there is an upstream db.
+            if let Some(upstream_db_url) = options.upstream_db_url.clone() {
+                let ch = ch.clone();
+                let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+                let shutdown_recv = shutdown_sender.subscribe();
+                let loop_interval = options.reconciler_loop_interval;
+                let cache = cache.clone();
+                let fut = async move {
+                    let connection = span!(Level::INFO, "live-qca upstream database connection");
+                    let upstream = H::UpstreamDatabase::connect(upstream_db_url.clone())
+                        .instrument(
+                            connection
+                                .in_scope(|| span!(Level::INFO, "Connecting to upstream database")),
+                        )
+                        .await
+                        .unwrap();
+
+                    let noria = NoriaConnector::new(
+                        ch.clone(),
+                        auto_increments.clone(),
+                        query_cache.clone(),
+                        None,
+                    )
+                    .instrument(
+                        connection
+                            .in_scope(|| span!(Level::DEBUG, "Building live-qca noria connector")),
+                    )
+                    .await;
+
+                    let mut reconciler = QueryReconciler::new(
+                        noria,
+                        upstream,
+                        cache,
+                        std::time::Duration::from_secs(loop_interval),
+                        shutdown_recv,
+                    );
+                    reconciler.run().await
+                };
+
+                rt.handle().spawn(fut);
+            }
+
+            Some(cache)
         } else {
             None
         };
@@ -325,6 +387,9 @@ where
             rt.handle().spawn(fut);
         }
 
+        // Dropping the sender acts as a shutdown signal.
+        drop(shutdown_sender);
+
         if let Some(path) = options.coverage_analysis.as_ref() {
             let _guard = rt.enter();
             let file = rt.block_on(
@@ -370,45 +435,63 @@ where
         }
 
         drop(ch);
-        info!("Exiting");
-        drop(rt);
+        // We use `shutdown_timeout` instead of `shutdown_background` in case any
+        // blocking IO is ongoing.
+        info!("Waiting up to 20s for tasks to complete shutdown");
+        rt.shutdown_timeout(std::time::Duration::from_secs(20));
 
         Ok(())
     }
 }
 
 /// Async task that logs query stats.
-async fn query_logger(mut receiver: UnboundedReceiver<QueryExecutionEvent>, db_type: DatabaseType) {
+async fn query_logger(
+    mut receiver: UnboundedReceiver<QueryExecutionEvent>,
+    db_type: DatabaseType,
+    mut shutdown_recv: broadcast::Receiver<()>,
+) {
     let _span = info_span!("query-logger");
 
     let database_label: noria_client_metrics::recorded::DatabaseType = db_type.into();
     let database_label = String::from(database_label);
 
-    while let Some(mut event) = receiver.recv().await {
-        let query = match &mut event.query {
-            Some(SqlQuery::Select(stmt)) => {
-                anonymize_literals(stmt);
-                stmt.to_string()
+    loop {
+        select! {
+            event = receiver.recv() => {
+                if let Some(mut event) = event {
+                    let query = match &mut event.query {
+                        Some(SqlQuery::Select(stmt)) => {
+                            anonymize_literals(stmt);
+                            stmt.to_string()
+                        }
+                        _ => "".to_string(),
+                    };
+
+                    if let Some(noria) = event.noria_duration {
+                        metrics::histogram!(
+                            noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
+                            noria,
+                            "query" => query.clone(),
+                            "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
+                        );
+                    }
+
+                    if let Some(upstream) = event.upstream_duration {
+                        metrics::histogram!(
+                            noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
+                            upstream,
+                            "query" => query.clone(),
+                            "database_type" => database_label.clone()
+                        );
+                    }
+                } else {
+                info!("Metrics thread shutting down after request handle dropped.");
+                }
             }
-            _ => "".to_string(),
-        };
-
-        if let Some(noria) = event.noria_duration {
-            metrics::histogram!(
-                noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                noria,
-                "query" => query.clone(),
-                "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
-            );
-        }
-
-        if let Some(upstream) = event.upstream_duration {
-            metrics::histogram!(
-                noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                upstream,
-                "query" => query.clone(),
-                "database_type" => database_label.clone()
-            );
+            _ = shutdown_recv.recv() => {
+                info!("Metrics thread shutting down after signal received.");
+                break;
+            }
         }
     }
 }
