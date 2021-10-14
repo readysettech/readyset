@@ -2923,8 +2923,9 @@ dependencies = [
 
 [[package]]
 name = "mysql"
-version = "21.0.1"
-source = "git+https://github.com/readysettech/rust-mysql-simple.git#eeed0702de2688abafe8619fe4ab6b02c1472da1"
+version = "21.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06f5abe1c0f91831afd4d35298c08d958e80144869757b913891e5b0d00c2c96"
 dependencies = [
  "bufstream",
  "bytes 1.1.0",
@@ -6382,8 +6383,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.4",
  "static_assertions",
 ]
 
