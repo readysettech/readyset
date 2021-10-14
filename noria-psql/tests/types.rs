@@ -60,14 +60,15 @@ mod types {
         assert_eq!(star_results[0].get::<_, V>(0), val);
 
         // check parameter parsing
-        let count_where_result = client
-            .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
-            .unwrap()
-            .get::<_, i64>(0);
-        assert_eq!(count_where_result, 1);
-
+        if format!("{}", type_name).as_str() != "json" {
+            let count_where_result = client
+                .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
+                .unwrap()
+                .get::<_, i64>(0);
+            assert_eq!(count_where_result, 1);
+        }
         // check parameter passing and value returning when going through fallback
-        // TODO(dan): Currently we classify all fallback prepares as writes, so this doesn't work
+        // TODO(DAN): below statement fails for UUID and JSON
         /*
         let fallback_result = client
             .query_one("SELECT x FROM (SELECT x FROM t WHERE x = $1) sq", &[&val])
