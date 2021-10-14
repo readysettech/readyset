@@ -777,6 +777,7 @@ impl From<TableSpec> for CreateTableStatement {
                 }]
             }),
             if_not_exists: false,
+            options: vec![],
         }
     }
 }

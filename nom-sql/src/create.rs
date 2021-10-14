@@ -15,7 +15,7 @@ use crate::common::{
     ws_sep_comma, IndexType, ReferentialAction, TableKey,
 };
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
-use crate::create_table_options::table_options;
+use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
 use crate::keywords::escape_if_keyword;
 use crate::order::{order_type, OrderType};
@@ -35,6 +35,7 @@ pub struct CreateTableStatement {
     pub fields: Vec<ColumnSpecification>,
     pub keys: Option<Vec<TableKey>>,
     pub if_not_exists: bool,
+    pub options: Vec<CreateTableOption>,
 }
 
 impl fmt::Display for CreateTableStatement {
@@ -60,7 +61,16 @@ impl fmt::Display for CreateTableStatement {
                     .join(", ")
             )?;
         }
-        write!(f, ")")
+        write!(f, ")")?;
+        write!(
+            f,
+            "{}",
+            self.options
+                .iter()
+                .map(|option| format!("{}", option))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -404,7 +414,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
     move |i| {
         let (
             remaining_input,
-            (_, _, _, _, if_not_exists, table, _, _, _, fields_list, _, keys_list, _, _, _, _, _),
+            (_, _, _, _, if_not_exists, table, _, _, _, fields_list, _, keys_list, _, _, _, opt, _),
         ) = tuple((
             tag_no_case("create"),
             multispace1,
@@ -530,6 +540,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                 fields,
                 keys,
                 if_not_exists,
+                options: opt,
             },
         ))
     }
@@ -822,7 +833,7 @@ mod tests {
           group_id int,
           primary key (id),
           constraint users_group foreign key (group_id) references `groups` (id),
-        )";
+        ) AUTO_INCREMENT=1000";
 
         let (rem, res) = creation(Dialect::MySQL)(qstring).unwrap();
         assert!(rem.is_empty());
@@ -853,7 +864,8 @@ mod tests {
                         on_delete: None,
                     }
                 ]),
-                if_not_exists: false
+                if_not_exists: false,
+                options: vec![CreateTableOption::AutoIncrement(1000)],
             }
         )
     }
@@ -927,6 +939,7 @@ mod tests {
                     },
                 ]),
                 if_not_exists: false,
+                options: vec![CreateTableOption::AutoIncrement(10)],
             }
         )
     }
@@ -997,6 +1010,7 @@ mod tests {
                     },
                 ]),
                 if_not_exists: false,
+                options: vec![],
             }
         )
     }
@@ -1048,6 +1062,7 @@ mod tests {
                     columns: vec![col("id")]
                 },]),
                 if_not_exists: false,
+                options: vec![CreateTableOption::AutoIncrement(1001)],
             }
         )
     }
@@ -1157,6 +1172,7 @@ mod tests {
                     }],
                     keys: None,
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
         }
@@ -1230,6 +1246,7 @@ mod tests {
                         }]
                     }]),
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
 
@@ -1266,6 +1283,7 @@ mod tests {
                         }]
                     }]),
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
         }
@@ -1274,11 +1292,12 @@ mod tests {
         fn format_create() {
             let qstring = "CREATE TABLE `auth_group` (
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
-                       `name` varchar(80) NOT NULL UNIQUE)";
+                       `name` varchar(80) NOT NULL UNIQUE) ENGINE=InnoDB AUTO_INCREMENT=495209 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
             let expected = "CREATE TABLE auth_group (\
                         id INT AUTO_INCREMENT NOT NULL, \
-                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
+                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))\
+                        ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = creation(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }
@@ -1393,6 +1412,10 @@ mod tests {
                         },
                     ]),
                     if_not_exists: false,
+                    options: vec![
+                        CreateTableOption::Engine(Some("InnoDB".to_string())),
+                        CreateTableOption::Charset("utf8mb4".to_string())
+                    ],
                 }
             );
         }
@@ -1425,6 +1448,7 @@ mod tests {
                             ],
                         ),
                     ],
+                    options: vec![CreateTableOption::Other],
                     ..Default::default()
                 }
             );
@@ -1536,6 +1560,7 @@ mod tests {
                     }],
                     keys: None,
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
         }
@@ -1609,6 +1634,7 @@ mod tests {
                         }]
                     }]),
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
 
@@ -1645,6 +1671,7 @@ mod tests {
                         }],
                     }]),
                     if_not_exists: false,
+                    options: vec![],
                 }
             );
         }
@@ -1772,6 +1799,10 @@ mod tests {
                         },
                     ]),
                     if_not_exists: false,
+                    options: vec![
+                        CreateTableOption::Engine(Some("InnoDB".to_string())),
+                        CreateTableOption::Charset("utf8mb4".to_string())
+                    ],
                 }
             );
         }
@@ -1804,6 +1835,7 @@ mod tests {
                             ],
                         ),
                     ],
+                    options: vec![CreateTableOption::Other],
                     ..Default::default()
                 }
             );
@@ -2009,6 +2041,11 @@ mod tests {
                     },
                 ]),
                 if_not_exists: false,
+                options: vec![
+                    CreateTableOption::Engine(Some("InnoDB".to_string())),
+                    CreateTableOption::Charset("utf8mb4".to_string()),
+                    CreateTableOption::Collate("utf8mb4_unicode_ci".to_string())
+                ],
             }
         )
     }
@@ -2041,6 +2078,10 @@ mod tests {
                 ],
                 keys: None,
                 if_not_exists: false,
+                options: vec![
+                    CreateTableOption::Charset("utf8mb4".to_string()),
+                    CreateTableOption::Collate("utf8mb4_unicode_ci".to_string())
+                ],
             }
         )
     }

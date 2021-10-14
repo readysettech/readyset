@@ -222,6 +222,7 @@ mod tests {
                 fields,
                 keys,
                 if_not_exists,
+                options: vec![],
             },
         );
         base_schemas
