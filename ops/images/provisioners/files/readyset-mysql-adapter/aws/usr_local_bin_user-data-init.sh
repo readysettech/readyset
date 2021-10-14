@@ -17,7 +17,7 @@ trap 'on_error' ERR
 /usr/local/bin/configure-vector.sh
 
 cat > /etc/default/readyset-mysql-adapter <<EOF
-MYSQL_URL=${MYSQL_URL}
+UPSTREAM_DB_URL=${UPSTREAM_DB_URL}
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
 EOF
