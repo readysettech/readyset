@@ -222,239 +222,244 @@ mod tests {
         }
     }
 
-    #[test]
-    fn collapsed_where_placeholders() {
-        let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (?, ?, ?)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![ItemPlaceholder::QuestionMark; 3]
-            }]
-        );
-        assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
+    mod collapse_where {
+        use super::*;
 
-        let mut q = parse_select_statement("SELECT * FROM x WHERE y IN (?, ?, ?)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![ItemPlaceholder::QuestionMark; 3]
-            }]
-        );
-        assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
+        #[test]
+        fn collapsed_where_placeholders() {
+            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (?, ?, ?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
 
-        let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![ItemPlaceholder::QuestionMark; 3]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
-        );
+            let mut q = parse_select_statement("SELECT * FROM x WHERE y IN (?, ?, ?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
 
-        let mut q =
-            parse_select_statement("SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![ItemPlaceholder::QuestionMark; 3]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?")
-        );
+            let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN (?, ?, ?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
+            );
 
-        let mut q = parse_select_statement(
-            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
-        );
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![ItemPlaceholder::QuestionMark; 2]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement(
-                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
-            )
-        );
+            let mut q =
+                parse_select_statement("SELECT * FROM t WHERE x = ? AND y IN (?, ?, ?) OR z = ?");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![ItemPlaceholder::QuestionMark; 3]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ? OR z = ?")
+            );
 
-        let mut q = parse_select_statement(
-            "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
-        );
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![ItemPlaceholder::QuestionMark; 2]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement(
-                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
-            )
-        );
-    }
+            let mut q = parse_select_statement(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y IN (?, ?) OR z = ?",
+            );
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![ItemPlaceholder::QuestionMark; 2]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement(
+                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = ?) AND y = ? OR z = ?"
+                )
+            );
 
-    #[test]
-    fn collapsed_where_literals() {
-        let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)");
-        assert_eq!(collapse_where_in(&mut q).unwrap(), vec![]);
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)")
-        );
-    }
+            let mut q = parse_select_statement(
+                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a IN (?, ?)) OR z = ?",
+            );
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![ItemPlaceholder::QuestionMark; 2]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement(
+                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = ? AND a = ?) OR z = ?",
+                )
+            );
+        }
 
-    #[test]
-    fn collapsed_where_dollarsign_placeholders() {
-        let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN ($1, $2, $3)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(1),
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                ]
-            }]
-        );
-        assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
+        #[test]
+        fn collapsed_where_literals() {
+            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)");
+            assert_eq!(collapse_where_in(&mut q).unwrap(), vec![]);
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM x WHERE x.y IN (1, 2, 3)")
+            );
+        }
 
-        let mut q = parse_select_statement("SELECT * FROM x WHERE y IN ($1, $2, $3)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(1),
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                ]
-            }]
-        );
-        assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
+        #[test]
+        fn collapsed_where_dollarsign_placeholders() {
+            let mut q = parse_select_statement("SELECT * FROM x WHERE x.y IN ($1, $2, $3)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(1),
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE x.y = ?"));
 
-        let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 0,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(1),
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                ]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
-        );
+            let mut q = parse_select_statement("SELECT * FROM x WHERE y IN ($1, $2, $3)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(1),
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(q, parse_select_statement("SELECT * FROM x WHERE y = ?"));
 
-        let mut q =
-            parse_select_statement("SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                    ItemPlaceholder::DollarNumber(4),
-                ]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
-        );
+            let mut q = parse_select_statement("SELECT * FROM x WHERE AVG(y) IN ($1, $2, $3)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 0,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(1),
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM x WHERE AVG(y) = ?")
+            );
 
-        let mut q = parse_select_statement(
+            let mut q = parse_select_statement(
+                "SELECT * FROM t WHERE x = $1 AND y IN ($2, $3, $4) OR z = $5",
+            );
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                        ItemPlaceholder::DollarNumber(4),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = ? OR z = $5")
+            );
+
+            let mut q = parse_select_statement(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y IN ($2, $3) OR z = $4",
         );
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                ]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement(
-                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4"
-            )
-        );
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement(
+                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE a = $1) AND y = ? OR z = $4"
+                )
+            );
 
-        let mut q = parse_select_statement(
+            let mut q = parse_select_statement(
             "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a IN ($2, $3)) OR z = $4",
         );
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![RewrittenIn {
-                first_param_index: 1,
-                literals: vec![
-                    ItemPlaceholder::DollarNumber(2),
-                    ItemPlaceholder::DollarNumber(3),
-                ]
-            }]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement(
-                "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = ?) OR z = $4",
-            )
-        );
-    }
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![RewrittenIn {
+                    first_param_index: 1,
+                    literals: vec![
+                        ItemPlaceholder::DollarNumber(2),
+                        ItemPlaceholder::DollarNumber(3),
+                    ]
+                }]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement(
+                    "SELECT * FROM t WHERE x IN (SELECT * FROM z WHERE b = $1 AND a = ?) OR z = $4",
+                )
+            );
+        }
 
-    #[test]
-    fn collapse_multiple_where_in() {
-        let mut q = parse_select_statement("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
-        let rewritten = collapse_where_in(&mut q).unwrap();
-        assert_eq!(
-            rewritten,
-            vec![
-                RewrittenIn {
-                    first_param_index: 0,
-                    literals: vec![ItemPlaceholder::QuestionMark; 2]
-                },
-                RewrittenIn {
-                    first_param_index: 2,
-                    literals: vec![ItemPlaceholder::QuestionMark; 2]
-                }
-            ]
-        );
-        assert_eq!(
-            q,
-            parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ?")
-        );
+        #[test]
+        fn collapse_multiple_where_in() {
+            let mut q = parse_select_statement("SELECT * FROM t WHERE x IN (?,?) AND y IN (?,?)");
+            let rewritten = collapse_where_in(&mut q).unwrap();
+            assert_eq!(
+                rewritten,
+                vec![
+                    RewrittenIn {
+                        first_param_index: 0,
+                        literals: vec![ItemPlaceholder::QuestionMark; 2]
+                    },
+                    RewrittenIn {
+                        first_param_index: 2,
+                        literals: vec![ItemPlaceholder::QuestionMark; 2]
+                    }
+                ]
+            );
+            assert_eq!(
+                q,
+                parse_select_statement("SELECT * FROM t WHERE x = ? AND y = ?")
+            );
+        }
     }
 
     mod explode_params {
