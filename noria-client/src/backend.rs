@@ -24,7 +24,7 @@ use noria_client_metrics::{EventType, QueryExecutionEvent};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::coverage::QueryCoverageInfoRef;
-use crate::query_status_cache::QueryStatusCache;
+use crate::query_status_cache::{QueryState, QueryStatusCache};
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -330,18 +330,15 @@ pub struct Backend<DB, Handler> {
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
 
     /// A cache of queries that we've seen, and their current state, used for processing
-    #[allow(dead_code)] // TODO: remove once this is used
     query_status_cache: Option<Arc<QueryStatusCache>>,
 
     /// Run with query coverage analysis enabled in the serving path.
-    #[allow(dead_code)]
     live_qca: bool,
 
     _query_handler: PhantomData<Handler>,
 }
 
 impl<DB, Handler> Backend<DB, Handler> {
-    #[allow(dead_code)]
     fn live_qca_enabled(&self) -> bool {
         self.live_qca
     }
@@ -507,12 +504,12 @@ where
 
     /// Stores the prepared query id in a table. If the statement already
     /// exists, update that statement's ids in the table.
-    fn store_prep_statement(&mut self, prepare: &PrepareResult<DB>) {
+    fn store_prep_statement(&mut self, id: u32, prepare: &PrepareResult<DB>) {
         use noria_connector::PrepareResult::*;
 
         let statement = self
             .prepared_statements
-            .entry(self.prepared_count)
+            .entry(id)
             .or_insert(PreparedStatement {
                 noria: None,
                 upstream: None,
@@ -810,30 +807,6 @@ where
         }
     }
 
-    /// Executes the given prepare select against noria, and on failure sends the prepare to
-    /// fallback. cascape_prepare will return a result or a mysql_async error (which could be a
-    /// mysql server error) if fallback is configured.
-    async fn cascade_prepare(
-        &mut self,
-        q: nom_sql::SelectStatement,
-        query: &str,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        match self.noria.prepare_select(q, self.prepared_count).await {
-            Ok(res) => Ok(PrepareResult::Noria(res)),
-            Err(e) => {
-                if self.upstream.is_some() {
-                    error!(error = %e, "Error received from noria, sending query to fallback");
-                    self.prepare_fallback(query)
-                        .await
-                        .map(PrepareResult::Upstream)
-                } else {
-                    error!("{}", e);
-                    Err(e.into())
-                }
-            }
-        }
-    }
-
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -855,7 +828,7 @@ where
                 .await
                 .map(PrepareResult::Upstream);
             if let Ok(ref result) = res {
-                self.store_prep_statement(result);
+                self.store_prep_statement(self.prepared_count, result);
                 handle.set_upstream_duration();
             }
             return res;
@@ -875,7 +848,7 @@ where
                         .await
                         .map(PrepareResult::Upstream);
                     if let Ok(ref result) = res {
-                        self.store_prep_statement(result);
+                        self.store_prep_statement(self.prepared_count, result);
                         handle.set_upstream_duration();
                     }
                     return res;
@@ -889,9 +862,54 @@ where
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => {
                 if self.upstream.is_some() {
-                    self.mirror_prepare(stmt.clone(), query, event).await
+                    if self.live_qca_enabled() {
+                        // The query status cache is guaranteed to exist if `live_qca` is enabled.
+                        #[allow(clippy::unwrap_used)]
+                        let cache = self.query_status_cache.as_ref().unwrap().clone();
+
+                        let result = match cache.query_state(stmt).await {
+                            // If this is the first time this adapter has seen the query, we should
+                            // set the queries status in the cache and attempt to validate column
+                            // headers to fast-track a query to the allow list.
+                            None => {
+                                cache.register_query(stmt).await;
+                                let handle = event.start_timer();
+                                let result = self
+                                    .prepare_fallback(query)
+                                    .await
+                                    .map(PrepareResult::Upstream);
+                                handle.set_upstream_duration();
+                                result
+                            }
+                            Some(QueryState::NeedsProcessing) => {
+                                // Any query whose state is still being processed should be sent
+                                // directly to fallback.
+                                let handle = event.start_timer();
+                                let result = self
+                                    .prepare_fallback(query)
+                                    .await
+                                    .map(PrepareResult::Upstream);
+                                handle.set_upstream_duration();
+                                result
+                            }
+                            Some(QueryState::Allow) => {
+                                // Prepare allowed queries on both noria and fallback so that
+                                // if there are errors during execute we can still fallback
+                                // correctly.
+                                self.mirror_prepare(stmt.clone(), query, event).await
+                            }
+                        };
+
+                        result
+                    } else {
+                        self.mirror_prepare(stmt.clone(), query, event).await
+                    }
                 } else {
-                    self.cascade_prepare(stmt.clone(), query).await
+                    self.noria
+                        .prepare_select(stmt.clone(), self.prepared_count)
+                        .await
+                        .map(PrepareResult::Noria)
+                        .map_err(|e| e.into())
                 }
             }
             nom_sql::SqlQuery::Insert(_) => {
@@ -969,7 +987,7 @@ where
         if let Ok(ref result) = res {
             self.prepared_queries
                 .insert(self.prepared_count, parsed_query.to_owned());
-            self.store_prep_statement(result);
+            self.store_prep_statement(self.prepared_count, result);
         }
         res
     }
@@ -983,6 +1001,64 @@ where
         if let (Some(info), e) = (self.query_coverage_info, query_event) {
             info.query_prepared(query.to_string(), e, self.prepared_count);
         }
+        res
+    }
+
+    async fn cascade_execute(
+        &mut self,
+        id: u32,
+        prepared_statement: &PreparedStatement,
+        params: Vec<DataType>,
+        prep: SqlQuery,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        let handle = event.start_timer();
+        if let Some(id) = prepared_statement.noria {
+            let res = Self::execute_noria(
+                &mut self.noria,
+                id,
+                params.clone(),
+                prep.clone(),
+                self.ticket.clone(),
+            )
+            .await;
+
+            match res {
+                Ok(res) => {
+                    handle.set_noria_duration();
+                    return Ok(res);
+                }
+                Err(e) => {
+                    if self.upstream.is_none() {
+                        return Err(e.into());
+                    }
+
+                    error!(error = %e, "Error received from noria during execute, sending query to fallback");
+                }
+            }
+        }
+
+        // Returns above if upstream is none.
+        #[allow(clippy::unwrap_used)]
+        let upstream = self.upstream.as_mut().unwrap();
+
+        let statement_id = if let Some(statement_id) = prepared_statement.upstream {
+            statement_id
+        } else {
+            // Prepare the statement if we have not seen this
+            // prepared statement yet.
+            let UpstreamPrepare { statement_id, .. } = upstream.prepare(&prep.to_string()).await?;
+            // The prepared statement must exist if we are executing on it.
+            self.prepared_statements.get_mut(&id).unwrap().upstream = Some(statement_id);
+            statement_id
+        };
+
+        let handle = event.start_timer();
+        let res = upstream
+            .execute(statement_id, params)
+            .await
+            .map(QueryResult::Upstream);
+        handle.set_upstream_duration();
         res
     }
 
@@ -1008,79 +1084,106 @@ where
             }
         }
 
-        if let Some(statement_id) = prepared_statement.noria {
-            let prep: SqlQuery = self
-                .prepared_queries
-                .get(&statement_id)
-                .cloned()
-                .ok_or(PreparedStatementMissing { statement_id })?;
+        match self.prepared_queries.get(&id).cloned() {
+            // If we have a `prepared_statement` but not a `SqlQuery` associated with it,
+            // this is an unparseable prepared statement, issue this directly to
+            // upstream.
+            None => self.execute_upstream(id, params, event).await,
+            Some(prep) => {
+                match prep {
+                    SqlQuery::Select(ref stmt) => {
+                        if self.live_qca_enabled() {
+                            // The query status cache is guaranteed to exist if `live_qca` is enabled.
+                            #[allow(clippy::unwrap_used)]
+                            let cache = self.query_status_cache.as_ref().unwrap().clone();
+                            let result = cache.query_state(stmt).await;
+                            match result {
+                                // If prepare was called for this query prior, it should be in the
+                                // query status cache.
+                                None => Err(PreparedStatementMissing { statement_id: id })
+                                    .map_err(|e| e.into()),
+                                Some(QueryState::Allow) => {
+                                    // If the query is allowed and we have not yet prepared it noria - then
+                                    // during our prepare we either encountered a transient noria
+                                    // failure or the migration was pending. Prepare it now as we
+                                    // should be able to succeed.
+                                    if prepared_statement.noria.is_none() {
+                                        // TODO(justin): Refactor prepared statement cache to wrap preparing and storing
+                                        // prepared statements in a thread-local cache.
+                                        let res = self
+                                            .noria
+                                            .prepare_select(stmt.clone(), id)
+                                            .await
+                                            .map(PrepareResult::Noria);
 
-            match prep {
-                SqlQuery::Select(_) => {
-                    let Backend {
-                        ref mut noria,
-                        ref mut upstream,
-                        ..
-                    } = self;
+                                        // If we cannot prepare, then set that this query needs
+                                        // reprocessing.
+                                        if let Ok(ref result) = res {
+                                            self.store_prep_statement(id, result);
+                                        } else {
+                                            cache.set_needs_processing(stmt).await;
+                                        }
+                                    }
 
-                    {
-                        let handle = event.start_timer();
-                        match Self::execute_noria(
-                            noria,
-                            statement_id,
-                            params.clone(),
-                            prep.clone(),
-                            self.ticket.clone(),
-                        )
-                        .await
-                        {
-                            Ok(res) => {
-                                handle.set_noria_duration();
-                                Ok(res)
-                            }
-                            Err(e) => match upstream {
-                                None => Err(e.into()),
-                                Some(upstream) => {
-                                    error!(error = %e, "Error received from noria during execute, sending query to fallback");
+                                    let prepared_statement = self
+                                        .prepared_statements
+                                        .get(&id)
+                                        .cloned()
+                                        .ok_or(PreparedStatementMissing { statement_id: id })?;
 
+                                    self.cascade_execute(
+                                        id,
+                                        &prepared_statement,
+                                        params,
+                                        prep,
+                                        event,
+                                    )
+                                    .await
+                                }
+                                Some(QueryState::NeedsProcessing) => {
                                     // Prepare the statement if we have not seen this
                                     // prepared statement yet.
-                                    let statement_id =
-                                        if let Some(statement_id) = prepared_statement.upstream {
-                                            statement_id
-                                        } else {
-                                            let UpstreamPrepare { statement_id, .. } =
-                                                upstream.prepare(&prep.to_string()).await?;
-                                            statement_id
-                                        };
-
-                                    let handle = event.start_timer();
-                                    let res = upstream
-                                        .execute(statement_id, params)
-                                        .await
-                                        .map(QueryResult::Upstream);
-                                    handle.set_upstream_duration();
-                                    res
+                                    if let (Some(statement_id), Some(upstream)) =
+                                        (prepared_statement.upstream, &mut self.upstream)
+                                    {
+                                        let handle = event.start_timer();
+                                        let res = upstream
+                                            .execute(statement_id, params)
+                                            .await
+                                            .map(QueryResult::Upstream);
+                                        handle.set_upstream_duration();
+                                        res
+                                    } else {
+                                        Err(PreparedStatementMissing { statement_id: id })
+                                            .map_err(|e| e.into())
+                                    }
                                 }
-                            },
+                            }
+                        } else {
+                            // If there is no upstream or live qca is disabled we just cascade
+                            // execute.
+                            self.cascade_execute(id, prepared_statement, params, prep, event)
+                                .await
                         }
                     }
-                }
-                SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
-                    if self.upstream.is_some() {
-                        self.execute_upstream(id, params, event).await
-                    } else {
-                        Self::execute_noria(&mut self.noria, id, params, prep, self.ticket.clone())
+                    SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
+                        if self.upstream.is_some() {
+                            self.execute_upstream(id, params, event).await
+                        } else {
+                            Self::execute_noria(
+                                &mut self.noria,
+                                id,
+                                params,
+                                prep,
+                                self.ticket.clone(),
+                            )
                             .await
                             .map_err(|e| e.into())
+                        }
                     }
+                    _ => internal!(),
                 }
-                _ => internal!(),
             }
-        } else if let Some(id) = prepared_statement.upstream {
-            self.execute_upstream(id, params, event).await
-        } else {
-            internal!()
         }
     }
 
@@ -1225,15 +1328,41 @@ where
 
         // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
         // default when the upstream connector is present.
+        let live_qca_enabled = self.live_qca_enabled();
         let res = if let Some(ref mut upstream) = self.upstream {
             match parsed_query {
-                nom_sql::SqlQuery::Select(q) => {
+                nom_sql::SqlQuery::Select(ref stmt) => {
                     let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
-                        self.mirror_read(q.clone(), query.to_owned(), self.ticket.clone(), event)
+                        self.mirror_read(stmt.clone(), query.to_owned(), self.ticket.clone(), event)
                             .await
+                    } else if live_qca_enabled {
+                        // The query status cache is guarenteed to exist if `live_qca` is enabled.
+                        #[allow(clippy::unwrap_used)]
+                        let cache = self.query_status_cache.as_ref().unwrap().clone();
+
+                        match cache.query_state(stmt).await {
+                            // If this is the first time this adapter has seen the query, we should
+                            // set the queries status in the cache and send it to fallback.
+                            None => {
+                                cache.register_query(stmt).await;
+                                upstream.query(&query).await.map(QueryResult::Upstream)
+                            }
+                            Some(QueryState::NeedsProcessing) => {
+                                upstream.query(&query).await.map(QueryResult::Upstream)
+                            }
+                            Some(QueryState::Allow) => {
+                                let res = self
+                                    .cascade_read(stmt.clone(), query, self.ticket.clone(), event)
+                                    .await;
+                                if res.is_err() {
+                                    cache.set_needs_processing(stmt).await;
+                                }
+                                res
+                            }
+                        }
                     } else {
-                        self.cascade_read(q.clone(), query, self.ticket.clone(), event)
+                        self.cascade_read(stmt.clone(), query, self.ticket.clone(), event)
                             .await
                     };
                     //TODO(Dan): Implement fallback execution timing

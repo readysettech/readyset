@@ -103,7 +103,7 @@ pub struct Options {
     allow_unauthenticated_connections: bool,
 
     /// Run with query coverage analysis enabled in the serving path.
-    #[clap(long)]
+    #[clap(long, requires("upstream-db-url"))]
     live_qca: bool,
 
     /// Make all reads run against Noria and upstream, returning the upstream result.
