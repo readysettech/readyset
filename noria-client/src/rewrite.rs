@@ -289,13 +289,36 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 
 /// Replace all literals that are in positions we support parameters in the given query with
 /// parameters, and return the values for those parameters alongside the index in the parameter list
-/// where they appear
+/// where they appear as a tuple of (placeholder position, value).
 #[allow(dead_code)] // TODO(grfn): remove once this is used
 pub(crate) fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
     let mut visitor = AutoParametrizeVisitor::default();
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     visitor.visit_select_statement(query).unwrap();
     visitor.out
+}
+
+/// Splice the given list of extracted parameters, which should be a tuple of (placeholder position,
+/// value) as returned by [`auto_parametrize_query`] into the given list of parameters supplied by
+/// the user, by interleaving them into the params based on the placeholder position.
+///
+/// # Invariants
+///
+/// `extracted_auto_params` must be sorted by the first index (this is the case with the return
+/// value of [`auto_parametrize_query`]).
+#[allow(dead_code)] // TODO(grfn): remove once this is used
+pub(crate) fn splice_auto_parameters<T>(
+    mut params: Vec<T>,
+    extracted_auto_params: Vec<(usize, T)>,
+) -> Vec<T> {
+    debug_assert!(extracted_auto_params.is_sorted_by_key(|(i, _)| *i));
+    let mut res = Vec::with_capacity(params.len() + extracted_auto_params.len());
+    for (idx, extracted) in extracted_auto_params.into_iter() {
+        res.extend(params.drain(0..idx.saturating_sub(res.len())));
+        res.push(extracted);
+    }
+    res.extend(params);
+    res
 }
 
 #[cfg(test)]
@@ -716,6 +739,58 @@ mod tests {
                 "SELECT id + 1 FROM users WHERE id = ?",
                 vec![(0, 1.into())],
             )
+        }
+    }
+
+    mod splice_auto_parameters {
+        use super::*;
+
+        #[test]
+        fn single_param() {
+            let params = vec![];
+            let extracted = vec![(0, 0)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0]);
+        }
+
+        #[test]
+        fn consecutive_params() {
+            let params = vec![];
+            let extracted = vec![(0, 0), (1, 1)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0, 1]);
+        }
+
+        #[test]
+        fn params_before() {
+            let params = vec![0, 1];
+            let extracted = vec![(2, 2), (3, 3)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0, 1, 2, 3]);
+        }
+
+        #[test]
+        fn params_after() {
+            let params = vec![2, 3];
+            let extracted = vec![(0, 0), (1, 1)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0, 1, 2, 3]);
+        }
+
+        #[test]
+        fn params_between() {
+            let params = vec![1, 2];
+            let extracted = vec![(0, 0), (3, 3)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0, 1, 2, 3]);
+        }
+
+        #[test]
+        fn params_before_between_and_after() {
+            let params = vec![0, 2];
+            let extracted = vec![(1, 1), (3, 3)];
+            let res = splice_auto_parameters(params, extracted);
+            assert_eq!(res, vec![0, 1, 2, 3]);
         }
     }
 }
