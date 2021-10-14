@@ -54,11 +54,19 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
     }
 
     /// Push a new packet to the outgoing packet list
-    pub fn enqueue_packet(&mut self, packet: Vec<u8>) {
+    pub fn enqueue_packet(&mut self, mut packet: Vec<u8>) {
+        while packet.len() >= U24_MAX {
+            let rest = packet.split_off(U24_MAX);
+            let mut hdr = (U24_MAX as u32).to_le_bytes();
+            hdr[3] = self.seq;
+            self.seq = self.seq.wrapping_add(1);
+            self.queue.push((hdr, packet));
+            packet = rest;
+        }
+
         let mut hdr = (packet.len() as u32).to_le_bytes();
         hdr[3] = self.seq;
         self.seq = self.seq.wrapping_add(1);
-
         self.queue.push((hdr, packet));
     }
 
@@ -82,9 +90,51 @@ impl<W: AsyncWrite + Unpin> PacketWriter<W> {
         Ok(())
     }
 
+    /// Handles split packet write (packets of 16MB and greater)
+    async fn write_large_packet(&mut self, mut packet: &[u8]) -> Result<(), tokio::io::Error> {
+        // We need to prepare the headers in advance so we can borrow them later
+        let mut total_len = packet.len();
+        let mut headers = Vec::new();
+        while total_len >= U24_MAX {
+            let mut hdr = (U24_MAX as u32).to_le_bytes();
+            hdr[3] = self.seq;
+            self.seq = self.seq.wrapping_add(1);
+            headers.push(hdr);
+            total_len -= U24_MAX;
+        }
+
+        let mut hdr = (total_len as u32).to_le_bytes();
+        hdr[3] = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        headers.push(hdr);
+
+        // After the headers where computed we can issue a vectored write that references
+        // both the headers and the packet slice, with no extra copying
+        let mut slices = Vec::with_capacity(headers.len() * 2);
+        for header in &headers {
+            slices.push(IoSlice::new(&header[..]));
+            if packet.len() >= U24_MAX {
+                let (first, rest) = packet.split_at(U24_MAX);
+                slices.push(IoSlice::new(first));
+                packet = rest;
+            } else {
+                slices.push(IoSlice::new(packet));
+            }
+        }
+
+        write_all_vectored(&mut self.w, &mut slices).await?;
+        self.w.flush().await?;
+
+        Ok(())
+    }
+
     /// Send a packet without queueing, flushes any queued packets beforehand
     pub async fn write_packet(&mut self, packet: &[u8]) -> Result<(), tokio::io::Error> {
         self.flush_packets().await?;
+
+        if packet.len() >= U24_MAX {
+            return self.write_large_packet(packet).await;
+        }
 
         write_all_vectored(
             &mut self.w,
@@ -349,5 +399,44 @@ mod tests {
         assert_eq!(p.1.len(), U24_MAX + 1);
         assert_eq!(&p.1[..U24_MAX], &[0; U24_MAX][..]);
         assert_eq!(&p.1[U24_MAX..], &[0x10]);
+    }
+
+    #[tokio::test]
+    async fn test_large_packet_write() {
+        let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+
+        let packets = vec![
+            vec![0u8; 245],
+            vec![1u8; U24_MAX * 2],
+            vec![2u8; U24_MAX + 100],
+            vec![3u8; 100],
+            vec![4u8; U24_MAX - 1],
+            vec![5u8; U24_MAX],
+        ];
+
+        let p = packets.clone();
+        tokio::spawn(async move {
+            let mut writer = PacketWriter::new(u_out);
+
+            for packet in &p {
+                writer.enqueue_packet(packet.clone());
+            }
+            writer.flush_packets().await.unwrap();
+
+            for packet in &p {
+                writer.write_packet(&packet[..]).await.unwrap();
+            }
+        });
+
+        let mut reader = PacketReader::new(u_in);
+
+        for _ in 0..2 {
+            for encoded in &packets {
+                let decoded = reader.next().await.unwrap().unwrap();
+                assert_eq!(&decoded.1[..], encoded);
+            }
+        }
+
+        assert!(reader.next().await.unwrap().is_none());
     }
 }
