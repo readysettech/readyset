@@ -17,7 +17,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 
-use crate::rewrite::{self, explode_params, RewrittenIn};
+use crate::rewrite::{self, ProcessedQueryParams};
 use crate::utils;
 
 use crate::backend::SelectSchema;
@@ -36,7 +36,7 @@ pub(crate) enum PreparedStatement {
         name: String,
         statement: nom_sql::SelectStatement,
         key_column_indices: Vec<usize>,
-        rewritten_in_conditions: Vec<RewrittenIn>,
+        processed_query_params: ProcessedQueryParams,
         /// Parameter columns ignored by noria server
         /// The adapter assumes that all LIMIT/OFFSET parameters are ignored by the
         /// server. (If the server cannot ignore them, it will fail to install the query).
@@ -1088,17 +1088,23 @@ impl NoriaConnector {
         mut statement: nom_sql::SelectStatement,
         statement_id: u32,
     ) -> ReadySetResult<PrepareResult> {
-        // extract parameter columns
-        // note that we have to do this *before* collapsing WHERE IN, otherwise the
+        // extract parameter columns *for the client*
+        // note that we have to do this *before* processing the query, otherwise the
         // client will be confused about the number of parameters it's supposed to
         // give.
-        let param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
+        let client_param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
             .into_iter()
             .cloned()
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let rewritten_in_conditions = rewrite::collapse_where_in(&mut statement)?;
+        let processed_query_params = rewrite::process_query(&mut statement)?;
+
+        // extract parameter columns *for noria*
+        let noria_param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
+            .into_iter()
+            .cloned()
+            .collect();
 
         let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
             .into_iter()
@@ -1126,10 +1132,8 @@ impl NoriaConnector {
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
-        let key_column_indices =
-            getter_schema.indices_for_cols(param_columns.iter(), SchemaType::ProjectedSchema)?;
         let mut params: Vec<_> = getter_schema
-            .to_cols_with_indices(&key_column_indices, SchemaType::ProjectedSchema)?
+            .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
             .into_iter()
             .map(|cs| {
                 let mut cs = cs.clone();
@@ -1138,12 +1142,15 @@ impl NoriaConnector {
             })
             .collect();
 
+        let key_column_indices = getter_schema
+            .indices_for_cols(noria_param_columns.iter(), SchemaType::ProjectedSchema)?;
+
         trace!(id = statement_id, "select::registered");
         let ps = PreparedStatement::Select {
             name: qname,
             statement,
             key_column_indices,
-            rewritten_in_conditions,
+            processed_query_params,
             ignored_columns: limit_columns.clone(),
         };
         self.prepared_statement_cache.insert(statement_id, ps);
@@ -1174,7 +1181,7 @@ impl NoriaConnector {
                 name,
                 statement: q,
                 key_column_indices,
-                rewritten_in_conditions,
+                processed_query_params,
                 ignored_columns,
             } => {
                 trace!("apply where-in rewrites");
@@ -1191,16 +1198,8 @@ impl NoriaConnector {
                     .do_read(
                         name,
                         q,
-                        explode_params(params, rewritten_in_conditions)
-                            .collect::<Result<Vec<_>, _>>()?,
-                        // key_column_indices has not been rewritten for the collapsing of IN yet
-                        // (since it was used to communicate the params back to the client, which
-                        // doesn't know about IN collapsing), so we have to do that here
-                        explode_params(key_column_indices.to_vec(), rewritten_in_conditions)
-                            .next()
-                            .transpose()?
-                            .map_or(Cow::Borrowed(key_column_indices), Cow::Owned)
-                            .as_ref(),
+                        processed_query_params.make_keys(params)?,
+                        key_column_indices,
                         ticket,
                     )
                     .await;
