@@ -995,6 +995,7 @@ where
                         } = self;
 
                         {
+                            let handle = event.start_timer();
                             match Self::execute_noria(
                                 noria,
                                 *statement_id,
@@ -1004,7 +1005,10 @@ where
                             )
                             .await
                             {
-                                Ok(res) => Ok(res),
+                                Ok(res) => {
+                                    handle.set_noria_duration();
+                                    Ok(res)
+                                }
                                 Err(e) => match upstream {
                                     None => Err(e.into()),
                                     Some(upstream) => {
@@ -1012,10 +1016,13 @@ where
                                         let UpstreamPrepare { statement_id, .. } =
                                             upstream.prepare(&prep.to_string()).await?;
 
-                                        upstream
+                                        let handle = event.start_timer();
+                                        let res = upstream
                                             .execute(statement_id, params)
                                             .await
-                                            .map(QueryResult::Upstream)
+                                            .map(QueryResult::Upstream);
+                                        handle.set_upstream_duration();
+                                        res
                                     }
                                 },
                             }
