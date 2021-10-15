@@ -121,10 +121,11 @@ impl MySqlReplicator {
     async fn get_binlog_position(&self) -> mysql::Result<BinlogPosition> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SHOW MASTER STATUS";
-        let pos: mysql::Row = conn
-            .query_first(query)
-            .await?
-            .ok_or("Empty response for SHOW MASTER STATUS")?;
+        let pos: mysql::Row = conn.query_first(query).await?.ok_or(
+            "Empty response for SHOW MASTER STATUS. \
+             Ensure the binlog_format parameter is set to ROW and, if using RDS, backup retention \
+             is greater than 0",
+        )?;
 
         let file: String = pos.get(0).expect("Binlog file name");
         let offset: u32 = pos.get(1).expect("Binlog offset");
