@@ -5,7 +5,7 @@
 #![feature(drain_filter)]
 #![feature(async_closure)]
 #![feature(never_type)]
-#![cfg_attr(debug_assertions, feature(is_sorted))]
+#![feature(is_sorted)]
 
 pub mod backend;
 mod convert;
