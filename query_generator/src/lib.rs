@@ -511,6 +511,8 @@ pub enum ColumnGenerationSpec {
     },
     /// Generates a random value for the row.
     Random,
+    /// Generate a random string from a regex
+    RandomString(String),
 }
 
 impl ColumnGenerationSpec {
@@ -542,6 +544,7 @@ impl ColumnGenerationSpec {
                 pulled: HashSet::new(),
             }),
             ColumnGenerationSpec::Random => ColumnGenerator::Random(col_type.into()),
+            ColumnGenerationSpec::RandomString(r) => ColumnGenerator::RandomString(r.into()),
         }
     }
 }
@@ -559,11 +562,44 @@ pub enum ColumnGenerator {
     Uniform(UniformGenerator),
     /// Returns a random value.
     Random(RandomGenerator),
+    /// Returns a random string from a regex
+    RandomString(RandomStringGenerator),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ConstantGenerator {
     value: DataType,
+}
+
+#[derive(Debug, Clone)]
+pub struct RandomStringGenerator {
+    regex: String,
+    inner: rand_regex::Regex,
+}
+
+impl Eq for RandomStringGenerator {}
+
+impl PartialEq for RandomStringGenerator {
+    fn eq(&self, other: &Self) -> bool {
+        self.regex == other.regex
+    }
+}
+
+impl<'a, S: AsRef<str>> From<S> for RandomStringGenerator {
+    fn from(s: S) -> Self {
+        let s = s.as_ref();
+        Self {
+            regex: s.to_string(),
+            inner: rand_regex::Regex::compile(s, 256).unwrap(),
+        }
+    }
+}
+
+impl RandomStringGenerator {
+    fn gen(&self) -> DataType {
+        let val: String = rand::thread_rng().sample(&self.inner);
+        val.into()
+    }
 }
 
 impl From<SqlType> for ConstantGenerator {
@@ -922,6 +958,7 @@ impl TableSpec {
                         ColumnGenerator::Constant(c) => c.gen(),
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
+                        ColumnGenerator::RandomString(r) => r.gen(),
                     };
 
                     (col_name.clone(), value)
