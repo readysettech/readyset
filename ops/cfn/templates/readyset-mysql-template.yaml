@@ -382,11 +382,26 @@ Resources:
           ToPort: 3306
           SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
   # --- START LOGS AGGREGATOR --- #
+  ReadysetAggregatorCloudWatchLogsManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:DescribeLogGroups"
+              - "logs:DescribeLogStreams"
+              - "logs:CreateLogGroup"
+              - "logs:PutLogEvents"
+            Resource: "*"
   ReadysetLogsAggregatorRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
         - !Ref ConsulJoinManagedPolicyArn
+        - !Ref ReadysetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
           - Action: "sts:AssumeRole"
