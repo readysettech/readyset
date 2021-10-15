@@ -97,7 +97,9 @@ Parameters:
   DeploymentName:
     Type: String
     MinLength: 1
-    # TODO: Allowed Pattern
+    AllowedPattern: >-
+      ^[^/ ]+$
+    ConstraintDescription: must be non-empty and cannot contain slashes ("/") or spaces
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
