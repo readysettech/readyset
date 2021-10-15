@@ -425,5 +425,10 @@ Outputs:
   ReadysetDBSecurityGroup:
     Value: !Ref ReadysetDBSecurityGroup
     Description: Attach this Security Group to your RDS instance.
+  ReadysetAdapterNLBDNSName:
+    Value: !GetAtt
+      - ReadysetMySQLAdapterNLB
+      - DNSName
+    Description: Host for Readyset connection string.
   ReadysetMySQLVPCEndpoint:
     Value: !Ref ReadysetMySQLAdapterVPCEndpoint
