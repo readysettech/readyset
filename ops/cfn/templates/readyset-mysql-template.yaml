@@ -95,6 +95,8 @@ Parameters:
     NoEcho: True
     # TODO: Allowed Pattern
   DeploymentName:
+    Description:
+      A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
     Type: String
     MinLength: 1
     AllowedPattern: >-
