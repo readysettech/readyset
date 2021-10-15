@@ -1,6 +1,38 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Readyset MySQL Cluster
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC Network Configuration"
+        Parameters:
+          - VPCID
+          - VPCCIDR
+          - PrivateSubnet1ID
+          - PrivateSubnet2ID
+          - PrivateSubnet3ID
+      - Label:
+          default: "SSH Access Configuration"
+        Parameters:
+          - BastionSecurityGroupID
+          - KeyPairName
+      - Label:
+          default: "Consul Configuration"
+        Parameters:
+          - ConsulJoinManagedPolicyArn
+          - ConsulEc2RetryJoinTagKey
+          - ConsulEc2RetryJoinTagValue
+      - Label:
+          default: "Readyset Configuration"
+        Parameters:
+          - ReadysetAdapterInstanceType
+          - ReadysetAdapterNodes
+          - ReadysetServerInstanceType
+          - ReadysetServerNodes
+          - ReadysetLogsAggregatorInstanceType
+          - MySQLDatabaseURL
+          - DeploymentName
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
