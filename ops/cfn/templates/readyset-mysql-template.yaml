@@ -117,16 +117,6 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-  ReadysetDBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections from Readyset to RDS
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadysetMySQLAdapterSecurityGroup
   ReadysetMySQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -341,6 +331,20 @@ Resources:
         Count: !Ref ReadysetServerNodes
         Timeout: PT20M
   # --- END SERVER --- #
+  ReadysetDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections from Readyset to RDS
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ReadysetMySQLAdapterSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
   # --- START LOGS AGGREGATOR --- #
   ReadysetLogsAggregatorRole:
     Type: AWS::IAM::Role
@@ -420,6 +424,6 @@ Resources:
 Outputs:
   ReadysetDBSecurityGroup:
     Value: !Ref ReadysetDBSecurityGroup
-    Description: Attach this Security Group to the RDS instance
+    Description: Attach this Security Group to your RDS instance.
   ReadysetMySQLVPCEndpoint:
     Value: !Ref ReadysetMySQLAdapterVPCEndpoint
