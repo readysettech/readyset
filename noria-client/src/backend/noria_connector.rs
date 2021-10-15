@@ -1058,11 +1058,13 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_select(
         &mut self,
-        q: nom_sql::SelectStatement,
+        mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'_>> {
+        let processed = rewrite::process_query(&mut query)?;
+
         trace!("query::select::access view");
-        let qname = self.get_or_create_view(&q, false).await?;
+        let qname = self.get_or_create_view(&query, false).await?;
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
@@ -1074,12 +1076,14 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
         let key_column_indices = getter_schema.indices_for_cols(
-            utils::select_statement_parameter_columns(&q).into_iter(),
+            utils::select_statement_parameter_columns(&query).into_iter(),
             SchemaType::ProjectedSchema,
         )?;
 
+        let keys = processed.make_keys(vec![])?;
+
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &q, vec![], &key_column_indices, ticket)
+        self.do_read(&qname, &query, keys, &key_column_indices, ticket)
             .await
     }
 
