@@ -159,6 +159,36 @@ impl ViewSchema {
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }
 
+    /// Convert the given iterator [`Columns`] to a `Vec` of [`ColumnSchema`]. The columns match if
+    /// either the column name matches (the alias) or the real base name
+    pub fn to_cols<'a, 'b, T>(
+        &'a self,
+        cols: T,
+        schema_type: SchemaType,
+    ) -> ReadySetResult<Vec<&'a ColumnSchema>>
+    where
+        T: IntoIterator<Item = &'b Column>,
+    {
+        let mut by_name = HashMap::new();
+        let mut by_base_name = HashMap::new();
+        for cs in self.schema(schema_type) {
+            by_name.insert(&cs.spec.column.name, cs);
+            if let Some(base) = &cs.base {
+                by_base_name.insert(&base.column, cs);
+            }
+        }
+
+        cols.into_iter()
+            .map(move |c| {
+                by_name
+                    .get(&c.name)
+                    .or_else(|| by_base_name.get(&c.name))
+                    .copied()
+                    .ok_or_else(|| internal_err(format!("Column `{}` not found", c)))
+            })
+            .collect()
+    }
+
     /// Convert the schema to a `Vec` of [`ColumnSchema`], for the speicified indices
     pub fn to_cols_with_indices<'a>(
         &'a self,

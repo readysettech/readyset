@@ -4,12 +4,64 @@ use nom_sql::{
     BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement,
 };
 use noria::{unsupported, ReadySetError, ReadySetResult};
-use std::{cmp::max, iter, mem};
+use std::{
+    cmp::max,
+    convert::{TryFrom, TryInto},
+    iter, mem,
+};
+
+/// Struct storing information about parameters processed from a raw user supplied query, which
+/// provides support for converting a user-supplied parameter list into a set of lookup keys to pass
+/// to Noria.
+///
+/// Construct a [`ProcessedQueryParams`] by calling [`process_query`], then pass the list of
+/// user-provided parameters to [`ProcessedQueryParams::make_keys`] to make a list of lookup keys to
+/// pass to noria.
+#[derive(Debug, Clone)]
+pub(crate) struct ProcessedQueryParams {
+    rewritten_in_conditions: Vec<RewrittenIn>,
+    auto_parameters: Vec<(usize, Literal)>,
+}
+
+pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
+    let rewritten_in_conditions = collapse_where_in(query)?;
+    let auto_parameters = auto_parametrize_query(query);
+    Ok(ProcessedQueryParams {
+        rewritten_in_conditions,
+        auto_parameters,
+    })
+}
+
+impl ProcessedQueryParams {
+    pub(crate) fn make_keys<T>(&self, params: Vec<T>) -> ReadySetResult<Vec<Vec<T>>>
+    where
+        T: Clone + TryFrom<Literal, Error = ReadySetError>,
+    {
+        if params.is_empty() && self.auto_parameters.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let auto_parameters = self
+            .auto_parameters
+            .clone()
+            .into_iter()
+            .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into()?)) })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if self.rewritten_in_conditions.is_empty() {
+            return Ok(vec![splice_auto_parameters(params, auto_parameters)]);
+        }
+
+        explode_params(params, &self.rewritten_in_conditions)
+            .map(move |k| Ok(splice_auto_parameters(k?, auto_parameters.clone())))
+            .collect()
+    }
+}
 
 /// Information about a single parametrized IN condition that has been rewritten to an equality
 /// condition
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct RewrittenIn {
+struct RewrittenIn {
     /// The index in the parameters of the query of the first rewritten parameter for this condition
     first_param_index: usize,
 
@@ -121,7 +173,7 @@ impl<'ast> Visitor<'ast> for CollapseWhereInVisitor {
 ///
 /// Note that IN conditions without any placeholders will be left untouched, as these can be handled
 /// by regular filter nodes in dataflow
-pub(crate) fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<RewrittenIn>> {
+fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<RewrittenIn>> {
     let mut res = vec![];
     let has_aggregates = query.contains_aggregate_select();
 
@@ -143,7 +195,7 @@ pub(crate) fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<V
 
 /// Given a vector of parameters provided by the user and the list of [`RewrittenIn`] returned by
 /// [`collapse_where_in`] on a query, construct a vector of lookup keys for executing that query
-pub(crate) fn explode_params<'a, T>(
+fn explode_params<'a, T>(
     params: Vec<T>,
     rewritten_in_conditions: &'a [RewrittenIn],
 ) -> impl Iterator<Item = ReadySetResult<Vec<T>>> + 'a
@@ -202,7 +254,7 @@ impl<'ast> Visitor<'ast> for AnonymizeLiteralsVisitor {
 }
 
 #[allow(dead_code)] // TODO(peter/justin): remove once this is used
-pub(crate) fn anonymize_literals(query: &mut SelectStatement) {
+fn anonymize_literals(query: &mut SelectStatement) {
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     AnonymizeLiteralsVisitor
         .visit_select_statement(query)
@@ -291,7 +343,7 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
 #[allow(dead_code)] // TODO(grfn): remove once this is used
-pub(crate) fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
     let mut visitor = AutoParametrizeVisitor::default();
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     visitor.visit_select_statement(query).unwrap();
@@ -307,10 +359,11 @@ pub(crate) fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize,
 /// `extracted_auto_params` must be sorted by the first index (this is the case with the return
 /// value of [`auto_parametrize_query`]).
 #[allow(dead_code)] // TODO(grfn): remove once this is used
-pub(crate) fn splice_auto_parameters<T>(
-    mut params: Vec<T>,
-    extracted_auto_params: Vec<(usize, T)>,
-) -> Vec<T> {
+fn splice_auto_parameters<T>(mut params: Vec<T>, extracted_auto_params: Vec<(usize, T)>) -> Vec<T> {
+    if extracted_auto_params.is_empty() {
+        return params;
+    }
+
     debug_assert!(extracted_auto_params.is_sorted_by_key(|(i, _)| *i));
     let mut res = Vec::with_capacity(params.len() + extracted_auto_params.len());
     for (idx, extracted) in extracted_auto_params.into_iter() {
@@ -791,6 +844,64 @@ mod tests {
             let extracted = vec![(1, 1), (3, 3)];
             let res = splice_auto_parameters(params, extracted);
             assert_eq!(res, vec![0, 1, 2, 3]);
+        }
+    }
+
+    mod process_query {
+        use noria::DataType;
+
+        use super::*;
+
+        fn process_and_make_keys(
+            query: &str,
+            params: Vec<DataType>,
+        ) -> (Vec<Vec<DataType>>, SelectStatement) {
+            let mut query = parse_select_statement(query);
+            let processed = process_query(&mut query).unwrap();
+            (processed.make_keys(params).unwrap(), query)
+        }
+
+        #[test]
+        fn no_keys() {
+            let (keys, query) = process_and_make_keys("SELECT * FROM test", vec![]);
+            assert_eq!(query, parse_select_statement("SELECT * FROM test"));
+            assert!(keys.is_empty(), "keys = {:?}", keys);
+        }
+
+        #[test]
+        fn only_auto_params() {
+            let (keys, query) = process_and_make_keys("SELECT x, y FROM test WHERE x = 4", vec![]);
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT x, y FROM test WHERE x = ?")
+            );
+
+            assert_eq!(keys, vec![vec![4.into()]]);
+        }
+
+        #[test]
+        fn where_in_with_auto_params() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM users WHERE x = ? AND y in (?, ?, ?) AND z = 4 AND w = 5 AND q = ?",
+                vec![0.into(), 1.into(), 2.into(), 3.into(), 6.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement(
+                    "SELECT * FROM users WHERE x = ? AND y = ? AND z = ? AND w = ? AND q = ?",
+                )
+            );
+
+            assert_eq!(
+                keys,
+                vec![
+                    vec![0.into(), 1.into(), 4.into(), 5.into(), 6.into()],
+                    vec![0.into(), 2.into(), 4.into(), 5.into(), 6.into()],
+                    vec![0.into(), 3.into(), 4.into(), 5.into(), 6.into()],
+                ]
+            );
         }
     }
 }
