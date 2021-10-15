@@ -1,5 +1,56 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
+Description: Readyset created in a new VPC with a new database
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Availability Zone Configuration
+        Parameters:
+          - AvailabilityZones
+      - Label:
+          default: "VPC Network Configuration"
+        Parameters:
+          - VPCCIDR
+          - PublicSubnet1CIDR
+          - PublicSubnet2CIDR
+          - PublicSubnet3CIDR
+          - PrivateSubnet1CIDR
+          - PrivateSubnet2CIDR
+          - PrivateSubnet3CIDR
+      - Label:
+          default: "SSH Access Configuration"
+        Parameters:
+          - KeyPairName
+          - AccessCIDR
+      - Label:
+          default: "Consul Configuration"
+        Parameters:
+          - ConsulEc2RetryJoinTagKey
+          - ConsulEc2RetryJoinTagValue
+      - Label:
+          default: "Database Configuration"
+        Parameters:
+          - DatabaseStorageType
+          - DatabaseInstanceClass
+          - DatabaseAllocatedStorage
+          - DatabaseName
+          - DatabaseUsername
+          - DatabasePassword
+      - Label:
+          default: "Readyset Configuration"
+        Parameters:
+          - ReadysetS3BucketName
+          - ReadysetAdapterInstanceType
+          - ReadysetAdapterNodes
+          - ReadysetServerInstanceType
+          - ReadysetServerNodes
+          - ReadysetLogsAggregatorInstanceType
+          - DeploymentName
+      - Label:
+          default: AWS Quick Start Configuration
+        Parameters:
+          - QSS3BucketName
 Parameters:
   AvailabilityZones:
     Description: >-
