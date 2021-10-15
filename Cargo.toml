@@ -19,6 +19,7 @@ members = [
     "noria/noria-logictest",
     "noria/timestamp_service",
     "ops/readyset-substrate",
+    "ops/cfn-deploy",
     "psql-srv",
     "unbounded-interval-tree",
     "launchpad",

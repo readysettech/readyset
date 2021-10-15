@@ -4322,6 +4322,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-cfn-deploy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.0.0-beta.4",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tracing",
+ "tracing-subscriber",
+ "yaml-rust",
+]
+
+[[package]]
 name = "readyset-logging"
 version = "0.1.0"
 dependencies = [
