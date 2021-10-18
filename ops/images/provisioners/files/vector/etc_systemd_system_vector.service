@@ -8,6 +8,7 @@ Type=simple
 User=vector
 Group=vector
 ExecStart=/usr/local/bin/start-vector.sh
+EnvironmentFile=-/etc/vector.d/env
 SyslogIdentifier=vector
 Restart=always
 RestartSec=1

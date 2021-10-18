@@ -37,6 +37,13 @@ compression = "none"
 region = "${AWS_CLOUDFORMATION_REGION}"
 stream_name = "readyset"
 encoding.codec = "json"
+
+[sinks.cloudwatch-metrics]
+type = "aws_cloudwatch_metrics"
+inputs = ["in"]
+default_namespace = "${AWS_CLOUDFORMATION_STACK}"
+compression = "none"
+region = "us-east-2"
 EOF
 
 usr/local/bin/cfn-signal-wrapper.sh 0

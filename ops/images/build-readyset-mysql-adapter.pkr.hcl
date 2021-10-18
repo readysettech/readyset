@@ -37,6 +37,9 @@ build {
   }
 
   provisioner "shell" {
+    environment_vars = [
+      "PROMETHEUS_PORT=9000"
+    ]
     scripts = [
       "provisioners/scripts/wait-for-cloud-init.sh",
       "provisioners/scripts/external-base/00-init.sh",

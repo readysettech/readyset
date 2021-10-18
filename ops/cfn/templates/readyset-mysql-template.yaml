@@ -392,6 +392,7 @@ Resources:
               - "logs:DescribeLogStreams"
               - "logs:CreateLogGroup"
               - "logs:PutLogEvents"
+              - "cloudwatch:PutMetricData"
             Resource: "*"
   ReadysetLogsAggregatorRole:
     Type: AWS::IAM::Role
