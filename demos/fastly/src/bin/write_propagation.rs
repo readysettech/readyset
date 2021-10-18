@@ -15,7 +15,7 @@
 use clap::{ArgGroup, Clap, ValueHint};
 use demo_utils::generate::load_to_backend;
 use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use mysql::chrono::Utc;
+
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, DataType, KeyComparison, View, ViewQuery};
@@ -24,8 +24,7 @@ use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
 use noria_client::UpstreamDatabase;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::ColumnGenerationSpec;
-use reqwest::Url;
-use rinfluxdb::line_protocol::LineBuilder;
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
@@ -264,7 +263,7 @@ impl Writer {
     async fn process_thread_updates(
         &self,
         updates: &[WriterThreadUpdate],
-        http_client: &reqwest::Client,
+        _http_client: &reqwest::Client,
     ) -> anyhow::Result<()> {
         let mut query_latencies: Vec<u128> = Vec::new();
         let mut db_latencies: Vec<u128> = Vec::new();
@@ -278,50 +277,11 @@ impl Writer {
             query_latencies.iter().sum::<u128>() as f64 / query_latencies.len() as f64;
         let avg_db_latency = db_latencies.iter().sum::<u128>() as f64 / db_latencies.len() as f64;
 
-        if let Some(influx_host) = &self.influx_host {
-            let timestamp = Utc::now();
-            let measurements = vec![
-                LineBuilder::new("write")
-                    .insert_field("qps", qps)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-                LineBuilder::new("write")
-                    .insert_field("latency", avg_latency)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-                LineBuilder::new("write")
-                    .insert_field("db_latency", avg_db_latency)
-                    .set_timestamp(timestamp)
-                    .build()
-                    .to_string(),
-            ];
-            let response = http_client
-                .post(Url::parse(format!("{}/write", influx_host.clone()).as_str()).unwrap())
-                .body(measurements.join("\n"))
-                .header("Content-Type", "text/plain")
-                .query(&[
-                    ("db", &self.influx_database.as_ref().unwrap().clone()),
-                    ("u", &self.influx_user.as_ref().unwrap().clone()),
-                    ("p", &self.influx_password.as_ref().unwrap().clone()),
-                ])
-                .send()
-                .await
-                .unwrap();
-            if !response.status().is_success() {
-                panic!(
-                    "Request to InfluxDB failed. Status: {} | Message: {}",
-                    response.status().as_u16(),
-                    response.text().await.unwrap()
-                )
-            }
-        } else {
-            println!(
-                "qps: {}\te2e_latency: {}\tdb_latency: {}",
-                qps, avg_latency, avg_db_latency
-            );
-        }
+        println!(
+            "qps: {}\te2e_latency: {}\tdb_latency: {}",
+            qps, avg_latency, avg_db_latency
+        );
+
         Ok(())
     }
 

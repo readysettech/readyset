@@ -17,7 +17,7 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 use thiserror::Error;
 
-const MICROSECS_IN_SECOND: i64 = 1_000_000;
+const MICROSECS_IN_SECOND: i128 = 1_000_000;
 
 const MAX_MYSQL_TIME_SECONDS: i64 = 3020399; // 3020399 secs = 838:59:59
 
@@ -79,7 +79,7 @@ impl MysqlTime {
     /// assert_eq!(0, truncated_mysql_time.microseconds());
     /// ```
     pub fn new(duration: Duration) -> MysqlTime {
-        let secs = duration.num_seconds();
+        let secs = duration.whole_seconds();
         if secs > MAX_MYSQL_TIME_SECONDS {
             return MysqlTime::max_value();
         }
@@ -110,11 +110,13 @@ impl MysqlTime {
         seconds: u8,
         microseconds: u64,
     ) -> MysqlTime {
-        let sum = (hour as i64 * 3600 * MICROSECS_IN_SECOND)
-            + (minutes.min(59) as i64 * 60 * MICROSECS_IN_SECOND)
-            + (seconds.min(59) as i64 * MICROSECS_IN_SECOND)
-            + (microseconds.min(999_999) as i64);
-        MysqlTime::new(Duration::microseconds(sum * if positive { 1 } else { -1 }))
+        let sum = (hour as i128 * 3600 * MICROSECS_IN_SECOND)
+            + (minutes.min(59) as i128 * 60 * MICROSECS_IN_SECOND)
+            + (seconds.min(59) as i128 * MICROSECS_IN_SECOND)
+            + (microseconds.min(999_999) as i128);
+        MysqlTime::new(Duration::microseconds(
+            (sum * if positive { 1 } else { -1 }) as _,
+        ))
     }
 
     /// Creates a new [`MysqlTime`] from the given `microseconds`.
@@ -229,7 +231,7 @@ impl MysqlTime {
     /// assert_eq!(pos_mysql_time.is_positive(), true);
     /// ```
     pub fn is_positive(&self) -> bool {
-        self.duration >= Duration::zero()
+        self.duration >= Duration::ZERO
     }
 
     /// Returns the `hour` from this [`MysqlTime`]
@@ -244,7 +246,7 @@ impl MysqlTime {
     /// ```
     pub fn hour(&self) -> u16 {
         self.duration
-            .num_hours()
+            .whole_hours()
             .abs()
             .try_into()
             .unwrap_or(u16::MAX)
@@ -261,7 +263,7 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.minutes(), 23);
     /// ```
     pub fn minutes(&self) -> u8 {
-        (self.duration.num_minutes().abs() % 60)
+        (self.duration.whole_minutes().abs() % 60)
             .try_into()
             .unwrap_or(59)
             .min(59)
@@ -278,7 +280,7 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.seconds(), 58);
     /// ```
     pub fn seconds(&self) -> u8 {
-        (self.duration.num_seconds().abs() % 60)
+        (self.duration.whole_seconds().abs() % 60)
             .try_into()
             .unwrap_or(59)
             .min(59)
@@ -295,11 +297,9 @@ impl MysqlTime {
     /// assert_eq!(mysql_time.microseconds(), 829313);
     /// ```
     pub fn microseconds(&self) -> u32 {
-        self.duration
-            .num_microseconds()
-            .map(|us| (us.abs() % MICROSECS_IN_SECOND) as u32)
-            .unwrap_or(0)
-            .max(0)
+        (self.duration.whole_microseconds().abs() % MICROSECS_IN_SECOND)
+            .try_into()
+            .unwrap_or(u32::MAX)
     }
 }
 
@@ -522,15 +522,15 @@ impl FromStr for MysqlTime {
 
 impl From<NaiveTime> for MysqlTime {
     fn from(nt: NaiveTime) -> Self {
-        let h = nt.hour() as i64;
-        let m = nt.minute() as i64;
-        let s = nt.second() as i64;
-        let us = (nt.nanosecond() / 1_000) as i64;
+        let h = nt.hour() as i128;
+        let m = nt.minute() as i128;
+        let s = nt.second() as i128;
+        let us = (nt.nanosecond() / 1_000) as i128;
         let sum = (h * 60 * 60 * MICROSECS_IN_SECOND)
             + (m * 60 * MICROSECS_IN_SECOND)
             + (s * MICROSECS_IN_SECOND)
             + us;
-        MysqlTime::new(Duration::microseconds(sum))
+        MysqlTime::new(Duration::microseconds(sum as _))
     }
 }
 
@@ -837,18 +837,25 @@ mod tests {
     macro_rules! assert_valid {
         ($mysql_time:expr,$duration:expr) => {
             if $duration > MAX_MYSQL_TIME_SECONDS {
-                assert_eq!($mysql_time.duration.num_seconds(), MAX_MYSQL_TIME_SECONDS);
+                assert_eq!($mysql_time.duration.whole_seconds(), MAX_MYSQL_TIME_SECONDS);
             } else if $duration < -MAX_MYSQL_TIME_SECONDS {
-                assert_eq!($mysql_time.duration.num_seconds(), -MAX_MYSQL_TIME_SECONDS);
+                assert_eq!(
+                    $mysql_time.duration.whole_seconds(),
+                    -MAX_MYSQL_TIME_SECONDS
+                );
             } else {
-                assert_eq!($mysql_time.duration.num_seconds(), $duration);
+                assert_eq!($mysql_time.duration.whole_seconds(), $duration);
             }
         };
     }
 
     macro_rules! assert_time {
         ($mysql_time:expr, $positive:literal , $h:literal, $m:literal, $s:literal, $us: literal) => {
-            assert_eq!($mysql_time.is_positive(), $positive);
+            if $positive {
+                assert!($mysql_time.is_positive());
+            } else {
+                assert!(!$mysql_time.is_positive());
+            }
             assert_eq!($mysql_time.hour(), $h);
             assert_eq!($mysql_time.minutes(), $m);
             assert_eq!($mysql_time.seconds(), $s);
@@ -859,7 +866,7 @@ mod tests {
     #[proptest]
     fn new(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time = MysqlTime::new(duration);
-        let total_secs = duration.num_seconds();
+        let total_secs = duration.whole_seconds();
         assert_valid!(mysql_time, total_secs);
     }
 
@@ -880,8 +887,8 @@ mod tests {
     #[proptest]
     fn from_microseconds(#[strategy(arbitrary_duration())] duration: Duration) {
         let mysql_time =
-            MysqlTime::from_microseconds(duration.num_microseconds().unwrap_or(i64::max_value()));
-        let total_secs = duration.num_seconds();
+            MysqlTime::from_microseconds(duration.whole_microseconds().try_into().unwrap());
+        let total_secs = duration.whole_seconds();
         assert_valid!(mysql_time, total_secs);
     }
 
@@ -970,7 +977,7 @@ mod tests {
     ) {
         let mysql_time1 = MysqlTime::new(duration1);
         let mysql_time2 = MysqlTime::new(duration2);
-        let total_secs = (duration1 - duration2).num_seconds();
+        let total_secs = (duration1 - duration2).whole_seconds();
         assert_valid!(mysql_time1 - mysql_time2, total_secs);
     }
 
@@ -981,7 +988,7 @@ mod tests {
     ) {
         let mysql_time1 = MysqlTime::new(duration1);
         let mysql_time2 = MysqlTime::new(duration2);
-        let total_secs = (duration1 + duration2).num_seconds();
+        let total_secs = (duration1 + duration2).whole_seconds();
         assert_valid!(mysql_time1 + mysql_time2, total_secs);
     }
 
@@ -1002,7 +1009,7 @@ mod tests {
         fn from_str(#[strategy(arbitrary_duration())] duration: Duration) {
             let duration_str = duration_to_str(duration);
             let mysql_time = MysqlTime::from_str(duration_str.as_str()).unwrap();
-            let total_secs = duration.num_seconds();
+            let total_secs = duration.whole_seconds();
             assert_valid!(mysql_time, total_secs);
         }
 
@@ -1157,28 +1164,28 @@ mod tests {
             assert_time!(mysql_time, false, 0, 0, 9, 654_321);
 
             let mysql_time = MysqlTime::from_str("67");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("00000067");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("67.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("00000067.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("-67");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("-00000067");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("-67.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
 
             let mysql_time = MysqlTime::from_str("-00000067.654321");
-            assert_eq!(mysql_time.is_err(), true);
+            assert!(mysql_time.is_err());
         }
 
         #[test]
@@ -1421,15 +1428,16 @@ mod tests {
     }
 
     fn duration_to_str(duration: Duration) -> String {
-        let total_secs = duration.num_seconds();
+        let total_secs = duration.whole_seconds();
         let h = total_secs.abs() / 3600;
         let m = total_secs.abs() % 3600 / 60;
         let s = total_secs.abs() % 60;
         let us = duration
-            .num_microseconds()
-            .map(|us| (us.abs() % MICROSECS_IN_SECOND) as u32)
-            .unwrap_or(0)
-            .max(0);
+            .whole_microseconds()
+            .abs()
+            .try_into()
+            .unwrap_or(u32::MAX)
+            % MICROSECS_IN_SECOND as u32;
         let sign = if total_secs.is_negative() { "-" } else { "" };
         if us != 0 {
             format!("{}{:02}:{:02}:{:02}.{:06}", sign, h, m, s, us)
