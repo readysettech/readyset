@@ -5,6 +5,7 @@ use crate::myc::io::WriteMysqlExt;
 use crate::Column;
 use byteorder::{LittleEndian, WriteBytesExt};
 use mysql_time::MysqlTime;
+use std::convert::TryFrom;
 use std::io::{self, Write};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
@@ -650,12 +651,13 @@ impl ToMysqlValue for myc::value::Value {
                         error: "negative times not yet supported".to_string(),
                     }));
                 }
-                (chrono::Duration::days(i64::from(d))
-                    + chrono::Duration::hours(i64::from(h))
-                    + chrono::Duration::minutes(i64::from(m))
-                    + chrono::Duration::seconds(i64::from(s))
-                    + chrono::Duration::microseconds(i64::from(us)))
-                .to_std()
+                std::time::Duration::try_from(
+                    chrono::Duration::days(i64::from(d))
+                        + chrono::Duration::hours(i64::from(h))
+                        + chrono::Duration::minutes(i64::from(m))
+                        + chrono::Duration::seconds(i64::from(s))
+                        + chrono::Duration::microseconds(i64::from(us)),
+                )
                 .map_err(|_| {
                     other_error(OtherErrorKind::Unexpected {
                         error: "negative times not yet supported".to_string(),
@@ -720,12 +722,13 @@ impl ToMysqlValue for myc::value::Value {
                         error: "negative times not yet supported".to_string(),
                     }));
                 }
-                (chrono::Duration::days(i64::from(d))
-                    + chrono::Duration::hours(i64::from(h))
-                    + chrono::Duration::minutes(i64::from(m))
-                    + chrono::Duration::seconds(i64::from(s))
-                    + chrono::Duration::microseconds(i64::from(us)))
-                .to_std()
+                std::time::Duration::try_from(
+                    chrono::Duration::days(i64::from(d))
+                        + chrono::Duration::hours(i64::from(h))
+                        + chrono::Duration::minutes(i64::from(m))
+                        + chrono::Duration::seconds(i64::from(s))
+                        + chrono::Duration::microseconds(i64::from(us)),
+                )
                 .map_err(|_| {
                     other_error(OtherErrorKind::Unexpected {
                         error: "negative times not yet supported".to_string(),
