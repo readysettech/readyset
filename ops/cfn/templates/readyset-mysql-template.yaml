@@ -51,10 +51,10 @@ Parameters:
     Default: t3.small
   ReadysetAdapterNodes:
     Type: String
-    Description: Number of Adapter nodes to create
+    Description: Number of Adapter nodes to create.
   ReadysetServerNodes:
     Type: String
-    Description: Number of Adapter nodes to create
+    Description: Number of Server nodes to create.
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -78,22 +78,20 @@ Parameters:
     Type: String
   ConsulEc2RetryJoinTagKey:
     Description:
-      The EC2 instance tag key to filter on when joining to other Consul
-      nodes.
+      The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
     Default: "ReadysetConsulNodeType"
     ConstraintDescription: Must match EC2 Tag Name requirements.
   ConsulEc2RetryJoinTagValue:
     Description:
-      The EC2 instance tag value to filter on when joining to other Consul
-      nodes.
+      The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
     Default: "Server"
-    ConstraintDescription: Must match EC2 Tag Name requirements.
+    ConstraintDescription: Must match EC2 Tag Value requirements.
   MySQLDatabaseURL:
     Type: String
     NoEcho: True
-    # TODO: Allowed Pattern
+    Description: Existing Database URL connection string
   DeploymentName:
     Description:
       A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
@@ -101,15 +99,15 @@ Parameters:
     MinLength: 1
     AllowedPattern: >-
       ^[^/ ]+$
-    ConstraintDescription: must be non-empty and cannot contain slashes ("/") or spaces
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      # short commit id associated with AMIs: 4386726 
+      # short commit id associated with AMIs: 4386726
       READYSETMYSQLADAPTER: ami-066cad927b27a4d0b
       READYSETSERVER: ami-02ac681fc8d0cc6be
-      LOGSAGGREGATOR: ami-03e9d75c2dbed51bb
+      READYSETLOGSAGGREGATOR: ami-03e9d75c2dbed51bb
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadysetMySQLAdapterRole:
@@ -229,10 +227,9 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref ReadysetMySQLAdapterTargetGroup
       LoadBalancerArn: !Ref ReadysetMySQLAdapterNLB
-  ReadysetMySQLAdapterVPCEndpoint:
+  ReadysetMySQLAdapterVPCEndpointService:
     Type: AWS::EC2::VPCEndpointService
     Properties:
-      AcceptanceRequired: false
       NetworkLoadBalancerArns:
         - !Ref ReadysetMySQLAdapterNLB
   # --- END MYSQL ADAPTER --- #
@@ -449,7 +446,7 @@ Resources:
       ImageId: !FindInMap
           - AWSAMIRegionMap
           - !Ref "AWS::Region"
-          - LOGSAGGREGATOR
+          - READYSETLOGSAGGREGATOR
       Tags:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Logs-Aggregator"]]
@@ -481,5 +478,6 @@ Outputs:
       - ReadysetMySQLAdapterNLB
       - DNSName
     Description: Host for Readyset connection string.
-  ReadysetMySQLVPCEndpoint:
-    Value: !Ref ReadysetMySQLAdapterVPCEndpoint
+  ReadysetMySQLVPCEndpointService:
+    Value: !Ref ReadysetMySQLAdapterVPCEndpointService
+    Description: VPC Endpoint Service to allow connections from outside the VPC.

@@ -56,7 +56,7 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      AUTHORITYCONSUL: ami-0bc5a6a247c2a5455
+      READYSETAUTHORITYCONSUL: ami-0bc5a6a247c2a5455
 Resources:
   ConsulSecurityGroup:
     Type: "AWS::EC2::SecurityGroup"
@@ -119,7 +119,7 @@ Resources:
       ImageId: !FindInMap
         - AWSAMIRegionMap
         - !Ref "AWS::Region"
-        - AUTHORITYCONSUL
+        - READYSETAUTHORITYCONSUL
       IamInstanceProfile: !Ref ConsulServerProfile
       UserData:
         Fn::Base64: !Sub

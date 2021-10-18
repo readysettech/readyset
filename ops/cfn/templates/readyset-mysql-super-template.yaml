@@ -130,23 +130,21 @@ Parameters:
     AllowedPattern: >-
       ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     Description: >-
-      The CIDR IP range that is permitted to access Readyset. Note: a value of
-      0.0.0.0/0 will allow access from ANY IP address
+      The CIDR IP range that is permitted to access this new VPC containing Readyset resources.
+      Note: a value of 0.0.0.0/0 will allow access from ANY IP address
     Type: String
   ConsulEc2RetryJoinTagKey:
     Description:
-      The EC2 instance tag key to filter on when joining to other Consul
-      nodes.
+      The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
     Default: "ReadysetConsulNodeType"
     ConstraintDescription: Must match EC2 Tag Name requirements.
   ConsulEc2RetryJoinTagValue:
     Description:
-      The EC2 instance tag value to filter on when joining to other Consul
-      nodes.
+      The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
     Default: "Server"
-    ConstraintDescription: Must match EC2 Tag Name requirements.
+    ConstraintDescription: Must match EC2 Tag Value requirements.
   ReadysetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
@@ -202,7 +200,9 @@ Parameters:
   DeploymentName:
     Type: String
     MinLength: 1
-    # TODO: Allowed Pattern
+    AllowedPattern: >-
+      ^[^/ ]+$
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 Resources:
   VPCStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -332,11 +332,6 @@ Resources:
         ReadysetLogsAggregatorInstanceType: !Ref ReadysetLogsAggregatorInstanceType
         DeploymentName: !Ref DeploymentName
 Outputs:
-  ReadysetDBSecurityGroup:
-    Value: !GetAtt
-      - ReadysetMySQLStack
-      - Outputs.ReadysetDBSecurityGroup
-    Description: Security group for the RDS instance
   ReadysetMySQLVPCEndpoint:
     Value: !GetAtt
       - ReadysetMySQLStack
