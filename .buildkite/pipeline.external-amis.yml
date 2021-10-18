@@ -1,5 +1,9 @@
 steps:
-  - block: "Create production external :amazon-ec2: AMIs?"
+  - block: "Release production external :amazon-ec2: AMIs?"
+    fields:
+      - key: release-name
+        required: true
+        text: Release Name (This name WILL be seen by customers)
 
   - label: ':rust: Build readyset release binaries'
     key: build-release-binaries
@@ -49,12 +53,6 @@ steps:
     - ecr#v2.5.0:
         login: true
         retries: 3
-
-  - block: "Release external images?"
-    fields:
-      - key: release-name
-        required: true
-        text: Release Name (This name WILL be seen by customers)
 
   - label: ":packer: Run copy production images to deploy account"
     key: packer-deploy-external
