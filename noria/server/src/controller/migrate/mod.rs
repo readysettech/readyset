@@ -940,6 +940,8 @@ impl Migration {
         info!("initializing new materializations");
         let mut materializations = mainline.materializations.clone();
 
+        materializations.extend(&mut ingredients, &new)?;
+        materializations.validate(&ingredients, &new)?;
         materializations.commit(&mut ingredients, &new, &mut dmp)?;
 
         warn!(

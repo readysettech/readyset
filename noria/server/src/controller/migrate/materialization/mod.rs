@@ -17,7 +17,6 @@ use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-use std::mem;
 use tracing::{debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
@@ -145,7 +144,11 @@ impl Materializations {
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
-    fn extend(&mut self, graph: &Graph, new: &HashSet<NodeIndex>) -> ReadySetResult<()> {
+    pub(super) fn extend(
+        &mut self,
+        graph: &mut Graph,
+        new: &HashSet<NodeIndex>,
+    ) -> ReadySetResult<()> {
         let span = info_span!("materializations:extend");
         let _g = span.enter();
         // this code used to be a mess, and will likely be a mess this time around too.
@@ -354,8 +357,8 @@ impl Materializations {
         //
         // the approach we are going to take is to require walking the graph bottom-up:
         let mut ordered = Vec::with_capacity(graph.node_count());
-        let mut topo = petgraph::visit::Topo::new(graph);
-        while let Some(node) = topo.next(graph) {
+        let mut topo = petgraph::visit::Topo::new(graph as &Graph);
+        while let Some(node) = topo.next(graph as &Graph) {
             if graph[node].is_source() {
                 continue;
             }
@@ -539,90 +542,6 @@ impl Materializations {
             }
         }
         assert!(replay_obligations.is_empty());
-        Ok(())
-    }
-
-    /// Retrieves the materialization status of a given node, or None
-    /// if the node isn't materialized.
-    pub(in crate::controller) fn get_status(
-        &self,
-        index: NodeIndex,
-        node: &Node,
-    ) -> MaterializationStatus {
-        let is_materialized = self.have.contains_key(&index)
-            || node
-                .as_reader()
-                .map(|r| r.is_materialized())
-                .unwrap_or(false);
-
-        if !is_materialized {
-            MaterializationStatus::Not
-        } else if self.partial.contains(&index) {
-            MaterializationStatus::Partial {
-                beyond_materialization_frontier: node.purge,
-            }
-        } else {
-            MaterializationStatus::Full
-        }
-    }
-
-    /// Commit to all materialization decisions since the last time `commit` was called.
-    ///
-    /// This includes setting up replay paths, adding new indices to existing materializations, and
-    /// populating new materializations.
-    #[allow(clippy::cognitive_complexity)]
-    pub(super) fn commit(
-        &mut self,
-        graph: &mut Graph,
-        new: &HashSet<NodeIndex>,
-        dmp: &mut DomainMigrationPlan,
-    ) -> Result<(), ReadySetError> {
-        self.extend(graph, new)?;
-
-        // check that we don't have fully materialized nodes downstream of partially materialized
-        // nodes.
-        {
-            fn any_partial(
-                this: &Materializations,
-                graph: &Graph,
-                ni: NodeIndex,
-            ) -> Option<NodeIndex> {
-                if this.partial.contains(&ni) {
-                    return Some(ni);
-                }
-                for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                    if let Some(ni) = any_partial(this, graph, ni) {
-                        return Some(ni);
-                    }
-                }
-                None
-            }
-
-            for ni in self
-                .added
-                .keys()
-                .copied()
-                .chain(mem::take(&mut self.new_readers))
-            {
-                if self.partial.contains(&ni) {
-                    continue;
-                }
-
-                if let Some(pi) = any_partial(self, graph, ni) {
-                    println!("{}", graphviz(graph, true, self));
-                    error!(
-                        full = %ni.index(),
-                        partial = %pi.index(),
-                        "partial materializations above full materialization"
-                    );
-                    internal!(
-                        "partial materializations ({:?}) above full materialization ({:?})",
-                        pi.index(),
-                        ni.index()
-                    );
-                }
-            }
-        }
 
         // Mark nodes as beyond the frontier as dictated by the strategy
         for &ni in new {
@@ -655,6 +574,108 @@ impl Materializations {
                 n.purge = true;
             } else if let FrontierStrategy::Readers = self.frontier_strategy {
                 n.purge = n.purge || n.is_reader();
+            }
+        }
+
+        for &ni in new {
+            // any nodes marked as .purge should have their state be beyond the materialization
+            // frontier. however, mir may have named an identity child instead of the node with a
+            // materialization, so let's make sure the label gets correctly applied: specifically,
+            // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
+            if graph[ni].purge && !(self.have.contains_key(&ni) || graph[ni].is_reader()) {
+                let mut it = graph
+                    .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
+                    .detach();
+                while let Some((_, pi)) = it.next(&*graph) {
+                    if !new.contains(&pi) {
+                        continue;
+                    }
+                    if !self.have.contains_key(&pi) {
+                        warn!(node = %ni.index(), "no associated state with purged node");
+                        continue;
+                    }
+                    invariant!(
+                        self.partial.contains(&pi),
+                        "attempting to place full materialization beyond materialization frontier"
+                    );
+                    graph.node_weight_mut(pi).unwrap().purge = true;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Retrieves the materialization status of a given node, or None
+    /// if the node isn't materialized.
+    pub(in crate::controller) fn get_status(
+        &self,
+        index: NodeIndex,
+        node: &Node,
+    ) -> MaterializationStatus {
+        let is_materialized = self.have.contains_key(&index)
+            || node
+                .as_reader()
+                .map(|r| r.is_materialized())
+                .unwrap_or(false);
+
+        if !is_materialized {
+            MaterializationStatus::Not
+        } else if self.partial.contains(&index) {
+            MaterializationStatus::Partial {
+                beyond_materialization_frontier: node.purge,
+            }
+        } else {
+            MaterializationStatus::Full
+        }
+    }
+
+    /// Validate all graph invariants for the materializations in `self` for all nodes in `new` in
+    /// the given `graph`, returning an `Err` if any invariants are violated. This consists of:
+    ///
+    /// * Checking to make sure no partially materialized nodes exist that are ancestors of fully
+    ///   materialized nodes
+    /// * Checking that no node is partial over a subset of the indices in its parent
+    /// * Checking that there are no cases where a subgraph is sharded by one column, and then has a
+    ///   replay path on a duplicated copy of that column.
+    pub(super) fn validate(&self, graph: &Graph, new: &HashSet<NodeIndex>) -> ReadySetResult<()> {
+        // check that we don't have fully materialized nodes downstream of partially materialized
+        // nodes.
+        {
+            fn any_partial(
+                this: &Materializations,
+                graph: &Graph,
+                ni: NodeIndex,
+            ) -> Option<NodeIndex> {
+                if this.partial.contains(&ni) {
+                    return Some(ni);
+                }
+                for ni in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    if let Some(ni) = any_partial(this, graph, ni) {
+                        return Some(ni);
+                    }
+                }
+                None
+            }
+
+            for ni in self.added.keys().copied().chain(self.new_readers.clone()) {
+                if self.partial.contains(&ni) {
+                    continue;
+                }
+
+                if let Some(pi) = any_partial(self, graph, ni) {
+                    println!("{}", graphviz(graph, true, self));
+                    error!(
+                        full = %ni.index(),
+                        partial = %pi.index(),
+                        "partial materializations above full materialization"
+                    );
+                    internal!(
+                        "partial materializations ({:?}) above full materialization ({:?})",
+                        pi.index(),
+                        ni.index()
+                    );
+                }
             }
         }
 
@@ -743,6 +764,31 @@ impl Materializations {
                     }
                 }
             }
+
+            // check that we never have non-purge below purge
+            let mut non_purge = Vec::new();
+            for &ni in new {
+                if (graph[ni].is_reader() || self.have.contains_key(&ni)) && !graph[ni].purge {
+                    for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                        non_purge.push(pi);
+                    }
+                }
+            }
+            while let Some(ni) = non_purge.pop() {
+                if graph[ni].purge {
+                    println!("{}", graphviz(graph, true, self));
+                    internal!("found purge node {} above non-purge node", ni.index())
+                }
+                if self.have.contains_key(&ni) {
+                    // already shceduled to be checked
+                    // NOTE: no need to check for readers here, since they can't be parents
+                    continue;
+                }
+                for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
+                    non_purge.push(pi);
+                }
+            }
+            drop(non_purge);
         }
 
         // check that we don't have any cases where a subgraph is sharded by one column, and then
@@ -810,57 +856,20 @@ impl Materializations {
             }
         }
 
-        for &ni in new {
-            // any nodes marked as .purge should have their state be beyond the materialization
-            // frontier. however, mir may have named an identity child instead of the node with a
-            // materialization, so let's make sure the label gets correctly applied: specifically,
-            // if a .prune node doesn't have state, we "move" that .prune to its ancestors.
-            if graph[ni].purge && !(self.have.contains_key(&ni) || graph[ni].is_reader()) {
-                let mut it = graph
-                    .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-                    .detach();
-                while let Some((_, pi)) = it.next(&*graph) {
-                    if !new.contains(&pi) {
-                        continue;
-                    }
-                    if !self.have.contains_key(&pi) {
-                        warn!(node = %ni.index(), "no associated state with purged node");
-                        continue;
-                    }
-                    invariant!(
-                        self.partial.contains(&pi),
-                        "attempting to place full materialization beyond materialization frontier"
-                    );
-                    graph.node_weight_mut(pi).unwrap().purge = true;
-                }
-            }
-        }
+        Ok(())
+    }
 
-        // check that we never have non-purge below purge
-        let mut non_purge = Vec::new();
-        for &ni in new {
-            if (graph[ni].is_reader() || self.have.contains_key(&ni)) && !graph[ni].purge {
-                for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                    non_purge.push(pi);
-                }
-            }
-        }
-        while let Some(ni) = non_purge.pop() {
-            if graph[ni].purge {
-                println!("{}", graphviz(graph, true, self));
-                internal!("found purge node {} above non-purge node", ni.index())
-            }
-            if self.have.contains_key(&ni) {
-                // already shceduled to be checked
-                // NOTE: no need to check for readers here, since they can't be parents
-                continue;
-            }
-            for pi in graph.neighbors_directed(ni, petgraph::EdgeDirection::Incoming) {
-                non_purge.push(pi);
-            }
-        }
-        drop(non_purge);
-
+    /// Commit to all materialization decisions since the last time `commit` was called.
+    ///
+    /// This includes setting up replay paths, adding new indices to existing materializations, and
+    /// populating new materializations.
+    #[allow(clippy::cognitive_complexity)]
+    pub(super) fn commit(
+        &mut self,
+        graph: &mut Graph,
+        new: &HashSet<NodeIndex>,
+        dmp: &mut DomainMigrationPlan,
+    ) -> Result<(), ReadySetError> {
         let mut reindex = Vec::with_capacity(new.len());
         let mut make = Vec::with_capacity(new.len());
         let mut topo = petgraph::visit::Topo::new(&*graph);
