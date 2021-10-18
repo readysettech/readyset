@@ -184,9 +184,9 @@ impl Node {
                     sharding
                 )),
                 NodeType::Reader(ref r) => {
-                    let key = match r.key() {
+                    let key = match r.index() {
                         None => String::from("none"),
-                        Some(k) => format!("{:?}", k),
+                        Some(index) => format!("{:?}({:?})", index.index_type, index.columns),
                     };
                     s.push_str(&format!(
                         "{{ {{ {} / {} {} }} | (reader / ⚷: {}) | {} }}",
