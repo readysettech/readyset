@@ -341,7 +341,6 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 /// Replace all literals that are in positions we support parameters in the given query with
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
-#[allow(dead_code)] // TODO(grfn): remove once this is used
 fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
     let mut visitor = AutoParametrizeVisitor::default();
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
@@ -357,7 +356,6 @@ fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> 
 ///
 /// `extracted_auto_params` must be sorted by the first index (this is the case with the return
 /// value of [`auto_parametrize_query`]).
-#[allow(dead_code)] // TODO(grfn): remove once this is used
 fn splice_auto_parameters<T>(mut params: Vec<T>, extracted_auto_params: Vec<(usize, T)>) -> Vec<T> {
     if extracted_auto_params.is_empty() {
         return params;
