@@ -20,6 +20,7 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", fe
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
 native-tls = "0.2.7"
 futures = "0.3.16"
+itertools = "0.10.1"
 thiserror = "1.0.26"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-futures = "0.2.5"

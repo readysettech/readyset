@@ -1,5 +1,6 @@
 use crate::backend::{noria_connector, NoriaConnector, PrepareResult};
 use crate::query_status_cache::QueryStatusCache;
+use crate::upstream_database::NoriaCompare;
 use crate::{UpstreamDatabase, UpstreamPrepare};
 use metrics::counter;
 use noria::{ReadySetError, ReadySetResult};
@@ -76,7 +77,26 @@ where
         // Issues a prepare statement in both noria and mysql and verifies that
         // the resulting schemas are equivalent.
         match self.mirror_prepare(stmt.clone()).await {
-            Ok(PrepareResult::Both(_, _)) => {
+            Ok(PrepareResult::Both(noria_result, upstream_result)) => {
+                if let noria_connector::PrepareResult::Select {
+                    ref schema,
+                    ref params,
+                    ..
+                } = noria_result
+                {
+                    match upstream_result.meta.compare(schema, params) {
+                        Ok(true) => {}
+                        Ok(false) => return,
+                        Err(e) => {
+                            error!("Error comparing schema: {}", e);
+                            return;
+                        }
+                    }
+                } else {
+                    // Treat the wrong schema type returned as a failure.
+                    return;
+                }
+
                 counter!(recorded::RECONCILER_ALLOWED, 1);
                 self.query_status_cache.set_allow(stmt).await
             }

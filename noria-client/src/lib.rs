@@ -17,7 +17,7 @@ pub mod query_reconciler;
 pub mod query_status_cache;
 pub mod rewrite;
 pub mod test_helpers;
-mod upstream_database;
+pub mod upstream_database;
 mod utils;
 
 pub use crate::backend::{Backend, BackendBuilder};
