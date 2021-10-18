@@ -146,13 +146,11 @@ impl OrderLimitRemoval for SqlQuery {
 
 #[cfg(test)]
 mod tests {
-    use nom_sql::{parse_query, Dialect};
+    use nom_sql::{parse_query, ColumnSpecification, Dialect};
 
     use super::*;
 
     fn generate_base_schemas() -> HashMap<String, CreateTableStatement> {
-        use nom_sql::{ColumnSpecification, Table};
-
         let table = Table {
             name: "t".to_string(),
             alias: None,
