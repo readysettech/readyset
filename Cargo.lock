@@ -3570,6 +3570,7 @@ dependencies = [
  "clap 3.0.0-beta.4",
  "eui48",
  "futures 0.3.17",
+ "itertools 0.10.1",
  "jemallocator",
  "launchpad",
  "native-tls",

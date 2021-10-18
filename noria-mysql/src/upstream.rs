@@ -2,15 +2,17 @@ use async_trait::async_trait;
 use mysql_async::consts::{CapabilityFlags, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{Column, Conn, Opts, OptsBuilder, Row, TxOpts, UrlError};
+use noria_client::upstream_database::NoriaCompare;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use tracing::{debug, error};
 
 use noria::errors::internal_err;
-use noria::{DataType, ReadySetError};
+use noria::{ColumnSchema, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 
+use crate::schema::convert_column;
 use crate::Error;
 
 type StatementID = u32;
@@ -50,6 +52,31 @@ pub struct StatementMeta {
     pub params: Vec<Column>,
     /// Metadata about the types of the columns in the rows returned by this statement
     pub schema: Vec<Column>,
+}
+
+fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> bool {
+    if schema.len() != columns.len() {
+        return false;
+    }
+
+    schema
+        .iter()
+        .zip(columns.iter())
+        .all(|(sch, col)| convert_column(&sch.spec).coltype == col.column_type())
+}
+
+impl NoriaCompare for StatementMeta {
+    type Error = Error;
+    fn compare(
+        &self,
+        columns: &[ColumnSchema],
+        params: &[ColumnSchema],
+    ) -> Result<bool, Self::Error> {
+        let param_match = schema_column_match(params, &self.params);
+        let column_match = schema_column_match(columns, &self.schema);
+
+        Ok(param_match && column_match)
+    }
 }
 
 #[async_trait]
@@ -255,5 +282,101 @@ impl UpstreamDatabase for MySqlUpstream {
             }
         }
         Ok(dump.into_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use msql_srv::ColumnType;
+    use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
+
+    fn test_column() -> NomColumn {
+        NomColumn {
+            name: "t".to_string(),
+            table: None,
+            function: None,
+        }
+    }
+
+    #[test]
+    fn compare_matching_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![
+                Column::new(ColumnType::MYSQL_TYPE_VAR_STRING),
+                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
+            ],
+            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
+        };
+
+        let param_specs = vec![
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Varchar(10)),
+                "table1".to_string(),
+            ),
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Double),
+                "table1".to_string(),
+            ),
+        ];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Int(None)),
+            "table1".to_string(),
+        )];
+
+        assert!(s.compare(&schema_spec, &param_specs).unwrap());
+    }
+
+    #[test]
+    fn compare_different_len_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![
+                Column::new(ColumnType::MYSQL_TYPE_VARCHAR),
+                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
+            ],
+            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
+        };
+
+        let param_specs = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Varchar(10)),
+            "table1".to_string(),
+        )];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Int(None)),
+            "table1".to_string(),
+        )];
+
+        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
+    }
+
+    #[test]
+    fn compare_different_type_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![
+                Column::new(ColumnType::MYSQL_TYPE_VARCHAR),
+                Column::new(ColumnType::MYSQL_TYPE_DOUBLE),
+            ],
+            schema: vec![Column::new(ColumnType::MYSQL_TYPE_LONG)],
+        };
+
+        let param_specs = vec![
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Bool),
+                "table1".to_string(),
+            ),
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Double),
+                "table1".to_string(),
+            ),
+        ];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Varchar(8)),
+            "table1".to_string(),
+        )];
+
+        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
     }
 }

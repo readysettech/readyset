@@ -5,7 +5,8 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use noria::{unsupported, DataType, ReadySetError};
+use noria::{unsupported, ColumnSchema, DataType, ReadySetError};
+use noria_client::upstream_database::NoriaCompare;
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 use pgsql::config::Host;
 use pgsql::types::Type;
@@ -16,6 +17,7 @@ use tokio_postgres as pgsql;
 use tracing::{info, info_span};
 use tracing_futures::Instrument;
 
+use crate::schema::type_to_pgsql;
 use crate::Error;
 
 /// A connector to an underlying PostgreSQL database
@@ -47,6 +49,41 @@ pub struct StatementMeta {
     pub params: Vec<Type>,
     /// Metadata about the types of the columns in the rows returned by this statement
     pub schema: Vec<Column>,
+}
+
+// Returns if the schema plausibly matches the sets of columns.
+fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<bool, Error> {
+    if schema.len() != columns.len() {
+        return Ok(false);
+    }
+
+    for (sch, col) in schema.iter().zip(columns.iter()) {
+        if &type_to_pgsql(&sch.spec.sql_type)? != col {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+impl NoriaCompare for StatementMeta {
+    type Error = Error;
+    fn compare(
+        &self,
+        columns: &[ColumnSchema],
+        params: &[ColumnSchema],
+    ) -> Result<bool, Self::Error> {
+        let param_match = schema_column_match(params, &self.params)?;
+        let schema_match = schema_column_match(
+            columns,
+            &self
+                .schema
+                .iter()
+                .map(|c| c.col_type.clone())
+                .collect::<Vec<_>>(),
+        )?;
+
+        Ok(param_match && schema_match)
+    }
 }
 
 #[async_trait]
@@ -234,5 +271,101 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             pg_dump.env("PGPASSWORD", OsStr::from_bytes(password));
         }
         Ok(pg_dump.output().await?.stdout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nom_sql::{Column as NomColumn, ColumnSpecification, SqlType};
+
+    use super::*;
+
+    fn test_column() -> NomColumn {
+        NomColumn {
+            name: "t".to_string(),
+            table: None,
+            function: None,
+        }
+    }
+
+    #[test]
+    fn compare_matching_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![Type::BOOL, Type::INT8],
+            schema: vec![Column {
+                name: "c1".to_string(),
+                col_type: Type::VARCHAR,
+            }],
+        };
+
+        let param_specs = vec![
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Bool),
+                "table1".to_string(),
+            ),
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Bigint(Some(10))),
+                "table1".to_string(),
+            ),
+        ];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Varchar(8)),
+            "table1".to_string(),
+        )];
+
+        assert!(s.compare(&schema_spec, &param_specs).unwrap());
+    }
+
+    #[test]
+    fn compare_different_len_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![Type::BOOL, Type::INT8],
+            schema: vec![Column {
+                name: "c1".to_string(),
+                col_type: Type::VARCHAR,
+            }],
+        };
+
+        let param_specs = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Bool),
+            "table1".to_string(),
+        )];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Varchar(8)),
+            "table1".to_string(),
+        )];
+
+        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
+    }
+
+    #[test]
+    fn compare_different_type_schema() {
+        let s: StatementMeta = StatementMeta {
+            params: vec![Type::BOOL, Type::INT8],
+            schema: vec![Column {
+                name: "c1".to_string(),
+                col_type: Type::VARCHAR,
+            }],
+        };
+
+        let param_specs = vec![
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Bool),
+                "table1".to_string(),
+            ),
+            ColumnSchema::from_base(
+                ColumnSpecification::new(test_column(), SqlType::Varchar(10)),
+                "table1".to_string(),
+            ),
+        ];
+
+        let schema_spec = vec![ColumnSchema::from_base(
+            ColumnSpecification::new(test_column(), SqlType::Varchar(8)),
+            "table1".to_string(),
+        )];
+
+        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
     }
 }

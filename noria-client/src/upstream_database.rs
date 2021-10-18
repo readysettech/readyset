@@ -2,13 +2,26 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use noria::{DataType, ReadySetError};
+use noria::{ColumnSchema, DataType, ReadySetError};
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 #[derive(Debug)]
 pub struct UpstreamPrepare<DB: UpstreamDatabase> {
     pub statement_id: u32,
     pub meta: DB::StatementMeta,
+}
+
+/// An implementation of this trait allows the statement metadata from a
+/// prepare result to be compared against the schema of the equivalent
+/// noria prepare result.
+pub trait NoriaCompare {
+    type Error: From<ReadySetError> + Error + Send + Sync + 'static;
+
+    fn compare(
+        &self,
+        columns: &[ColumnSchema],
+        params: &[ColumnSchema],
+    ) -> Result<bool, Self::Error>;
 }
 
 /// A connector to some kind of upstream database which can be used for passthrough write queries
@@ -33,7 +46,7 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// This type is used as a field of [`UpstreamPrepare`], returned from
     /// [`prepare`](UpstreamDatabase::prepaare)
-    type StatementMeta: Debug + Send + 'static;
+    type StatementMeta: NoriaCompare + Debug + Send + 'static;
 
     /// Errors that can be returned from operations on this database
     ///
