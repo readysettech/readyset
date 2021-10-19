@@ -44,6 +44,7 @@ build {
       "provisioners/scripts/vector/00-init.sh",
       "provisioners/scripts/vector/10-aws.sh",
       "provisioners/scripts/prometheus/00-init.sh",
+      "provisioners/scripts/grafana/00-init.sh",
     ]
   }
 

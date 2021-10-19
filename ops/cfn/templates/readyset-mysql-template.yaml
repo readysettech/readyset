@@ -432,6 +432,10 @@ Resources:
           ToPort: 9090
           CidrIp: !Ref VPCCIDR
           Description: Allow connections to the prometheus server within the VPC.
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref VPCCIDR
+          Description: Allow connections to the grafana server within the VPC. 
         - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
