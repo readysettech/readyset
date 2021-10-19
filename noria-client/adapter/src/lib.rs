@@ -17,11 +17,12 @@ use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
-use noria_client::coverage::QueryCoverageInfoRef;
 use noria_client::query_reconciler::QueryReconciler;
 use noria_client::query_status_cache::QueryStatusCache;
+use noria_client::{coverage::QueryCoverageInfoRef, http_router::NoriaAdapterHttpRouter};
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
+use stream_cancel::Valve;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::net;
@@ -73,6 +74,14 @@ pub struct NoriaAdapter<H> {
     pub mirror_ddl: bool,
 }
 
+fn true_or_false(s: &str) -> Result<bool, &'static str> {
+    match &s.to_ascii_lowercase()[..] {
+        "true" | "t" | "yes" | "y" => Ok(true),
+        "false" | "f" | "no" | "n" => Ok(false),
+        _ => Err("expected `true`, `t,`, `yes`, `y`, `false`, `f`, `no`, or `n`"),
+    }
+}
+
 #[derive(Clap)]
 pub struct Options {
     /// IP:PORT to listen on
@@ -106,8 +115,24 @@ pub struct Options {
     allow_unauthenticated_connections: bool,
 
     /// Run with query coverage analysis enabled in the serving path.
-    #[clap(long, requires("upstream-db-url"))]
+    #[clap(
+        long,
+        env = "LIVE_QCA",
+        default_value = "false",
+        requires("upstream-db-url"), 
+        parse(try_from_str = true_or_false)
+    )]
     live_qca: bool,
+
+    /// IP:PORT to host endpoint for scraping metrics from the adapter.
+    #[clap(
+        long,
+        env = "METRICS_ADDRESS",
+        default_value = "0.0.0.0:6034",
+        parse(try_from_str),
+        requires("upstream-db-url")
+    )]
+    metrics_address: SocketAddr,
 
     /// Make all reads run against Noria and upstream, returning the upstream result.
     #[clap(long, requires("upstream-db-url"))]
@@ -332,6 +357,25 @@ where
             None
         };
 
+        // Deploy http router if an address was supplied to retrieve QCA data.
+        let router_handle = {
+            let (handle, valve) = Valve::new();
+            let query_cache = query_status_cache.as_ref().cloned();
+            let http_server = NoriaAdapterHttpRouter {
+                listen_addr: options.metrics_address,
+                query_cache,
+                valve,
+            };
+            let fut = async move {
+                let http_listener = http_server.create_listener().await.unwrap();
+                NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
+            };
+
+            rt.handle().spawn(fut);
+
+            handle
+        };
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
@@ -389,6 +433,9 @@ where
 
         // Dropping the sender acts as a shutdown signal.
         drop(shutdown_sender);
+
+        // Shut down all tcp streams started by the adapters http router.
+        drop(router_handle);
 
         if let Some(path) = options.coverage_analysis.as_ref() {
             let _guard = rt.enter();

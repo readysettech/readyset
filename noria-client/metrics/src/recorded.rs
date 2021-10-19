@@ -40,6 +40,9 @@ pub const RECONCILER_PROCESSED: &str = "reconciler.processed";
 /// locking.
 pub const RECONCILER_ALLOWED: &str = "reconciler.allowed";
 
+/// Counter: The number of HTTP requests received at the noria-client.
+pub const ADAPTER_EXTERNAL_REQUESTS: &str = "noria-client.external_requests";
+
 /// A query log entry representing the time spent executing a single
 /// query.
 pub struct QueryLogEntry {
