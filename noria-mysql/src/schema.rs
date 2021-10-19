@@ -7,7 +7,7 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
     let coltype = match col.sql_type {
         SqlType::Mediumtext => MYSQL_TYPE_VAR_STRING,
         SqlType::Longtext => MYSQL_TYPE_BLOB,
-        SqlType::Text => MYSQL_TYPE_STRING,
+        SqlType::Text => MYSQL_TYPE_BLOB,
         SqlType::Varchar(_) => MYSQL_TYPE_VAR_STRING,
         SqlType::Int(_) => MYSQL_TYPE_LONG,
         SqlType::UnsignedInt(_) => {
