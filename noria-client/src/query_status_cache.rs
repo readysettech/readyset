@@ -14,7 +14,10 @@
 
 use chrono::{DateTime, Utc};
 use nom_sql::SelectStatement;
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 use std::collections::HashMap;
+
+use crate::rewrite::anonymize_literals;
 
 /// Holds metadata regarding when a query was first seen within the system,
 /// along with its current state.
@@ -35,6 +38,43 @@ impl QueryStatus {
 
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct QueryList {
+    queries: Vec<Query>,
+}
+
+impl QueryList {
+    pub fn len(&self) -> usize {
+        self.queries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.queries.is_empty()
+    }
+}
+
+impl From<Vec<Query>> for QueryList {
+    fn from(queries: Vec<Query>) -> Self {
+        QueryList { queries }
+    }
+}
+
+impl Serialize for QueryList {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sanitized = self.queries.clone();
+        sanitized.iter_mut().for_each(|q| anonymize_literals(q));
+
+        let mut seq = serializer.serialize_seq(Some(sanitized.len()))?;
+        for q in sanitized {
+            seq.serialize_element(&q.to_string())?;
+        }
+        seq.end()
+    }
+}
 
 /// Represents the current state of any given query. Deny is an implicit state
 /// that is derived from a combination of NeedsProcessing and other query
@@ -120,26 +160,29 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Allow`].
-    pub async fn allow_list(&self) -> Vec<Query> {
+    pub async fn allow_list(&self) -> QueryList {
         self.inner
             .read()
             .await
             .iter()
             .filter(|(_, status)| matches!(status.state, QueryState::Allow))
             .map(|(q, _)| q.clone())
-            .collect()
+            .collect::<Vec<Query>>()
+            .into()
     }
 
     /// Returns a list of queries that are in the deny list.
-    pub async fn deny_list(&self) -> Vec<Query> {
-        self.inner
-            .read()
-            .await
-            .iter()
-            .filter(|(_, status)| matches!(status.state, QueryState::NeedsProcessing if status.first_seen < self.max_age())
-            )
-            .map(|(q, _)| q.clone())
-            .collect()
+    pub async fn deny_list(&self) -> QueryList {
+        self
+                .inner
+                .read()
+                .await
+                .iter()
+                .filter(|(_, status)| matches!(status.state, QueryState::NeedsProcessing if status.first_seen < self.max_age())
+                )
+                .map(|(q, _)| q.clone())
+                .collect::<Vec<Query>>()
+                .into()
     }
 
     /// Returns the a query's current status in the cache. If the query does not
@@ -191,7 +234,7 @@ mod tests {
 
         cache.set_allow(&query).await;
         assert_eq!(cache.needs_processing().await.len(), 0);
-        assert_eq!(cache.allow_list().await, vec![query.clone()]);
+        assert_eq!(cache.allow_list().await, vec![query.clone()].into());
         assert_eq!(cache.deny_list().await.len(), 0);
         assert_eq!(cache.query_state(&query).await, Some(QueryState::Allow));
     }
