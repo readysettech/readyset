@@ -427,9 +427,68 @@ where
         //          (0, 4), 4)    (2, 4), 4)     (7, 10] 11]
         //
         //   [0, 3), 3)                                  (7, 11] 11]
+        //
+
+        /// Fully rebalance a node after walking it for deletion.
+        ///
+        /// Note that this is not as simple as the usual insertion rebalance case - because we can
+        /// removee entire subtrees as part of walking for deletion, nodes can get *arbitrarily*
+        /// unbalanced, so we need to rebalance them in a loop and recursively
+        fn rebalance_node<Q>(node: &mut Option<Box<Node<Q>>>)
+        where
+            Q: Ord + Clone,
+        {
+            if node.is_none() {
+                return;
+            }
+
+            while !node.as_ref().unwrap().is_balanced() {
+                let bf = node.as_ref().unwrap().balance_factor();
+                if bf > 1 {
+                    // left is bigger than the right
+                    if node
+                        .as_ref()
+                        .unwrap()
+                        .left
+                        .as_ref()
+                        .map_or(0, |n| n.balance_factor())
+                        < 0
+                    {
+                        // right-left case: rotate the left one step left first
+                        Node::rotate_left(&mut node.as_mut().unwrap().left);
+                    }
+                    node.as_mut().unwrap().update_height();
+                    Node::rotate_right(node);
+
+                    // rotating right might have unbalanced our right child, so rebalance that if it
+                    // needs to be
+                    rebalance_node(&mut node.as_mut().unwrap().right);
+                } else if bf < -1 {
+                    // right is bigger than the left
+                    if node
+                        .as_ref()
+                        .unwrap()
+                        .right
+                        .as_ref()
+                        .map_or(0, |n| n.balance_factor())
+                        > 0
+                    {
+                        // left-right case: rotate the right one step left right
+                        Node::rotate_right(&mut node.as_mut().unwrap().right);
+                    }
+                    node.as_mut().unwrap().update_height();
+                    Node::rotate_left(node);
+
+                    // rotating left might have unbalanced our left child, so rebalance that if it
+                    // needs to be
+                    rebalance_node(&mut node.as_mut().unwrap().left);
+                }
+                node.as_mut().unwrap().update_height();
+            }
+        }
 
         /// If a node is entirely covered by a bound, replace it with its own child (collecting the
-        /// other child if it exists into `to_insert` and recurse.
+        /// other child if it exists into `to_insert`) and recurse.
         fn replace_node_if_covered<Q, R>(
             node: &mut Option<Box<Node<Q>>>,
             range: &R,
@@ -516,13 +575,14 @@ where
                         to_insert.push(Box::new(Node::new(below)));
                         to_insert.push(Box::new(Node::new(above)));
                     }
-                    (None, None) =>
-                    #[allow(clippy::unreachable)]
-                    // actually unreachable - and there's a proptest covering it!
-                    {
-                        unreachable!(
-                        "fully covered node should have already been removed in maybe_replace_node",
-                    )
+                    (None, None) => {
+                        // actually unreachable - and there's a proptest covering it!
+                        #[allow(clippy::unreachable)]
+                        {
+                            unreachable!(
+                                "fully covered node should have already been removed in maybe_replace_node",
+                            )
+                        }
                     }
                 }
 
@@ -549,6 +609,8 @@ where
 
             if needs_removal {
                 node.left = None;
+            } else {
+                rebalance_node(&mut node.left);
             }
 
             // now, if the node's start is not above the end of the range to remove (which would
@@ -567,6 +629,8 @@ where
 
                 if needs_removal {
                     node.right = None;
+                } else {
+                    rebalance_node(&mut node.right);
                 }
             }
 
@@ -583,12 +647,15 @@ where
         replace_node_if_covered(&mut self.root, range, &mut to_insert);
 
         let needs_removal = if let Some(ref mut root) = self.root {
+            // then walk the tree starting at the root node
             walk_tree(root, range, &mut to_insert)
         } else {
             false
         };
         if needs_removal {
             self.root = None;
+        } else {
+            rebalance_node(&mut self.root);
         }
 
         // Now, keep walking and inserting the contents of to_insert until it empties
@@ -1179,14 +1246,11 @@ where
     }
 
     fn rotate_right(node: &mut Option<Box<Self>>) {
-        if !node.as_ref().map_or(false, |n| n.left.is_some()) {
-            return;
-        }
-
         let mut n = node.take().unwrap();
         *node = n.left.take().map(|mut new_top| {
             let new_right = n;
             let new_left = mem::replace(&mut new_top.right, Some(new_right));
+
             let new_self = new_top.right.as_mut().unwrap();
             new_self.left = new_left;
             new_self.update_height();
@@ -1200,10 +1264,6 @@ where
     }
 
     fn rotate_left(node: &mut Option<Box<Self>>) {
-        if !node.as_ref().map_or(false, |n| n.right.is_some()) {
-            return;
-        }
-
         let mut n = node.take().unwrap();
         *node = n.right.take().map(|mut new_top| {
             let new_left = n;
@@ -1238,6 +1298,10 @@ where
 
     fn balance_factor(&self) -> i32 {
         self.left.as_ref().map_or(0, |n| n.height) - self.right.as_ref().map_or(0, |n| n.height)
+    }
+
+    fn is_balanced(&self) -> bool {
+        matches!(self.balance_factor(), -1 | 0 | 1)
     }
 
     fn drain(self: Box<Self>) -> Drain<Q> {
@@ -1366,14 +1430,14 @@ mod tests {
         res
     }
 
-    fn check_invariants<Q>(tree: &IntervalTree<Q>, check_balance: bool)
+    fn check_invariants<Q>(tree: &IntervalTree<Q>)
     where
         Q: Ord + Clone + Hash + std::fmt::Debug,
     {
         use itertools::Itertools;
 
         // returns child_contains_max or true if max is None
-        fn check_node_invariants<Q>(node: &Node<Q>, max: Option<&Bound<Q>>, check_balance: bool)
+        fn check_node_invariants<Q>(node: &Node<Q>, max: Option<&Bound<Q>>)
         where
             Q: Ord + Clone + std::fmt::Debug,
         {
@@ -1436,25 +1500,23 @@ mod tests {
             );
 
             // our balance factor is between -1 and 1 (aka, we are an avl tree!)
-            if check_balance {
-                assert!(
-                    matches!(node.balance_factor(), -1 | 0 | 1),
-                    "imbalanced node {:#?}: balance_factor = {}",
-                    node,
-                    node.balance_factor()
-                );
-            }
+            assert!(
+                node.is_balanced(),
+                "imbalanced node {:#?}: balance_factor = {}",
+                node,
+                node.balance_factor()
+            );
 
             if let Some(ref left) = node.left {
-                check_node_invariants(left, Some(&node.value), check_balance);
+                check_node_invariants(left, Some(&node.value));
             }
             if let Some(ref right) = node.right {
-                check_node_invariants(right, Some(&node.value), check_balance);
+                check_node_invariants(right, Some(&node.value));
             }
         }
 
         if let Some(ref root) = tree.root {
-            check_node_invariants(root, None, check_balance);
+            check_node_invariants(root, None);
         }
 
         assert_eq!(
@@ -1510,23 +1572,23 @@ mod tests {
             let mut tree = IntervalTree::default();
             for range in ranges.drain(..) {
                 tree.insert(range);
-                check_invariants(&tree, true);
+                check_invariants(&tree);
             }
         }
 
 
         #[test]
         fn insert_preserves_invariants(mut tree: IntervalTree<u8>, range: Range<u8>) {
-            check_invariants(&tree, true);
+            check_invariants(&tree);
             tree.insert(range);
-            check_invariants(&tree, true);
+            check_invariants(&tree);
         }
 
         #[test]
         fn insert_node_preserves_invariants(mut tree: IntervalTree<u8>, node: Node<u8>) {
-            check_invariants(&tree, true);
+            check_invariants(&tree);
             tree.insert_node(Box::new(node));
-            check_invariants(&tree, true);
+            check_invariants(&tree);
         }
 
         #[test]
@@ -1575,69 +1637,9 @@ mod tests {
             t.root.unwrap()
         };
 
-        check_invariants(&tree, true);
+        check_invariants(&tree);
         tree.insert_node(node);
-        check_invariants(&tree, true);
-    }
-
-    #[test]
-    fn insert_into_unbalanced() {
-        let mut tree = IntervalTree {
-            root: Some(Box::new(Node {
-                key: (Excluded(-86), Included(0)),
-                value: Included(1),
-                left: Some(Box::new(Node {
-                    key: (Excluded(-86), Excluded(0)),
-                    value: Included(0),
-                    left: Some(Box::new(Node {
-                        key: (Included(-86), Excluded(0)),
-                        value: Included(0),
-                        left: Some(Box::new(Node {
-                            key: (Unbounded, Included(0)),
-                            value: Included(0),
-                            left: Some(Box::new(Node {
-                                key: (Unbounded, Included(-1)),
-                                value: Included(-1),
-                                left: None,
-                                right: None,
-                                height: 1,
-                            })),
-                            right: None,
-                            height: 2,
-                        })),
-                        right: Some(Box::new(Node {
-                            key: (Included(-86), Included(0)),
-                            value: (Included(0)),
-                            left: None,
-                            right: None,
-                            height: 1,
-                        })),
-                        height: 3,
-                    })),
-                    right: None,
-                    height: 4,
-                })),
-                right: Some(Box::new(Node {
-                    key: (Excluded(-42), Included(0)),
-                    value: (Included(1)),
-                    left: Some(Box::new(Node {
-                        key: (Excluded(-43), Included(1)),
-                        value: (Included(1)),
-                        left: None,
-                        right: None,
-                        height: 1,
-                    })),
-                    right: None,
-                    height: 2,
-                })),
-                height: 5,
-            })),
-        };
-        check_invariants(&tree, false);
-        tree.insert((Excluded(2), Unbounded));
-        check_invariants(&tree, false);
-
-        assert_eq!(tree.len(), 9);
+        check_invariants(&tree);
     }
 
     #[test]
@@ -1988,7 +1990,7 @@ mod tests {
             tree.insert(0..10);
             assert!(tree.contains_interval(0..10));
             tree.remove(&(0..10));
-            check_invariants(&tree, false);
+            check_invariants(&tree);
             assert!(!tree.contains_interval(0..10));
             assert!(
                 tree.get_interval_difference(0..10)
@@ -2003,7 +2005,7 @@ mod tests {
             tree.insert(-2..=-1);
 
             tree.remove(&(0..10));
-            check_invariants(&tree, false);
+            check_invariants(&tree);
             assert!(!tree.contains_interval(0..10));
             assert!(tree.contains_interval(-2..=-1));
         }
@@ -2015,7 +2017,7 @@ mod tests {
             tree.insert(11..=12);
             tree.remove(&(0..10));
 
-            check_invariants(&tree, false);
+            check_invariants(&tree);
             assert!(!tree.contains_interval(0..10));
             assert!(tree.contains_interval(11..=12));
         }
@@ -2028,21 +2030,145 @@ mod tests {
             tree.insert(11..=12);
             tree.remove(&(0..10));
 
-            check_invariants(&tree, false);
+            check_invariants(&tree);
             assert!(!tree.contains_interval(0..10));
             assert!(tree.contains_interval(-2..=-1));
             assert!(tree.contains_interval(11..=12));
         }
 
+        #[test]
+        fn complex_rebalancing() {
+            let mut tree: IntervalTree<i8> = IntervalTree {
+                root: Some(Box::new(Node {
+                    key: (Included(0), Included(0)),
+                    value: Unbounded,
+                    left: Some(Box::new(Node {
+                        key: (Included(-42), Included(0)),
+                        value: Included(1),
+                        left: Some(Box::new(Node {
+                            key: (Included(-122), Included(0)),
+                            value: Included(1),
+                            left: Some(Box::new(Node {
+                                key: (Unbounded, Included(0)),
+                                value: Included(0),
+                                left: None,
+                                right: None,
+                                height: 1,
+                            })),
+                            right: Some(Box::new(Node {
+                                key: (Included(-43), Included(1)),
+                                value: Included(1),
+                                left: Some(Box::new(Node {
+                                    key: (Included(-43), Included(0)),
+                                    value: Included(0),
+                                    left: None,
+                                    right: None,
+                                    height: 1,
+                                })),
+                                right: None,
+                                height: 2,
+                            })),
+                            height: 3,
+                        })),
+                        right: Some(Box::new(Node {
+                            key: (Included(-1), Included(0)),
+                            value: Included(1),
+                            left: Some(Box::new(Node {
+                                key: (Included(-35), Included(0)),
+                                value: Included(0),
+                                left: None,
+                                right: None,
+                                height: 1,
+                            })),
+                            right: Some(Box::new(Node {
+                                key: (Excluded(-1), Excluded(0)),
+                                value: Included(1),
+                                left: Some(Box::new(Node {
+                                    key: (Included(-1), Included(1)),
+                                    value: Included(1),
+                                    left: None,
+                                    right: None,
+                                    height: 1,
+                                })),
+                                right: None,
+                                height: 2,
+                            })),
+                            height: 3,
+                        })),
+                        height: 4,
+                    })),
+                    right: Some(Box::new(Node {
+                        key: (Included(9), Included(57)),
+                        value: Unbounded,
+                        left: Some(Box::new(Node {
+                            key: (Included(0), Included(1)),
+                            value: Unbounded,
+                            left: None,
+                            right: Some(Box::new(Node {
+                                key: (Included(0), Unbounded),
+                                value: Unbounded,
+                                left: None,
+                                right: None,
+                                height: 1,
+                            })),
+                            height: 2,
+                        })),
+                        right: Some(Box::new(Node {
+                            key: (Excluded(9), Excluded(9)),
+                            value: Unbounded,
+                            left: Some(Box::new(Node {
+                                key: (Included(9), Unbounded),
+                                value: Unbounded,
+                                left: None,
+                                right: None,
+                                height: 1,
+                            })),
+                            right: Some(Box::new(Node {
+                                key: (Included(53), Excluded(53)),
+                                value: Excluded(53),
+                                left: Some(Box::new(Node {
+                                    key: (Included(10), Excluded(10)),
+                                    value: Excluded(10),
+                                    left: None,
+                                    right: None,
+                                    height: 1,
+                                })),
+                                right: None,
+                                height: 2,
+                            })),
+                            height: 3,
+                        })),
+                        height: 4,
+                    })),
+                    height: 5,
+                })),
+            };
+            check_invariants(&tree);
+            tree.remove(&(Included(-1), Excluded(0)));
+            check_invariants(&tree);
+        }
+
         proptest! {
+            #[test]
+            fn preserves_invariants(
+                mut tree: IntervalTree<i8>,
+                to_remove in arbitrary_ordered_bound::<i8>()
+            ) {
+                check_invariants(&tree);
+                eprintln!("{}", tree.graphviz());
+                tree.remove(&to_remove);
+                eprintln!("{}", tree.graphviz());
+                check_invariants(&tree);
+            }
+
             #[test]
             fn then_contains(
                 mut tree: IntervalTree<i8>,
                 to_remove in arbitrary_ordered_bound::<i8>()
             ) {
-                check_invariants(&tree, false);
+                check_invariants(&tree);
                 tree.remove(&to_remove);
-                check_invariants(&tree, false);
+                check_invariants(&tree);
                 assert!(!tree.contains_interval(to_remove));
                 assert_eq!(tree.get_interval_difference(to_remove), vec![to_remove]);
             }
@@ -2054,13 +2180,13 @@ mod tests {
                 other in arbitrary_ordered_bound::<i8>()
             ) {
                 prop_assume!(!overlaps(&to_remove, &other));
-                check_invariants(&tree, false);
+                check_invariants(&tree);
 
                 tree.insert(other);
-                check_invariants(&tree, false);
+                check_invariants(&tree);
 
                 tree.remove(&to_remove);
-                check_invariants(&tree, false);
+                check_invariants(&tree);
 
                 assert!(tree.contains_interval(other));
             }
@@ -2218,13 +2344,7 @@ mod tests {
             );
         }
 
-        // Currently, both left and right rotation no-op if the child in the opposite direction is
-        // None - this is only necessary because due to removal not rebalancing, we sometimes need
-        // to insert into an unbalanced tree, and attempting to rotate an unbalanced tree might
-        // result in your tree emptying out from under you. Once we rebalance on removal, this test
-        // can come back
         #[proptest]
-        #[ignore]
         fn rotation_inverse(node: Box<Node<u8>>) {
             let mut result = Some(node.clone());
             Node::rotate_right(&mut result);
