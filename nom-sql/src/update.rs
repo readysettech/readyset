@@ -2,7 +2,7 @@ use nom::character::complete::{multispace0, multispace1};
 use std::{fmt, str};
 
 use crate::column::Column;
-use crate::common::{assignment_expr_list, statement_terminator, table_reference};
+use crate::common::{assignment_expr_list, schema_table_reference_no_alias, statement_terminator};
 use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
@@ -46,7 +46,7 @@ pub fn updating(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], UpdateStat
         let (remaining_input, (_, _, table, _, _, _, fields, _, where_clause, _)) = tuple((
             tag_no_case("update"),
             multispace1,
-            table_reference(dialect),
+            schema_table_reference_no_alias(dialect),
             multispace1,
             tag_no_case("set"),
             multispace1,

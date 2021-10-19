@@ -28,6 +28,7 @@ eui48 = "0.4"
 uuid = { version = "0.8", features = ["v4"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 bit-vec = { version = "0.6", features = ["serde"] }
+lazy_static = "1.4"
 
 [dev-dependencies]
 assert_approx_eq = "1.1.0"

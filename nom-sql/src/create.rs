@@ -1566,6 +1566,30 @@ mod tests {
         }
 
         #[test]
+        fn create_with_non_reserved_identifier() {
+            let qstring = "CREATE TABLE groups ( id integer );";
+            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert_eq!(
+                res.unwrap().1,
+                CreateTableStatement {
+                    table: Table::from("groups"),
+                    fields: vec![ColumnSpecification::new(
+                        Column::from("groups.id"),
+                        SqlType::Int(None)
+                    ),],
+                    ..Default::default()
+                }
+            );
+        }
+
+        #[test]
+        fn create_with_reserved_identifier() {
+            let qstring = "CREATE TABLE select ( id integer );";
+            let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
+            assert!(res.is_err());
+        }
+
+        #[test]
         fn django_create() {
             let qstring = "CREATE TABLE \"django_admin_log\" (
                        \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
