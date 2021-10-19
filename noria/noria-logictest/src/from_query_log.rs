@@ -38,6 +38,13 @@ pub struct FromQueryLog {
     #[clap(long)]
     pub skip_ddl: bool,
 
+    /// Log unparsable queries to a file
+    #[clap(long)]
+    pub unparsable_query_log: Option<PathBuf>,
+
+    #[clap(skip)]
+    unparsable_query_log_file: Option<File>,
+
     /// Query log to convert
     pub input: PathBuf,
 
@@ -109,7 +116,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
 
 impl FromQueryLog {
     async fn process_query(
-        &self,
+        &mut self,
         entry: &Entry,
         conn: &mut DatabaseConnection,
     ) -> anyhow::Result<Option<Record>> {
@@ -142,12 +149,15 @@ impl FromQueryLog {
     }
 
     async fn process_execute(
-        &self,
+        &mut self,
         session: &Session,
         entry: &Entry,
         conn: &mut DatabaseConnection,
     ) -> anyhow::Result<Option<Record>> {
-        let parsed = parse_query(Dialect::MySQL, &entry.arguments).map_err(|e| anyhow!(e))?;
+        let parsed = self
+            .parse_query(Dialect::MySQL, &entry.arguments)
+            .await
+            .map_err(|e| anyhow!(e))?;
         let (stmt, values) = session
             .find_prepared_statement(&parsed)
             .ok_or_else(|| anyhow!("Prepared statement not found"))?;
@@ -175,8 +185,39 @@ impl FromQueryLog {
         }
     }
 
+    async fn parse_query(
+        &mut self,
+        dialect: Dialect,
+        query: impl AsRef<str>,
+    ) -> anyhow::Result<SqlQuery> {
+        match parse_query(dialect, query.as_ref()) {
+            Ok(parsed) => Ok(parsed),
+            Err(e) => {
+                if let Some(f) = self.unparsable_query_log_file.as_mut() {
+                    f.write(format!("{}\n\n", query.as_ref()).as_bytes())
+                        .await?;
+                }
+                Err(anyhow!(e))
+            }
+        }
+    }
+
     #[tokio::main]
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        if let Some(path) = self.unparsable_query_log.as_ref() {
+            self.unparsable_query_log_file = Some(
+                OpenOptions::new()
+                    .read(false)
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .append(false)
+                    .open(path)
+                    .await
+                    .unwrap(),
+            );
+        }
+
         let input = File::open(&self.input).await.unwrap();
         let mut input = Stream::new(BufReader::new(input), self.split_sessions);
 
