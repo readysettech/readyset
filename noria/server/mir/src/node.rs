@@ -11,7 +11,8 @@ use std::rc::Rc;
 
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef};
-use dataflow::prelude::{internal_err, ReadySetResult};
+use noria::errors::internal_err;
+use noria::{internal, ReadySetResult};
 
 pub mod node_inner;
 
@@ -185,7 +186,7 @@ impl MirNode {
 
     /// Add a new column to the set of emitted columns for this node, and return the resulting index
     /// of that column
-    pub fn add_column(&mut self, c: Column) -> usize {
+    pub fn add_column(&mut self, c: Column) -> ReadySetResult<usize> {
         fn column_pos(node: &MirNode) -> Option<usize> {
             match &node.inner {
                 MirNodeInner::Aggregation { .. } => {
@@ -213,9 +214,9 @@ impl MirNode {
             self.columns.len()
         };
 
-        self.inner.insert_column(c);
+        self.inner.insert_column(c)?;
 
-        pos
+        Ok(pos)
     }
 
     pub fn ancestors(&self) -> &[MirNodeRef] {
@@ -288,12 +289,14 @@ impl MirNode {
         }
     }
 
-    pub fn column_specifications(&self) -> &[(ColumnSpecification, Option<usize>)] {
+    /// Returns a slice to the column specifications, if this MIR-Node is a base node.
+    /// Otherwise, returns `None`.
+    pub fn column_specifications(&self) -> ReadySetResult<&[(ColumnSpecification, Option<usize>)]> {
         match self.inner {
             MirNodeInner::Base {
                 ref column_specs, ..
-            } => column_specs.as_slice(),
-            _ => panic!("non-base MIR nodes don't have column specifications!"),
+            } => Ok(column_specs.as_slice()),
+            _ => internal!("Non-base MIR nodes don't have column specifications!"),
         }
     }
 
@@ -620,7 +623,7 @@ mod tests {
                 rhs: Box::new(Expression::Literal(Literal::Integer(1))),
             };
 
-            node.borrow_mut().add_column("y".into());
+            node.borrow_mut().add_column("y".into()).unwrap();
 
             assert_eq!(
                 node.borrow().columns(),
@@ -644,7 +647,7 @@ mod tests {
                 rhs: Box::new(Expression::Column("y".into())),
             };
 
-            node.borrow_mut().add_column("y".into());
+            node.borrow_mut().add_column("y".into()).unwrap();
 
             assert_eq!(
                 node.borrow().columns(),
@@ -689,7 +692,7 @@ mod tests {
                 vec![],
             );
 
-            node.borrow_mut().add_column("y".into());
+            node.borrow_mut().add_column("y".into()).unwrap();
 
             assert_eq!(
                 node.borrow().columns(),

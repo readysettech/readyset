@@ -3521,6 +3521,7 @@ version = "0.7.0"
 dependencies = [
  "itertools 0.10.1",
  "nom-sql",
+ "noria",
  "noria-common",
  "noria-dataflow",
  "petgraph",

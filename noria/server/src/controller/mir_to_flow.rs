@@ -404,20 +404,19 @@ fn adapt_base_node(
     }
     for r in remove.iter() {
         let over_node = over_node.borrow();
-        let pos = over_node
-            .column_specifications()
+        let column_specs = over_node.column_specifications()?;
+        let pos = column_specs
             .iter()
             .position(|&(ref ecs, _)| ecs == r)
             .ok_or_else(|| {
                 internal_err(format!(
                     "could not find ColumnSpecification {:?} in {:?}",
-                    r,
-                    over_node.column_specifications()
+                    r, column_specs
                 ))
             })?;
         // pos just came from `position` above
         #[allow(clippy::indexing_slicing)]
-        let cid = over_node.column_specifications()[pos]
+        let cid = column_specs[pos]
             .1
             .ok_or_else(|| internal_err("base column ID must be set to remove column"))?;
         mig.drop_column(na, cid)?;
