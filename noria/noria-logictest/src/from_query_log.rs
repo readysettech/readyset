@@ -34,6 +34,10 @@ pub struct FromQueryLog {
     #[clap(long)]
     pub split_sessions: bool,
 
+    /// Exclude DDL statements from the resulting logictest
+    #[clap(long)]
+    pub skip_ddl: bool,
+
     /// Query log to convert
     pub input: PathBuf,
 
@@ -84,55 +88,93 @@ fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool
     true
 }
 
-async fn process_query(entry: &Entry, conn: &mut DatabaseConnection) -> anyhow::Result<Record> {
-    let parsed = parse_query(Dialect::MySQL, &entry.arguments).ok();
-    let record = match conn.query(&entry.arguments).await {
-        Ok(rows) => {
-            if !should_validate_results(&entry.arguments, &parsed) {
-                Record::Statement(Statement {
-                    result: StatementResult::Ok,
-                    command: entry.arguments.clone(),
-                    conditionals: vec![],
-                })
-            } else {
-                Record::query(entry.arguments.clone(), parsed.as_ref(), vec![], rows)
-            }
-        }
-        Err(_) => Record::Statement(Statement {
-            result: StatementResult::Error,
-            command: entry.arguments.clone(),
-            conditionals: vec![],
-        }),
-    };
-    Ok(record)
-}
-
-async fn process_execute(
-    session: &Session,
-    entry: &Entry,
-    conn: &mut DatabaseConnection,
-) -> anyhow::Result<Record> {
-    let parsed = parse_query(Dialect::MySQL, &entry.arguments).map_err(|e| anyhow!(e))?;
-    let (stmt, values) = session
-        .find_prepared_statement(&parsed)
-        .ok_or_else(|| anyhow!("Prepared statement not found"))?;
-    let params = values
-        .into_iter()
-        .map(Value::try_from)
-        .collect::<Result<Vec<_>, _>>()?;
-    let rows = conn.execute(stmt.to_string(), &params).await?;
-    if should_validate_results(&stmt.to_string(), &Some(parsed)) {
-        Ok(Record::query(stmt.to_string(), Some(stmt), params, rows))
-    } else {
-        Ok(Record::Statement(Statement {
-            result: StatementResult::Ok,
-            command: stmt.to_string(),
-            conditionals: vec![],
-        }))
+fn is_ddl(query: &SqlQuery) -> bool {
+    match query {
+        SqlQuery::Select(_)
+        | SqlQuery::Insert(_)
+        | SqlQuery::Delete(_)
+        | SqlQuery::Update(_)
+        | SqlQuery::Set(_)
+        | SqlQuery::CompoundSelect(_)
+        | SqlQuery::StartTransaction(_)
+        | SqlQuery::Commit(_)
+        | SqlQuery::Rollback(_) => false,
+        SqlQuery::CreateTable(_)
+        | SqlQuery::CreateView(_)
+        | SqlQuery::DropTable(_)
+        | SqlQuery::AlterTable(_)
+        | SqlQuery::RenameTable(_) => true,
     }
 }
 
 impl FromQueryLog {
+    async fn process_query(
+        &self,
+        entry: &Entry,
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<Option<Record>> {
+        let parsed = parse_query(Dialect::MySQL, &entry.arguments).ok();
+        let result = conn.query(&entry.arguments).await;
+
+        if self.skip_ddl && parsed.iter().any(is_ddl) {
+            return Ok(None);
+        }
+
+        let record = match result {
+            Ok(rows) => {
+                if !should_validate_results(&entry.arguments, &parsed) {
+                    Record::Statement(Statement {
+                        result: StatementResult::Ok,
+                        command: entry.arguments.clone(),
+                        conditionals: vec![],
+                    })
+                } else {
+                    Record::query(entry.arguments.clone(), parsed.as_ref(), vec![], rows)
+                }
+            }
+            Err(_) => Record::Statement(Statement {
+                result: StatementResult::Error,
+                command: entry.arguments.clone(),
+                conditionals: vec![],
+            }),
+        };
+        Ok(Some(record))
+    }
+
+    async fn process_execute(
+        &self,
+        session: &Session,
+        entry: &Entry,
+        conn: &mut DatabaseConnection,
+    ) -> anyhow::Result<Option<Record>> {
+        let parsed = parse_query(Dialect::MySQL, &entry.arguments).map_err(|e| anyhow!(e))?;
+        let (stmt, values) = session
+            .find_prepared_statement(&parsed)
+            .ok_or_else(|| anyhow!("Prepared statement not found"))?;
+        let params = values
+            .into_iter()
+            .map(Value::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let rows = conn.execute(stmt.to_string(), &params).await?;
+        if self.skip_ddl && is_ddl(&parsed) {
+            return Ok(None);
+        }
+        if should_validate_results(&stmt.to_string(), &Some(parsed)) {
+            Ok(Some(Record::query(
+                stmt.to_string(),
+                Some(stmt),
+                params,
+                rows,
+            )))
+        } else {
+            Ok(Some(Record::Statement(Statement {
+                result: StatementResult::Ok,
+                command: stmt.to_string(),
+                conditionals: vec![],
+            })))
+        }
+    }
+
     #[tokio::main]
     pub async fn run(self) -> anyhow::Result<()> {
         let input = File::open(&self.input).await.unwrap();
@@ -154,7 +196,7 @@ impl FromQueryLog {
             for entry in &session.entries {
                 let record = match entry.command {
                     Command::Connect => None,
-                    Command::Query => process_query(entry, &mut conn).await.ok(),
+                    Command::Query => self.process_query(entry, &mut conn).await.ok().flatten(),
                     Command::Prepare => {
                         let parsed = match parse_query(Dialect::MySQL, &entry.arguments) {
                             Ok(v) => v,
@@ -169,13 +211,15 @@ impl FromQueryLog {
                         session.prepared_statements.insert(parsed);
                         None
                     }
-                    Command::Execute => match process_execute(&session, entry, &mut conn).await {
-                        Ok(v) => Some(v),
-                        Err(e) => {
-                            eprintln!("!!! (execute) Error with {}:  {}", entry.arguments, e);
-                            continue;
+                    Command::Execute => {
+                        match self.process_execute(&session, entry, &mut conn).await {
+                            Ok(v) => Some(v).flatten(),
+                            Err(e) => {
+                                eprintln!("!!! (execute) Error with {}:  {}", entry.arguments, e);
+                                continue;
+                            }
                         }
-                    },
+                    }
                     Command::CloseStmt => None,
                     Command::Quit => None,
                 };
