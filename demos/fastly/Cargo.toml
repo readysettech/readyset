@@ -17,6 +17,7 @@ hdrhistogram = "7.1"
 zipf = "7.0.0"
 structopt = "0.3.22"
 clap = "3.0.0-beta.2"
+rinfluxdb = { version = "0.1.0" }
 reqwest = { version = "0.11" }
 
 # local dependencies

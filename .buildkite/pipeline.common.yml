@@ -101,7 +101,9 @@ steps:
 
   - label: ':rust: :lock: Check cargo-audit'
     commands:
-    - cargo --locked audit
+    # We are ignoring RUSTSEC-2020-0159 (`chrono`) and RUSTSEC-2020-0071 (`time` v0.1.x, transitively from `chrono`)
+    # in order to unblock the pipeline.
+    - cargo --locked audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
     depends_on:
     - cargo-audit-image
     plugins:

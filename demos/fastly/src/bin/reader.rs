@@ -1,5 +1,5 @@
 use anyhow::Result;
-
+use mysql::chrono::Utc;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 use noria::DataType;
@@ -9,6 +9,7 @@ use noria::ViewQuery;
 use noria_logictest::upstream::{DatabaseConnection, DatabaseURL};
 use rand::distributions::{Distribution, Uniform};
 use rand::prelude::*;
+use rinfluxdb::line_protocol::LineBuilder;
 use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -16,7 +17,7 @@ use std::{env, fs, mem};
 use structopt::clap::{arg_enum, ArgGroup};
 use structopt::StructOpt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-
+use url::Url;
 use vec1::Vec1;
 
 static THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
@@ -139,6 +140,22 @@ struct Reader {
     /// If `None` is provided, the experiment will run until it is interrupted.
     #[structopt(long)]
     run_for: Option<u32>,
+
+    /// The InfluxDB host address.
+    #[structopt(long, group = "influx")]
+    influx_host: Option<String>,
+
+    /// The InfluxDB database to write to.
+    #[structopt(long, group = "influx")]
+    influx_database: Option<String>,
+
+    /// The username to authenticate to InfluxDB.
+    #[structopt(long, group = "influx")]
+    influx_user: Option<String>,
+
+    /// The password to authenticate to InfluxDB.
+    #[structopt(long, group = "influx")]
+    influx_password: Option<String>,
 
     /// The type of database the client is connecting to. This determines
     /// the set of opts that should be populated. See `noria_opts` and
@@ -489,7 +506,7 @@ impl Reader {
         &self,
         updates: &mut [Vec<u128>],
         period: Duration,
-        _http_client: &reqwest::Client,
+        http_client: &reqwest::Client,
     ) -> anyhow::Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         for u in updates {
@@ -498,22 +515,58 @@ impl Reader {
             }
         }
         let qps = hist.len() as f64 / period.as_secs() as f64;
-        let _percentiles = vec![
+        let percentiles = vec![
             ("p50", hist.value_at_quantile(0.5)),
             ("p90", hist.value_at_quantile(0.9)),
             ("p99", hist.value_at_quantile(0.99)),
             ("p9999", hist.value_at_percentile(0.9999)),
         ];
 
-        println!(
-            "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
-            qps,
-            hist.value_at_quantile(0.5),
-            hist.value_at_quantile(0.9),
-            hist.value_at_quantile(0.99),
-            hist.value_at_quantile(0.9999)
-        );
-
+        if let Some(influx_host) = &self.influx_host {
+            let timestamp = Utc::now();
+            let mut measurements = vec![LineBuilder::new("read")
+                .insert_field("qps", qps)
+                .set_timestamp(timestamp)
+                .build()
+                .to_string()];
+            for (name, percentile) in percentiles {
+                measurements.push(
+                    LineBuilder::new("read")
+                        .insert_field(name, percentile)
+                        .set_timestamp(timestamp)
+                        .build()
+                        .to_string(),
+                )
+            }
+            let response = http_client
+                .post(Url::parse(format!("{}/write", influx_host.clone()).as_str()).unwrap())
+                .body(measurements.join("\n"))
+                .header("Content-Type", "text/plain")
+                .query(&[
+                    ("db", &self.influx_database.as_ref().unwrap().clone()),
+                    ("u", &self.influx_user.as_ref().unwrap().clone()),
+                    ("p", &self.influx_password.as_ref().unwrap().clone()),
+                ])
+                .send()
+                .await
+                .unwrap();
+            if !response.status().is_success() {
+                panic!(
+                    "Request to InfluxDB failed. Status: {} | Message: {}",
+                    response.status().as_u16(),
+                    response.text().await.unwrap()
+                )
+            }
+        } else {
+            println!(
+                "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
+                qps,
+                hist.value_at_quantile(0.5),
+                hist.value_at_quantile(0.9),
+                hist.value_at_quantile(0.99),
+                hist.value_at_quantile(0.9999)
+            );
+        }
         Ok(())
     }
 
