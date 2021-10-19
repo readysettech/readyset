@@ -98,41 +98,46 @@ pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
 /// Check whether the set statement is explicitly allowed. All other set
 /// statements should return an error
 pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
-    match &set.variable.to_ascii_lowercase()[..] {
-        "time_zone" | "@@global.time_zone" | "@@local.time_zone" | "@@session.time_zone" => {
-            matches!(&set.value, Literal::String(s) if s == "+00:00")
-        }
-        "autocommit" => {
-            matches!(&set.value, Literal::Integer(i) if *i == 1)
-        }
-        "@@session.sql_mode" | "@@global.sql_mode" | "sql_mode" => {
-            if let Literal::String(s) = &set.value {
-                match raw_sql_modes_to_list(&s[..]) {
-                    Ok(sql_modes) => {
-                        let allowed = HashSet::from(ALLOWED_SQL_MODES);
-                        sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
+    match set {
+        nom_sql::SetStatement::Variable(var) => match &var.variable.to_ascii_lowercase()[..] {
+            "time_zone" | "@@global.time_zone" | "@@local.time_zone" | "@@session.time_zone" => {
+                matches!(&var.value, Literal::String(s) if s == "+00:00")
+            }
+            "autocommit" => {
+                matches!(&var.value, Literal::Integer(i) if *i == 1)
+            }
+            "@@session.sql_mode" | "@@global.sql_mode" | "sql_mode" => {
+                if let Literal::String(s) = &var.value {
+                    match raw_sql_modes_to_list(&s[..]) {
+                        Ok(sql_modes) => {
+                            let allowed = HashSet::from(ALLOWED_SQL_MODES);
+                            sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
+                        }
+                        Err(e) => {
+                            warn!(
+                            %e,
+                            "unknown sql modes in set"
+                            );
+                            false
+                        }
                     }
-                    Err(e) => {
-                        warn!(
-                        %e,
-                        "unknown sql modes in set"
-                        );
-                        false
-                    }
+                } else {
+                    false
                 }
-            } else {
-                false
             }
-        }
-        "names" => {
-            if let Literal::String(s) = &set.value {
-                matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
-            } else {
-                false
+            "names" => {
+                if let Literal::String(s) = &var.value {
+                    matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
+                } else {
+                    false
+                }
             }
+            "foreign_key_checks" => true,
+            _ => false,
+        },
+        nom_sql::SetStatement::Names(names) => {
+            names.collation.is_none() && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
         }
-        "foreign_key_checks" => true,
-        _ => false,
     }
 }
 

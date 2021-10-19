@@ -11,15 +11,47 @@ use nom::sequence::tuple;
 use nom::IResult;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct SetStatement {
-    pub variable: String,
-    pub value: Literal,
+pub enum SetStatement {
+    Variable(SetVariable),
+    Names(SetNames),
 }
 
 impl fmt::Display for SetStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SET ")?;
+        match self {
+            Self::Variable(set) => write!(f, "{}", set)?,
+            Self::Names(set) => write!(f, "{}", set)?,
+        };
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct SetVariable {
+    pub variable: String,
+    pub value: Literal,
+}
+
+impl fmt::Display for SetVariable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} = {}", self.variable, self.value.to_string())?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct SetNames {
+    pub charset: String,
+    pub collation: Option<String>,
+}
+
+impl fmt::Display for SetNames {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NAMES '{}'", &self.charset)?;
+        if let Some(collation) = self.collation.as_ref() {
+            write!(f, " COLLATE '{}'", collation)?;
+        }
         Ok(())
     }
 }
@@ -67,9 +99,20 @@ pub fn scope(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Option<String
 
 pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     move |i| {
-        let (remaining_input, (_, _, scope, var, _, _, _, value, _)) = tuple((
-            tag_no_case("set"),
-            multispace1,
+        let (i, _) = tag_no_case("set")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, statement) = alt((
+            map(set_variable(dialect), SetStatement::Variable),
+            map(set_names(dialect), SetStatement::Names),
+        ))(i)?;
+
+        Ok((i, statement))
+    }
+}
+
+fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariable> {
+    move |i| {
+        let (remaining_input, (scope, var, _, _, _, value, _)) = tuple((
             scope(dialect),
             dialect.identifier(),
             multispace0,
@@ -85,7 +128,24 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
             var.into()
         };
 
-        Ok((remaining_input, SetStatement { variable, value }))
+        Ok((remaining_input, SetVariable { variable, value }))
+    }
+}
+
+fn set_names(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetNames> {
+    move |i| {
+        let (i, _) = tag_no_case("names")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, charset) = dialect.utf8_string_literal()(i)?;
+        let (i, collation) = opt(move |i| {
+            let (i, _) = multispace1(i)?;
+            let (i, _) = tag_no_case("collate")(i)?;
+            let (i, _) = multispace1(i)?;
+            let (i, collation) = dialect.utf8_string_literal()(i)?;
+            Ok((i, collation))
+        })(i)?;
+
+        Ok((i, SetNames { charset, collation }))
     }
 }
 
@@ -99,10 +159,10 @@ mod tests {
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
-            SetStatement {
+            SetStatement::Variable(SetVariable {
                 variable: "SQL_AUTO_IS_NULL".to_owned(),
                 value: 0.into(),
-            }
+            })
         );
     }
 
@@ -112,10 +172,10 @@ mod tests {
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
-            SetStatement {
+            SetStatement::Variable(SetVariable {
                 variable: "@var".to_owned(),
                 value: 123.into(),
-            }
+            })
         );
     }
 
@@ -160,5 +220,27 @@ mod tests {
         let res2 = set(Dialect::MySQL)(qstring2.as_bytes());
         assert_eq!(format!("{}", res1.unwrap().1), expected);
         assert_eq!(format!("{}", res2.unwrap().1), expected);
+    }
+
+    #[test]
+    fn set_names() {
+        let qstring1 = "SET NAMES 'iso8660'";
+        let qstring2 = "set names 'utf8mb4' collate 'utf8mb4_unicode_ci'";
+        let res1 = set(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let res2 = set(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        assert_eq!(
+            res1,
+            SetStatement::Names(SetNames {
+                charset: "iso8660".to_string(),
+                collation: None
+            })
+        );
+        assert_eq!(
+            res2,
+            SetStatement::Names(SetNames {
+                charset: "utf8mb4".to_string(),
+                collation: Some("utf8mb4_unicode_ci".to_string())
+            })
+        );
     }
 }

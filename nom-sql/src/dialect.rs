@@ -7,6 +7,7 @@ use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
 use nom::character::complete::char;
 use nom::character::is_alphanumeric;
 use nom::combinator::{map, map_res, not, opt, peek};
+use nom::error::{ErrorKind, ParseError};
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::IResult;
@@ -155,7 +156,7 @@ impl Dialect {
                     preceded(
                         not(map_res(peek(sql_keyword_or_builtin_function), |i| {
                             if POSTGRES_NOT_RESERVED.contains(&i.to_ascii_uppercase()[..]) {
-                                Err(nom::Err::Error((i, nom::error::ErrorKind::IsNot)))
+                                Err(nom::Err::Error((i, ErrorKind::IsNot)))
                             } else {
                                 Ok(i)
                             }
@@ -205,6 +206,18 @@ impl Dialect {
                 opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
                 alt((raw_string_single_quoted, raw_string_double_quoted)),
             )(i),
+        }
+    }
+
+    pub fn utf8_string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], String> {
+        move |i| {
+            let (remaining, bytes) = self.string_literal()(i)?;
+            Ok((
+                remaining,
+                String::from_utf8(bytes).map_err(|_| {
+                    nom::Err::Error(ParseError::from_error_kind(i, ErrorKind::Many0))
+                })?,
+            ))
         }
     }
 
