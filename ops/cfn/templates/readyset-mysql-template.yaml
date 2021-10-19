@@ -428,10 +428,15 @@ Resources:
           ToPort: 9000
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp: !Ref VPCCIDR
+          Description: Allow connections to the prometheus server within the VPC.
+        - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
+     SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0

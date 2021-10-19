@@ -44,6 +44,12 @@ inputs = ["in"]
 default_namespace = "${AWS_CLOUDFORMATION_STACK}"
 compression = "none"
 region = "us-east-2"
+
+[sinks.prometheus]
+type = "prometheus_exporter"
+inputs = [ "in" ]
+address = "0.0.0.0:9090"
+default_namespace = "${AWS_CLOUDFORMATION_STACK}"
 EOF
 
 usr/local/bin/cfn-signal-wrapper.sh 0

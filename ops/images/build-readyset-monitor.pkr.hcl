@@ -22,6 +22,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/prometheus"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "provisioners/files/setup-data-volume"
     destination = "/tmp/"
   }
@@ -38,6 +43,7 @@ build {
       "provisioners/scripts/vector-aggregator/10-aws.sh",
       "provisioners/scripts/vector/00-init.sh",
       "provisioners/scripts/vector/10-aws.sh",
+      "provisioners/scripts/prometheus/00-init.sh",
     ]
   }
 

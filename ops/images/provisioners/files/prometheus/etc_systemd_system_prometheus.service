@@ -1,0 +1,13 @@
+[Unit]
+Description=Prometheus server
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=prometheus
+Group=prometheus
+ExecStart=/usr/local/bin/start-prometheus.sh
+SyslogIdentifier=prometheus
+Restart=always
+RestartSec=1
