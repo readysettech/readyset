@@ -1392,6 +1392,25 @@ pub fn schema_table_reference(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
     }
 }
 
+// Parse a reference to a named schema.table
+pub fn schema_table_reference_no_alias(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], Table> {
+    move |i| {
+        map(
+            tuple((
+                opt(pair(dialect.identifier(), tag("."))),
+                dialect.identifier(),
+            )),
+            |tup| Table {
+                name: String::from(tup.1),
+                alias: None,
+                schema: tup.0.map(|(s, _)| s.to_string()),
+            },
+        )(i)
+    }
+}
+
 named!(pub(crate) if_not_exists(&[u8]) -> bool, map!(opt!(do_parse!(
     tag_no_case!("if")
         >> multispace1

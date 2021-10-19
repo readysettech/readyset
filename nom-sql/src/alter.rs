@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::column::{column_specification, ColumnSpecification};
 use crate::common::{
-    literal, schema_table_reference, statement_terminator, ws_sep_comma, Literal, TableKey,
+    literal, schema_table_reference_no_alias, statement_terminator, ws_sep_comma, Literal, TableKey,
 };
 use crate::create::key_specification;
 use crate::keywords::escape_if_keyword;
@@ -261,7 +261,7 @@ named_with_dialect!(
             >> multispace1
             >> tag_no_case!("table")
             >> multispace1
-            >> table: call!(schema_table_reference(dialect))
+            >> table: call!(schema_table_reference_no_alias(dialect))
             >> multispace1
             >> definitions: separated_list!(ws_sep_comma, alter_table_definition(dialect))
             >> multispace0

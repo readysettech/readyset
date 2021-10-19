@@ -5,8 +5,8 @@ use std::str;
 
 use crate::column::Column;
 use crate::common::{
-    assignment_expr_list, field_list, schema_table_reference, statement_terminator, value_list,
-    ws_sep_comma, Literal,
+    assignment_expr_list, field_list, schema_table_reference_no_alias, statement_terminator,
+    value_list, ws_sep_comma, Literal,
 };
 use crate::keywords::escape_if_keyword;
 use crate::table::Table;
@@ -105,7 +105,7 @@ pub fn insertion(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], InsertSta
             multispace1,
             tag_no_case("into"),
             multispace1,
-            schema_table_reference(dialect),
+            schema_table_reference_no_alias(dialect),
             multispace0,
             opt(fields(dialect)),
             tag_no_case("values"),

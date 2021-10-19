@@ -12,7 +12,7 @@ use nom::sequence::{delimited, preceded};
 use nom::IResult;
 use thiserror::Error;
 
-use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function};
+use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT_RESERVED};
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
@@ -153,7 +153,13 @@ impl Dialect {
             Dialect::PostgreSQL => alt((
                 map_res(
                     preceded(
-                        not(peek(sql_keyword_or_builtin_function)),
+                        not(map_res(peek(sql_keyword_or_builtin_function), |i| {
+                            if POSTGRES_NOT_RESERVED.contains(&i.to_ascii_uppercase()[..]) {
+                                Err(nom::Err::Error((i, nom::error::ErrorKind::IsNot)))
+                            } else {
+                                Ok(i)
+                            }
+                        })),
                         take_while1(is_sql_identifier),
                     ),
                     |v| {
