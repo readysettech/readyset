@@ -1,6 +1,7 @@
 use crate::column::Column;
 use crate::query::MirQuery;
 use crate::MirNodeRef;
+use noria::ReadySetResult;
 
 fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
@@ -15,7 +16,7 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     false
 }
 
-pub(super) fn pull_required_base_columns(q: &mut MirQuery) {
+pub(super) fn pull_required_base_columns(q: &mut MirQuery) -> ReadySetResult<()> {
     let mut queue = vec![q.leaf.clone()];
 
     while let Some(mn) = queue.pop() {
@@ -42,18 +43,19 @@ pub(super) fn pull_required_base_columns(q: &mut MirQuery) {
             }
             for c in &needed_columns {
                 if !found.contains(&c) && has_column(ancestor, c) {
-                    ancestor.borrow_mut().add_column(c.clone());
+                    ancestor.borrow_mut().add_column(c.clone())?;
                     found.push(c);
                 }
             }
             queue.push(ancestor.clone());
         }
     }
+    Ok(())
 }
 
 // currently unused
 #[allow(dead_code)]
-pub(super) fn push_all_base_columns(q: &mut MirQuery) {
+pub(super) fn push_all_base_columns(q: &mut MirQuery) -> ReadySetResult<()> {
     let mut queue = Vec::new();
     queue.extend(q.roots.clone());
 
@@ -70,12 +72,13 @@ pub(super) fn push_all_base_columns(q: &mut MirQuery) {
             for c in &columns {
                 // push through if the child doesn't already have this column
                 if !child.borrow().columns().contains(c) {
-                    child.borrow_mut().add_column(c.clone());
+                    child.borrow_mut().add_column(c.clone())?;
                 }
             }
             queue.push(child.clone());
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -197,7 +200,7 @@ mod tests {
                 leaf: prj,
             };
 
-            pull_required_base_columns(&mut query);
+            pull_required_base_columns(&mut query).unwrap();
 
             assert_eq!(
                 grp.borrow().columns(),

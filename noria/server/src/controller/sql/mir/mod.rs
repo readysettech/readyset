@@ -523,7 +523,7 @@ impl SqlToMirConverter {
 
                         let mut columns: Vec<ColumnSpecification> = existing_node
                             .borrow()
-                            .column_specifications()
+                            .column_specifications()?
                             .iter()
                             .map(|&(ref cs, _)| cs.clone())
                             .collect();

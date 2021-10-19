@@ -584,7 +584,7 @@ impl SqlIncorporator {
         trace!(unoptimized_mir = %og_mir.to_graphviz());
 
         // run MIR-level optimizations
-        let mut mir = og_mir.optimize();
+        let mut mir = og_mir.optimize()?;
 
         trace!(optimized_mir = %mir.to_graphviz());
 
@@ -703,7 +703,7 @@ impl SqlIncorporator {
             .named_query_to_mir(query_name, query, &qg, is_leaf)?;
 
         trace!(original_mir = %new_query_mir.to_graphviz());
-        let new_opt_mir = new_query_mir.optimize();
+        let new_opt_mir = new_query_mir.optimize()?;
         trace!(optimized_mir = %new_opt_mir.to_graphviz());
 
         // compare to existing query MIR and reuse prefix

@@ -6,6 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
+use noria::{internal, ReadySetResult};
 use std::fmt::{self, Debug, Formatter};
 
 pub enum MirNodeInner {
@@ -129,14 +130,14 @@ impl MirNodeInner {
         format!("{:?}", self)
     }
 
-    pub(crate) fn insert_column(&mut self, c: Column) {
+    pub(crate) fn insert_column(&mut self, c: Column) -> ReadySetResult<()> {
         match *self {
             MirNodeInner::Aggregation {
                 ref mut group_by, ..
             } => {
                 group_by.push(c);
             }
-            MirNodeInner::Base { .. } => panic!("can't add columns to base nodes!"),
+            MirNodeInner::Base { .. } => internal!("can't add columns to base nodes!"),
             MirNodeInner::Extremum {
                 ref mut group_by, ..
             } => {
@@ -170,6 +171,7 @@ impl MirNodeInner {
             }
             _ => (),
         }
+        Ok(())
     }
 
     pub(crate) fn can_reuse_as(&self, other: &MirNodeInner) -> bool {

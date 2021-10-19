@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
 use crate::MirNodeRef;
+use noria::ReadySetResult;
 use petgraph::graph::NodeIndex;
 
 /// Represents the result of a query incorporation, specifying query name (auto-generated or
@@ -67,13 +68,13 @@ impl MirQuery {
         nodes
     }
 
-    // Mutate our MirQuery in order to optimize it, for example by
-    // merging certain nodes together, and return it.
-    // Also return a list of any new nodes created so that the
-    // caller can add them to any other internal representations.
-    pub fn optimize(mut self) -> MirQuery {
-        super::rewrite::pull_required_base_columns(&mut self);
-        self
+    /// Try to mutate our MirQuery in order to optimize it, for example by
+    /// merging certain nodes together, and return it.
+    /// Also return a list of any new nodes created so that the
+    /// caller can add them to any other internal representations.
+    pub fn optimize(mut self) -> ReadySetResult<MirQuery> {
+        super::rewrite::pull_required_base_columns(&mut self)?;
+        Ok(self)
     }
 }
 

@@ -13,13 +13,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
             return None;
         }
         // silly, but the borrow checker doesn't let us do this in a single line
-        let next = cur
-            .borrow()
-            .ancestors()
-            .iter()
-            .next()
-            .unwrap_or_else(|| panic!("{:?} has no ancestors", cur))
-            .clone();
+        let next = cur.borrow().ancestors().first()?.clone();
 
         cur = next;
 
