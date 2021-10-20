@@ -9,18 +9,21 @@ use replicators::NoriaAdapter;
 use std::env;
 use std::sync::Arc;
 
+// Postgres does not accept MySQL escapes, so rename the table before the query
+const PGSQL_RENAME: (&str, &str) = ("`groups`", "groups");
+
 const CREATE_SCHEMA: &str = "
-    DROP TABLE IF EXISTS noria CASCADE;
+    DROP TABLE IF EXISTS `groups` CASCADE;
     DROP VIEW IF EXISTS noria_view;
-    CREATE TABLE noria (
+    CREATE TABLE `groups` (
         id int NOT NULL PRIMARY KEY,
         string varchar(20) NOT NULL,
         bignum int
     );
-    CREATE VIEW noria_view AS SELECT id,string,bignum FROM noria ORDER BY id ASC";
+    CREATE VIEW noria_view AS SELECT id,string,bignum FROM `groups` ORDER BY id ASC";
 
 const POPULATE_SCHEMA: &str =
-    "INSERT INTO noria VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)";
+    "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)";
 
 /// A convinience init to convert 3 character byte slice to TinyText noria type
 const fn tiny<const N: usize>(text: &[u8; N]) -> DataType {
@@ -36,7 +39,7 @@ const SNAPSHOT_RESULT: &[&[DataType]] = &[
 const TESTS: &[(&str, &str, &[&[DataType]])] = &[
     (
         "Test UPDATE key column replication",
-        "UPDATE noria SET id=id+10",
+        "UPDATE `groups` SET id=id+10",
         &[
             &[D::Int(11), tiny(b"abc"), D::Int(2)],
             &[D::Int(12), tiny(b"bcd"), D::Int(3)],
@@ -45,7 +48,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
     ),
     (
         "Test DELETE replication",
-        "DELETE FROM noria WHERE string='bcd'",
+        "DELETE FROM `groups` WHERE string='bcd'",
         &[
             &[D::Int(11), tiny(b"abc"), D::Int(2)],
             &[D::Int(50), tiny(b"xyz"), D::Int(4)],
@@ -53,7 +56,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
     ),
     (
         "Test INSERT replication",
-        "INSERT INTO noria VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)",
+        "INSERT INTO `groups` VALUES (1, 'abc', 2), (2, 'bcd', 3), (40, 'xyz', 4)",
         &[
             &[D::Int(1), tiny(b"abc"), D::Int(2)],
             &[D::Int(2), tiny(b"bcd"), D::Int(3)],
@@ -64,7 +67,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
     ),
     (
         "Test UPDATE non-key column replication",
-        "UPDATE noria SET bignum=id+10",
+        "UPDATE `groups` SET bignum=id+10",
         &[
             &[D::Int(1), tiny(b"abc"), D::Int(11)],
             &[D::Int(2), tiny(b"bcd"), D::Int(12)],
@@ -76,7 +79,7 @@ const TESTS: &[(&str, &str, &[&[DataType]])] = &[
 ];
 
 /// Test query we issue after replicator disconnect
-const DISCONNECT_QUERY: &str = "INSERT INTO noria VALUES (3, 'abc', 2), (5, 'xyz', 4)";
+const DISCONNECT_QUERY: &str = "INSERT INTO `groups` VALUES (3, 'abc', 2), (5, 'xyz', 4)";
 /// Test result after replicator reconnects and catches up
 const RECONNECT_RESULT: &[&[DataType]] = &[
     &[D::Int(1), tiny(b"abc"), D::Int(11)],
@@ -128,7 +131,8 @@ impl DbConnection {
                 c.query_drop(query).await?;
             }
             DbConnection::PostgreSQL(c, _) => {
-                c.simple_query(query).await?;
+                let query = query.replace(PGSQL_RENAME.0, PGSQL_RENAME.1);
+                c.simple_query(query.as_str()).await?;
             }
         }
         Ok(())
@@ -214,12 +218,35 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
+        const MAX_ATTEMPTS: usize = 6;
+        let mut attempt: usize = 0;
+        loop {
+            match self.check_results_inner().await {
+                Err(_) if attempt < MAX_ATTEMPTS => {
+                    // Sometimes things are slow in CI, so we retry a few times before giving up
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                }
+                Ok(res) if res != test_results && attempt < MAX_ATTEMPTS => {
+                    // Sometimes things are slow in CI, so we retry a few times before giving up
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                }
+                Ok(res) => {
+                    assert_eq!(res, *test_results, "{} incorrect", test_name);
+                    break Ok(());
+                }
+                Err(err) => break Err(err),
+            }
+        }
+    }
+
+    async fn check_results_inner(&mut self) -> ReadySetResult<Vec<Vec<DataType>>> {
         let mut getter = self.controller().await.view("noria_view").await?;
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.as_ref().to_owned();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves
-        assert_eq!(results, *test_results, "{} incorrect", test_name);
-        Ok(())
+        Ok(results)
     }
 }
 
@@ -230,12 +257,11 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
 
     let mut ctx = TestHandle::start_noria(url.to_string()).await?;
     // Allow some time to snapshot
-    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
     ctx.check_results("Snapshot", SNAPSHOT_RESULT).await?;
 
     for (test_name, test_query, test_results) in TESTS {
         client.query(test_query).await?;
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         ctx.check_results(test_name, *test_results).await?;
     }
 
@@ -244,13 +270,11 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     client.query(DISCONNECT_QUERY).await?;
 
     // Make sure no replication takes place for real
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     ctx.check_results("Disconnected", TESTS[TESTS.len() - 1].2)
         .await?;
 
     // Resume replication
     ctx.start_repl().await?;
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await; // Need time to sync again
     ctx.check_results("Reconnect", RECONNECT_RESULT).await?;
 
     client.stop().await;
@@ -276,7 +300,6 @@ fn mysql_url() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore] // FIXME: this is flaky and can't be run locally for reasons I don't understand right now
 async fn pgsql_replication() -> ReadySetResult<()> {
     replication_test_inner(&pgsql_url()).await
 }
