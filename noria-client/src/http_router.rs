@@ -111,6 +111,14 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     Ok(res.unwrap())
                 })
             }
+            (_, &Method::GET, "/health") => Box::pin(async move {
+                let res = res
+                    .status(200)
+                    .header(CONTENT_TYPE, "text/plain")
+                    .body(hyper::Body::empty());
+
+                Ok(res.unwrap())
+            }),
             _ => Box::pin(async move {
                 let res = res
                     .status(404)
