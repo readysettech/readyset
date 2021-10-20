@@ -145,9 +145,14 @@ pub enum ReadySetError {
     #[error("Failed to (de)serialize: {0}")]
     SerializationFailed(String),
 
-    /// The wrong number of columns was given when inserting a row.
+    /// The wrong number of columns was given when inserting a row or preparing
+    /// a statement.
     #[error("wrong number of columns specified: expected {0}, got {1}")]
     WrongColumnCount(usize, usize),
+
+    /// The wrong column type was returned from noria when preparing a statement.
+    #[error("wrong column type returned from noria: expected {0}, got {1}")]
+    WrongColumnType(String, String),
 
     /// The wrong number of key columns was given when modifying a row.
     #[error("wrong number of key columns used: expected {0}, got {1}")]
