@@ -41,6 +41,7 @@ stream-cancel = "0.8.0"
 tokio-stream = "0.1.5"
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
+time = { version = "0.3", features = ["local-offset"] }
 
 [lib]
 path = "src/lib.rs"

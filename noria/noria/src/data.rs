@@ -1413,10 +1413,22 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::Integer(i) => Ok((*i as i64).into()),
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::CurrentTimestamp | Literal::CurrentTime => {
-                let ts = chrono::Local::now().naive_local();
-                Ok(DataType::Timestamp(ts))
+                let ts = time::OffsetDateTime::now_utc();
+                let ndt = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
+                    .and_hms_nano(
+                        ts.hour() as u32,
+                        ts.minute() as u32,
+                        ts.second() as u32,
+                        ts.nanosecond(),
+                    );
+                Ok(DataType::Timestamp(ndt))
             }
-            Literal::CurrentDate => Ok(DataType::from(chrono::Local::now().naive_local().date())),
+            Literal::CurrentDate => {
+                let ts = time::OffsetDateTime::now_utc();
+                let nd = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
+                    .and_hms(0, 0, 0);
+                Ok(DataType::Timestamp(nd))
+            }
             Literal::Float(ref float) => Ok(DataType::Float(float.value, float.precision)),
             Literal::Double(ref double) => Ok(DataType::Double(double.value, double.precision)),
             Literal::Numeric(i, s) => Decimal::try_from_i128_with_scale(*i, *s)
