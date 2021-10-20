@@ -32,7 +32,7 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         SqlType::Bool => MYSQL_TYPE_BIT,
         SqlType::DateTime(_) => MYSQL_TYPE_DATETIME,
         SqlType::Float => MYSQL_TYPE_FLOAT,
-        SqlType::Decimal(_, _) => MYSQL_TYPE_DECIMAL,
+        SqlType::Decimal(_, _) => MYSQL_TYPE_NEWDECIMAL,
         SqlType::Char(_) => {
             // TODO(grfn): I'm not sure if this is right
             MYSQL_TYPE_STRING
