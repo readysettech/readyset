@@ -24,8 +24,13 @@ const WAIT_TIMER: Duration = Duration::from_secs(1);
 struct Opts {
     #[clap(default_value = "/dev/xvdb")]
     device: PathBuf,
+
     #[clap(default_value = "/data")]
     mountpoint: PathBuf,
+
+    /// Size of the volume to create in gigabytes
+    #[clap(long, default_value = "32", min_values = 8)]
+    volume_size_gb: i32,
 }
 
 fn filter(key: &str, value: &str) -> Filter {
@@ -34,6 +39,11 @@ fn filter(key: &str, value: &str) -> Filter {
 
 fn tag(key: &str, value: &str) -> Tag {
     Tag::builder().key(key).value(value).build()
+}
+
+async fn exists(path: &Path) -> Result<bool> {
+    let path = path.to_path_buf();
+    Ok(task::spawn_blocking(move || path.exists()).await?)
 }
 
 #[instrument(skip(ec2))]
@@ -51,29 +61,6 @@ async fn find_existing_volume_id(ec2: &Client, az: &str) -> Result<Option<String
         .flat_map(|volumes| volumes.into_iter().next())
         .flat_map(|volume| volume.volume_id)
         .next())
-}
-
-#[instrument(skip(ec2))]
-async fn create_volume_and_return_id(ec2: &Client, az: &str) -> Result<String> {
-    let tag_specification = TagSpecification::builder()
-        .resource_type(ResourceType::Volume)
-        .tags(tag("ReadySet:ComputeInstance", "true"))
-        .build();
-    let result = ec2
-        .create_volume()
-        .availability_zone(az)
-        .size(32)
-        .tag_specifications(tag_specification)
-        .send()
-        .await?;
-    result
-        .volume_id
-        .ok_or_else(|| anyhow!("No volume ID was returned by EC2"))
-}
-
-async fn exists(path: &Path) -> Result<bool> {
-    let path = path.to_path_buf();
-    Ok(task::spawn_blocking(move || path.exists()).await?)
 }
 
 #[instrument(skip(ec2))]
@@ -104,30 +91,6 @@ async fn wait_for_volume_state(
         time::sleep(WAIT_TIMER).await;
     }
     Ok(())
-}
-
-#[instrument(skip(ec2))]
-async fn ensure_volume_exists(
-    ec2: &Client,
-    instance_id: &str,
-    region: &str,
-    az: &str,
-) -> Result<String> {
-    info!("Searching for volume...");
-    let volume_id = match find_existing_volume_id(ec2, az).await? {
-        Some(vid) => {
-            info!(volume_id = vid.as_str(), "...found");
-            vid
-        }
-        None => {
-            info!("...not found.  Creating...");
-            let vid = create_volume_and_return_id(ec2, az).await?;
-            info!(volume_id = vid.as_str(), "...created");
-            vid
-        }
-    };
-    wait_for_volume_state(ec2, &volume_id, VolumeState::Available).await?;
-    Ok(volume_id)
 }
 
 #[instrument(skip(ec2, device))]
@@ -162,91 +125,147 @@ async fn attach_volume(
     Ok(())
 }
 
-#[instrument]
-async fn ensure_volume_attached(device: &Path) -> Result<()> {
-    info!("Checking to see whether device exists...");
-    if exists(device).await? {
-        info!("It does");
-        return Ok(());
-    } else {
-        info!("It does not");
+impl Opts {
+    #[instrument(skip(self, ec2))]
+    async fn create_volume_and_return_id(&self, ec2: &Client, az: &str) -> Result<String> {
+        let tag_specification = TagSpecification::builder()
+            .resource_type(ResourceType::Volume)
+            .tags(tag("ReadySet:ComputeInstance", "true"))
+            .build();
+        let result = ec2
+            .create_volume()
+            .availability_zone(az)
+            .size(self.volume_size_gb)
+            .tag_specifications(tag_specification)
+            .send()
+            .await?;
+        result
+            .volume_id
+            .ok_or_else(|| anyhow!("No volume ID was returned by EC2"))
     }
 
-    let imds = aws_config::imds::client::Client::builder()
-        .configure(&ProviderConfig::with_default_region().await)
-        .build()
-        .await?;
-
-    let instance_id = imds.get("/latest/meta-data/instance-id").await?;
-    let region = imds.get("/latest/meta-data/placement/region").await?;
-    let az = imds
-        .get("/latest/meta-data/placement/availability-zone")
-        .await?;
-
-    let ec2 = {
-        let shared_config = aws_config::from_env()
-            .region(Region::new(region.clone()))
-            .load()
-            .await;
-        Client::new(&shared_config)
-    };
-
-    let volume_id = ensure_volume_exists(&ec2, &instance_id, &region, &az).await?;
-    attach_volume(&ec2, &volume_id, &instance_id, device).await?;
-
-    Ok(())
-}
-
-#[instrument]
-async fn ensure_disk_formatted(device: &Path) -> Result<()> {
-    info!("Checking to see whether disk already contains an ext4 filesystem...");
-    let magic = Command::new("file").arg("-s").arg(device).output().await?;
-    let magic = String::from_utf8(magic.stdout)?;
-    if magic.contains("ext4 filesystem data") {
-        info!("It does");
-        return Ok(());
+    #[instrument(skip(self, ec2))]
+    async fn ensure_volume_exists(
+        &self,
+        ec2: &Client,
+        instance_id: &str,
+        region: &str,
+        az: &str,
+    ) -> Result<String> {
+        info!("Searching for volume...");
+        let volume_id = match find_existing_volume_id(ec2, az).await? {
+            Some(vid) => {
+                info!(volume_id = vid.as_str(), "...found");
+                vid
+            }
+            None => {
+                info!("...not found.  Creating...");
+                let vid = self.create_volume_and_return_id(ec2, az).await?;
+                info!(volume_id = vid.as_str(), "...created");
+                vid
+            }
+        };
+        wait_for_volume_state(ec2, &volume_id, VolumeState::Available).await?;
+        Ok(volume_id)
     }
-    info!("It does not; formatting disk...");
-    Command::new("mkfs.ext4")
-        .arg("-F")
-        .arg(device)
-        .spawn()?
-        .wait()
-        .await?;
-    info!("Done");
-    Ok(())
-}
 
-#[instrument]
-async fn ensure_filesystem_mounted(device: &Path, mountpoint: &Path) -> Result<()> {
-    info!("Ensuring mountpoint exists...");
-    create_dir_all(mountpoint).await?;
+    #[instrument(skip(self))]
+    async fn ensure_volume_attached(&self) -> Result<()> {
+        info!("Checking to see whether device exists...");
+        if exists(&self.device).await? {
+            info!("It does");
+            return Ok(());
+        } else {
+            info!("It does not");
+        }
 
-    info!("Checking to see whether mountpoint is mounted...");
-    let result = Command::new("mountpoint")
-        .arg("-q")
-        .arg(&mountpoint)
-        .output()
-        .await?;
-    if result.status.code() == Some(0) {
-        info!("It is");
-        return Ok(());
+        let imds = aws_config::imds::client::Client::builder()
+            .configure(&ProviderConfig::with_default_region().await)
+            .build()
+            .await?;
+
+        let instance_id = imds.get("/latest/meta-data/instance-id").await?;
+        let region = imds.get("/latest/meta-data/placement/region").await?;
+        let az = imds
+            .get("/latest/meta-data/placement/availability-zone")
+            .await?;
+
+        let ec2 = {
+            let shared_config = aws_config::from_env()
+                .region(Region::new(region.clone()))
+                .load()
+                .await;
+            Client::new(&shared_config)
+        };
+
+        let volume_id = self
+            .ensure_volume_exists(&ec2, &instance_id, &region, &az)
+            .await?;
+        attach_volume(&ec2, &volume_id, &instance_id, &self.device).await?;
+
+        Ok(())
     }
-    info!("It is not; mounting...");
-    Command::new("mount")
-        .arg(device)
-        .arg(mountpoint)
-        .spawn()?
-        .wait()
-        .await?;
-    info!("Done");
-    Ok(())
+
+    #[instrument(skip(self))]
+    async fn ensure_disk_formatted(&self) -> Result<()> {
+        info!("Checking to see whether disk already contains an ext4 filesystem...");
+        let magic = Command::new("file")
+            .arg("-s")
+            .arg(&self.device)
+            .output()
+            .await?;
+        let magic = String::from_utf8(magic.stdout)?;
+        if magic.contains("ext4 filesystem data") {
+            info!("It does");
+            return Ok(());
+        }
+        info!("It does not; formatting disk...");
+        Command::new("mkfs.ext4")
+            .arg("-F")
+            .arg(&self.device)
+            .spawn()?
+            .wait()
+            .await?;
+        info!("Done");
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn ensure_filesystem_mounted(&self) -> Result<()> {
+        info!("Ensuring mountpoint exists...");
+        create_dir_all(&self.mountpoint).await?;
+
+        info!("Checking to see whether mountpoint is mounted...");
+        let result = Command::new("mountpoint")
+            .arg("-q")
+            .arg(&self.mountpoint)
+            .output()
+            .await?;
+        if result.status.code() == Some(0) {
+            info!("It is");
+            return Ok(());
+        }
+        info!("It is not; mounting...");
+        Command::new("mount")
+            .arg(&self.device)
+            .arg(&self.mountpoint)
+            .spawn()?
+            .wait()
+            .await?;
+        info!("Done");
+        Ok(())
+    }
+
+    async fn run(&self) -> Result<()> {
+        self.ensure_volume_attached().await?;
+        self.ensure_disk_formatted().await?;
+        self.ensure_filesystem_mounted().await?;
+        Ok(())
+    }
 }
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    let opts = Opts::parse();
-
     tracing_subscriber::fmt()
         .compact()
         .with_env_filter(
@@ -254,10 +273,9 @@ pub async fn main() -> Result<()> {
         )
         .init();
 
-    ensure_volume_attached(&opts.device).await?;
-    ensure_disk_formatted(&opts.device).await?;
-    ensure_filesystem_mounted(&opts.device, &opts.mountpoint).await?;
-
+    let opts = Opts::parse();
+    opts.run().await?;
     info!("Done");
+
     Ok(())
 }
