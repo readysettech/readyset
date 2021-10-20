@@ -45,6 +45,7 @@ Metadata:
           - ReadysetAdapterNodes
           - ReadysetServerInstanceType
           - ReadysetServerNodes
+          - ReadysetServerVolumeSizeGB
           - ReadysetMonitorInstanceType
           - DeploymentName
       - Label:
@@ -203,6 +204,11 @@ Parameters:
     AllowedPattern: >-
       ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+  ReadysetServerVolumeSizeGB:
+    Type: Number
+    Description: Volume size, in gigabytes, to provision for Server instances.
+    MinValue: 32
+    Default: 32
 Resources:
   VPCStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -329,6 +335,7 @@ Resources:
         ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
         ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
         ReadysetServerNodes: !Ref ReadysetServerNodes
+        ReadysetServerVolumeSizeGB: !Ref ReadysetServerVolumeSizeGB
         ReadysetMonitorInstanceType: !Ref ReadysetMonitorInstanceType
         DeploymentName: !Ref DeploymentName
 Outputs:

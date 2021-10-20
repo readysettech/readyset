@@ -17,7 +17,7 @@ trap 'on_error' ERR
 /usr/local/bin/configure-vector.sh
 
 mkdir -p /var/lib/readyset-server
-ensure-ebs-volume /dev/xvdb /var/lib/readyset-server
+ensure-ebs-volume /dev/xvdb /var/lib/readyset-server --volume-size-gb "${VOLUME_SIZE_GB:-32}"
 
 if [ -f /var/lib/readyset-server/volume_id ]; then
   volume_id=$(< /var/lib/readyset-server/volume_id)

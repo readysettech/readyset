@@ -30,6 +30,7 @@ Metadata:
           - ReadysetAdapterNodes
           - ReadysetServerInstanceType
           - ReadysetServerNodes
+          - ReadysetServerVolumeSizeGB
           - ReadysetMonitorInstanceType
           - MySQLDatabaseURL
           - DeploymentName
@@ -55,6 +56,11 @@ Parameters:
   ReadysetServerNodes:
     Type: String
     Description: Number of Server nodes to create.
+  ReadysetServerVolumeSizeGB:
+    Type: Number
+    Description: Volume size, in gigabytes, to provision for Server instances.
+    MinValue: 32
+    Default: 32
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -342,6 +348,7 @@ Resources:
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="1"
             export REPLICATION_URL="${MySQLDatabaseURL}"
+            export VOLUME_SIZE_GB="${ReadysetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -435,7 +442,7 @@ Resources:
           FromPort: 3000
           ToPort: 3000
           CidrIp: !Ref VPCCIDR
-          Description: Allow connections to the grafana server within the VPC. 
+          Description: Allow connections to the grafana server within the VPC.
         - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
