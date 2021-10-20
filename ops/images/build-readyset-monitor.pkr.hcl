@@ -1,5 +1,5 @@
 build {
-  sources = ["source.amazon-ebs.readyset-vector-aggregator"]
+  sources = ["source.amazon-ebs.readyset-monitor"]
 
   provisioner "file" {
     source      = "provisioners/files/external-base"

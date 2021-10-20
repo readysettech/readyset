@@ -45,7 +45,7 @@ Metadata:
           - ReadysetAdapterNodes
           - ReadysetServerInstanceType
           - ReadysetServerNodes
-          - ReadysetLogsAggregatorInstanceType
+          - ReadysetMonitorInstanceType
           - DeploymentName
       - Label:
           default: AWS Quick Start Configuration
@@ -161,7 +161,7 @@ Parameters:
     Type: String
     Description: Number of server nodes to create
     Default: 3
-  ReadysetLogsAggregatorInstanceType:
+  ReadysetMonitorInstanceType:
     Type: String
     Description: The EC2 instance type to use for the logs aggregation instance.
     Default: t3.small
@@ -329,7 +329,7 @@ Resources:
         ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
         ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
         ReadysetServerNodes: !Ref ReadysetServerNodes
-        ReadysetLogsAggregatorInstanceType: !Ref ReadysetLogsAggregatorInstanceType
+        ReadysetMonitorInstanceType: !Ref ReadysetMonitorInstanceType
         DeploymentName: !Ref DeploymentName
 Outputs:
   ReadysetMySQLVPCEndpoint:

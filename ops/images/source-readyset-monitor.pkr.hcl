@@ -1,12 +1,12 @@
 locals {
-  readyset_vector_aggregator_ami_name = format("readyset/images/%s-ssd/readyset-vector-aggregator-%s-amd64-%s",
+  readyset_monitor_ami_name = format("readyset/images/%s-ssd/readyset-monitor-%s-amd64-%s",
     local.ami_virtualization_type,
     local.ami_version,
     local.ami_suffix
   )
 }
 
-source "amazon-ebs" "readyset-vector-aggregator" {
+source "amazon-ebs" "readyset-monitor" {
   # Settings to allow development of images outside of CI.
   skip_create_ami       = local.skip_create_ami
   force_deregister      = local.force_degregister
@@ -26,7 +26,7 @@ source "amazon-ebs" "readyset-vector-aggregator" {
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
 
-  ami_name                  = local.readyset_vector_aggregator_ami_name
+  ami_name                  = local.readyset_monitor_ami_name
   ssh_clear_authorized_keys = true
 
   ami_users = local.ami_users
