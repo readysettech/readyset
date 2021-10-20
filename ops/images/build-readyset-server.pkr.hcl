@@ -41,6 +41,11 @@ build {
     destination = "/tmp/readyset-server-binary"
   }
 
+  provisioner "file" {
+    source      = "${local.binaries_path}/ensure-ebs-volume"
+    destination = "/tmp/ensure-ebs-volume-binary"
+  }
+
   provisioner "shell" {
     environment_vars = [
       "PROMETHEUS_PORT=6033"
@@ -55,7 +60,7 @@ build {
       "provisioners/scripts/vector-agent/00-init.sh",
       "provisioners/scripts/vector/00-init.sh",
       "provisioners/scripts/vector/10-aws.sh",
-      "provisioners/scripts/setup-data-volume/00-init.sh",
+      "provisioners/scripts/ensure-ebs-volume/00-init.sh",
       "provisioners/scripts/readyset-server/00-init.sh",
       "provisioners/scripts/readyset-server/10-aws.sh",
     ]

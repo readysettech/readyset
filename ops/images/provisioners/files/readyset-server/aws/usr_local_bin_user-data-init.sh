@@ -17,8 +17,7 @@ trap 'on_error' ERR
 /usr/local/bin/configure-vector.sh
 
 mkdir -p /var/lib/readyset-server
-# TODO: Maintain state in a separate EBS volume
-# setup-data-volume /var/lib/readyset-server
+ensure-ebs-volume /dev/xvdb /var/lib/readyset-server
 
 if [ -f /var/lib/readyset-server/volume_id ]; then
   volume_id=$(< /var/lib/readyset-server/volume_id)
