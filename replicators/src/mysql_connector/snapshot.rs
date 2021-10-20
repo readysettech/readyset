@@ -38,7 +38,7 @@ where
     I: IntoIterator<Item = N>,
 {
     let mut query = names.into_iter().fold("LOCK TABLES".to_string(), |q, t| {
-        format!("{} {} READ,", q, t)
+        format!("{} `{}` READ,", q, t)
     });
     query.pop(); // Remove any trailing commas
     q.query_drop(query).await
@@ -50,7 +50,7 @@ async fn create_for_table<Q: Queryable>(
     table_name: &str,
     kind: TableKind,
 ) -> mysql::Result<String> {
-    let query = format!("show create {} {}", kind.kind(), table_name);
+    let query = format!("show create {} `{}`", kind.kind(), table_name);
     match kind {
         TableKind::View => {
             // For SHOW CREATE VIEW the format is the name of the view, the create DDL, character_set_client and collation_connection
@@ -97,7 +97,7 @@ impl MySqlReplicator {
     /// replicate a table, and `mysqldump` and `debezium` do just that
     pub async fn dump_table(&self, table: &str) -> mysql::Result<TableDumper> {
         let conn = self.pool.get_conn().await?;
-        let query = format!("select * from {}", table);
+        let query = format!("select * from `{}`", table);
         Ok(TableDumper { query, conn })
     }
 
