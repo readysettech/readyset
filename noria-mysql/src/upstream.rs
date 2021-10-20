@@ -12,7 +12,7 @@ use noria::errors::internal_err;
 use noria::{ColumnSchema, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
 
-use crate::schema::convert_column;
+use crate::schema::{convert_column, is_subtype};
 use crate::Error;
 
 type StatementID = u32;
@@ -62,7 +62,7 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> bool {
     schema
         .iter()
         .zip(columns.iter())
-        .all(|(sch, col)| convert_column(&sch.spec).coltype == col.column_type())
+        .all(|(sch, col)| is_subtype(convert_column(&sch.spec).coltype, col.column_type()))
 }
 
 impl NoriaCompare for StatementMeta {

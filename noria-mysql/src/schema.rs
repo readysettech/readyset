@@ -1,5 +1,30 @@
 use nom_sql::{self, ColumnConstraint, SqlType};
 
+/// Checks if `c1` is a subtype of `c2`.
+pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> bool {
+    use msql_srv::ColumnType::*;
+
+    if c1 == c2 {
+        return true;
+    }
+
+    // Handle all types that support subtypes.
+    matches!(
+        (c1, c2),
+        (
+            MYSQL_TYPE_TINY,
+            MYSQL_TYPE_LONG | MYSQL_TYPE_LONGLONG | MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL,
+        ) | (
+            MYSQL_TYPE_LONG,
+            MYSQL_TYPE_LONGLONG | MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL
+        ) | (
+            MYSQL_TYPE_LONGLONG,
+            MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL
+        ) | (MYSQL_TYPE_BLOB, MYSQL_TYPE_LONG_BLOB | MYSQL_TYPE_BLOB)
+            | (MYSQL_TYPE_DOUBLE | MYSQL_TYPE_FLOAT, MYSQL_TYPE_DOUBLE)
+    )
+}
+
 pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Column {
     let mut colflags = msql_srv::ColumnFlags::empty();
     use msql_srv::ColumnType::*;
@@ -116,5 +141,77 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         column: col.column.name.clone(),
         coltype,
         colflags,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use msql_srv::ColumnType::{self, *};
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
+    pub fn arbitrary_column_type() -> impl Strategy<Value = ColumnType> {
+        prop_oneof![
+            Just(MYSQL_TYPE_DECIMAL),
+            Just(MYSQL_TYPE_TINY),
+            Just(MYSQL_TYPE_SHORT),
+            Just(MYSQL_TYPE_LONG),
+            Just(MYSQL_TYPE_FLOAT),
+            Just(MYSQL_TYPE_DOUBLE),
+            Just(MYSQL_TYPE_NULL),
+            Just(MYSQL_TYPE_TIMESTAMP),
+            Just(MYSQL_TYPE_LONGLONG),
+            Just(MYSQL_TYPE_INT24),
+            Just(MYSQL_TYPE_DATE),
+            Just(MYSQL_TYPE_TIME),
+            Just(MYSQL_TYPE_DATETIME),
+            Just(MYSQL_TYPE_YEAR),
+            Just(MYSQL_TYPE_NEWDATE),
+            Just(MYSQL_TYPE_VARCHAR),
+            Just(MYSQL_TYPE_BIT),
+            Just(MYSQL_TYPE_TIMESTAMP2),
+            Just(MYSQL_TYPE_DATETIME2),
+            Just(MYSQL_TYPE_TIME2),
+            Just(MYSQL_TYPE_TYPED_ARRAY),
+            Just(MYSQL_TYPE_UNKNOWN),
+            Just(MYSQL_TYPE_JSON),
+            Just(MYSQL_TYPE_NEWDECIMAL),
+            Just(MYSQL_TYPE_ENUM),
+            Just(MYSQL_TYPE_SET),
+            Just(MYSQL_TYPE_TINY_BLOB),
+            Just(MYSQL_TYPE_MEDIUM_BLOB),
+            Just(MYSQL_TYPE_LONG_BLOB),
+            Just(MYSQL_TYPE_BLOB),
+            Just(MYSQL_TYPE_VAR_STRING),
+            Just(MYSQL_TYPE_STRING),
+            Just(MYSQL_TYPE_GEOMETRY)
+        ]
+    }
+
+    #[proptest]
+    fn subtype_reflexivity(#[strategy(arbitrary_column_type())] column_type: ColumnType) {
+        assert!(is_subtype(column_type, column_type))
+    }
+
+    #[proptest]
+    fn subtype_transitivity(
+        #[strategy(arbitrary_column_type())] c1: ColumnType,
+        #[strategy(arbitrary_column_type())] c2: ColumnType,
+        #[strategy(arbitrary_column_type())] c3: ColumnType,
+    ) {
+        if is_subtype(c1, c2) && is_subtype(c2, c3) {
+            assert!(is_subtype(c1, c3));
+        }
+    }
+
+    #[proptest]
+    fn subtype_antisymmetry(
+        #[strategy(arbitrary_column_type())] c1: ColumnType,
+        #[strategy(arbitrary_column_type())] c2: ColumnType,
+    ) {
+        if is_subtype(c1, c2) && is_subtype(c2, c1) {
+            assert!(c1 == c2);
+        }
     }
 }
