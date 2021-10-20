@@ -29,38 +29,37 @@ struct Opts {
     mountpoint: PathBuf,
 
     /// Size of the volume to create in gigabytes
-    #[clap(long, default_value = "32", min_values = 8)]
+    #[clap(long, default_value = "32")]
     volume_size_gb: i32,
+
+    /// Tag key to use for volumes
+    #[clap(long, default_value = "ReadySet:ServerVolume")]
+    volume_tag_key: String,
+
+    /// Tag value to use for volumes
+    #[clap(long, default_value = "true")]
+    volume_tag_value: String,
 }
 
-fn filter(key: &str, value: &str) -> Filter {
+fn filter<K, V>(key: K, value: V) -> Filter
+where
+    K: Into<String>,
+    V: Into<String>,
+{
     Filter::builder().name(key).values(value).build()
 }
 
-fn tag(key: &str, value: &str) -> Tag {
+fn tag<K, V>(key: K, value: V) -> Tag
+where
+    K: Into<String>,
+    V: Into<String>,
+{
     Tag::builder().key(key).value(value).build()
 }
 
 async fn exists(path: &Path) -> Result<bool> {
     let path = path.to_path_buf();
     Ok(task::spawn_blocking(move || path.exists()).await?)
-}
-
-#[instrument(skip(ec2))]
-async fn find_existing_volume_id(ec2: &Client, az: &str) -> Result<Option<String>> {
-    let description = ec2
-        .describe_volumes()
-        .filters(filter("tag:ReadySet:ComputeInstance", "true"))
-        .filters(filter("availability-zone", az))
-        .filters(filter("status", "available"))
-        .send()
-        .await?;
-    Ok(description
-        .volumes
-        .into_iter()
-        .flat_map(|volumes| volumes.into_iter().next())
-        .flat_map(|volume| volume.volume_id)
-        .next())
 }
 
 #[instrument(skip(ec2))]
@@ -126,11 +125,38 @@ async fn attach_volume(
 }
 
 impl Opts {
+    fn volume_tag_filter(&self) -> Filter {
+        filter(
+            format!("tag:{}", self.volume_tag_key),
+            &self.volume_tag_value,
+        )
+    }
+
+    fn volume_tag(&self) -> Tag {
+        tag(&self.volume_tag_key, &self.volume_tag_value)
+    }
+
     #[instrument(skip(self, ec2))]
+    async fn find_existing_volume_id(&self, ec2: &Client, az: &str) -> Result<Option<String>> {
+        let description = ec2
+            .describe_volumes()
+            .filters(self.volume_tag_filter())
+            .filters(filter("availability-zone", az))
+            .filters(filter("status", "available"))
+            .send()
+            .await?;
+        Ok(description
+            .volumes
+            .into_iter()
+            .flat_map(|volumes| volumes.into_iter().next())
+            .flat_map(|volume| volume.volume_id)
+            .next())
+    }
+    #[instrument(skip(ec2))]
     async fn create_volume_and_return_id(&self, ec2: &Client, az: &str) -> Result<String> {
         let tag_specification = TagSpecification::builder()
             .resource_type(ResourceType::Volume)
-            .tags(tag("ReadySet:ComputeInstance", "true"))
+            .tags(self.volume_tag())
             .build();
         let result = ec2
             .create_volume()
@@ -153,7 +179,7 @@ impl Opts {
         az: &str,
     ) -> Result<String> {
         info!("Searching for volume...");
-        let volume_id = match find_existing_volume_id(ec2, az).await? {
+        let volume_id = match self.find_existing_volume_id(ec2, az).await? {
             Some(vid) => {
                 info!(volume_id = vid.as_str(), "...found");
                 vid
