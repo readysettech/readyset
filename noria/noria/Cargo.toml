@@ -33,6 +33,7 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 petgraph = { version = "0.5", features = ["serde-1"] }
 ahash = "0.3"
 chrono = { version = "0.4.0", features = ["serde"] }
+time = { version = "0.3", features = ["local-offset"] }
 tower-service = "0.3.1"
 tower-layer = "0.3.1"
 tokio-tower = "0.5.1"

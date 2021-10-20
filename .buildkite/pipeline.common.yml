@@ -120,9 +120,9 @@ steps:
   - label: ':clippy: Check clippy'
     key: check-clippy
     commands:
-    - cargo --locked clippy --workspace -- -D warnings
+    - cargo --locked clippy --workspace -- -W clippy::disallowed_method -D warnings
     depends_on:
-      - build-image
+    - build-image
     plugins:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'

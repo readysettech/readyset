@@ -3283,6 +3283,7 @@ dependencies = [
  "slab",
  "test-strategy",
  "thiserror",
+ "time 0.3.3",
  "tokio 1.12.0",
  "tokio-postgres",
  "tokio-tower",
@@ -3366,6 +3367,7 @@ dependencies = [
  "serde_json",
  "stream-cancel",
  "thiserror",
+ "time 0.3.3",
  "timestamp_service",
  "tokio 1.12.0",
  "tokio-stream",
@@ -5259,7 +5261,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0bccbcf40c8938196944a3da0e133e031a33f4d6b72db3bda3cc556e361905d"
 dependencies = [
  "lazy_static",
- "parking_lot 0.10.2",
+ "parking_lot 0.11.2",
  "serial_test_derive",
 ]
 
@@ -5895,6 +5897,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "time"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde1cf55178e0293453ba2cca0d5f8392a922e52aa958aee9c28ed02becc6d03"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "time-macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6408,8 +6419,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.4",
  "static_assertions",
 ]
 

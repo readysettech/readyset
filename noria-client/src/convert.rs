@@ -2,6 +2,7 @@ use nom_sql::{Double, Float, Literal};
 use noria::{DataType, ReadySetError, ReadySetResult};
 
 use bit_vec::BitVec;
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
@@ -26,11 +27,22 @@ impl ToDataType for Literal {
                     details: format!("Values out-of-bounds for Numeric type. Error: {}", e),
                 })
                 .map(DataType::from)?,
-            Literal::CurrentDate => {
-                DataType::Timestamp(chrono::Local::today().and_hms(0, 0, 0).naive_local())
+            Literal::CurrentTimestamp | Literal::CurrentTime => {
+                let ts = time::OffsetDateTime::now_utc();
+                let ndt = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
+                    .and_hms_nano(
+                        ts.hour() as u32,
+                        ts.minute() as u32,
+                        ts.second() as u32,
+                        ts.nanosecond(),
+                    );
+                DataType::Timestamp(ndt)
             }
-            Literal::CurrentTime | Literal::CurrentTimestamp => {
-                DataType::Timestamp(chrono::Local::now().naive_local())
+            Literal::CurrentDate => {
+                let ts = time::OffsetDateTime::now_utc();
+                let nd = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
+                    .and_hms(0, 0, 0);
+                DataType::Timestamp(nd)
             }
             Literal::ByteArray(b) => DataType::ByteArray(Arc::new(b)),
             Literal::BitVector(b) => DataType::from(BitVec::from_bytes(b.as_slice())),
