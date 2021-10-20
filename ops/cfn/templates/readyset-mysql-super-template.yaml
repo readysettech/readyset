@@ -332,8 +332,8 @@ Resources:
         ReadysetMonitorInstanceType: !Ref ReadysetMonitorInstanceType
         DeploymentName: !Ref DeploymentName
 Outputs:
-  ReadysetMySQLVPCEndpoint:
+  ReadysetMySQLVPCEndpointService:
     Value: !GetAtt
       - ReadysetMySQLStack
-      - Outputs.ReadysetMySQLVPCEndpoint
+      - Outputs.ReadysetMySQLVPCEndpointService
     Description: VPC Endpoint to connect to to access Readyset
