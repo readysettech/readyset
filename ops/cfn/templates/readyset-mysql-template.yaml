@@ -160,8 +160,11 @@ Resources:
   ReadysetMySQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Protocol: TCP
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckPort: 6034
       Port: 3306
+      Protocol: TCP
       VpcId: !Ref VPCID
   ReadysetMySQLAdapterLC:
     Type: AWS::AutoScaling::LaunchConfiguration
