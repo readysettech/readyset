@@ -6,7 +6,7 @@ use postgres_types::Type;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
-use tracing::{debug, info, info_span, trace, Instrument};
+use tracing::{debug, error, info, info_span, trace, Instrument};
 
 const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
 
@@ -182,7 +182,7 @@ impl TableEntry {
     ) -> Result<String, pgsql::Error> {
         let query = "SELECT definition FROM pg_catalog.pg_views WHERE viewname=$1";
 
-        let mut create_view = format!("CREATE VIEW {} AS", self.name);
+        let mut create_view = format!("CREATE VIEW \"{}\" AS", self.name);
 
         for col in transaction.query(query, &[&self.name]).await? {
             create_view.push_str(col.try_get(0)?);
@@ -194,7 +194,7 @@ impl TableEntry {
 
 impl Display for TableDescription {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "CREATE TABLE {} (", self.name)?;
+        writeln!(f, "CREATE TABLE `{}` (", self.name)?;
         write!(
             f,
             "{}",
@@ -218,7 +218,7 @@ impl TableDescription {
         mut noria_table: noria::Table,
     ) -> ReadySetResult<()> {
         // The most efficient way to copy an entire table is COPY BINARY
-        let query = format!("COPY {} TO stdout BINARY", self.name);
+        let query = format!("COPY \"{}\" TO stdout BINARY", self.name);
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.type_oid.clone()).collect();
@@ -322,7 +322,12 @@ impl<'a> PostgresReplicator<'a> {
 
         let mut views = Vec::with_capacity(view_list.len());
         for view in view_list {
-            views.push(view.get_create_view(&self.transaction).await?);
+            let create_view = view.get_create_view(&self.transaction).await?;
+            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL style
+            match nom_sql::parse_query(nom_sql::Dialect::PostgreSQL, &create_view) {
+                Ok(v) => views.push(v),
+                Err(err) => error!(?create_view, ?err, "Error parsing CREATE VIEW"),
+            }
         }
 
         let recipe = itertools::join(
@@ -347,6 +352,7 @@ impl<'a> PostgresReplicator<'a> {
                 .table(&table.name)
                 .instrument(span.clone())
                 .await?;
+
             table
                 .dump(&self.transaction, noria_table)
                 .instrument(span.clone())
