@@ -62,7 +62,8 @@ async fn write_column<W: AsyncWrite + Unpin>(
         DataType::Text(ref t) => rw.write_col(t.as_str()),
         DataType::TinyText(ref t) => rw.write_col(t.as_str()),
         ref dt @ (DataType::Float(..) | DataType::Double(..)) => match cs.coltype {
-            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL => {
+            msql_srv::ColumnType::MYSQL_TYPE_DECIMAL
+            | msql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
                 let f = dt.to_string();
                 rw.write_col(f)
             }
