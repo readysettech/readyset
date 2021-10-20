@@ -6,7 +6,7 @@ use metrics::counter;
 use noria::{ReadySetError, ReadySetResult};
 use noria_client_metrics::recorded;
 use tokio::select;
-use tracing::{error, info};
+use tracing::{error, info, instrument, warn};
 
 use nom_sql::SelectStatement;
 use std::sync::Arc;
@@ -51,6 +51,7 @@ where
         }
     }
 
+    #[instrument(level = "warn", name = "reconciler", skip(self))]
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
         loop {
@@ -85,13 +86,10 @@ where
                         ..
                     } = noria_result
                     {
-                        match upstream_result.meta.compare(schema, params) {
-                            Ok(true) => {}
-                            Ok(false) => return,
-                            Err(e) => {
-                                error!("Error comparing schema: {}", e);
-                                return;
-                            }
+                        // If the wrong schema type is passed treat as a failure.
+                        if let Err(e) = upstream_result.meta.compare(schema, params) {
+                            warn!("Query compare failed: {}", e);
+                            return;
                         }
                     } else {
                         return;

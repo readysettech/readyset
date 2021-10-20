@@ -52,17 +52,24 @@ pub struct StatementMeta {
 }
 
 // Returns if the schema plausibly matches the sets of columns.
-fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<bool, Error> {
+fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<(), Error> {
     if schema.len() != columns.len() {
-        return Ok(false);
+        return Err(Error::ReadySet(ReadySetError::WrongColumnCount(
+            columns.len(),
+            schema.len(),
+        )));
     }
 
     for (sch, col) in schema.iter().zip(columns.iter()) {
-        if &type_to_pgsql(&sch.spec.sql_type)? != col {
-            return Ok(false);
+        let noria_type = type_to_pgsql(&sch.spec.sql_type)?;
+        if &noria_type != col {
+            return Err(Error::ReadySet(ReadySetError::WrongColumnType(
+                col.to_string(),
+                noria_type.to_string(),
+            )));
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 impl NoriaCompare for StatementMeta {
@@ -71,9 +78,9 @@ impl NoriaCompare for StatementMeta {
         &self,
         columns: &[ColumnSchema],
         params: &[ColumnSchema],
-    ) -> Result<bool, Self::Error> {
-        let param_match = schema_column_match(params, &self.params)?;
-        let schema_match = schema_column_match(
+    ) -> Result<(), Self::Error> {
+        schema_column_match(params, &self.params)?;
+        schema_column_match(
             columns,
             &self
                 .schema
@@ -82,7 +89,7 @@ impl NoriaCompare for StatementMeta {
                 .collect::<Vec<_>>(),
         )?;
 
-        Ok(param_match && schema_match)
+        Ok(())
     }
 }
 
@@ -314,7 +321,7 @@ mod tests {
             "table1".to_string(),
         )];
 
-        assert!(s.compare(&schema_spec, &param_specs).unwrap());
+        assert!(s.compare(&schema_spec, &param_specs).is_ok());
     }
 
     #[test]
@@ -337,7 +344,7 @@ mod tests {
             "table1".to_string(),
         )];
 
-        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
+        assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 
     #[test]
@@ -366,6 +373,6 @@ mod tests {
             "table1".to_string(),
         )];
 
-        assert!(!s.compare(&schema_spec, &param_specs).unwrap());
+        assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 }

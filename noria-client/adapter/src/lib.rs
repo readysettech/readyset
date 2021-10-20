@@ -144,11 +144,11 @@ pub struct Options {
     )]
     max_processing_minutes: i64,
 
-    /// Sets the query reconciler's loop interval in seconds.
+    /// Sets the query reconciler's loop interval in milliseconds.
     #[clap(
         long,
         env = "RECONCILE_INTERVAL",
-        default_value = "20",
+        default_value = "1000",
         requires("upstream-db-url")
     )]
     reconciler_loop_interval: u64,
@@ -341,7 +341,7 @@ where
                         noria,
                         upstream,
                         cache,
-                        std::time::Duration::from_secs(loop_interval),
+                        std::time::Duration::from_millis(loop_interval),
                         shutdown_recv,
                     );
                     reconciler.run().await

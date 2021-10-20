@@ -13,15 +13,14 @@ pub struct UpstreamPrepare<DB: UpstreamDatabase> {
 
 /// An implementation of this trait allows the statement metadata from a
 /// prepare result to be compared against the schema of the equivalent
-/// noria prepare result.
+/// noria prepare result. The compare function returns an Ok result if
+/// the query schemas match, and otherwise returns an error with the
+/// reason the schema match failed.
 pub trait NoriaCompare {
     type Error: From<ReadySetError> + Error + Send + Sync + 'static;
 
-    fn compare(
-        &self,
-        columns: &[ColumnSchema],
-        params: &[ColumnSchema],
-    ) -> Result<bool, Self::Error>;
+    fn compare(&self, columns: &[ColumnSchema], params: &[ColumnSchema])
+        -> Result<(), Self::Error>;
 }
 
 /// A connector to some kind of upstream database which can be used for passthrough write queries
