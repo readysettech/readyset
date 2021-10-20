@@ -232,20 +232,28 @@ impl TableDescription {
             let noria_row = type_map
                 .iter()
                 .enumerate()
-                .map(|(i, t)| match t {
-                    &Type::BPCHAR | &Type::TEXT | &Type::VARCHAR => {
+                .map(|(i, t)| match *t {
+                    Type::BPCHAR | Type::TEXT | Type::VARCHAR => {
                         Ok(noria::DataType::from(row.try_get::<&str>(i)?))
                     }
-                    &Type::INT4 => Ok(noria::DataType::Int(row.try_get(i)?)),
-                    &Type::INT8 => Ok(noria::DataType::BigInt(row.try_get(i)?)),
-                    &Type::TIMESTAMP => Ok(noria::DataType::Timestamp(row.try_get(i)?)),
-                    &Type::TIMESTAMPTZ => Ok(noria::DataType::from(
+                    Type::CHAR => Ok(row.try_get::<i8>(i)?.into()),
+                    Type::INT2 => Ok((row.try_get::<i16>(i)? as i32).into()),
+                    Type::INT4 => Ok(noria::DataType::Int(row.try_get(i)?)),
+                    Type::INT8 => Ok(noria::DataType::BigInt(row.try_get(i)?)),
+                    Type::OID => Ok(noria::DataType::UnsignedInt(row.try_get(i)?)),
+                    Type::TIMESTAMP => Ok(noria::DataType::Timestamp(row.try_get(i)?)),
+                    Type::TIMESTAMPTZ => Ok(noria::DataType::from(
                         row.try_get::<DateTime<FixedOffset>>(i)?,
                     )),
-                    &Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
-                    &Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
-                    &Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),
-                    &Type::DATE => Ok(row.try_get::<chrono::NaiveDate>(i)?.into()),
+                    Type::FLOAT8 => Ok(row.try_get::<f64>(i)?.try_into()?),
+                    Type::FLOAT4 => Ok(row.try_get::<f32>(i)?.try_into()?),
+                    Type::TIME => Ok(row.try_get::<chrono::NaiveTime>(i)?.into()),
+                    Type::DATE => Ok(row.try_get::<chrono::NaiveDate>(i)?.into()),
+                    Type::BIT | Type::VARBIT => Ok(row.try_get::<bit_vec::BitVec>(i)?.into()),
+                    Type::BYTEA => Ok(noria::DataType::ByteArray(
+                        row.try_get::<Vec<u8>>(i)?.into(),
+                    )),
+                    Type::BOOL => Ok(row.try_get::<bool>(i)?.into()),
                     _ => Err(ReadySetError::ReplicationFailed(format!(
                         "Unimplmented type conversion for {}",
                         t
