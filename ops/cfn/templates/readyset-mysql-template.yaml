@@ -255,6 +255,32 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+      Policies:
+        - PolicyName: ReadysetServerEBSVolumePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                - ec2:CreateVolume
+                - ec2:DescribeVolumes
+                - ec2:CreateTags
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                - ec2:AttachVolume
+                - ec2:DetachVolume
+                Resource:
+                - "arn:aws:ec2:*:*:volume/*"
+                Condition:
+                  StringEquals:
+                    'aws:ResourceTag/ReadySet:ServerVolume': 'true'
+              - Effect: Allow
+                Action:
+                - ec2:AttachVolume
+                - ec2:DetachVolume
+                Resource:
+                - "arn:aws:ec2:*:*:instance/*"
   ReadysetServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
