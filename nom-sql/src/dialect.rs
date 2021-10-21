@@ -145,7 +145,7 @@ impl Dialect {
                         not(peek(sql_keyword_or_builtin_function)),
                         take_while1(is_sql_identifier),
                     ),
-                    delimited(tag("`"), take_while1(is_sql_identifier), tag("`")),
+                    delimited(tag("`"), take_while1(|c| c != 0 && c != b'`'), tag("`")),
                     delimited(tag("["), take_while1(is_sql_identifier), tag("]")),
                 )),
                 |v| str::from_utf8(v).map(Cow::Borrowed),
@@ -169,7 +169,7 @@ impl Dialect {
                     },
                 ),
                 map_res(
-                    delimited(tag("\""), take_while1(is_sql_identifier), tag("\"")),
+                    delimited(tag("\""), take_while1(|c| c != 0 && c != b'"'), tag("\"")),
                     |v| str::from_utf8(v).map(Cow::Borrowed),
                 ),
             ))(i),
@@ -284,6 +284,8 @@ mod tests {
             let id4 = b":fo oo";
             let id5 = b"primary ";
             let id6 = b"`primary`";
+            let id7 = b"`state-province`";
+            let id8 = b"`state\0province`";
 
             assert!(Dialect::MySQL.identifier()(id1).is_ok());
             assert!(Dialect::MySQL.identifier()(id2).is_ok());
@@ -291,6 +293,8 @@ mod tests {
             assert!(Dialect::MySQL.identifier()(id4).is_err());
             assert!(Dialect::MySQL.identifier()(id5).is_err());
             assert!(Dialect::MySQL.identifier()(id6).is_ok());
+            assert!(Dialect::MySQL.identifier()(id7).is_ok());
+            assert!(Dialect::MySQL.identifier()(id8).is_err());
         }
 
         #[test]
@@ -339,6 +343,7 @@ mod tests {
             let id4 = b":fo oo";
             let id5 = b"primary ";
             let id6 = b"\"primary\"";
+            let id7 = b"\"state-province\"";
 
             assert!(Dialect::PostgreSQL.identifier()(id1).is_ok());
             assert!(Dialect::PostgreSQL.identifier()(id2).is_ok());
@@ -346,6 +351,7 @@ mod tests {
             assert!(Dialect::PostgreSQL.identifier()(id4).is_err());
             assert!(Dialect::PostgreSQL.identifier()(id5).is_err());
             assert!(Dialect::PostgreSQL.identifier()(id6).is_ok());
+            assert!(Dialect::PostgreSQL.identifier()(id7).is_ok());
         }
 
         #[test]
