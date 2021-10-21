@@ -27,6 +27,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/grafana"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "provisioners/files/setup-data-volume"
     destination = "/tmp/"
   }
@@ -44,7 +49,9 @@ build {
       "provisioners/scripts/vector/00-init.sh",
       "provisioners/scripts/vector/10-aws.sh",
       "provisioners/scripts/prometheus/00-init.sh",
+      "provisioners/scripts/prometheus/10-aws.sh",
       "provisioners/scripts/grafana/00-init.sh",
+      "provisioners/scripts/grafana/10-aws.sh",
     ]
   }
 

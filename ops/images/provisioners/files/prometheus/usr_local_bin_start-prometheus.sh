@@ -21,4 +21,5 @@ EOF
 
 /usr/local/bin/prometheus \
   --config.file /etc/prometheus.d/prometheus.yaml \
-  --storage.tsdb.path /var/lib/prometheus
+  --storage.tsdb.path /var/lib/prometheus \
+  --web.listen-address="0.0.0.0:9091"

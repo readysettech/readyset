@@ -15,6 +15,8 @@ trap 'on_error' ERR
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
 /usr/local/bin/configure-vector.sh
+/usr/local/bin/configure-prometheus.sh
+/usr/local/bin/configure-grafana.sh
 
 cat > /etc/vector.d/vector.toml <<EOF
 [sources.in]
@@ -49,7 +51,6 @@ region = "us-east-2"
 type = "prometheus_exporter"
 inputs = [ "in" ]
 address = "0.0.0.0:9090"
-default_namespace = "${AWS_CLOUDFORMATION_STACK}"
 EOF
 
 usr/local/bin/cfn-signal-wrapper.sh 0

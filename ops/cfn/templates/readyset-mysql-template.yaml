@@ -471,9 +471,9 @@ Resources:
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
           FromPort: 9090
-          ToPort: 9090
+          ToPort: 9091
           CidrIp: !Ref VPCCIDR
-          Description: Allow connections to the prometheus server within the VPC.
+          Description: Allow connections to a prometheus scrape endpoint and server within the VPC.
         - IpProtocol: tcp
           FromPort: 3000
           ToPort: 3000

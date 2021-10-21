@@ -10,5 +10,13 @@ echo "deb https://packages.grafana.com/enterprise/deb stable main" | sudo tee -a
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y grafana-enterprise
 
+sudo install -o root -g root -m 644 \
+  /tmp/grafana/etc_systemd_system_grafana-server.service \
+  /etc/systemd/system/grafana-server.service
+
+sudo install -o grafana -g grafana -m 644 \
+  /tmp/grafana/etc_grafana_grafana.ini \
+  /etc/grafana/grafana.ini
+
 sudo systemctl daemon-reload
-sudo systemctl start grafana-server
+sudo systemctl start grafana-server.service
