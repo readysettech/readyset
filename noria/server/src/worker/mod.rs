@@ -86,6 +86,7 @@ pub struct WorkerRequest {
 #[derive(Clone, Debug)]
 pub struct WorkerElectionState {
     /// The URI of the currently active controller.
+    #[allow(dead_code)] // never read - do we care?
     controller_uri: Url,
 }
 

@@ -187,12 +187,12 @@ impl fmt::Display for Expression {
 }
 
 macro_rules! try_cast_or_none {
-    ($datatype:expr, $sqltype:expr) => {
+    ($datatype:expr, $sqltype:expr) => {{
         match $datatype.coerce_to($sqltype) {
             Ok(v) => v,
             Err(_) => return Ok(Cow::Owned(DataType::None)),
-        };
-    };
+        }
+    }};
 }
 
 macro_rules! get_time_or_default {
@@ -200,7 +200,7 @@ macro_rules! get_time_or_default {
         $datatype
             .coerce_to(&SqlType::Timestamp)
             .or($datatype.coerce_to(&SqlType::Time))
-            .unwrap_or(Cow::Owned(DataType::None));
+            .unwrap_or(Cow::Owned(DataType::None))
     };
 }
 

@@ -22,6 +22,7 @@ struct Opts {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // TODO: remove when all fields are used
 struct PackerBuild {
     name: String,
     builder_type: String,

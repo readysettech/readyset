@@ -41,7 +41,7 @@ pub(crate) enum PreparedStatement {
 #[derive(Clone)]
 pub(crate) struct PreparedSelectStatement {
     name: String,
-    statement: nom_sql::SelectStatement,
+    statement: Box<nom_sql::SelectStatement>,
     key_column_indices: Vec<usize>,
     processed_query_params: ProcessedQueryParams,
     /// Parameter columns ignored by noria server
@@ -1152,7 +1152,7 @@ impl NoriaConnector {
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {
             name: qname,
-            statement,
+            statement: Box::new(statement),
             key_column_indices,
             processed_query_params,
             ignored_columns: limit_columns.clone(),

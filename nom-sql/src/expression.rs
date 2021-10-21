@@ -470,7 +470,7 @@ named_with_dialect!(primary_inner(dialect, &[u8]) -> TokenTree, alt!(
             char!(')') >>
             (TokenTree::Group(group))
     ) |
-    preceded!(multispace0, simple_expr(dialect)) => { |s| TokenTree::Primary(s) }
+    preceded!(multispace0, simple_expr(dialect)) => { TokenTree::Primary }
 ));
 
 named_with_dialect!(primary(dialect, &[u8]) -> TokenTree, do_parse!(
@@ -635,15 +635,15 @@ where
 }
 
 named_with_dialect!(in_lhs(dialect) -> Expression, alt!(
-    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
-    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(column_function(dialect)) => { Expression::Call } |
+    call!(literal(dialect)) => { Expression::Literal } |
     call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
+    call!(column_identifier_no_alias(dialect)) => { Expression::Column }
 ));
 
 named_with_dialect!(in_rhs(dialect) -> InValue, alt!(
     call!(nested_selection(dialect)) => { |sel| InValue::Subquery(Box::new(sel)) } |
-    separated_list!(ws_sep_comma, call!(expression(dialect))) => { |exprs| InValue::List(exprs) }
+    separated_list!(ws_sep_comma, call!(expression(dialect))) => { InValue::List }
 ));
 
 named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
@@ -666,10 +666,10 @@ named_with_dialect!(in_expr(dialect) -> Expression, do_parse!(
 
 named_with_dialect!(between_operand(dialect) -> Expression, alt!(
     call!(parenthesized_expr(dialect)) |
-    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
-    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(column_function(dialect)) => { Expression::Call } |
+    call!(literal(dialect)) => { Expression::Literal } |
     call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) }
+    call!(column_identifier_no_alias(dialect)) => { Expression::Column }
 ));
 
 named_with_dialect!(between_max(dialect) -> Expression, alt!(
@@ -771,12 +771,12 @@ named_with_dialect!(simple_expr(dialect, &[u8]) -> Expression, alt!(
     call!(exists_expr(dialect)) |
     call!(between_expr(dialect)) |
     call!(in_expr(dialect)) |
-    call!(column_function(dialect)) => { |f| Expression::Call(f) } |
-    call!(literal(dialect)) => { |l| Expression::Literal(l) } |
+    call!(column_function(dialect)) => { Expression::Call } |
+    call!(literal(dialect)) => { Expression::Literal } |
     call!(case_when(dialect)) |
-    call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) } |
+    call!(column_identifier_no_alias(dialect)) => { Expression::Column } |
     call!(cast(dialect)) |
-    call!(scoped_var(dialect)) => { |v| Expression::Variable(v) }
+    call!(scoped_var(dialect)) => { Expression::Variable }
 ));
 
 pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {

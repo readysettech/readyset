@@ -607,7 +607,7 @@ macro_rules! internal {
             "{}{}",
             $crate::__location_info!("in {}: "),
             format_args!($($tt)*)
-        )).into());
+        )).into())
     };
 }
 
@@ -629,7 +629,7 @@ macro_rules! unsupported {
             "{}{}",
             format_args!($($tt)*),
             $crate::__location_info!()
-        )).into());
+        )).into())
     };
 }
 

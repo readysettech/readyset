@@ -806,7 +806,7 @@ pub fn numeric_precision_inner(i: &[u8]) -> IResult<&[u8], (u16, Option<u8>)> {
     ))(i)?;
 
     let m = digit_as_u16(m)?.1;
-    d.map(|v| digit_as_u8(v))
+    d.map(digit_as_u8)
         .transpose()
         .map(|v| (remaining_input, (m, v.map(|digit| digit.1))))
 }

@@ -191,7 +191,7 @@ impl Writer {
         &self,
         article: usize,
         schema: DatabaseSchema,
-        mut backend: &mut Backend<MySqlUpstream, MySqlQueryHandler>,
+        backend: &mut Backend<MySqlUpstream, MySqlQueryHandler>,
     ) -> anyhow::Result<()> {
         let mut database_spec = DatabaseGenerationSpec::new(schema).table_rows("articles", 1);
         // Article table overrides.
@@ -214,7 +214,7 @@ impl Writer {
             ),
         ]);
 
-        load_to_backend(&mut backend, database_spec).await?;
+        load_to_backend(backend, database_spec).await?;
         Ok(())
     }
 

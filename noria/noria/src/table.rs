@@ -185,7 +185,6 @@ impl TableBuilder {
             conns.push(s);
         }
 
-        let dispatch = tracing::dispatcher::get_default(|d| d.clone());
         Table {
             ni: self.ni,
             node: self.addr,
@@ -199,8 +198,6 @@ impl TableBuilder {
 
             shard_addrs: addrs,
             shards: conns,
-
-            dispatch,
         }
     }
 }
@@ -226,8 +223,6 @@ pub struct Table {
 
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
-
-    dispatch: tracing::Dispatch,
 }
 
 impl fmt::Debug for Table {

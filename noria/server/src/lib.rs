@@ -365,13 +365,12 @@
 //! + [id=1, title=Hello world, votes=43]
 //! ```
 #![feature(
-    min_type_alias_impl_trait,
+    type_alias_impl_trait,
     box_patterns,
     try_find,
     stmt_expr_attributes,
     result_cloned,
     result_flattening,
-    bindings_after_at,
     drain_filter
 )]
 #![deny(missing_docs)]

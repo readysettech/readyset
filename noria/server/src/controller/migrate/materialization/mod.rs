@@ -113,8 +113,6 @@ pub(in crate::controller) struct Materializations {
     /// Nodes materialized since the last time `commit()` was invoked.
     added: HashMap<NodeIndex, Indices>,
 
-    /// Nodes that have weak indices
-    have_weak: HashMap<NodeIndex, Indices>,
     /// Weak indices added since the last time `commit()` was invoked
     added_weak: HashMap<NodeIndex, Indices>,
 
@@ -143,7 +141,6 @@ impl Materializations {
             added: HashMap::default(),
             new_readers: HashSet::default(),
 
-            have_weak: HashMap::default(),
             added_weak: HashMap::default(),
 
             paths: HashMap::default(),

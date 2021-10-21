@@ -182,7 +182,7 @@ named!(
             )),
             parse_to!(f64)
         ),
-        |f| Value::from(f)
+        Value::from
     )
 );
 
@@ -206,7 +206,7 @@ named!(
         terminated!(tag!("NULL"), line_ending) => { |_| Value::Null } |
         terminated!(empty_string, line_ending) |
         terminated!(complete!(float), line_ending) |
-        terminated!(integer, line_ending) => { |i| Value::Integer(i) } |
+        terminated!(integer, line_ending) => { Value::Integer } |
         terminated!(map_opt!(
             not_line_ending,
             |s: &[u8]| {
@@ -242,7 +242,7 @@ named!(
                     String::from_utf8(s.into()).ok()
                 }
             }
-        ), line_ending) => { |s| Value::Text(s) }
+        ), line_ending) => { Value::Text }
     )
 );
 
@@ -380,8 +380,8 @@ named!(
 );
 
 named!(pub record<Record>, alt!(
-    statement => { |stmt| Record::Statement(stmt) } |
-    query => { |query| Record::Query(query) } |
+    statement => { Record::Statement } |
+    query => { Record::Query } |
     sleep |
     halt |
     terminated!(tag!("graphviz"), line_ending) => { |_| Record::Graphviz } |

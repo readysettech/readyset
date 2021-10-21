@@ -220,11 +220,9 @@ impl ConsulAuthority {
         if let Some(session) = &inner.session {
             // This will not be populated without an id.
             #[allow(clippy::unwrap_used)]
-            let _ = self
-                .consul
-                .destroy(session.ID.as_ref().unwrap(), None)
-                .await
-                .unwrap();
+            let id = session.ID.clone().unwrap();
+            drop(session);
+            self.consul.destroy(&id, None).await.unwrap();
         }
 
         Ok(())
@@ -775,7 +773,7 @@ mod tests {
         assert!(adapter_addrs.is_empty());
 
         authority
-            .register_adapter(adapter_addr.clone())
+            .register_adapter(adapter_addr)
             .await
             .unwrap()
             .unwrap();

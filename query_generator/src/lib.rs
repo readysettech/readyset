@@ -748,9 +748,10 @@ impl UniformGenerator {
                 val = uniform_random_value(&self.min, &self.max);
                 iters += 1;
 
-                if iters > 100000 {
-                    panic!("Too many iterations when trying to generate a single random value");
-                }
+                assert!(
+                    !(iters > 100000),
+                    "Too many iterations when trying to generate a single random value"
+                );
             }
             self.pulled.insert(val.clone());
 
@@ -1185,7 +1186,6 @@ impl TableSpec {
 pub struct GeneratorState {
     tables: HashMap<TableName, TableSpec>,
     table_name_counter: u32,
-    alias_counter: u32,
 }
 
 impl GeneratorState {
@@ -1691,15 +1691,9 @@ pub enum SubqueryPosition {
 }
 
 /// Parameters for generating an arbitrary [`QueryOperation`]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct QueryOperationArgs {
     in_subquery: bool,
-}
-
-impl Default for QueryOperationArgs {
-    fn default() -> Self {
-        Self { in_subquery: false }
-    }
 }
 
 /// Operations that can be performed as part of a SQL query

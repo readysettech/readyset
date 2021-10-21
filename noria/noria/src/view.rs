@@ -637,7 +637,6 @@ impl ViewBuilder {
             conns.push(s);
         }
 
-        let tracer = tracing::dispatcher::get_default(|d| d.clone());
         Ok(View {
             node,
             schema,
@@ -645,7 +644,6 @@ impl ViewBuilder {
             shard_addrs: addrs,
             shards: Vec1::try_from_vec(conns)
                 .map_err(|_| internal_err("cannot create view '{}' without shards"))?,
-            tracer,
         })
     }
 }
@@ -662,8 +660,6 @@ pub struct View {
 
     shards: Vec1<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
-
-    tracer: tracing::Dispatch,
 }
 
 impl fmt::Debug for View {
