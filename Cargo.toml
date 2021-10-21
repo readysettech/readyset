@@ -30,7 +30,8 @@ members = [
     "demos/weavegrid",
     "demos/utils",
     "xtask",
-    "ensure-ebs-volume"
+    "ensure-ebs-volume",
+    "metrics-aggregator"
 ]
 [profile.release]
 debug=true

@@ -2758,6 +2758,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-aggregator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bit-vec",
+ "chrono",
+ "clap 3.0.0-beta.4",
+ "derive_more",
+ "futures 0.3.17",
+ "futures-executor",
+ "futures-util",
+ "hyper",
+ "itertools 0.10.1",
+ "launchpad",
+ "lazy_static",
+ "maplit",
+ "metrics",
+ "nom",
+ "nom-sql",
+ "noria",
+ "prometheus-http-query",
+ "readyset-logging",
+ "regex",
+ "reqwest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "stream-cancel",
+ "thiserror",
+ "tokio 1.12.0",
+ "tokio-stream",
+ "tokio-tower",
+ "tower",
+ "tracing",
+ "tracing-futures",
+ "tracing-subscriber",
+ "vec1",
+]
+
+[[package]]
 name = "metrics-exporter-prometheus"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4358,6 +4399,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9f5105d4fdaab20335ca9565e106a5d9b82b6219b5ba735731124ac6711d23d"
 dependencies = [
  "unicode-xid",
+]
+
+[[package]]
+name = "prometheus-http-query"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3066c526a70b4efaad34990cbea7cd98844286f64722a2a9dfe4a7ee8f99cf1"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time 0.2.27",
+ "url",
 ]
 
 [[package]]
