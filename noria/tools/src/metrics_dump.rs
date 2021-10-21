@@ -1,5 +1,7 @@
+#![warn(clippy::panic)]
 //! Tool to retrieve a metrics dump for the current leader in a
 //! deployment.
+
 use clap::Clap;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;

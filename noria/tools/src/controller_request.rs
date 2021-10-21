@@ -1,3 +1,5 @@
+#![warn(clippy::panic)]
+
 use anyhow::anyhow;
 use clap::Clap;
 use noria::consensus::AuthorityType;
