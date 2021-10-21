@@ -33,28 +33,28 @@ arg_enum! {
 #[derive(StructOpt, Clone)]
 struct NoriaClientOpts {
     /// ReadySet's zookeeper connection string.
-    #[structopt(long, required_if("database_type", "noria"))]
+    #[structopt(long, required_if("database-type", "noria"))]
     zookeeper_url: Option<String>,
 
     #[structopt(
         short,
         long,
-        required_if("database_type", "noria"),
+        required_if("database-type", "noria"),
         env("AUTHORITY_ADDRESS"),
         default_value("127.0.0.1:2181")
     )]
     authority_address: String,
 
-    #[structopt(long, env("AUTHORITY"), required_if("database_type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
+    #[structopt(long, env("AUTHORITY"), required_if("database-type", "noria"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
     #[structopt(
         short,
-        required_if("database_type", "noria"),
+        required_if("database-type", "noria"),
         long,
         env("NORIA_DEPLOYMENT")
     )]
-    deployment: String,
+    deployment: Option<String>,
 
     /// The region used when requesting a view.
     #[structopt(long)]
@@ -76,11 +76,11 @@ struct NoriaClientOpts {
 struct MySqlOpts {
     /// MySQL database connection string.
     /// Only one of MySQL database url and zooekeper url can be specified.
-    #[structopt(long, required_if("database_type", "mysql"))]
+    #[structopt(long, required_if("database-type", "mysql"))]
     database_url: Option<DatabaseURL>,
 
     /// The path to the parameterized query.
-    #[structopt(long, required_if("database_type", "mysql"))]
+    #[structopt(long, required_if("database-type", "mysql"))]
     query: Option<PathBuf>,
 }
 
@@ -309,7 +309,7 @@ impl NoriaExecutor {
     async fn init(opts: NoriaClientOpts) -> Self {
         let authority = opts
             .authority
-            .to_authority(&opts.authority_address, &opts.deployment)
+            .to_authority(&opts.authority_address, &opts.deployment.unwrap())
             .await;
         let mut handle: ControllerHandle = ControllerHandle::new(authority).await;
         handle.ready().await.unwrap();
