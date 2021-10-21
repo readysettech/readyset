@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
+sudo apt-get install -y nvme-cli
+
 sudo install -o root -g root -m 755 \
     /tmp/ensure-ebs-volume-binary \
     /usr/local/bin/ensure-ebs-volume

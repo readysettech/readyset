@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
+use std::str;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -8,10 +9,13 @@ use aws_sdk_ec2::model::{Filter, ResourceType, Tag, TagSpecification, VolumeStat
 use aws_sdk_ec2::Client;
 use aws_types::region::Region;
 use clap::Clap;
+use lazy_static::lazy_static;
+use regex::Regex;
 use tokio::fs::create_dir_all;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time;
+use tracing::debug;
 use tracing::{info, instrument};
 use tracing_subscriber::EnvFilter;
 
@@ -22,11 +26,13 @@ const WAIT_TIMER: Duration = Duration::from_secs(1);
 /// is running.  This includes creating a volume if one does not exist, attaching it to the
 /// instance, formatting it, and mounting it.
 struct Opts {
-    #[clap(default_value = "/dev/xvdb")]
-    device: PathBuf,
-
+    /// Filesystem path at which to mount the device
     #[clap(default_value = "/data")]
     mountpoint: PathBuf,
+
+    /// Block device name of the device to mount
+    #[clap(default_value = "sdb")]
+    device: PathBuf,
 
     /// Size of the volume to create in gigabytes
     #[clap(long, default_value = "32")]
@@ -92,36 +98,102 @@ async fn wait_for_volume_state(
     Ok(())
 }
 
-#[instrument(skip(ec2, device))]
-async fn attach_volume(
-    ec2: &Client,
-    volume_id: &str,
-    instance_id: &str,
-    device: &Path,
-) -> Result<()> {
-    info!("Attaching volume...");
-    ec2.attach_volume()
-        .device(device.to_string_lossy())
-        .instance_id(instance_id)
-        .volume_id(volume_id)
-        .send()
+#[instrument]
+async fn find_nvme_device(device_name: &Path) -> Result<Option<PathBuf>> {
+    info!("Trying to find nvme device");
+    let nvme_list_output = Command::new("nvme")
+        .args(&["list", "-o", "json"])
+        .output()
         .await?;
+    if !nvme_list_output.status.success() {
+        bail!("`nvme list` failed with {}", nvme_list_output.status)
+    }
 
-    wait_for_volume_state(ec2, volume_id, VolumeState::InUse).await?;
+    let json = serde_json::from_slice::<serde_json::Value>(&nvme_list_output.stdout)?;
+    let devices = json
+        .get("Devices")
+        .ok_or_else(|| anyhow!("Invalid JSON output from nvme list; expected Devices key"))?
+        .as_array()
+        .ok_or_else(|| {
+            anyhow!("Invalid JSON output from nvme list; expected array at $.Devices")
+        })?;
 
-    loop {
-        info!("Waiting for volume to attach successfully...");
-        let result = Command::new("sgdisk")
-            .arg("-p")
-            .arg(device)
+    for device in devices {
+        let nvme_device_path = device
+            .get("DevicePath")
+            .ok_or_else(|| anyhow!("Invalid JSON output from nvme list; missing DevicePath"))?
+            .as_str()
+            .ok_or_else(|| {
+                anyhow!("Invalid JSON output from nvme list; DevicePath must be a string")
+            })?;
+
+        // https://github.com/transferwise/ansible-ebs-automatic-nvme-mapping
+        let id_ctrl_output = Command::new("nvme")
+            .arg("id-ctrl")
+            .arg("-vb")
+            .arg(nvme_device_path)
             .output()
             .await?;
-        if result.status.code() == Some(0) {
-            break;
+        if !id_ctrl_output.status.success() {
+            bail!("`nvme id-ctrl` failed with {}", id_ctrl_output.status)
         }
-        time::sleep(WAIT_TIMER).await;
+        debug!(id_ctrl_output = %String::from_utf8_lossy(&id_ctrl_output.stdout));
+
+        // Amazon stores the block device name associated with nvme devices in the "vendor data"
+        // field of the id-ctrl struct, which if you do the math is bytes 3072-3104 of the
+        // nvme_id_ctrl struct in linux/nvme.h.
+        let ebs_block_dev = PathBuf::from(
+            str::from_utf8(&id_ctrl_output.stdout[3072..=3104])?
+                .trim_matches(|c| [' ', '\0'].contains(&c)),
+        );
+        debug!(ebs_block_dev = %ebs_block_dev.display());
+        if ebs_block_dev == device_name {
+            info!("Found!");
+            return Ok(Some(nvme_device_path.into()));
+        }
     }
-    Ok(())
+
+    Ok(None)
+}
+
+/// Annoyingly, AWS is extremely inconsistent about how block devices actually get mounted to the
+/// system. If you have an EBS device with a mount point like `sdb`, its *actual* block device path
+/// could either be:
+///
+/// * `/dev/sdb`
+/// * `/dev/xvdb`
+/// * some random nvme device, where the only way to figure out the EBS block device mapping is to
+///   parse the binary output of `nvme-cli`
+///
+/// And the only way to figure out which has happened is to try each in order until we find a block
+/// device that actually exists on the filesystem! This function implements that logic.
+#[instrument]
+async fn find_block_device(device_name: &Path) -> Result<Option<PathBuf>> {
+    let with_sd = PathBuf::from("/dev").join(device_name);
+
+    if exists(&with_sd).await? {
+        info!("Found with sd prefix");
+        return Ok(Some(with_sd));
+    }
+    info!("Not found with sd prefix");
+
+    lazy_static! {
+        static ref SD_RE: Regex = Regex::new("^sd").unwrap();
+    }
+    let name_with_xv = SD_RE.replace(device_name.as_os_str().to_str().unwrap(), "xvd");
+
+    let path_with_xv = PathBuf::from("/dev").join(name_with_xv.as_ref());
+    if exists(&path_with_xv).await? {
+        info!("Found with xvd prefix");
+        return Ok(Some(path_with_xv));
+    }
+    info!("Not found with xvd prefix");
+
+    // can't use Option::or_else bc async (give me effect composition!!!)
+    match find_nvme_device(device_name).await? {
+        Some(res) => Ok(Some(res)),
+        None => find_nvme_device(Path::new(name_with_xv.as_ref())).await,
+    }
 }
 
 impl Opts {
@@ -195,12 +267,40 @@ impl Opts {
         Ok(volume_id)
     }
 
+    #[instrument(skip(self, ec2))]
+    async fn attach_volume(
+        &self,
+        ec2: &Client,
+        volume_id: &str,
+        instance_id: &str,
+    ) -> Result<PathBuf> {
+        info!("Attaching volume...");
+        ec2.attach_volume()
+            .device(self.device.to_string_lossy())
+            .instance_id(instance_id)
+            .volume_id(volume_id)
+            .send()
+            .await?;
+
+        wait_for_volume_state(ec2, volume_id, VolumeState::InUse).await?;
+
+        loop {
+            info!("Waiting for volume to attach successfully...");
+            match find_block_device(&self.device).await? {
+                Some(block_device_path) => return Ok(block_device_path),
+                None => {
+                    time::sleep(WAIT_TIMER).await;
+                }
+            }
+        }
+    }
+
     #[instrument(skip(self))]
-    async fn ensure_volume_attached(&self) -> Result<()> {
+    async fn ensure_volume_attached(&self) -> Result<PathBuf> {
         info!("Checking to see whether device exists...");
-        if exists(&self.device).await? {
-            info!("It does");
-            return Ok(());
+        if let Some(block_device_path) = find_block_device(&self.device).await? {
+            info!(path = %block_device_path.display(), "It does");
+            return Ok(block_device_path);
         } else {
             info!("It does not");
         }
@@ -227,17 +327,15 @@ impl Opts {
         let volume_id = self
             .ensure_volume_exists(&ec2, &instance_id, &region, &az)
             .await?;
-        attach_volume(&ec2, &volume_id, &instance_id, &self.device).await?;
-
-        Ok(())
+        self.attach_volume(&ec2, &volume_id, &instance_id).await
     }
 
     #[instrument(skip(self))]
-    async fn ensure_disk_formatted(&self) -> Result<()> {
+    async fn ensure_disk_formatted(&self, block_device_path: &Path) -> Result<()> {
         info!("Checking to see whether disk already contains an ext4 filesystem...");
         let magic = Command::new("file")
             .arg("-s")
-            .arg(&self.device)
+            .arg(block_device_path)
             .output()
             .await?;
         let magic = String::from_utf8(magic.stdout)?;
@@ -248,7 +346,7 @@ impl Opts {
         info!("It does not; formatting disk...");
         Command::new("mkfs.ext4")
             .arg("-F")
-            .arg(&self.device)
+            .arg(block_device_path)
             .spawn()?
             .wait()
             .await?;
@@ -257,7 +355,7 @@ impl Opts {
     }
 
     #[instrument(skip(self))]
-    async fn ensure_filesystem_mounted(&self) -> Result<()> {
+    async fn ensure_filesystem_mounted(&self, block_device_path: &Path) -> Result<()> {
         info!("Ensuring mountpoint exists...");
         create_dir_all(&self.mountpoint).await?;
 
@@ -272,20 +370,23 @@ impl Opts {
             return Ok(());
         }
         info!("It is not; mounting...");
-        Command::new("mount")
-            .arg(&self.device)
+        let result = Command::new("mount")
+            .arg(block_device_path)
             .arg(&self.mountpoint)
             .spawn()?
             .wait()
             .await?;
+        if !result.success() {
+            bail!("mount {} {} failed")
+        }
         info!("Done");
         Ok(())
     }
 
     async fn run(&self) -> Result<()> {
-        self.ensure_volume_attached().await?;
-        self.ensure_disk_formatted().await?;
-        self.ensure_filesystem_mounted().await?;
+        let block_device = self.ensure_volume_attached().await?;
+        self.ensure_disk_formatted(&block_device).await?;
+        self.ensure_filesystem_mounted(&block_device).await?;
         Ok(())
     }
 }
