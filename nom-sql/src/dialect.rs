@@ -6,7 +6,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, tag_no_case, take, take_while1};
 use nom::character::complete::char;
 use nom::character::is_alphanumeric;
-use nom::combinator::{map, map_res, not, peek};
+use nom::combinator::{map, map_res, not, opt, peek};
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded};
 use nom::IResult;
@@ -201,7 +201,10 @@ impl Dialect {
     pub fn string_literal(self) -> impl for<'a> Fn(&'a [u8]) -> IResult<&'a [u8], Vec<u8>> {
         move |i| match self {
             Dialect::PostgreSQL => raw_string_single_quoted(i),
-            Dialect::MySQL => alt((raw_string_single_quoted, raw_string_double_quoted))(i),
+            Dialect::MySQL => preceded(
+                opt(alt((tag("_utf8mb4"), tag("_utf8"), tag("_binary")))),
+                alt((raw_string_single_quoted, raw_string_double_quoted)),
+            )(i),
         }
     }
 
@@ -306,6 +309,13 @@ mod tests {
                 let expected = "\0\'\"\x7F\n\r\t\x1a\\%_".as_bytes().to_vec();
                 assert_eq!(res, Ok((&b""[..], expected)));
             }
+        }
+
+        #[test]
+        fn literal_string_charset() {
+            let res = Dialect::MySQL.string_literal()(b"_utf8mb4'noria'");
+            let expected = b"noria".to_vec();
+            assert_eq!(res, Ok((&b""[..], expected)));
         }
 
         #[test]
