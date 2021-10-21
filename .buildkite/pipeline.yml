@@ -353,7 +353,7 @@ steps:
     - 'echo +++ :buildkite: Downloading binary artifacts'
     - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-authority-consul,amazon-ebs.readyset-vector-aggregator .
+    - packer build -only=amazon-ebs.readyset-authority-consul,amazon-ebs.readyset-monitor .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:

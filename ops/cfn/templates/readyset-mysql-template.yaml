@@ -113,7 +113,7 @@ Mappings:
       # short commit id associated with AMIs: 4386726
       READYSETMYSQLADAPTER: ami-066cad927b27a4d0b
       READYSETSERVER: ami-02ac681fc8d0cc6be
-      READYSETLOGSAGGREGATOR: ami-03e9d75c2dbed51bb
+      READYSETMONITOR: ami-03e9d75c2dbed51bb
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadysetMySQLAdapterRole:
@@ -464,7 +464,7 @@ Resources:
       ImageId: !FindInMap
           - AWSAMIRegionMap
           - !Ref "AWS::Region"
-          - READYSETLOGSAGGREGATOR
+          - READYSETMONITOR
       Tags:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Monitor"]]
