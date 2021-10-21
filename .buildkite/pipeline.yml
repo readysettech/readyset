@@ -260,6 +260,31 @@ steps:
           login: true
           retries: 3
 
+  - label: ':rust: Build ensure-ebs-volume release binary'
+    key: build-ensure-ebs-volume-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin ensure-ebs-volume
+    - strip target/release/ensure-ebs-volume
+    artifact_paths:
+    - target/release/ensure-ebs-volume
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
   - label: ':rust: Build noria-mysql adapter release binary'
     key: build-noria-mysql-adapter-release
     commands:
@@ -317,6 +342,7 @@ steps:
     - build-noria-server-release
     - build-noria-mysql-adapter-release
     - build-noria-psql-adapter-release
+    - build-ensure-ebs-volume-release
 
   - label: ':packer: Build readyset images'
     key: build-images
@@ -335,6 +361,7 @@ steps:
     - build-noria-server-release
     - build-noria-mysql-adapter-release
     - build-noria-psql-adapter-release
+    - build-ensure-ebs-volume-release
     plugins:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
