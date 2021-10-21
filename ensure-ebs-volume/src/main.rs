@@ -1,3 +1,4 @@
+use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str;
@@ -395,9 +396,9 @@ impl Opts {
 pub async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .compact()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("ensure-ebs-volume=info".parse()?),
-        )
+        .with_env_filter(EnvFilter::new(
+            env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_owned()),
+        ))
         .init();
 
     let opts = Opts::parse();
