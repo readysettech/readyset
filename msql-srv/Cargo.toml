@@ -8,19 +8,8 @@ readme = "README.md"
 
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
-documentation = "https://docs.rs/msql-srv"
-homepage = "https://github.com/jonhoo/msql-srv"
-repository = "https://github.com/jonhoo/msql-srv.git"
-
 keywords = ["api-bindings", "database", "sql", "mock"]
 categories = ["api-bindings", "network-programming", "database-implementations"]
-
-license = "MIT/Apache-2.0"
-
-[badges]
-travis-ci = { repository = "jonhoo/msql-srv" }
-codecov = { repository = "jonhoo/msql-srv", branch = "master", service = "github" }
-maintenance = { status = "experimental" }
 
 [dependencies]
 nom = "5.0.1"
