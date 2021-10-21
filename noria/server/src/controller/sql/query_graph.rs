@@ -185,7 +185,7 @@ pub struct Pagination {
     pub offset: Option<Expression>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<String, QueryGraphNode>,
@@ -226,19 +226,6 @@ impl QueryGraph {
         let mut s = DefaultHasher::new();
         self.hash(&mut s);
         s.finish()
-    }
-}
-
-impl Default for QueryGraph {
-    fn default() -> Self {
-        QueryGraph {
-            relations: HashMap::new(),
-            edges: HashMap::new(),
-            columns: Vec::new(),
-            join_order: Vec::new(),
-            global_predicates: Vec::new(),
-            pagination: None,
-        }
     }
 }
 

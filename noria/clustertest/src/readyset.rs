@@ -60,11 +60,7 @@ async fn query_regional_routing_test() {
     .unwrap();
 
     // Query via r2.
-    let mut view_r2 = deployment
-        .handle
-        .view_from_region("q", "r2".into())
-        .await
-        .unwrap();
+    let mut view_r2 = deployment.handle.view_from_region("q", "r2").await.unwrap();
     assert_eq!(
         view_r2.lookup(&[0i32.into()], true).await.unwrap(),
         vec![vec![

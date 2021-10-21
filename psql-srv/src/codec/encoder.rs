@@ -1309,7 +1309,7 @@ mod tests {
     fn test_encode_text_bytea() {
         let mut buf = BytesMut::new();
         let bytes = vec![0, 8, 39, 92, 100, 128];
-        put_text_value(DataValue::ByteArray(bytes.clone()), &mut buf).unwrap();
+        put_text_value(DataValue::ByteArray(bytes), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(12); // length (placeholder)
         exp.extend_from_slice(b"0008275c6480");
@@ -1356,7 +1356,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Jsonb(json.clone()), &mut buf).unwrap();
+        put_text_value(DataValue::Jsonb(json), &mut buf).unwrap();
         let mut exp = BytesMut::new();
         exp.put_i32(67); // length (placeholder)
         exp.extend_from_slice(
@@ -1377,7 +1377,7 @@ mod tests {
         assert_eq!(buf, exp);
 
         let mut buf = BytesMut::new();
-        put_text_value(DataValue::Bit(bits.clone()), &mut buf).unwrap();
+        put_text_value(DataValue::Bit(bits), &mut buf).unwrap();
         assert_eq!(buf, exp);
     }
 

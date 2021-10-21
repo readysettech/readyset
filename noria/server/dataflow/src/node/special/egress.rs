@@ -13,7 +13,7 @@ struct EgressTx {
     dest: ReplicaAddr,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Egress {
     txs: Vec<EgressTx>,
     tags: HashMap<Tag, NodeIndex>,
@@ -28,16 +28,6 @@ impl Clone for Egress {
             txs: Vec::new(),
             tags: self.tags.clone(),
             packet_filter: self.packet_filter.clone(),
-        }
-    }
-}
-
-impl Default for Egress {
-    fn default() -> Self {
-        Self {
-            tags: Default::default(),
-            txs: Default::default(),
-            packet_filter: Default::default(),
         }
     }
 }

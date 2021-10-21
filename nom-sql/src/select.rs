@@ -400,14 +400,14 @@ named_with_dialect!(from_clause_join(dialect) -> FromClause, do_parse!(
 
 named_with_dialect!(nested_from_clause(dialect) -> FromClause, alt!(
     delimited!(tag!("("), call!(from_clause_join(dialect)), tag!(")"))
-        | call!(table_list(dialect)) => { |ts| FromClause::Tables(ts) }
+        | call!(table_list(dialect)) => { FromClause::Tables }
         | call!(nested_select(dialect))
 ));
 
 named_with_dialect!(from_clause_tree(dialect) -> FromClause, alt!(
     delimited!(tag!("("), call!(from_clause_join(dialect)), tag!(")"))
         | call!(from_clause_join(dialect))
-        | call!(table_list(dialect)) => { |ts| FromClause::Tables(ts) }
+        | call!(table_list(dialect)) => { FromClause::Tables }
         | call!(nested_select(dialect))
 ));
 

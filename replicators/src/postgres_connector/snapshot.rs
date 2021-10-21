@@ -42,6 +42,7 @@ struct TableEntry {
 
 #[derive(Debug)]
 struct TableDescription {
+    #[allow(dead_code)]
     schema: String,
     name: String,
     columns: Vec<ColumnEntry>,
@@ -58,8 +59,10 @@ struct ColumnEntry {
 
 #[derive(Debug)]
 struct ConstraintEntry {
+    #[allow(dead_code)]
     name: String,
     definition: String,
+    #[allow(dead_code)]
     kind: ConstraintKind,
 }
 

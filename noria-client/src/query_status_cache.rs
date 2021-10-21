@@ -71,7 +71,7 @@ impl Serialize for QueryList {
         S: Serializer,
     {
         let mut sanitized = self.queries.clone();
-        sanitized.iter_mut().for_each(|q| anonymize_literals(q));
+        sanitized.iter_mut().for_each(anonymize_literals);
 
         let mut seq = serializer.serialize_seq(Some(sanitized.len()))?;
         for q in sanitized {

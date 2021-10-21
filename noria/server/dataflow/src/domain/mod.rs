@@ -258,7 +258,6 @@ impl DomainBuilder {
 struct TimedPurge {
     time: time::Instant,
     view: LocalNodeIndex,
-    tag: Tag,
     keys: HashSet<KeyComparison>,
 }
 
@@ -3113,7 +3112,6 @@ impl Domain {
                                             + time::Duration::from_millis(50),
                                         keys: for_keys,
                                         view: dst,
-                                        tag,
                                     });
                                 }
                                 assert_ne!(finished_partial, 0);

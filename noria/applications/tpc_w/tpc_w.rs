@@ -279,9 +279,10 @@ async fn main() {
     let write = value_t_or_exit!(matches, "write", f32);
     let random = matches.is_present("random");
 
-    if read_scale > write {
-        panic!("can't read scale must be less or equal than write scale");
-    }
+    assert!(
+        read_scale <= write,
+        "can't read scale must be less or equal than write scale"
+    );
 
     println!("Loading TPC-W recipe from {}", rloc);
     let mut backend = make(rloc, parallel_prepop, single_query, disable_partial).await;

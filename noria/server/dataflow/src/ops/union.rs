@@ -739,7 +739,7 @@ impl Ingredient for Union {
                     keys.iter()
                         .filter_map(|key| {
                             let key = key.equal().expect("Unions can't handle range queries yet");
-                            let rs = rs_by_key.remove(key).unwrap_or_else(Records::default);
+                            let rs = rs_by_key.remove(key).unwrap_or_default();
 
                             // store this replay piece
                             use std::collections::btree_map::Entry;

@@ -40,7 +40,7 @@ pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
 fn do_flatten_conditional(
     cond: &Expression,
     pkey: &[&Column],
-    mut flattened: &mut HashSet<Vec<(String, DataType)>>,
+    flattened: &mut HashSet<Vec<(String, DataType)>>,
 ) -> ReadySetResult<bool> {
     Ok(match *cond {
         Expression::BinaryOp {
@@ -98,9 +98,9 @@ fn do_flatten_conditional(
             // WHERE A.a = AND a.b = 2
             // but also bogus stuff like `WHERE 1 = 1 AND 2 = 2`.
             let pre_count = flattened.len();
-            do_flatten_conditional(&*lhs, pkey, &mut flattened)? && {
+            do_flatten_conditional(&*lhs, pkey, flattened)? && {
                 let count = flattened.len();
-                let valid = do_flatten_conditional(&*rhs, pkey, &mut flattened)?;
+                let valid = do_flatten_conditional(&*rhs, pkey, flattened)?;
                 valid && (pre_count == flattened.len() || count == flattened.len())
             }
         }
@@ -109,8 +109,8 @@ fn do_flatten_conditional(
             ref lhs,
             ref rhs,
         } => {
-            do_flatten_conditional(&*lhs, pkey, &mut flattened)?
-                && do_flatten_conditional(&*rhs, pkey, &mut flattened)?
+            do_flatten_conditional(&*lhs, pkey, flattened)?
+                && do_flatten_conditional(&*rhs, pkey, flattened)?
         }
         _ => false,
     })
@@ -227,7 +227,7 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
         }
         Expression::Call(ref f) => f
             .arguments()
-            .flat_map(|expr| get_parameter_columns_recurse(expr))
+            .flat_map(get_parameter_columns_recurse)
             .collect(),
         Expression::Literal(_) => vec![],
         Expression::CaseWhen {

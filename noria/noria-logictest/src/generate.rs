@@ -54,7 +54,6 @@ pub(crate) struct Seed {
     queries: Vec<Query>,
     generator: GeneratorState,
     hash_threshold: usize,
-    file: Option<File>,
     script: TestScript,
 }
 
@@ -108,7 +107,6 @@ impl TryFrom<PathBuf> for Seed {
             queries,
             generator,
             hash_threshold,
-            file: Some(file),
             script,
         })
     }
@@ -178,7 +176,6 @@ impl TryFrom<Vec<QuerySeed>> for Seed {
             queries,
             generator,
             hash_threshold: DEFAULT_HASH_THRESHOLD,
-            file: None,
             script: records.into(),
         })
     }

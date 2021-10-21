@@ -378,7 +378,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         )
         .await?;
 
-    let res2 = ctx
+    let _res2 = ctx
         .check_results(
             "dt_test_view",
             "Replication",

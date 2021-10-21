@@ -220,14 +220,14 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
             let new_len = std::cmp::max(4096, end * 2);
             self.bytes.resize(new_len, 0);
             let read = {
-                let mut buf = self.bytes.get_mut(end..).ok_or_else(|| {
+                let buf = self.bytes.get_mut(end..).ok_or_else(|| {
                     other_error(OtherErrorKind::IndexErr {
                         data: "self.bytes".to_string(),
                         index: end,
                         length: new_len,
                     })
                 })?;
-                self.r.read(&mut buf).await?
+                self.r.read(buf).await?
             };
             self.bytes.truncate(end + read);
             self.remaining = self.bytes.len();

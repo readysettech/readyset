@@ -42,30 +42,30 @@ pub struct PostgresWalConnector {
 pub struct ServerIdentity {
     /// The unique system identifier identifying the cluster. This can be used to check that the base
     /// backup used to initialize the standby came from the same cluster.
-    id: String,
+    pub id: String,
     /// Current timeline ID. Also useful to check that the standby is consistent with the master.
-    timeline: i8,
+    pub timeline: i8,
     /// Current WAL flush location. Useful to get a known location in the write-ahead log where streaming can start.
-    xlogpos: String,
+    pub xlogpos: String,
     /// Database connected to or null.
-    dbname: Option<String>,
+    pub dbname: Option<String>,
 }
 
 /// The decoded response to `CREATE_REPLICATION_SLOT`
 #[derive(Debug)]
 pub struct CreatedSlot {
     /// The name of the newly-created replication slot
-    pub(crate) slot_name: String,
+    pub slot_name: String,
     /// The WAL location at which the slot became consistent. This is the earliest location
     /// from which streaming can start on this replication slot.
-    pub(crate) consistent_point: String,
+    pub consistent_point: String,
     /// The identifier of the snapshot exported by the command. The snapshot is valid until a
     /// new command is executed on this connection or the replication connection is closed.
     /// Null if the created slot is physical.
-    pub(crate) snapshot_name: Option<String>,
+    pub snapshot_name: Option<String>,
     /// The name of the output plugin used by the newly-created replication slot.
     /// Null if the created slot is physical.
-    pub(crate) output_plugin: Option<String>,
+    pub output_plugin: Option<String>,
 }
 
 impl PostgresWalConnector {

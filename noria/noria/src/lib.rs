@@ -105,7 +105,7 @@
 //! binary MySQL protocol, which provides a compatibility layer for applications that wish to
 //! continue to issue ad-hoc MySQL queries through existing MySQL client libraries.
 #![feature(
-    min_type_alias_impl_trait,
+    type_alias_impl_trait,
     total_cmp,
     stmt_expr_attributes,
     bound_map,

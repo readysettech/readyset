@@ -110,7 +110,7 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
 }
 
 /// Configuration for how SQL is converted to MIR
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
     /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node, which
     /// currently crashes if it ever receives negative deltas that bring /// it below K records (see
@@ -123,31 +123,13 @@ pub(crate) struct Config {
     pub(crate) allow_topk: bool,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self { allow_topk: false }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct SqlToMirConverter {
     config: Config,
     base_schemas: HashMap<String, Vec<(usize, Vec<ColumnSpecification>)>>,
     current: HashMap<String, usize>,
     nodes: HashMap<(String, usize), MirNodeRef>,
     schema_version: usize,
-}
-
-impl Default for SqlToMirConverter {
-    fn default() -> Self {
-        SqlToMirConverter {
-            config: Default::default(),
-            base_schemas: HashMap::default(),
-            current: HashMap::default(),
-            nodes: HashMap::default(),
-            schema_version: 0,
-        }
-    }
 }
 
 impl SqlToMirConverter {

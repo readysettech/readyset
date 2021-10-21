@@ -126,9 +126,9 @@ impl SqlIncorporator {
         &mut self,
         query: &str,
         name: Option<String>,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, ReadySetError> {
-        query.to_flow_parts(self, name, &mut mig)
+        query.to_flow_parts(self, name, mig)
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -442,7 +442,7 @@ impl SqlIncorporator {
         index_type: IndexType,
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> ReadySetResult<QueryFlowParts> {
         trace!("Adding a new leaf below: {:?}", final_query_node);
 
@@ -458,7 +458,7 @@ impl SqlIncorporator {
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`.
         // Note that we don't need to optimize the MIR here, because the query is trivial.
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
 
         self.register_query(query_name, None, &mir);
 
@@ -469,7 +469,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         stmt: CreateTableStatement,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> ReadySetResult<QueryFlowParts> {
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter.named_base_to_mir(query_name, &stmt)?;
@@ -479,7 +479,7 @@ impl SqlIncorporator {
         // no optimization, because standalone base nodes can't be optimized
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
 
         // remember the schema in case we need it later
         // on base table schema change, we will overwrite the existing schema here.
@@ -498,7 +498,7 @@ impl SqlIncorporator {
         is_name_required: bool,
         query: &CompoundSelectStatement,
         is_leaf: bool,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, ReadySetError> {
         let subqueries: Result<Vec<_>, ReadySetError> = query
             .selects
@@ -527,7 +527,7 @@ impl SqlIncorporator {
             is_leaf,
         )?;
 
-        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, &mut mig)?;
+        let qfp = mir_query_to_flow_parts(&mut combined_mir_query, mig)?;
 
         self.register_query(query_name, None, &combined_mir_query);
 
@@ -596,7 +596,7 @@ impl SqlIncorporator {
         query: &SelectStatement,
         qg: QueryGraph,
         is_leaf: bool,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         use ::mir::visualize::GraphViz;
         // no QG-level reuse possible, so we'll build a new query.
@@ -613,7 +613,7 @@ impl SqlIncorporator {
         trace!(optimized_mir = %mir.to_graphviz());
 
         // push it into the flow graph using the migration in `mig`, and obtain `QueryFlowParts`
-        let qfp = mir_query_to_flow_parts(&mut mir, &mut mig)?;
+        let qfp = mir_query_to_flow_parts(&mut mir, mig)?;
 
         // register local state
         self.register_query(query_name, Some(qg), &mir);
@@ -715,7 +715,7 @@ impl SqlIncorporator {
         qg: QueryGraph,
         reuse_mirs: Vec<u64>,
         is_leaf: bool,
-        mut mig: &mut Migration,
+        mig: &mut Migration,
     ) -> Result<QueryFlowParts, ReadySetError> {
         use ::mir::reuse::merge_mir_for_queries;
         use ::mir::visualize::GraphViz;
@@ -744,7 +744,7 @@ impl SqlIncorporator {
                 num_reused_nodes = res.1;
             }
         }
-        let qfp = mir_query_to_flow_parts(&mut reused_mir, &mut mig)?;
+        let qfp = mir_query_to_flow_parts(&mut reused_mir, mig)?;
 
         debug!(%query_name, num_reused_nodes);
 

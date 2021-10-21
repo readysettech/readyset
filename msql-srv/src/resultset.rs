@@ -316,7 +316,7 @@ where
             Some(cached) => {
                 writers::column_definitions_cached(self.columns, cached, self.result.writer).await
             }
-            None => writers::column_definitions(self.columns, &mut self.result.writer).await,
+            None => writers::column_definitions(self.columns, self.result.writer).await,
         }
     }
 
