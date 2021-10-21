@@ -1,6 +1,0 @@
-language: rust
-rust:
-  - nightly
-cache: cargo
-env:
-  - RUST_TEST_THREADS=1
