@@ -25,8 +25,7 @@ services:
       - "host.docker.internal:host-gateway"
   grafana:
     image: grafana/grafana:8.0.6
-    ports:
-      - 3000:3000
+    network_mode: "host"
     volumes:
       - ./grafana/dashboards:/var/lib/grafana/dashboards
       - ./grafana/provisioning:/etc/grafana/provisioning

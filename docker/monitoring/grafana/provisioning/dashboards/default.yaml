@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: ReadySet Dash
+  - name: Query log
     type: file
     options:
-      path: /var/lib/grafana/dashboards/experiments.json
+      path: /var/lib/grafana/dashboards/query_log.json
