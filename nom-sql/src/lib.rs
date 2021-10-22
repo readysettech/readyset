@@ -28,6 +28,7 @@ pub use self::select::{
 pub use self::set::SetStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
+pub use self::use_statement::UseStatement;
 
 pub mod parser;
 
@@ -57,3 +58,4 @@ mod set;
 mod table;
 mod transaction;
 mod update;
+mod use_statement;

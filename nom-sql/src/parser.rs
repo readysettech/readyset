@@ -12,6 +12,7 @@ use crate::select::{selection, SelectStatement};
 use crate::set::{set, SetStatement};
 use crate::transaction::{CommitStatement, RollbackStatement, StartTransactionStatement};
 use crate::update::{updating, UpdateStatement};
+use crate::use_statement::{use_statement, UseStatement};
 use crate::Dialect;
 use crate::{
     alter::{alter_table_statement, AlterTableStatement},
@@ -38,6 +39,7 @@ pub enum SqlQuery {
     Commit(CommitStatement),
     Rollback(RollbackStatement),
     RenameTable(RenameTableStatement),
+    Use(UseStatement),
 }
 
 impl fmt::Display for SqlQuery {
@@ -57,6 +59,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Commit(ref commit) => write!(f, "{}", commit),
             SqlQuery::Rollback(ref rollback) => write!(f, "{}", rollback),
             SqlQuery::RenameTable(ref rename) => write!(f, "{}", rename),
+            SqlQuery::Use(ref use_db) => write!(f, "{}", use_db),
         }
     }
 }
@@ -79,6 +82,7 @@ impl SqlQuery {
             Self::Commit(_) => "COMMIT",
             Self::Rollback(_) => "ROLLBACK",
             Self::RenameTable(_) => "RENAME",
+            Self::Use(_) => "USE",
         }
     }
 }
@@ -100,6 +104,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(commit(dialect), SqlQuery::Commit),
             map(rollback(dialect), SqlQuery::Rollback),
             map(rename_table(dialect), SqlQuery::RenameTable),
+            map(use_statement(dialect), SqlQuery::Use),
         ))(i)
     }
 }
