@@ -23,6 +23,11 @@ cat > /etc/vector.d/vector.toml <<EOF
 type = "vector"
 address = "0.0.0.0:9000"
 
+[sources.node-exporter]
+type = "prometheus_scrape"
+endpoints = [ "http://localhost:9100/metrics" ]
+scrape_interval_secs = 15
+
 [sinks.out]
 inputs = ["in"]
 type = "console"
@@ -49,7 +54,7 @@ region = "us-east-2"
 
 [sinks.prometheus]
 type = "prometheus_exporter"
-inputs = [ "in" ]
+inputs = ["in", "node-exporter"]
 address = "0.0.0.0:9090"
 EOF
 

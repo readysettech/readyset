@@ -13,6 +13,11 @@ cat > /etc/vector.d/vector.toml <<EOF
 type = "journald"
 include_units = [ "readyset-mysql-adapter", "readyset-server" ]
 
+[sources.node-exporter]
+type = "prometheus_scrape"
+endpoints = [ "http://localhost:9100/metrics" ]
+scrape_interval_secs = 15
+
 [sources.prometheus]
 type = "prometheus_scrape"
 endpoints = [ "http://localhost:${PROMETHEUS_PORT:-6033}/prometheus" ]
@@ -28,7 +33,7 @@ source = '''
 '''
 
 [sinks.out]
-inputs = ["metadata", "prometheus"]
+inputs = ["metadata", "prometheus", "node-exporter"]
 type = "vector"
 address = "${LOG_AGGREGATOR_ADDRESS}:9000"
 EOF

@@ -12,6 +12,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/node_exporter"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "provisioners/files/vector-aggregator"
     destination = "/tmp/"
   }
@@ -43,6 +48,7 @@ build {
       "provisioners/scripts/external-base/10-aws.sh",
       "provisioners/scripts/consul-client/00-init.sh",
       "provisioners/scripts/consul-client/10-aws.sh",
+      "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/vector-aggregator/00-init.sh",
       "provisioners/scripts/vector-aggregator/10-aws.sh",
