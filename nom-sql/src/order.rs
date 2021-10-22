@@ -124,6 +124,6 @@ mod tests {
         let clause = OrderClause {
             columns: vec![("t.n".into(), OrderType::OrderDescending)],
         };
-        assert_eq!(clause.to_string(), "ORDER BY t.n DESC");
+        assert_eq!(clause.to_string(), "ORDER BY `t`.`n` DESC");
     }
 }

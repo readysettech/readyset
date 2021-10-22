@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
 use crate::common::{schema_table_reference, statement_terminator};
-use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::{Dialect, Expression};
@@ -20,8 +19,7 @@ pub struct DeleteStatement {
 
 impl fmt::Display for DeleteStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DELETE FROM ")?;
-        write!(f, "{}", escape_if_keyword(&self.table.name))?;
+        write!(f, "DELETE FROM `{}`", self.table.name)?;
         if let Some(ref where_clause) = self.where_clause {
             write!(f, " WHERE ")?;
             write!(f, "{}", where_clause)?;
@@ -106,7 +104,7 @@ mod tests {
     #[test]
     fn format_delete() {
         let qstring = "DELETE FROM users WHERE id = 1";
-        let expected = "DELETE FROM users WHERE (id = 1)";
+        let expected = "DELETE FROM `users` WHERE (`id` = 1)";
         let res = deletion(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }

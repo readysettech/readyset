@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 
 use crate::common::eof;
@@ -214,15 +213,6 @@ pub fn sql_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
 // Matches any SQL reserved keyword _or_ built-in function
 pub fn sql_keyword_or_builtin_function(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((sql_keyword, sql_builtin_function))(i)
-}
-
-// Escapes a keyword using MySQL syntax.
-pub fn escape_if_keyword(s: &str) -> Cow<str> {
-    if sql_keyword(s.as_bytes()).is_ok() {
-        Cow::Owned(format!("`{}`", s))
-    } else {
-        Cow::Borrowed(s)
-    }
 }
 
 lazy_static! {

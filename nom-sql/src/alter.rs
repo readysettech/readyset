@@ -14,7 +14,6 @@ use crate::common::{
     literal, schema_table_reference_no_alias, statement_terminator, ws_sep_comma, Literal, TableKey,
 };
 use crate::create::key_specification;
-use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -82,17 +81,17 @@ impl fmt::Display for AlterTableDefinition {
                 write!(f, "ADD {}", index)
             }
             AlterTableDefinition::AlterColumn { name, operation } => {
-                write!(f, "ALTER COLUMN {} {}", name, operation)
+                write!(f, "ALTER COLUMN `{}` {}", name, operation)
             }
             AlterTableDefinition::DropColumn { name, behavior } => {
-                write!(f, "DROP COLUMN {}", name)?;
+                write!(f, "DROP COLUMN `{}`", name)?;
                 if let Some(behavior) = behavior {
                     write!(f, " {}", behavior)?;
                 }
                 Ok(())
             }
             AlterTableDefinition::ChangeColumn { name, spec } => {
-                write!(f, "CHANGE COLUMN {} {}", escape_if_keyword(name), spec)
+                write!(f, "CHANGE COLUMN `{}` {}", name, spec)
             }
         }
     }
@@ -106,7 +105,7 @@ pub struct AlterTableStatement {
 
 impl fmt::Display for AlterTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ALTER TABLE {} ", escape_if_keyword(&self.table.name))?;
+        write!(f, "ALTER TABLE `{}` ", self.table.name)?;
         write!(
             f,
             "{}",
@@ -292,7 +291,7 @@ mod tests {
         };
 
         let result = format!("{}", stmt);
-        assert_eq!(result, "ALTER TABLE t ADD COLUMN c INT(32)");
+        assert_eq!(result, "ALTER TABLE `t` ADD COLUMN `c` INT(32)");
     }
 
     #[test]
@@ -537,7 +536,7 @@ mod tests {
             );
             assert_eq!(
                 res.to_string(),
-                "ALTER TABLE t CHANGE COLUMN f `modify` DATETIME"
+                "ALTER TABLE `t` CHANGE COLUMN `f` `modify` DATETIME"
             );
         }
 
@@ -616,7 +615,7 @@ mod tests {
             );
             assert_eq!(
                 res.to_string(),
-                "ALTER TABLE discussion_user ADD COLUMN subscription ENUM('follow', 'ignore') NULL"
+                "ALTER TABLE `discussion_user` ADD COLUMN `subscription` ENUM('follow', 'ignore') NULL"
             );
         }
     }

@@ -80,7 +80,7 @@ mod tests {
                 }]
             }
         );
-        assert_eq!(res.to_string(), "RENAME TABLE t1 TO t2");
+        assert_eq!(res.to_string(), "RENAME TABLE `t1` TO `t2`");
     }
 
     #[test]
@@ -124,7 +124,7 @@ mod tests {
         );
         assert_eq!(
             res.to_string(),
-            "RENAME TABLE t1 TO t2, `change` TO t3, t4 TO `select`"
+            "RENAME TABLE `t1` TO `t2`, `change` TO `t3`, `t4` TO `select`"
         );
     }
 
@@ -141,6 +141,9 @@ mod tests {
                 }]
             }
         );
-        assert_eq!(res.to_string(), "RENAME TABLE posts_likes TO post_likes");
+        assert_eq!(
+            res.to_string(),
+            "RENAME TABLE `posts_likes` TO `post_likes`"
+        );
     }
 }

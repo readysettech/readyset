@@ -8,7 +8,6 @@ use crate::common::{
     assignment_expr_list, field_list, schema_table_reference_no_alias, statement_terminator,
     value_list, ws_sep_comma, Literal,
 };
-use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::Dialect;
 use crate::Expression;
@@ -29,14 +28,14 @@ pub struct InsertStatement {
 
 impl fmt::Display for InsertStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "INSERT INTO {}", escape_if_keyword(&self.table.name))?;
+        write!(f, "INSERT INTO `{}`", self.table.name)?;
         if let Some(ref fields) = self.fields {
             write!(
                 f,
                 " ({})",
                 fields
                     .iter()
-                    .map(|col| escape_if_keyword(&col.name))
+                    .map(|col| format!("`{}`", col.name))
                     .collect::<Vec<_>>()
                     .join(", ")
             )?;

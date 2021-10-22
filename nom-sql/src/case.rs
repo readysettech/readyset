@@ -66,7 +66,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", exp),
-            "CASE WHEN (foo = 0) THEN foo ELSE 1 END"
+            "CASE WHEN (`foo` = 0) THEN `foo` ELSE 1 END"
         );
 
         let exp_no_else = Expression::CaseWhen {
@@ -81,7 +81,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", exp_no_else),
-            "CASE WHEN (foo = 0) THEN foo END"
+            "CASE WHEN (`foo` = 0) THEN `foo` END"
         );
     }
 }

@@ -3,7 +3,6 @@ use std::{fmt, str};
 
 use crate::column::Column;
 use crate::common::{assignment_expr_list, schema_table_reference_no_alias, statement_terminator};
-use crate::keywords::escape_if_keyword;
 use crate::select::where_clause;
 use crate::table::Table;
 use crate::{Dialect, Expression};
@@ -22,7 +21,7 @@ pub struct UpdateStatement {
 
 impl fmt::Display for UpdateStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "UPDATE {} ", escape_if_keyword(&self.table.name))?;
+        write!(f, "UPDATE `{}` ", self.table.name)?;
         assert!(!self.fields.is_empty());
         write!(
             f,
@@ -122,7 +121,7 @@ mod tests {
     #[test]
     fn format_update_with_where_clause() {
         let qstring = "UPDATE users SET id = 42, name = 'test' WHERE id = 1";
-        let expected = "UPDATE users SET id = 42, name = 'test' WHERE (id = 1)";
+        let expected = "UPDATE `users` SET `id` = 42, `name` = 'test' WHERE (`id` = 1)";
         let res = updating(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }

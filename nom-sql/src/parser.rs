@@ -127,13 +127,13 @@ mod tests {
 
     #[test]
     fn display_select_query() {
-        let qstring0 = "SELECT * FROM users";
-        let qstring1 = "SELECT * FROM users AS u";
-        let qstring2 = "SELECT name, password FROM users AS u";
-        let qstring3 = "SELECT name, password FROM users AS u WHERE (user_id = '1')";
+        let qstring0 = "SELECT * FROM `users`";
+        let qstring1 = "SELECT * FROM `users` AS `u`";
+        let qstring2 = "SELECT `name`, `password` FROM `users` AS `u`";
+        let qstring3 = "SELECT `name`, `password` FROM `users` AS `u` WHERE (`user_id` = '1')";
         let qstring4 =
-            "SELECT name, password FROM users AS u WHERE ((user = 'aaa') AND (password = 'xxx'))";
-        let qstring5 = "SELECT (name * 2) AS double_name FROM users";
+            "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))";
+        let qstring5 = "SELECT (`name` * 2) AS `double_name` FROM `users`";
 
         let res0 = parse_query(Dialect::MySQL, qstring0);
         let res1 = parse_query(Dialect::MySQL, qstring1);
@@ -163,9 +163,9 @@ mod tests {
         let qstring2 = "select name,password from users u;";
         let qstring3 = "select name,password from users u WHERE user_id='1'";
 
-        let expected1 = "SELECT * FROM users AS u";
-        let expected2 = "SELECT name, password FROM users AS u";
-        let expected3 = "SELECT name, password FROM users AS u WHERE (user_id = '1')";
+        let expected1 = "SELECT * FROM `users` AS `u`";
+        let expected2 = "SELECT `name`, `password` FROM `users` AS `u`";
+        let expected3 = "SELECT `name`, `password` FROM `users` AS `u` WHERE (`user_id` = '1')";
 
         let res1 = parse_query(Dialect::MySQL, qstring1);
         let res2 = parse_query(Dialect::MySQL, qstring2);
@@ -186,9 +186,9 @@ mod tests {
         let qstring1 = "select name, password from users as u where user=? and password =?";
 
         let expected0 =
-            "SELECT name, password FROM users AS u WHERE ((user = 'aaa') AND (password = 'xxx'))";
+            "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))";
         let expected1 =
-            "SELECT name, password FROM users AS u WHERE ((user = ?) AND (password = ?))";
+            "SELECT `name`, `password` FROM `users` AS `u` WHERE ((`user` = ?) AND (`password` = ?))";
 
         let res0 = parse_query(Dialect::MySQL, qstring0);
         let res1 = parse_query(Dialect::MySQL, qstring1);
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn format_select_query_with_function() {
         let qstring1 = "select count(*) from users";
-        let expected1 = "SELECT count(*) FROM users";
+        let expected1 = "SELECT count(*) FROM `users`";
 
         let res1 = parse_query(Dialect::MySQL, qstring1);
         assert!(res1.is_ok());
@@ -211,15 +211,16 @@ mod tests {
     #[test]
     fn display_insert_query() {
         let qstring = "INSERT INTO users (name, password) VALUES ('aaa', 'xxx')";
+        let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
-        assert_eq!(qstring, format!("{}", res.unwrap()));
+        assert_eq!(expected, format!("{}", res.unwrap()));
     }
 
     #[test]
     fn display_insert_query_no_columns() {
         let qstring = "INSERT INTO users VALUES ('aaa', 'xxx')";
-        let expected = "INSERT INTO users VALUES ('aaa', 'xxx')";
+        let expected = "INSERT INTO `users` VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
@@ -228,7 +229,7 @@ mod tests {
     #[test]
     fn format_insert_query() {
         let qstring = "insert into users (name, password) values ('aaa', 'xxx')";
-        let expected = "INSERT INTO users (name, password) VALUES ('aaa', 'xxx')";
+        let expected = "INSERT INTO `users` (`name`, `password`) VALUES ('aaa', 'xxx')";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
@@ -237,7 +238,7 @@ mod tests {
     #[test]
     fn format_update_query() {
         let qstring = "update users set name=42, password='xxx' where id=1";
-        let expected = "UPDATE users SET name = 42, password = 'xxx' WHERE (id = 1)";
+        let expected = "UPDATE `users` SET `name` = 42, `password` = 'xxx' WHERE (`id` = 1)";
         let res = parse_query(Dialect::MySQL, qstring);
         assert!(res.is_ok());
         assert_eq!(expected, format!("{}", res.unwrap()));
@@ -248,8 +249,8 @@ mod tests {
         let qstring0 = "delete from users where user='aaa' and password= 'xxx'";
         let qstring1 = "delete from users where user=? and password =?";
 
-        let expected0 = "DELETE FROM users WHERE ((user = 'aaa') AND (password = 'xxx'))";
-        let expected1 = "DELETE FROM users WHERE ((user = ?) AND (password = ?))";
+        let expected0 = "DELETE FROM `users` WHERE ((`user` = 'aaa') AND (`password` = 'xxx'))";
+        let expected1 = "DELETE FROM `users` WHERE ((`user` = ?) AND (`password` = ?))";
 
         let res0 = parse_query(Dialect::MySQL, qstring0);
         let res1 = parse_query(Dialect::MySQL, qstring1);
@@ -311,8 +312,8 @@ mod tests {
             let qstring0 = "delete from articles where `key`='aaa'";
             let qstring1 = "delete from `where` where user=?";
 
-            let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
-            let expected1 = "DELETE FROM `where` WHERE (user = ?)";
+            let expected0 = "DELETE FROM `articles` WHERE (`key` = 'aaa')";
+            let expected1 = "DELETE FROM `where` WHERE (`user` = ?)";
 
             let res0 = parse_query(Dialect::MySQL, qstring0);
             let res1 = parse_query(Dialect::MySQL, qstring1);
@@ -375,8 +376,8 @@ mod tests {
             let qstring0 = "delete from articles where \"key\"='aaa'";
             let qstring1 = "delete from \"where\" where user=?";
 
-            let expected0 = "DELETE FROM articles WHERE (`key` = 'aaa')";
-            let expected1 = "DELETE FROM `where` WHERE (user = ?)";
+            let expected0 = "DELETE FROM `articles` WHERE (`key` = 'aaa')";
+            let expected1 = "DELETE FROM `where` WHERE (`user` = ?)";
 
             let res0 = parse_query(Dialect::PostgreSQL, qstring0);
             let res1 = parse_query(Dialect::PostgreSQL, qstring1);
