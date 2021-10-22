@@ -185,3 +185,18 @@ impl From<Vec<(Vec<DataType>, bool)>> for Records {
         Records(val.into_iter().map(Into::into).collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Certain operators (see eg [note: topk-record-ordering]) rely on the fact that positive
+    /// records compare less than negative records when the actual record is the same - this checks
+    /// that that is actually the case to prevent us from accidentally changing it.
+    #[test]
+    fn positive_less_than_negative() {
+        assert!(
+            Record::Positive(vec![1.into(), 2.into()]) < Record::Negative(vec![1.into(), 2.into()])
+        )
+    }
+}

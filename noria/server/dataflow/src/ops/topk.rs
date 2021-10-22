@@ -406,6 +406,10 @@ impl Ingredient for TopK {
                             let (_, was_new) = current.swap_remove(p);
                             // was_new = we received a positive and a negative
                             // for the same value in one batch
+                            // [note: topk-record-ordering]
+                            // Note that since we sort records, and positive records compare less
+                            // than negative records, we'll always get the positive first and the
+                            // negative second
                             if !was_new {
                                 out.push(Record::Negative(r.clone()));
                             }
