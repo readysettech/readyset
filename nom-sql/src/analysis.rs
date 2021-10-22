@@ -39,7 +39,8 @@ impl ReferredTables for SqlQuery {
             | SqlQuery::Set(_)
             | SqlQuery::StartTransaction(_)
             | SqlQuery::Commit(_)
-            | SqlQuery::Rollback(_) => HashSet::new(),
+            | SqlQuery::Rollback(_)
+            | SqlQuery::Use(_) => HashSet::new(),
         }
     }
 }

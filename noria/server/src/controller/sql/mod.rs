@@ -767,7 +767,8 @@ impl SqlIncorporator {
             | SqlQuery::CreateView(_)
             | SqlQuery::StartTransaction(_)
             | SqlQuery::Commit(_)
-            | SqlQuery::Rollback(_) => (),
+            | SqlQuery::Rollback(_)
+            | SqlQuery::Use(_) => (),
             // other kinds of queries *do* require their referred tables to exist!
             ref q @ SqlQuery::CompoundSelect(_)
             | ref q @ SqlQuery::Select(_)

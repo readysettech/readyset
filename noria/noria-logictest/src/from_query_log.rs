@@ -110,7 +110,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
         | SqlQuery::AlterTable(_)
-        | SqlQuery::RenameTable(_) => true,
+        | SqlQuery::RenameTable(_)
+        | SqlQuery::Use(_) => true,
     }
 }
 
