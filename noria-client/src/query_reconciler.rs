@@ -78,25 +78,25 @@ where
         // the resulting schemas are equivalent.
         match self.mirror_prepare(stmt.clone()).await {
             Ok(PrepareResult::Both(noria_result, upstream_result)) => {
-                if let noria_connector::PrepareResult::Select {
-                    ref schema,
-                    ref params,
-                    ..
-                } = noria_result
-                {
-                    match upstream_result.meta.compare(schema, params) {
-                        Ok(true) => {}
-                        Ok(false) => return,
-                        Err(e) => {
-                            error!("Error comparing schema: {}", e);
-                            return;
+                if cfg!(feature = "reconciler-schema-check") {
+                    if let noria_connector::PrepareResult::Select {
+                        ref schema,
+                        ref params,
+                        ..
+                    } = noria_result
+                    {
+                        match upstream_result.meta.compare(schema, params) {
+                            Ok(true) => {}
+                            Ok(false) => return,
+                            Err(e) => {
+                                error!("Error comparing schema: {}", e);
+                                return;
+                            }
                         }
+                    } else {
+                        return;
                     }
-                } else {
-                    // Treat the wrong schema type returned as a failure.
-                    return;
                 }
-
                 counter!(recorded::RECONCILER_ALLOWED, 1);
                 self.query_status_cache.set_allow(stmt).await
             }
