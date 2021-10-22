@@ -47,6 +47,7 @@ Metadata:
           - ReadysetServerNodes
           - ReadysetServerVolumeSizeGB
           - ReadysetMonitorInstanceType
+          - MemoryLimitBytes
           - DeploymentName
       - Label:
           default: AWS Quick Start Configuration
@@ -198,6 +199,11 @@ Parameters:
     Description: Password to log into the MySQL Database
     MinLength: 8
     MaxLength: 41
+  MemoryLimitBytes:
+    Type: Number
+    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Default: 0
+    MinValue: 0
   DeploymentName:
     Type: String
     MinLength: 1
@@ -337,6 +343,7 @@ Resources:
         ReadysetServerNodes: !Ref ReadysetServerNodes
         ReadysetServerVolumeSizeGB: !Ref ReadysetServerVolumeSizeGB
         ReadysetMonitorInstanceType: !Ref ReadysetMonitorInstanceType
+        MemoryLimitBytes: !Ref MemoryLimitBytes
         DeploymentName: !Ref DeploymentName
 Outputs:
   ReadysetMySQLVPCEndpointService:

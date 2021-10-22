@@ -33,6 +33,7 @@ Metadata:
           - ReadysetServerVolumeSizeGB
           - ReadysetMonitorInstanceType
           - MySQLDatabaseURL
+          - MemoryLimitBytes
           - DeploymentName
 Parameters:
   BastionSecurityGroupID:
@@ -98,6 +99,11 @@ Parameters:
     Type: String
     NoEcho: True
     Description: Existing Database URL connection string
+  MemoryLimitBytes:
+    Type: Number
+    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Default: 0
+    MinValue: 0
   DeploymentName:
     Description:
       A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
@@ -371,7 +377,7 @@ Resources:
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${DeploymentName}"
-            export NORIA_MEMORY_BYTES="0"
+            export NORIA_MEMORY_BYTES="${MemoryLimitBytes}"
             export NORIA_PRIMARY_REGION="${AWS::Region}"
             export NORIA_QUORUM="1"
             export NORIA_REGION="${AWS::Region}"
