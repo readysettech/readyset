@@ -243,12 +243,12 @@ impl State for MemoryState {
     /// referenced `state`, then they are removed from the weakly referenced `weak_indices`.
     fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0, self.state.len());
+        let state_index = rng.gen_range(0, self.state.len());
         let mut bytes_freed = 0u64;
         let mut keys_evicted = Vec::new();
 
         while bytes_freed < bytes as u64 {
-            let evicted = self.state[index].evict_random(&mut rng);
+            let evicted = self.state[state_index].evict_random(&mut rng);
 
             if evicted.is_none() {
                 // There are no more keys in this state.
@@ -277,18 +277,18 @@ impl State for MemoryState {
 
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
         return Some(StateEvicted {
-            key_columns: self.state[index].columns().to_vec(),
+            index: self.state[state_index].index(),
             keys_evicted,
             bytes_freed,
         });
     }
 
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&[usize], u64)> {
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)> {
         // we may be told to evict from a tag that add_key hasn't been called for yet
         // this can happen if an upstream domain issues an eviction for a replay path that we have
         // been told about, but that has not yet been finalized.
-        self.by_tag.get(&tag).cloned().map(move |index| {
-            let rows = self.state[index].evict_keys(keys);
+        self.by_tag.get(&tag).cloned().map(move |state_index| {
+            let rows = self.state[state_index].evict_keys(keys);
             let mut bytes = 0;
 
             for row in &rows {
@@ -309,7 +309,7 @@ impl State for MemoryState {
                 .sum::<u64>();
 
             self.mem_size = self.mem_size.saturating_sub(bytes + key_bytes);
-            (self.state[index].columns(), bytes)
+            (self.state[state_index].index(), bytes)
         })
     }
 

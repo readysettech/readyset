@@ -4339,9 +4339,21 @@ async fn range_upquery_after_point_queries() {
         );
 
         mig.maintain(
-            "reader".to_string(),
+            "btree_reader".to_string(),
             join,
             &Index::btree_map(vec![0]),
+            Default::default(),
+        );
+
+        // each node can only have one reader, so add an identity node above the join for the hash
+        // reader
+
+        let hash_id = mig.add_ingredient("hash_id", &["a", "a_b", "a_c"], Identity::new(join));
+
+        mig.maintain(
+            "hash_reader".to_string(),
+            hash_id,
+            &Index::hash_map(vec![0]),
             Default::default(),
         );
     })
@@ -4349,7 +4361,8 @@ async fn range_upquery_after_point_queries() {
 
     let mut a = g.table("a").await.unwrap();
     let mut b = g.table("b").await.unwrap();
-    let mut reader = g.view("reader").await.unwrap();
+    let mut btree_reader = g.view("btree_reader").await.unwrap();
+    let mut hash_reader = g.view("hash_reader").await.unwrap();
     a.insert_many((0i32..10).map(|n| vec![DataType::from(n), DataType::from(n)]))
         .await
         .unwrap();
@@ -4361,7 +4374,7 @@ async fn range_upquery_after_point_queries() {
 
     // Do some point queries so we get keys covered by our range
     assert_eq!(
-        &*reader.lookup(&[3.into()], true).await.unwrap(),
+        &*hash_reader.lookup(&[3.into()], true).await.unwrap(),
         &[vec![
             DataType::from(3),
             DataType::from(3),
@@ -4369,7 +4382,7 @@ async fn range_upquery_after_point_queries() {
         ]]
     );
     assert_eq!(
-        &*reader.lookup(&[3.into()], true).await.unwrap(),
+        &*hash_reader.lookup(&[3.into()], true).await.unwrap(),
         &[vec![
             DataType::from(3),
             DataType::from(3),
@@ -4377,7 +4390,7 @@ async fn range_upquery_after_point_queries() {
         ]]
     );
 
-    let res = reader
+    let res = btree_reader
         .multi_lookup(
             vec![(vec1![DataType::from(2)]..vec1![DataType::from(5)]).into()],
             true,
@@ -5892,8 +5905,6 @@ async fn partial_distinct() {
     )
     .await
     .unwrap();
-
-    eprintln!("{}", g.graphviz().await.unwrap());
 
     let mut t = g.table("test").await.unwrap();
     let mut q = g.view("distinctselect").await.unwrap();

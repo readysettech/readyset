@@ -1,4 +1,3 @@
-use crate::domain;
 use crate::ops;
 use crate::prelude::*;
 use crate::processing::SuggestedIndex;
@@ -30,7 +29,7 @@ pub use process::bench;
 pub struct Node {
     name: String,
     index: Option<IndexPair>,
-    domain: Option<domain::Index>,
+    domain: Option<DomainIndex>,
 
     fields: Vec<String>,
     parents: Vec<LocalNodeIndex>,
@@ -469,7 +468,7 @@ impl Node {
     ///
     /// * Must call on_connected prior to using this helper function.
     #[allow(clippy::unreachable)]
-    pub fn domain(&self) -> domain::Index {
+    pub fn domain(&self) -> DomainIndex {
         match self.domain {
             Some(domain) => domain,
             None => {
@@ -523,7 +522,7 @@ impl Node {
         }
     }
 
-    pub fn add_to(&mut self, domain: domain::Index) {
+    pub fn add_to(&mut self, domain: DomainIndex) {
         debug_assert_eq!(self.domain, None);
         debug_assert!(!self.is_dropped());
         self.domain = Some(domain);

@@ -11,7 +11,6 @@ pub use noria::internal::{Index, IndexType};
 pub use noria_data::DataType;
 use petgraph::prelude::*;
 use serde::{Deserialize, Serialize};
-use vec1::Vec1;
 
 pub trait SizeOf {
     fn deep_size_of(&self) -> u64;
@@ -63,30 +62,31 @@ impl SizeOf for Vec<DataType> {
     }
 }
 
-/// A reference to a node, and potentially some columns.
+/// A reference to a node, and potentially a partial index on that node
 ///
-/// The columns are only included if partial materialization is possible; if they're present,
-/// they determine the index required on the node to make partial materialization work.
+/// The index is only included if partial materialization is possible; if it's present, it
+/// determines the index required on the node to make partial materialization work.
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct OptColumnRef {
+pub struct IndexRef {
     /// The index of the node being referenced.
     pub node: NodeIndex,
     /// If partial materialization is possible, the index required for partial materialization.
-    pub cols: Option<Vec1<usize>>,
+    pub index: Option<Index>,
 }
 
-impl OptColumnRef {
-    /// Make a new `OptColumnRef` with a column index.
-    pub fn partial(node: NodeIndex, cols: Vec1<usize>) -> Self {
+impl IndexRef {
+    /// Make a new `IndexRef` with a partial index.
+    pub fn partial(node: NodeIndex, index: Index) -> Self {
         Self {
             node,
-            cols: Some(cols),
+            index: Some(index),
         }
     }
 
-    /// Make a new `OptColumnRef` with just a node.
+    /// Make a new `IndexRef` with just a node.
     pub fn full(node: NodeIndex) -> Self {
-        Self { node, cols: None }
+        Self { node, index: None }
     }
 }
 

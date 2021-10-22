@@ -1,4 +1,4 @@
-pub use common::OptColumnRef;
+pub use common::IndexRef;
 use dataflow::prelude::*;
 use noria::ReadySetError;
 
@@ -19,7 +19,7 @@ pub fn provenance_of(
 /// The return value of `deduce_column_source`.
 struct DeducedColumnSource {
     /// Node ancestors to continue building replay paths through. Empty if the node is a base node.
-    ancestors: Vec<OptColumnRef>,
+    ancestors: Vec<IndexRef>,
     /// Whether or not the replay path should be broken at the node passed to
     /// `deduced_column_source`.
     ///
@@ -35,7 +35,7 @@ struct DeducedColumnSource {
 /// (see the `DeducedColumnSource` documentation for more)
 fn deduce_column_source(
     graph: &Graph,
-    &OptColumnRef { node, ref cols }: &OptColumnRef,
+    &IndexRef { node, ref index }: &IndexRef,
 ) -> ReadySetResult<DeducedColumnSource> {
     let parents: Vec<_> = graph
         .neighbors_directed(node, petgraph::EdgeDirection::Incoming)
@@ -55,16 +55,16 @@ fn deduce_column_source(
         // we know all non-internal nodes use an identity mapping
         let parent = parents[0];
         return Ok(DeducedColumnSource {
-            ancestors: vec![OptColumnRef {
+            ancestors: vec![IndexRef {
                 node: parent,
-                cols: cols.clone(),
+                index: index.clone(),
             }],
             break_path: false,
         });
     }
 
-    let colsrc = if let Some(ref cols) = *cols {
-        n.column_source(cols)
+    let colsrc = if let Some(ref index) = *index {
+        n.column_source(&index.columns)
     } else {
         // if we don't have any columns to pass to `column_source`, we're going for
         // a full materialization.
@@ -85,25 +85,43 @@ fn deduce_column_source(
 
     Ok(match colsrc {
         ColumnSource::ExactCopy(ColumnRef { node, columns }) => DeducedColumnSource {
-            ancestors: vec![OptColumnRef::partial(node, columns)],
+            ancestors: vec![IndexRef::partial(
+                node,
+                #[allow(clippy::unwrap_used)] // we only hit ExactCopy if we have a partial index
+                Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+            )],
             break_path: false,
         },
         ColumnSource::Union(refs) => DeducedColumnSource {
             ancestors: refs
                 .into_iter()
-                .map(|ColumnRef { node, columns }| OptColumnRef::partial(node, columns))
+                .map(|ColumnRef { node, columns }| {
+                    IndexRef::partial(
+                        node,
+                        #[allow(clippy::unwrap_used)]
+                        // we only hit Union if we have a partial index
+                        Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+                    )
+                })
                 .collect(),
             break_path: false,
         },
         ColumnSource::GeneratedFromColumns(refs) => DeducedColumnSource {
             ancestors: refs
                 .into_iter()
-                .map(|ColumnRef { node, columns }| OptColumnRef::partial(node, columns))
+                .map(|ColumnRef { node, columns }| {
+                    IndexRef::partial(
+                        node,
+                        #[allow(clippy::unwrap_used)]
+                        // we only hit GeneratedFromColumns if we have a partial index
+                        Index::new(index.as_ref().unwrap().index_type, columns.to_vec()),
+                    )
+                })
                 .collect(),
             break_path: true,
         },
         ColumnSource::RequiresFullReplay(nodes) => DeducedColumnSource {
-            ancestors: nodes.into_iter().map(|n| OptColumnRef::full(n)).collect(),
+            ancestors: nodes.into_iter().map(|n| IndexRef::full(n)).collect(),
             break_path: false,
         },
     })
@@ -123,9 +141,9 @@ fn deduce_column_source(
 /// used.
 fn continue_replay_path<F>(
     graph: &Graph,
-    mut current: Vec<OptColumnRef>,
+    mut current: Vec<IndexRef>,
     stop_at: &F,
-) -> ReadySetResult<Vec<Vec<OptColumnRef>>>
+) -> ReadySetResult<Vec<Vec<IndexRef>>>
 where
     F: Fn(NodeIndex) -> bool,
 {
@@ -177,8 +195,8 @@ where
     }
 }
 
-/// Given a `ColumnRef`, generate all replay paths needed to generate a **partial** materialization
-/// for those columns on that node, if one is possible.
+/// Given a `ColumnRef`, and an `IndexType`, generate all replay paths needed to generate a
+/// **partial** materialization for those columns on that node, if one is possible.
 ///
 /// If a partial materialization is not desired, use the `replay_paths_for_opt` API instead, which
 /// will not try and handle generated columns.
@@ -189,24 +207,29 @@ where
 pub fn replay_paths_for<F>(
     graph: &Graph,
     ColumnRef { node, columns }: ColumnRef,
+    index_type: IndexType,
     stop_at: F,
-) -> ReadySetResult<Vec<Vec<OptColumnRef>>>
+) -> ReadySetResult<Vec<Vec<IndexRef>>>
 where
     F: Fn(NodeIndex) -> bool,
 {
-    replay_paths_for_opt(graph, OptColumnRef::partial(node, columns), stop_at)
+    replay_paths_for_opt(
+        graph,
+        IndexRef::partial(node, Index::new(index_type, columns.to_vec())),
+        stop_at,
+    )
 }
 
-/// Like `replay_paths_for`, but allows specifying an `OptColumnRef` instead of a `ColumnRef`.
+/// Like `replay_paths_for`, but allows specifying an `IndexRef` instead of a `ColumnRef`.
 ///
 /// This is useful for full materialization cases where specifying a `ColumnRef` will try and
 /// generate split replay paths for generated columns, which is highly undesirable unless we're
 /// doing partial.
 pub fn replay_paths_for_opt<F>(
     graph: &Graph,
-    colref: OptColumnRef,
+    colref: IndexRef,
     stop_at: F,
-) -> ReadySetResult<Vec<Vec<OptColumnRef>>>
+) -> ReadySetResult<Vec<Vec<IndexRef>>>
 where
     F: Fn(NodeIndex) -> bool,
 {
@@ -218,9 +241,10 @@ where
 pub fn replay_paths_for_nonstop(
     graph: &Graph,
     colref: ColumnRef,
-) -> ReadySetResult<Vec<Vec<OptColumnRef>>> {
+    index_type: IndexType,
+) -> ReadySetResult<Vec<Vec<IndexRef>>> {
     let never_stop = |_| false;
-    replay_paths_for(graph, colref, never_stop)
+    replay_paths_for(graph, colref, index_type, never_stop)
 }
 
 fn trace(
@@ -386,10 +410,11 @@ mod tests {
                 ColumnRef {
                     node: a,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
-            vec![vec![OptColumnRef::partial(a, vec1![0])]]
+            vec![vec![IndexRef::partial(a, Index::hash_map(vec![0]))]]
         );
         assert_eq!(
             replay_paths_for_nonstop(
@@ -397,10 +422,11 @@ mod tests {
                 ColumnRef {
                     node: b,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
-            vec![vec![OptColumnRef::partial(b, vec1![0])]]
+            vec![vec![IndexRef::partial(b, Index::hash_map(vec![0]))]]
         );
 
         // multicol
@@ -410,10 +436,11 @@ mod tests {
                 ColumnRef {
                     node: a,
                     columns: vec1![0, 1]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
-            vec![vec![OptColumnRef::partial(a, vec1![0, 1])]]
+            vec![vec![IndexRef::partial(a, Index::hash_map(vec![0, 1]))]]
         );
 
         assert_eq!(
@@ -422,10 +449,11 @@ mod tests {
                 ColumnRef {
                     node: a,
                     columns: vec1![1, 0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
-            vec![vec![OptColumnRef::partial(a, vec1![1, 0])]]
+            vec![vec![IndexRef::partial(a, Index::hash_map(vec![1, 0]))]]
         );
     }
 
@@ -442,12 +470,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0]),
-                OptColumnRef::partial(a, vec1![0])
+                IndexRef::partial(x, Index::hash_map(vec![0])),
+                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
 
@@ -457,12 +486,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0, 1]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0, 1]),
-                OptColumnRef::partial(a, vec1![0, 1])
+                IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                IndexRef::partial(a, Index::hash_map(vec![0, 1]))
             ]]
         );
     }
@@ -484,12 +514,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0]),
-                OptColumnRef::partial(a, vec1![1])
+                IndexRef::partial(x, Index::hash_map(vec![0])),
+                IndexRef::partial(a, Index::hash_map(vec![1]))
             ]]
         );
         assert_eq!(
@@ -498,12 +529,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0, 1]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0, 1]),
-                OptColumnRef::partial(a, vec1![1, 0])
+                IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                IndexRef::partial(a, Index::hash_map(vec![1, 0]))
             ]]
         );
     }
@@ -532,12 +564,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0]),
-                OptColumnRef::partial(a, vec1![0])
+                IndexRef::partial(x, Index::hash_map(vec![0])),
+                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
         assert_eq!(
@@ -546,12 +579,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![1]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![1]),
-                OptColumnRef::full(a)
+                IndexRef::partial(x, Index::hash_map(vec![1])),
+                IndexRef::full(a)
             ]]
         );
         assert_eq!(
@@ -560,12 +594,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0, 1]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0, 1]),
-                OptColumnRef::full(a)
+                IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                IndexRef::full(a)
             ]]
         );
     }
@@ -594,6 +629,7 @@ mod tests {
                 node: x,
                 columns: vec1![0],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
@@ -601,12 +637,12 @@ mod tests {
             paths,
             vec![
                 vec![
-                    OptColumnRef::partial(x, vec1![0]),
-                    OptColumnRef::partial(a, vec1![0])
+                    IndexRef::partial(x, Index::hash_map(vec![0])),
+                    IndexRef::partial(a, Index::hash_map(vec![0]))
                 ],
                 vec![
-                    OptColumnRef::partial(x, vec1![0]),
-                    OptColumnRef::partial(b, vec1![0])
+                    IndexRef::partial(x, Index::hash_map(vec![0])),
+                    IndexRef::partial(b, Index::hash_map(vec![0]))
                 ],
             ]
         );
@@ -617,6 +653,7 @@ mod tests {
                 node: x,
                 columns: vec1![0, 1],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
@@ -624,12 +661,12 @@ mod tests {
             paths,
             vec![
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 1]),
-                    OptColumnRef::partial(a, vec1![0, 1])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                    IndexRef::partial(a, Index::hash_map(vec![0, 1]))
                 ],
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 1]),
-                    OptColumnRef::partial(b, vec1![0, 1])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                    IndexRef::partial(b, Index::hash_map(vec![0, 1]))
                 ],
             ]
         );
@@ -663,12 +700,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![0]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![0]),
-                OptColumnRef::partial(a, vec1![0])
+                IndexRef::partial(x, Index::hash_map(vec![0])),
+                IndexRef::partial(a, Index::hash_map(vec![0]))
             ]]
         );
 
@@ -679,12 +717,13 @@ mod tests {
                 ColumnRef {
                     node: x,
                     columns: vec1![2]
-                }
+                },
+                IndexType::HashMap
             )
             .unwrap(),
             vec![vec![
-                OptColumnRef::partial(x, vec1![2]),
-                OptColumnRef::partial(b, vec1![1])
+                IndexRef::partial(x, Index::hash_map(vec![2])),
+                IndexRef::partial(b, Index::hash_map(vec![1]))
             ]]
         );
 
@@ -695,14 +734,15 @@ mod tests {
                 node: x,
                 columns: vec1![1],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
             vec![vec![
-                OptColumnRef::partial(x, vec1![1]),
-                OptColumnRef::partial(a, vec1![1])
+                IndexRef::partial(x, Index::hash_map(vec![1])),
+                IndexRef::partial(a, Index::hash_map(vec![1]))
             ],]
         );
 
@@ -713,14 +753,15 @@ mod tests {
                 node: x,
                 columns: vec1![0, 1],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
             vec![vec![
-                OptColumnRef::partial(x, vec1![0, 1]),
-                OptColumnRef::partial(a, vec1![0, 1])
+                IndexRef::partial(x, Index::hash_map(vec![0, 1])),
+                IndexRef::partial(a, Index::hash_map(vec![0, 1]))
             ],]
         );
 
@@ -731,14 +772,15 @@ mod tests {
                 node: x,
                 columns: vec1![1, 2],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
         assert_eq!(
             paths,
             vec![vec![
-                OptColumnRef::partial(x, vec1![1, 2]),
-                OptColumnRef::partial(b, vec1![0, 1])
+                IndexRef::partial(x, Index::hash_map(vec![1, 2])),
+                IndexRef::partial(b, Index::hash_map(vec![0, 1]))
             ],]
         );
 
@@ -749,6 +791,7 @@ mod tests {
                 node: x,
                 columns: vec1![0, 1, 2],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
@@ -756,12 +799,12 @@ mod tests {
             paths,
             vec![
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 1, 2]),
-                    OptColumnRef::partial(a, vec1![0, 1])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
+                    IndexRef::partial(a, Index::hash_map(vec![0, 1]))
                 ],
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 1, 2]),
-                    OptColumnRef::partial(b, vec1![1])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 1, 2])),
+                    IndexRef::partial(b, Index::hash_map(vec![1]))
                 ],
             ]
         );
@@ -773,6 +816,7 @@ mod tests {
                 node: x,
                 columns: vec1![0, 2],
             },
+            IndexType::HashMap,
         )
         .unwrap();
         paths.sort_unstable();
@@ -780,12 +824,12 @@ mod tests {
             paths,
             vec![
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 2]),
-                    OptColumnRef::partial(a, vec1![0])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 2])),
+                    IndexRef::partial(a, Index::hash_map(vec![0]))
                 ],
                 vec![
-                    OptColumnRef::partial(x, vec1![0, 2]),
-                    OptColumnRef::partial(b, vec1![1])
+                    IndexRef::partial(x, Index::hash_map(vec![0, 2])),
+                    IndexRef::partial(b, Index::hash_map(vec![1]))
                 ],
             ]
         );
