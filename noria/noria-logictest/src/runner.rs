@@ -259,9 +259,20 @@ impl TestScript {
     ) -> anyhow::Result<()> {
         let mut prev_was_statement = false;
 
+        let conditional_skip = |conditionals: &[Conditional]| {
+            return conditionals.iter().any(|s| match s {
+                Conditional::SkipIf(c) if c == &opts.database_type.to_string() => true,
+                Conditional::OnlyIf(c) if c != &opts.database_type.to_string() => true,
+                _ => false,
+            });
+        };
+
         for record in &self.records {
             match record {
                 Record::Statement(stmt) => {
+                    if conditional_skip(&stmt.conditionals) {
+                        continue;
+                    }
                     prev_was_statement = true;
                     self.run_statement(stmt, conn)
                         .await
@@ -269,6 +280,10 @@ impl TestScript {
                 }
 
                 Record::Query(query) => {
+                    if conditional_skip(&query.conditionals) {
+                        continue;
+                    }
+
                     if prev_was_statement {
                         prev_was_statement = false;
                         // we need to give the statements some time to propagate before we can issue
@@ -285,7 +300,7 @@ impl TestScript {
                     // Failure from noria on a FailNoUpstream query is considered a pass. Passing
                     // is considered a failure.
                     let invert_result = query.conditionals.contains(&Conditional::InvertNoUpstream)
-                        && opts.replication_url.is_none();
+                        && (opts.replication_url.is_none());
 
                     match self
                         .run_query(query, conn)
