@@ -168,7 +168,15 @@ impl Ingredient for TopK {
             });
         }
 
-        let rs: Vec<_> = rs.into();
+        // First, we want to be smart about multiple added/removed rows with same group.
+        // For example, if we get a -, then a +, for the same group, we don't want to
+        // execute two queries. We'll do this by sorting the batch by our group by.
+        let mut rs: Vec<_> = rs.into();
+        rs.sort_by(|a: &Record, b: &Record| {
+            self.project_group(&***a)
+                .unwrap_or_default()
+                .cmp(&self.project_group(&***b).unwrap_or_default())
+        });
 
         let us = self.us.unwrap();
         let db: &dyn State = state
@@ -709,5 +717,59 @@ mod tests {
         assert_eq!(emit.len(), 2); // 1 pos, 1 neg
         assert!(emit.iter().any(|r| !r.is_positive() && r[2] == 10.into()));
         assert!(emit.iter().any(|r| r.is_positive() && r[2] == 11.into()));
+    }
+
+    #[test]
+    fn multiple_groups() {
+        let (mut g, _) = setup(true);
+        let ni = g.node().local_addr();
+
+        let ra1: Vec<DataType> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
+        let ra2: Vec<DataType> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
+        let ra3: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
+        let ra4: Vec<DataType> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
+        let ra5: Vec<DataType> = vec![5.into(), "a".try_into().unwrap(), 5.into()];
+
+        let rb1: Vec<DataType> = vec![1.into(), "b".try_into().unwrap(), 1.into()];
+        let rb2: Vec<DataType> = vec![2.into(), "b".try_into().unwrap(), 2.into()];
+        let rb3: Vec<DataType> = vec![3.into(), "b".try_into().unwrap(), 3.into()];
+        let rb4: Vec<DataType> = vec![4.into(), "b".try_into().unwrap(), 4.into()];
+        let rb5: Vec<DataType> = vec![5.into(), "b".try_into().unwrap(), 5.into()];
+
+        g.narrow_one_row(ra3, true);
+        g.narrow_one_row(ra4.clone(), true);
+        g.narrow_one_row(ra5.clone(), true);
+
+        g.narrow_one_row(rb3, true);
+        g.narrow_one_row(rb4.clone(), true);
+        g.narrow_one_row(rb5.clone(), true);
+
+        assert_eq!(g.states[ni].rows(), 6);
+
+        let mut emit = g.narrow_one(
+            vec![
+                (ra1.clone(), true),
+                (rb1.clone(), true),
+                (ra2.clone(), true),
+                (rb2.clone(), true),
+            ],
+            true,
+        );
+        assert_eq!(g.states[ni].rows(), 6);
+        emit.sort();
+        assert_eq!(
+            emit,
+            vec![
+                (ra1, true),
+                (rb1, true),
+                (ra2, true),
+                (rb2, true),
+                (ra4, false),
+                (rb4, false),
+                (ra5, false),
+                (rb5, false),
+            ]
+            .into()
+        )
     }
 }
