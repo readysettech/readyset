@@ -131,7 +131,7 @@ struct Opts {
     #[clap(long, short = 'q', default_value = "1", env = "NORIA_QUORUM")]
     quorum: usize,
 
-    /// Shard the graph this many ways (0 = disable sharding)
+    /// Shard the graph this many ways (<= 1 : disable sharding)
     #[clap(long, default_value = "0", env = "NORIA_SHARDS")]
     shards: usize,
 
@@ -186,7 +186,7 @@ fn main() -> anyhow::Result<()> {
         Either::Right(future::ok(opts.external_address.unwrap_or(opts.address)))
     };
     let sharding = match opts.shards {
-        0 => None,
+        0 | 1 => None,
         x => Some(x),
     };
 
