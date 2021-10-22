@@ -4,7 +4,6 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
-use crate::keywords::escape_if_keyword;
 use crate::Dialect;
 use crate::FunctionExpression;
 use crate::{
@@ -29,16 +28,11 @@ pub struct Column {
 impl fmt::Display for Column {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref table) = self.table {
-            write!(
-                f,
-                "{}.{}",
-                escape_if_keyword(table),
-                escape_if_keyword(&self.name)
-            )?;
+            write!(f, "`{}`.`{}`", table, self.name)?;
         } else if let Some(ref function) = self.function {
             write!(f, "{}", *function)?;
         } else {
-            write!(f, "{}", escape_if_keyword(&self.name))?;
+            write!(f, "`{}`", self.name)?;
         }
         Ok(())
     }
@@ -132,12 +126,7 @@ pub struct ColumnSpecification {
 
 impl fmt::Display for ColumnSpecification {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {}",
-            escape_if_keyword(&self.column.name),
-            self.sql_type
-        )?;
+        write!(f, "`{}` {}", &self.column.name, self.sql_type)?;
         for constraint in self
             .constraints
             .iter()
@@ -373,7 +362,7 @@ mod tests {
 
         #[test]
         fn null_round_trip() {
-            let input = b"c INT(32) NULL";
+            let input = b"`c` INT(32) NULL";
             let cspec = column_specification(Dialect::MySQL)(input).unwrap().1;
             let res = cspec.to_string();
             assert_eq!(res, String::from_utf8(input.to_vec()).unwrap());

@@ -119,6 +119,8 @@ mod tests {
     fn inner_join() {
         let qstring = "SELECT tags.* FROM tags \
                        INNER JOIN taggings ON (tags.id = taggings.tag_id)";
+        let expected = "SELECT `tags`.* FROM `tags` \
+                       INNER JOIN `taggings` ON (`tags`.`id` = `taggings`.`tag_id`)";
 
         let res = selection(Dialect::MySQL)(qstring.as_bytes());
 
@@ -140,6 +142,6 @@ mod tests {
 
         let q = res.unwrap().1;
         assert_eq!(q, expected_stmt);
-        assert_eq!(qstring, format!("{}", q));
+        assert_eq!(expected, format!("{}", q));
     }
 }

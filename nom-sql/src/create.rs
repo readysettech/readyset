@@ -17,7 +17,6 @@ use crate::common::{
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
 use crate::create_table_options::{table_options, CreateTableOption};
 use crate::expression::expression;
-use crate::keywords::escape_if_keyword;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, SelectStatement};
 use crate::table::Table;
@@ -40,7 +39,7 @@ pub struct CreateTableStatement {
 
 impl fmt::Display for CreateTableStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE TABLE {} ", escape_if_keyword(&self.table.name))?;
+        write!(f, "CREATE TABLE `{}` ", self.table.name)?;
         write!(f, "(")?;
         write!(
             f,
@@ -99,7 +98,7 @@ pub struct CreateViewStatement {
 
 impl fmt::Display for CreateViewStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CREATE VIEW {} ", escape_if_keyword(&self.name))?;
+        write!(f, "CREATE VIEW `{}` ", self.name)?;
         if !self.fields.is_empty() {
             write!(f, "(")?;
             write!(
@@ -1294,9 +1293,9 @@ mod tests {
                        `id` integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        `name` varchar(80) NOT NULL UNIQUE) ENGINE=InnoDB AUTO_INCREMENT=495209 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
-            let expected = "CREATE TABLE auth_group (\
-                        id INT AUTO_INCREMENT NOT NULL, \
-                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))\
+            let expected = "CREATE TABLE `auth_group` (\
+                        `id` INT AUTO_INCREMENT NOT NULL, \
+                        `name` VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (`id`))\
                         ENGINE=InnoDB, AUTO_INCREMENT=495209, DEFAULT CHARSET=utf8mb4, COLLATE=utf8mb4_unicode_ci";
             let res = creation(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
@@ -1332,7 +1331,7 @@ mod tests {
         #[test]
         fn format_create_view() {
             let qstring = "CREATE VIEW `v` AS SELECT * FROM `t`;";
-            let expected = "CREATE VIEW v AS SELECT * FROM t";
+            let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }
@@ -1706,9 +1705,9 @@ mod tests {
                        \"id\" integer AUTO_INCREMENT NOT NULL PRIMARY KEY,
                        \"name\" varchar(80) NOT NULL UNIQUE)";
             // TODO(malte): INTEGER isn't quite reflected right here, perhaps
-            let expected = "CREATE TABLE auth_group (\
-                        id INT AUTO_INCREMENT NOT NULL, \
-                        name VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (id))";
+            let expected = "CREATE TABLE `auth_group` (\
+                        `id` INT AUTO_INCREMENT NOT NULL, \
+                        `name` VARCHAR(80) NOT NULL UNIQUE, PRIMARY KEY (`id`))";
             let res = creation(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }
@@ -1743,7 +1742,7 @@ mod tests {
         #[test]
         fn format_create_view() {
             let qstring = "CREATE VIEW \"v\" AS SELECT * FROM \"t\";";
-            let expected = "CREATE VIEW v AS SELECT * FROM t";
+            let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::PostgreSQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
         }

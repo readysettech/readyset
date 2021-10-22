@@ -89,7 +89,7 @@ pub struct CommonTableExpression {
 
 impl fmt::Display for CommonTableExpression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} AS ({})", self.name, self.statement)
+        write!(f, "`{}` AS ({})", self.name, self.statement)
     }
 }
 
@@ -1583,7 +1583,10 @@ mod tests {
             ..Default::default()
         };
         let res = query.to_string();
-        assert_eq!(res, "WITH foo AS (SELECT x FROM t) SELECT x FROM foo");
+        assert_eq!(
+            res,
+            "WITH `foo` AS (SELECT `x` FROM `t`) SELECT `x` FROM `foo`"
+        );
     }
 
     mod mysql {
@@ -1849,7 +1852,7 @@ mod tests {
             println!("{}", qstr);
             assert_eq!(
                 qstr,
-                "SELECT EXISTS (SELECT * FROM `groups` WHERE (id = ?)) AS `exists`"
+                "SELECT EXISTS (SELECT * FROM `groups` WHERE (`id` = ?)) AS `exists`"
             );
         }
     }

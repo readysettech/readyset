@@ -29,7 +29,6 @@ use test_strategy::Arbitrary;
 use crate::column::Column;
 use crate::dialect::Dialect;
 use crate::expression::expression;
-use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::{Expression, FunctionExpression};
 use eui48::{MacAddress, MacAddressFormat};
@@ -524,14 +523,14 @@ impl fmt::Display for TableKey {
             TableKey::PrimaryKey { name, columns } => {
                 write!(f, "PRIMARY KEY ")?;
                 if let Some(name) = name {
-                    write!(f, "{} ", escape_if_keyword(name))?;
+                    write!(f, "`{}` ", name)?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| escape_if_keyword(&c.name))
+                        .map(|c| format!("`{}`", c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -543,14 +542,14 @@ impl fmt::Display for TableKey {
             } => {
                 write!(f, "UNIQUE KEY ")?;
                 if let Some(ref name) = *name {
-                    write!(f, "{} ", escape_if_keyword(name))?;
+                    write!(f, "`{}` ", name)?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| escape_if_keyword(&c.name))
+                        .map(|c| format!("`{}`", c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )?;
@@ -562,14 +561,14 @@ impl fmt::Display for TableKey {
             TableKey::FulltextKey(name, columns) => {
                 write!(f, "FULLTEXT KEY ")?;
                 if let Some(ref name) = *name {
-                    write!(f, "{} ", escape_if_keyword(name))?;
+                    write!(f, "`{}` ", name)?;
                 }
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| escape_if_keyword(&c.name))
+                        .map(|c| format!("`{}`", c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -579,13 +578,13 @@ impl fmt::Display for TableKey {
                 columns,
                 index_type,
             } => {
-                write!(f, "KEY {} ", escape_if_keyword(name))?;
+                write!(f, "KEY `{}` ", name)?;
                 write!(
                     f,
                     "({})",
                     columns
                         .iter()
-                        .map(|c| escape_if_keyword(&c.name))
+                        .map(|c| format!("`{}`", c.name))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )?;
@@ -604,14 +603,14 @@ impl fmt::Display for TableKey {
             } => {
                 write!(
                     f,
-                    "CONSTRAINT {} FOREIGN KEY {}({}) REFERENCES {} ({})",
+                    "CONSTRAINT `{}` FOREIGN KEY {}({}) REFERENCES {} ({})",
                     name.as_deref().unwrap_or(""),
                     index_name.as_deref().unwrap_or(""),
-                    column.iter().map(|c| escape_if_keyword(&c.name)).join(", "),
+                    column.iter().map(|c| format!("`{}`", c.name)).join(", "),
                     target_table,
                     target_column
                         .iter()
-                        .map(|c| escape_if_keyword(&c.name))
+                        .map(|c| format!("`{}`", c.name))
                         .join(", ")
                 )?;
                 if let Some(on_delete) = on_delete {
@@ -626,7 +625,7 @@ impl fmt::Display for TableKey {
             } => {
                 write!(f, "CONSTRAINT",)?;
                 if let Some(name) = name {
-                    write!(f, " {}", name)?;
+                    write!(f, " `{}`", name)?;
                 }
 
                 write!(f, " CHECK {}", expr)?;
@@ -684,12 +683,12 @@ impl Display for FieldDefinitionExpression {
         match self {
             FieldDefinitionExpression::All => write!(f, "*"),
             FieldDefinitionExpression::AllInTable(ref table) => {
-                write!(f, "{}.*", escape_if_keyword(table))
+                write!(f, "`{}`.*", table)
             }
             FieldDefinitionExpression::Expression { expr, alias } => {
                 write!(f, "{}", expr)?;
                 if let Some(alias) = alias {
-                    write!(f, " AS {}", escape_if_keyword(alias))?;
+                    write!(f, " AS `{}`", alias)?;
                 }
                 Ok(())
             }

@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
 use crate::common::{statement_terminator, table_list};
-use crate::keywords::escape_if_keyword;
 use crate::table::Table;
 use crate::Dialect;
 use nom::bytes::complete::tag_no_case;
@@ -26,7 +25,7 @@ impl fmt::Display for DropTableStatement {
         let ts = self
             .tables
             .iter()
-            .map(|t| escape_if_keyword(&t.name))
+            .map(|t| format!("`{}`", t.name))
             .collect::<Vec<_>>()
             .join(", ");
         write!(f, "{}", ts)?;
@@ -90,7 +89,7 @@ mod tests {
     #[test]
     fn format_drop_table() {
         let qstring = "DROP TABLE IF EXISTS users,posts;";
-        let expected = "DROP TABLE IF EXISTS users, posts";
+        let expected = "DROP TABLE IF EXISTS `users`, `posts`";
         let res = drop_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
