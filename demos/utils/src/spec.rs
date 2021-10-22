@@ -6,10 +6,12 @@
 // Specify how we select values for each column type.
 
 use anyhow::{anyhow, bail, Context};
-use nom::character::complete::multispace0;
-use nom::combinator::opt;
+use nom::branch::alt;
+use nom::bytes::complete::{tag, take_until, take_while};
+use nom::character::complete::multispace1;
+use nom::combinator::{map, opt};
 use nom::multi::many1;
-use nom::sequence::preceded;
+use nom::sequence::{preceded, terminated, tuple};
 use nom_sql::{sql_query, Dialect, SqlQuery};
 use query_generator::{TableName, TableSpec};
 use std::collections::HashMap;
@@ -78,9 +80,37 @@ pub struct DatabaseSchema {
     tables: HashMap<TableName, TableSpec>,
 }
 
+fn comments_or_var_set(i: &[u8]) -> nom::IResult<&[u8], ()> {
+    map(
+        many1(tuple((
+            opt(alt((
+                map(tuple((tag("/*"), take_until("*/;"), tag("*/;"))), |_| ()),
+                map(tuple((tag("--"), take_while(|c| c != b'\n'))), |_| ()),
+                map(tuple((tag("SET"), take_while(|c| c != b'\n'))), |_| ()),
+            ))),
+            multispace1,
+        ))),
+        |_| (),
+    )(i)
+}
+
 fn parse_ddl(input: &[u8]) -> anyhow::Result<Vec<SqlQuery>> {
-    let (_, query) = many1(preceded(opt(multispace0), sql_query(Dialect::MySQL)))(input)
-        .map_err(|_| anyhow!("Error parsing ddl into SqlQuery"))?;
+    let (remain, query) = terminated(
+        many1(preceded(
+            // Skip comments, newlines, variables
+            opt(comments_or_var_set),
+            sql_query(Dialect::MySQL),
+        )),
+        opt(comments_or_var_set),
+    )(input)
+    .map_err(|err| anyhow!("Error parsing ddl into SqlQuery {:?}", err))?;
+
+    if !remain.is_empty() {
+        return Err(anyhow!(
+            "Unable to parse schema, beginning with {:?}",
+            std::str::from_utf8(remain.chunks(100).next().unwrap())
+        ));
+    }
 
     Ok(query)
 }
@@ -101,6 +131,7 @@ impl TryFrom<PathBuf> for DatabaseSchema {
                     let spec = TableSpec::from(s);
                     schema.tables.insert(spec.name.clone(), spec);
                 }
+                SqlQuery::DropTable(_) => {}
                 _ => bail!("Unsupported statement in schema file"),
             }
         }
