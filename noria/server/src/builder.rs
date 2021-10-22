@@ -74,9 +74,9 @@ impl Builder {
         self.config.frontier_strategy = f;
     }
 
-    /// Set sharding policy for all subsequent migrations; `None` disables
+    /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
     pub fn set_sharding(&mut self, shards: Option<usize>) {
-        self.config.sharding = shards;
+        self.config.sharding = shards.filter(|s| *s > 1);
     }
 
     /// Set how many workers this worker should wait for before becoming a controller. More workers
