@@ -275,13 +275,25 @@ fn foreign_key(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], TableKey> {
                         )),
                         call!(referential_action)
                     ))
+                >> on_update:
+                    opt!(preceded!(
+                        tuple((
+                            multispace0,
+                            tag_no_case("on"),
+                            multispace1,
+                            tag_no_case("update"),
+                            multispace1
+                        )),
+                        call!(referential_action)
+                    ))
                 >> (TableKey::ForeignKey {
                     name: name.map(String::from),
                     index_name: index_name.map(String::from),
                     columns,
                     target_table,
                     target_columns,
-                    on_delete
+                    on_delete,
+                    on_update
                 })
         )
     }
@@ -508,6 +520,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                             target_columns: target_column,
                             index_name,
                             on_delete,
+                            on_update,
                         } => TableKey::ForeignKey {
                             name,
                             columns: attach_names(column),
@@ -515,6 +528,7 @@ pub fn creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], CreateTabl
                             target_columns: target_column,
                             index_name,
                             on_delete,
+                            on_update,
                         },
                         constraint => constraint,
                     }
@@ -861,6 +875,7 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: None,
                         on_delete: None,
+                        on_update: None,
                     }
                 ]),
                 if_not_exists: false,
@@ -931,6 +946,7 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: None,
                         on_delete: None,
+                        on_update: None,
                     },
                     TableKey::PrimaryKey {
                         name: None,
@@ -994,6 +1010,7 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: Some("order_customer".into()),
                         on_delete: None,
+                        on_update: None,
                     },
                     TableKey::ForeignKey {
                         name: None,
@@ -1002,6 +1019,7 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: Some("ordered_product".into()),
                         on_delete: None,
+                        on_update: None,
                     },
                     TableKey::PrimaryKey {
                         name: None,
@@ -1959,7 +1977,7 @@ mod tests {
   UNIQUE KEY `access_tokens_token_unique` (`token`),
   KEY `access_tokens_user_id_foreign` (`user_id`),
   KEY `access_tokens_type_index` (`type`),
-  CONSTRAINT `access_tokens_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  CONSTRAINT `access_tokens_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
         let res = test_parse!(creation(Dialect::MySQL), qstring);
         let col = |n: &str| Column {
@@ -2061,6 +2079,7 @@ mod tests {
                         target_columns: vec!["id".into()],
                         index_name: None,
                         on_delete: Some(ReferentialAction::Cascade),
+                        on_update: Some(ReferentialAction::Cascade),
                     },
                 ]),
                 if_not_exists: false,

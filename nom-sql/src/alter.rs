@@ -587,7 +587,8 @@ mod tests {
                         columns: vec![Column::from("post_id")],
                         target_table: Table::from("posts"),
                         target_columns: vec![Column::from("id")],
-                        on_delete: Some(ReferentialAction::Cascade)
+                        on_delete: Some(ReferentialAction::Cascade),
+                        on_update: None
                     })]
                 }
             );
