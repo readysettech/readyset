@@ -509,6 +509,7 @@ pub enum TableKey {
         target_table: Table,
         target_columns: Vec<Column>,
         on_delete: Option<ReferentialAction>,
+        on_update: Option<ReferentialAction>,
     },
     CheckConstraint {
         name: Option<String>,
@@ -600,6 +601,7 @@ impl fmt::Display for TableKey {
                 target_table,
                 target_columns: target_column,
                 on_delete,
+                on_update,
             } => {
                 write!(
                     f,
@@ -615,6 +617,9 @@ impl fmt::Display for TableKey {
                 )?;
                 if let Some(on_delete) = on_delete {
                     write!(f, " ON DELETE {}", on_delete)?;
+                }
+                if let Some(on_update) = on_update {
+                    write!(f, " ON UPDATE {}", on_update)?;
                 }
                 Ok(())
             }
