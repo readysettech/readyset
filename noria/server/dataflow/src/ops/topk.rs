@@ -62,11 +62,12 @@ pub struct TopK {
     /// Invariant: If this node is partial, this will always be empty
     extra_records: RefCell<HashMap<GroupHash, Vec<Vec<DataType>>>>,
 
-    // some cache state
-    us: Option<IndexPair>,
+    /// The index of this node
+    our_index: Option<IndexPair>,
+    /// The number of columns in the node
     cols: usize,
 
-    // precomputed datastructures
+    /// The list of column indices that we're grouping by.
     group_by: Vec<usize>,
 
     order: Order,
@@ -85,10 +86,9 @@ impl TopK {
     pub fn new(
         src: NodeIndex,
         order: Vec<(usize, OrderType)>,
-        group_by: Vec<usize>,
+        mut group_by: Vec<usize>,
         k: usize,
     ) -> Self {
-        let mut group_by = group_by;
         group_by.sort_unstable();
 
         TopK {
@@ -96,7 +96,7 @@ impl TopK {
 
             extra_records: RefCell::new(Default::default()),
 
-            us: None,
+            our_index: None,
             cols: 0,
 
             group_by,
@@ -106,7 +106,6 @@ impl TopK {
     }
 
     /// Project the columns we are grouping by out of the given record
-
     fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DataType>>
     where
         R: Indices<'static, usize, Output = DataType> + ?Sized,
@@ -150,7 +149,7 @@ impl TopK {
         let mut lookup = None;
         current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
 
-        let start = current.len().saturating_sub(self.k);
+        let group_start_index = current.len().saturating_sub(self.k);
 
         if original_group_len == self.k {
             if let Some(diff) = original_group_len
@@ -212,10 +211,10 @@ impl TopK {
             // not consider old rows that were removed in this batch (which should still be
             // counted for this condition).
             if false {
-                let all_new_bottom = current[start..]
+                let all_new_bottom = current[group_start_index..]
                     .iter()
                     .take_while(|(ref r, _)| {
-                        self.order.cmp(r, &current[start].0) == Ordering::Equal
+                        self.order.cmp(r, &current[group_start_index].0) == Ordering::Equal
                     })
                     .all(|&(_, is_new)| is_new);
                 if all_new_bottom {
@@ -225,20 +224,22 @@ impl TopK {
         }
 
         // optimization: if we don't *have to* remove something, we don't
-        for i in start..current.len() {
+        for i in group_start_index..current.len() {
             if current[i].1 {
                 // we found an `is_new` in current
                 // can we replace it with a !is_new with the same order value?
-                let replace = current[0..start].iter().position(|&(ref r, is_new)| {
-                    !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
-                });
+                let replace = current[0..group_start_index]
+                    .iter()
+                    .position(|&(ref r, is_new)| {
+                        !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
+                    });
                 if let Some(ri) = replace {
                     current.swap(i, ri);
                 }
             }
         }
 
-        for (r, is_new) in current.drain(start..) {
+        for (r, is_new) in current.drain(group_start_index..) {
             if is_new {
                 out.push(Record::Positive(r.into_owned()));
             }
@@ -287,7 +288,7 @@ impl Ingredient for TopK {
         self.src.remap(remap);
 
         // who are we?
-        self.us = Some(remap[&us]);
+        self.our_index = Some(remap[&us]);
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -319,7 +320,7 @@ impl Ingredient for TopK {
                 .cmp(&self.project_group(&***b).unwrap_or_default())
         });
 
-        let us = self.us.unwrap();
+        let us = self.our_index.unwrap();
         let db: &dyn State = state
             .get(*us)
             .ok_or_else(|| internal_err("topk operators must have their own state materialized"))?
