@@ -360,6 +360,13 @@ impl KeyComparison {
     pub fn is_equal(&self) -> bool {
         matches!(self, KeyComparison::Equal(_))
     }
+
+    /// Returns `true` if this [`KeyComparsion`] is a [`Range`] key.
+    ///
+    /// [`Range`]: KeyComparison::Range
+    pub fn is_range(&self) -> bool {
+        matches!(self, KeyComparison::Range(..))
+    }
 }
 
 impl TryFrom<Vec<DataType>> for KeyComparison {

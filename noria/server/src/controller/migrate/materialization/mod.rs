@@ -491,6 +491,7 @@ impl Materializations {
                         node: ni,
                         columns: Vec1::try_from(index.columns.clone()).unwrap(),
                     },
+                    index.index_type,
                 )?;
 
                 for path in paths {
@@ -498,10 +499,10 @@ impl Materializations {
                     // passing to replay_paths_for, if generated columns are involved. We need to
                     // materialize those nodes, too.
                     let n_to_skip = if path[0].node == ni { 1 } else { 0 };
-                    for (i, OptColumnRef { node, cols }) in
+                    for (i, IndexRef { node, index }) in
                         path.into_iter().skip(n_to_skip).enumerate()
                     {
-                        match cols {
+                        match index {
                             None => {
                                 debug!(
                                     node = %node.index(),
@@ -510,9 +511,7 @@ impl Materializations {
                                 able = false;
                                 break 'attempt;
                             }
-                            Some(cols) => {
-                                let index =
-                                    Index::new(index.index_type, cols.into_iter().collect());
+                            Some(index) => {
                                 if let Some(m) = self.have.get(&node) {
                                     if !m.contains(&index) {
                                         // we'd need to add an index to this view,
@@ -731,44 +730,53 @@ impl Materializations {
                             node: ni,
                             columns: Vec1::try_from(index.columns.clone()).unwrap(),
                         },
+                        index.index_type,
                     )?;
 
                     for path in paths {
-                        for OptColumnRef { node, cols } in path {
-                            match cols {
+                        for IndexRef { node, index } in path {
+                            match index {
                                 None => break,
-                                Some(columns) => {
+                                Some(child_index) => {
                                     if self.partial.contains(&node) {
-                                        'outer: for index in &self.have[&node] {
+                                        'outer: for parent_index in &self.have[&node] {
                                             // is this node partial over some of the child's partial
                                             // columns, but not others? if so, we run into really sad
                                             // situations where the parent could miss in its state despite
                                             // the child having state present for that key.
 
+                                            // Are the indexes the same type?
+                                            if parent_index.index_type != child_index.index_type {
+                                                continue;
+                                            }
+
                                             // do we share a column?
-                                            if index.columns.iter().all(|&c| !columns.contains(&c))
+                                            if parent_index
+                                                .columns
+                                                .iter()
+                                                .all(|&c| !child_index.columns.contains(&c))
                                             {
                                                 continue;
                                             }
 
                                             // is there a column we *don't* share?
-                                            let unshared = index
-                                                .columns
-                                                .iter()
-                                                .cloned()
-                                                .find(|&c| !columns.contains(&c))
-                                                .or_else(|| {
-                                                    columns
-                                                        .iter()
-                                                        .cloned()
-                                                        .find(|c| !index.columns.contains(c))
-                                                });
+                                            let unshared =
+                                                parent_index
+                                                    .columns
+                                                    .iter()
+                                                    .cloned()
+                                                    .find(|&c| !child_index.columns.contains(&c))
+                                                    .or_else(|| {
+                                                        child_index.columns.iter().cloned().find(
+                                                            |c| !parent_index.columns.contains(c),
+                                                        )
+                                                    });
                                             if let Some(not_shared) = unshared {
                                                 // This might be fine if we also have the child's index in
                                                 // the parent, since then the overlapping index logic in
                                                 // `MemoryState::lookup` will save us.
                                                 for other_idx in &self.have[&node] {
-                                                    if other_idx.columns == &columns as &[_] {
+                                                    if *other_idx == child_index {
                                                         // Looks like we have the necessary index, so we'll
                                                         // be okay.
                                                         continue 'outer;
@@ -781,15 +789,15 @@ impl Materializations {
                                                 println!("{}", graphviz(graph, true, self));
                                                 error!(
                                                     parent = %node.index(),
-                                                    pcols = ?index,
+                                                    parent_index = ?parent_index,
                                                     child = %ni.index(),
-                                                    cols = ?columns,
+                                                    child_index = ?child_index,
                                                     conflict = not_shared,
                                                     "partially lapping partial indices"
                                                 );
                                                 internal!(
                                                     "partially overlapping partial indices (parent {:?} cols {:?} all {:?}, child {:?} cols {:?})",
-                                                    node.index(), index, &self.have[&node], ni.index(), columns
+                                                    node.index(), parent_index, &self.have[&node], ni.index(), parent_index
                                                 );
                                             }
                                         }

@@ -3,6 +3,8 @@ use std::cmp::Ordering;
 use nom_sql::BinaryOperator;
 use serde::{Deserialize, Serialize};
 
+use crate::KeyComparison;
+
 /// Types of (key-value) data structures we can use as indices in Noria.
 ///
 /// See [the design doc][0] for more information
@@ -45,10 +47,42 @@ impl IndexType {
             _ => None,
         }
     }
+
+    /// Return the [`IndexType`] that is best able to satisfy lookups for the given `key`
+    pub fn best_for_key(key: &KeyComparison) -> Self {
+        match key {
+            KeyComparison::Equal(_) => Self::HashMap,
+            KeyComparison::Range(_) => Self::BTreeMap,
+        }
+    }
+
+    /// Return a list of all [`IndexType`]s that could possibly satisfy lookups for the given `key`
+    pub fn all_for_key(key: &KeyComparison) -> &'static [Self] {
+        match key {
+            KeyComparison::Equal(_) => &[Self::HashMap, Self::BTreeMap],
+            KeyComparison::Range(_) => &[Self::BTreeMap],
+        }
+    }
+
+    /// Return the [`IndexType`] that is best able to satisfy lookups for all the given `keys`
+    pub fn best_for_keys(keys: &[KeyComparison]) -> Self {
+        keys.iter()
+            .map(Self::best_for_key)
+            .max()
+            .unwrap_or(Self::HashMap)
+    }
+
+    /// Return true if this index type can support lookups for the given `key`
+    pub fn supports_key(&self, key: &KeyComparison) -> bool {
+        match self {
+            IndexType::HashMap => key.is_equal(),
+            IndexType::BTreeMap => true,
+        }
+    }
 }
 
 /// A description of an index used on a relation
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct Index {
     /// The type of the index
     pub index_type: IndexType,
@@ -57,9 +91,11 @@ pub struct Index {
     pub columns: Vec<usize>,
 }
 
+#[allow(clippy::len_without_is_empty)] // Index can't have an empty set of columns
 impl Index {
     /// Create a new Index with the given index type and column indices
     pub fn new(index_type: IndexType, columns: Vec<usize>) -> Self {
+        debug_assert!(!columns.is_empty());
         Self {
             index_type,
             columns,
@@ -79,10 +115,6 @@ impl Index {
     /// Returns the length of this index's key
     pub fn len(&self) -> usize {
         self.columns.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.columns.is_empty()
     }
 }
 

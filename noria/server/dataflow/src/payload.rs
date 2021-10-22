@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
-use crate::domain;
 use crate::prelude::*;
 use noria::{self, KeyComparison};
 use noria::{internal::LocalOrNot, PacketData, PacketTrace};
@@ -13,7 +12,7 @@ use std::fmt;
 pub struct ReplayPathSegment {
     pub node: LocalNodeIndex,
     pub force_tag_to: Option<Tag>,
-    pub partial_key: Option<Vec<usize>>,
+    pub partial_index: Option<Index>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -31,12 +30,18 @@ pub enum SourceSelection {
     AllShards(usize),
 }
 
+/// Representation for how to trigger replays for a partial replay path that touches a particular
+/// domain
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum TriggerEndpoint {
     None,
-    Start(Vec<usize>),
-    End(SourceSelection, domain::Index),
-    Local(Vec<usize>),
+    /// This domain is the start of the replay path
+    Start(Index),
+    /// This domain is the end of the replay path, with the indicated source domain and how to query
+    /// that domain's shards
+    End(SourceSelection, DomainIndex),
+    /// The replay path is contained entirely within this domain
+    Local(Index),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -53,7 +58,7 @@ pub enum InitialState {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
         key: Vec<usize>,
-        trigger_domain: (domain::Index, usize),
+        trigger_domain: (DomainIndex, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,
@@ -151,7 +156,7 @@ pub enum DomainRequest {
         partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
-        raw_path: Vec<OptColumnRef>,
+        raw_path: Vec<IndexRef>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,

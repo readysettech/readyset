@@ -27,9 +27,13 @@ pub use partial_map::PartialMap;
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
 
-pub(crate) struct StateEvicted {
-    pub(crate) key_columns: Vec<usize>,
+/// Information about state evicted via a call to [`State::evict_bytes`]
+pub(crate) struct StateEvicted<'a> {
+    /// The index that was evicted from
+    pub(crate) index: &'a Index,
+    /// The keys that were evicted
     pub(crate) keys_evicted: Vec<Vec<DataType>>,
+    /// The number of bytes removed from the state
     pub(crate) bytes_freed: u64,
 }
 
@@ -133,13 +137,13 @@ pub(crate) trait State: SizeOf + Send {
     /// Return a copy of all records. Panics if the state is only partially materialized.
     fn cloned_records(&self) -> Vec<Vec<DataType>>;
 
-    /// Evict up to `bytes` by randomly selected keys, returning key colunms of the index chosen to evict
-    /// from along with the keys evicted and the number of bytes evicted.
+    /// Evict up to `bytes` by randomly selected keys, returning a struct representing the index
+    /// chosen to evict from along with the keys evicted and the number of bytes evicted.
     fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted>;
 
-    /// Evict the listed keys from the materialization targeted by `tag`, returning the key columns
-    /// of the index that was evicted from and the number of bytes evicted.
-    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&[usize], u64)>;
+    /// Evict the listed keys from the materialization targeted by `tag`, returning the index chosen
+    /// to evict from and the number of bytes evicted.
+    fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&Index, u64)>;
 
     fn clear(&mut self);
 }

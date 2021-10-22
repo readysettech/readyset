@@ -13,6 +13,7 @@ use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
 use launchpad::Indices;
 use metrics::{counter, gauge, histogram};
+use noria::internal::Index;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
@@ -21,7 +22,7 @@ use tracing::info_span;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
-pub use internal::DomainIndex as Index;
+pub use internal::DomainIndex;
 use noria::channel;
 use noria::metrics::recorded;
 use noria::replication::ReplicationOffset;
@@ -69,12 +70,12 @@ impl PartialEq for DomainMode {
 
 enum TriggerEndpoint {
     None,
-    Start(Vec<usize>),
+    Start(Index),
     End {
         source: SourceSelection,
         options: Vec<Box<dyn channel::Sender<Item = Box<Packet>> + Send>>,
     },
-    Local(Vec<usize>),
+    Local(Index),
 }
 
 pub(crate) struct ReplayPath {
@@ -89,7 +90,6 @@ pub(crate) struct ReplayPath {
 impl ReplayPath {
     /// Return a reference to the last [`ReplayPathSegment`] of this replay path
     pub(crate) fn last_segment(&self) -> &ReplayPathSegment {
-        #[allow(clippy::unwrap_used)] // replay paths can't be empty
         self.path.last()
     }
 }
@@ -134,14 +134,16 @@ impl ReplayDescriptor {
         }
     }
 
-    // Returns true if that `ReplayDescriptor` can be processed together, i.e. they only
-    // differ in their miss and lookup keys
+    // Returns true if the given `ReplayDescriptor` can be processed together with `self`, i.e. they
+    // only differ in their miss and lookup keys, and have the same replay key type (range or
+    // equal).
     fn can_combine(&self, other: &ReplayDescriptor) -> bool {
         self.tag == other.tag
             && self.idx == other.idx
             && self.lookup_columns == other.lookup_columns
             && self.unishard == other.unishard
             && self.requesting_shard == other.requesting_shard
+            && self.replay_key.is_range() == other.replay_key.is_range()
     }
 }
 
@@ -183,7 +185,7 @@ struct Waiting {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DomainBuilder {
     /// The domain's index.
-    pub index: Index,
+    pub index: DomainIndex,
     /// The shard ID represented by this `DomainBuilder`.
     pub shard: Option<usize>,
     /// The number of shards in the domain.
@@ -265,7 +267,7 @@ struct TimedPurge {
 }
 
 pub struct Domain {
-    index: Index,
+    index: DomainIndex,
     shard: Option<usize>,
     _nshards: usize,
 
@@ -317,7 +319,7 @@ pub struct Domain {
     ///
     /// These include the whole replay path, not just the parts relevant to this domain, and don't
     /// include the domain-specific information in `ReplayPath` and `ReplayPathSegment`.
-    raw_replay_paths: HashMap<Tag, Vec<OptColumnRef>>,
+    raw_replay_paths: HashMap<Tag, Vec<IndexRef>>,
     reader_triggered: NodeMap<HashSet<KeyComparison, RandomState>>,
 
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
@@ -329,9 +331,12 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: VecDeque<TimedPurge>,
 
-    replay_paths_by_dst: NodeMap<HashMap<Vec<usize>, Vec<Tag>>>,
-    /// If a (node, cols) pair appears in this set, those columns are generated
-    /// and require use of the `Ingredient::handle_upquery` API.
+    /// Map from terminating nodes of replay paths, to indexes, to tags for those replay paths
+    replay_paths_by_dst: NodeMap<HashMap<Index, Vec<Tag>>>,
+
+    /// Set of nodes and columns which are "generated" by that node, meaning those columns do not
+    /// appear unchanged in exactly one of that node's parents. If a  If a (node, cols) pair appears
+    /// in this set, then misses on those columns require the use of [`Ingredient::handle_upquery`]
     generated_columns: HashSet<(LocalNodeIndex, Vec<usize>)>,
 
     concurrent_replays: usize,
@@ -366,7 +371,7 @@ pub struct Domain {
 
 impl Domain {
     /// Return the unique index for this domain
-    pub fn index(&self) -> Index {
+    pub fn index(&self) -> DomainIndex {
         self.index
     }
 
@@ -398,17 +403,19 @@ impl Domain {
         miss_columns: &[usize],
         miss_in: LocalNodeIndex,
     ) -> Result<(), ReadySetError> {
-        let mut tags = Vec::new();
-        if let Some(candidates) = self.replay_paths_by_dst.get(miss_in) {
-            if let Some(ts) = candidates.get(miss_columns) {
-                // the clone is a bit sad; self.request_partial_replay doesn't use
-                // self.replay_paths_by_dst.
-                tags = ts.clone();
-            }
-        }
+        let miss_index = Index::new(IndexType::best_for_keys(&miss_keys), miss_columns.to_vec());
+        // the cloned is a bit sad; self.request_partial_replay doesn't use
+        // self.replay_paths_by_dst.
+        let tags = self
+            .replay_paths_by_dst
+            .get(miss_in)
+            .and_then(|indexes| indexes.get(&miss_index))
+            .cloned()
+            .unwrap_or_default();
+
         let remapped_upqueries = if self
             .generated_columns
-            .contains(&(miss_in, miss_columns.into()))
+            .contains(&(miss_in, miss_columns.to_owned()))
         {
             #[allow(clippy::indexing_slicing)] // Documented invariant
             let mut n = self.nodes[miss_in].borrow_mut();
@@ -425,7 +432,7 @@ impl Domain {
             if upqueries.is_empty() {
                 internal!(
                     "columns {:?} in l{} are generated, but could not remap an upquery",
-                    miss_columns,
+                    miss_index,
                     miss_in.id()
                 );
             }
@@ -447,18 +454,27 @@ impl Domain {
                 #[allow(clippy::indexing_slicing)] // Tag must exist
                 let replay_path = &self.raw_replay_paths[&tag];
                 let mut new_keys = None;
-                for OptColumnRef { node, cols } in replay_path.iter() {
-                    if let Some(cols) = cols {
+                for IndexRef { node, index } in replay_path.iter() {
+                    if let Some(index) = index {
                         for upquery in remapped_upqueries.iter() {
                             if *node == upquery.missed_columns.node
-                                && upquery.missed_columns.columns.len() == cols.len()
+                                // TODO(grfn): Why is this matching on `len()` rather than the
+                                // columns themselves?
+                                && upquery.missed_columns.columns.len() == index.columns.len()
+                                && upquery
+                                    .missed_key
+                                    .iter()
+                                    // TODO(grfn): Btrees support point keys - what if we find a
+                                    // btree first while a hash already exists?  I *think* this is
+                                    // fine, but should be double checked later
+                                    .all(|k| index.index_type.supports_key(k))
                             {
                                 // This tag is one we want to replay along.
                                 if new_keys.is_some() {
                                     // We should only match one remapped upquery per tag.
                                     internal!(
                                         "conflicting remapped upqueries while finding tags for {:?} in l{}: {:?}",
-                                        miss_columns,
+                                        miss_index,
                                         miss_in.id(),
                                         remapped_upqueries
                                     );
@@ -473,7 +489,7 @@ impl Domain {
                         miss_keys.clone().into_iter().zip(nk.clone().into_iter())
                     {
                         self.active_remaps
-                            .entry((miss_in, (miss_columns.to_owned(), orig_key)))
+                            .entry((miss_in, (miss_index.columns.to_owned(), orig_key)))
                             .or_default()
                             .insert((tag, new_key));
                     }
@@ -525,7 +541,7 @@ impl Domain {
                 "no tag found to fill missing value {:?} in {}.{:?}; available tags: {:?}",
                 miss_keys,
                 miss_in,
-                miss_columns,
+                miss_index,
                 self.replay_paths_by_dst.get(miss_in)
             );
         }
@@ -534,7 +550,7 @@ impl Domain {
                 "no tag found to fill missing value {:?} in {}.{:?} after remap; available tags: {:?}; remapped upqueries: {:?}",
                 miss_keys,
                 miss_in,
-                miss_columns,
+                miss_index,
                 self.replay_paths_by_dst.get(miss_in),
                 remapped_upqueries
             );
@@ -765,7 +781,7 @@ impl Domain {
                 if let Some(cs) = self.replay_paths_by_dst.get(last.node) {
                     // We already know it's a partial replay path, so it must have a partial key
                     #[allow(clippy::unwrap_used)]
-                    if let Some(tags) = cs.get(last.partial_key.as_ref().unwrap()) {
+                    if let Some(tags) = cs.get(last.partial_index.as_ref().unwrap()) {
                         requests_satisfied = tags
                             .iter()
                             .filter(|tag| {
@@ -934,8 +950,8 @@ impl Domain {
                         rp.path
                             .iter()
                             .find(|rps| rps.node == me)
-                            .and_then(|rps| rps.partial_key.as_ref())
-                            .and_then(|keys| {
+                            .and_then(|rps| rps.partial_index.as_ref())
+                            .and_then(|index| {
                                 // we need to find the *input* column that produces that output.
                                 //
                                 // if one of the columns for this replay path's keys does not
@@ -943,7 +959,9 @@ impl Domain {
                                 // to issue an eviction for that path. this is because we *missed*
                                 // on the join column in the other side, so we *know* it can't have
                                 // forwarded anything related to the write we're now handling.
-                                keys.iter()
+                                index
+                                    .columns
+                                    .iter()
                                     .map(|&k| {
                                         n.parent_columns(k)
                                             .into_iter()
@@ -1462,8 +1480,8 @@ impl Domain {
                 use crate::payload;
                 let trigger = match trigger {
                     payload::TriggerEndpoint::None => TriggerEndpoint::None,
-                    payload::TriggerEndpoint::Start(v) => TriggerEndpoint::Start(v),
-                    payload::TriggerEndpoint::Local(v) => TriggerEndpoint::Local(v),
+                    payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
+                    payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
                     payload::TriggerEndpoint::End(selection, domain) => {
                         let shard = |shardi| -> ReadySetResult<_> {
                             // TODO: make async
@@ -1502,7 +1520,7 @@ impl Domain {
                     self.replay_paths_by_dst
                         .entry(last.node)
                         .or_insert_with(HashMap::new)
-                        .entry(last.partial_key.clone().unwrap())
+                        .entry(last.partial_index.clone().unwrap())
                         .or_insert_with(Vec::new)
                         .push(tag);
                 }
@@ -2278,19 +2296,19 @@ impl Domain {
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::indexing_slicing)]
         // tag came from an internal data structure that guarantees it's present
-        let (source, cols, path) = match &self.replay_paths[&tag] {
+        let (source, index, path) = match &self.replay_paths[&tag] {
             ReplayPath {
                 source: Some(source),
-                trigger: TriggerEndpoint::Start(cols),
+                trigger: TriggerEndpoint::Start(index),
                 path,
                 ..
             }
             | ReplayPath {
                 source: Some(source),
-                trigger: TriggerEndpoint::Local(cols),
+                trigger: TriggerEndpoint::Local(index),
                 path,
                 ..
-            } => (source, cols, path),
+            } => (source, index, path),
             _ => internal!(),
         };
 
@@ -2307,7 +2325,7 @@ impl Domain {
             records,
             found_keys,
             replay_keys,
-        } = self.do_lookup(state.as_ref(), cols, keys)?;
+        } = self.do_lookup(state.as_ref(), &index.columns, keys)?;
 
         let records = records
             .into_iter()
@@ -2316,7 +2334,7 @@ impl Domain {
             .collect::<ReadySetResult<Vec<Record>>>()?;
 
         let dst = path[0].node;
-        let cols = cols.clone(); // Clone to free the immutable reference at the top
+        let index = index.clone(); // Clone to free the immutable reference at the top
         let src = *source;
 
         if !replay_keys.is_empty() {
@@ -2330,7 +2348,7 @@ impl Domain {
 
             self.on_replay_misses(
                 src,
-                &cols,
+                &index.columns,
                 // NOTE:
                 // `replay_keys` are tuples of (replay_key, miss_key), where `replay_key` is the key we're trying
                 // to replay and `miss_key` is the part of it we missed on.
@@ -2467,7 +2485,7 @@ impl Domain {
                         } = context
                         {
                             let had = for_keys.len();
-                            let partial_keys = path.last().partial_key.as_ref().unwrap();
+                            let partial_index = path.last().partial_index.as_ref().unwrap();
                             if let Some(w) = self.waiting.get(dst) {
                                 let mut remapped_keys_to_holes = vec![];
                                 // Scan the list of active upquery maps to see if this replay is
@@ -2502,7 +2520,10 @@ impl Domain {
                                 if remapped_keys_to_holes.is_empty() {
                                     // discard all the keys that we aren't waiting for
                                     for_keys.retain(|k| {
-                                        w.redos.contains_key(&(partial_keys.clone(), k.clone()))
+                                        w.redos.contains_key(&(
+                                            partial_index.columns.to_owned(),
+                                            k.clone(),
+                                        ))
                                     });
                                 } else {
                                     // discard keys that won't fill any remapped holes
@@ -2552,11 +2573,12 @@ impl Domain {
                                 // yet
                                 // We already know it's a partial replay path, so it must have a partial key
                                 #[allow(clippy::unwrap_used)]
-                                let partial_keys = path.first().partial_key.as_ref().unwrap();
+                                let partial_keys = path.first().partial_index.as_ref().unwrap();
                                 data.retain(|r| {
                                     for_keys.iter().any(|k| {
                                         k.contains(
                                             &partial_keys
+                                                .columns
                                                 .iter()
                                                 .map(|c| {
                                                     #[allow(clippy::indexing_slicing)]
@@ -2617,7 +2639,7 @@ impl Domain {
                         let is_reader = n.as_reader().map(|r| r.is_materialized()).unwrap_or(false);
 
                         // keep track of whether we're filling any partial holes
-                        let partial_key_cols = segment.partial_key.as_ref();
+                        let partial_key_cols = segment.partial_index.as_ref();
                         // keep a copy of the partial keys from before we process
                         // we need this because n.process may choose to reduce the set of keys
                         // (e.g., because some of them missed), in which case we need to know what
@@ -2683,7 +2705,7 @@ impl Domain {
                         // process the current message in this node
                         let process_result = n.process(
                             &mut m,
-                            segment.partial_key.as_ref(),
+                            segment.partial_index.as_ref().map(|idx| &idx.columns),
                             &mut self.state,
                             &self.nodes,
                             self.shard,
@@ -2851,7 +2873,7 @@ impl Domain {
                             // that key missed.
                             #[allow(clippy::unwrap_used)]
                             // We know this is a partial replay
-                            let partial_col = partial_key_cols.as_ref().unwrap();
+                            let partial_index = partial_key_cols.as_ref().unwrap();
                             #[allow(clippy::unwrap_used)]
                             // We would have bailed earlier (break 'outer, above) if m wasn't Some
                             m.as_mut().unwrap().map_data(|rs| {
@@ -2862,7 +2884,8 @@ impl Domain {
                                     let r = r.rec();
                                     !missed_on.iter().any(|miss| {
                                         miss.contains(
-                                            &partial_col
+                                            &partial_index
+                                                .columns
                                                 .iter()
                                                 .map(|&c| {
                                                     #[allow(clippy::indexing_slicing)]
@@ -2943,7 +2966,7 @@ impl Domain {
                             }
 
                             // next, evict any state that we had to look up to process this replay.
-                            let mut evict_tag = None;
+                            let mut evict_tags = Vec::new();
                             let mut pns_for = None;
                             let mut pns = Vec::new();
                             let mut tmp = Vec::new();
@@ -2990,58 +3013,64 @@ impl Domain {
                                 #[allow(clippy::unwrap_used)]
                                 // we know this is a partial replay path
                                 let tag_match = |rp: &ReplayPath, pn| {
+                                    let path_index =
+                                        rp.last_segment().partial_index.as_ref().unwrap();
                                     rp.last_segment().node == pn
-                                        && rp.last_segment().partial_key.as_ref().unwrap()
-                                            == &lookup.cols
+                                        && path_index.columns == lookup.cols
+                                        && path_index.index_type.supports_key(&lookup.key)
                                 };
 
                                 for &pn in &pns {
-                                    let state = self.state.get_mut(pn).unwrap();
-                                    assert!(state.is_partial());
-
                                     // this is a node that we were doing lookups into as part of
                                     // the replay -- make sure we evict any state we may have added
                                     // there.
-                                    if let Some(tag) = evict_tag {
+                                    evict_tags.retain(|tag| {
                                         #[allow(clippy::indexing_slicing)]
                                         // tag came from an internal data structure that guarantees it exists
-                                        if !tag_match(&self.replay_paths[&tag], pn) {
-                                            // we can't re-use this
-                                            evict_tag = None;
-                                        }
-                                    }
+                                        tag_match(&self.replay_paths[tag], pn)
+                                    });
 
-                                    if evict_tag.is_none() {
+                                    let state = self.state.get_mut(pn).unwrap();
+                                    assert!(state.is_partial());
+
+                                    if evict_tags.is_empty() {
                                         if let Some(cs) = self.replay_paths_by_dst.get(pn) {
                                             #[allow(clippy::indexing_slicing)]
                                             // we check len is 1 first
-                                            if let Some(tags) = cs.get(&lookup.cols) {
-                                                // this is the tag we would have used to
-                                                // fill a lookup hole in this ancestor, so
-                                                // this is the tag we need to evict from.
+                                            for index_type in IndexType::all_for_key(&lookup.key) {
+                                                if let Some(tags) = cs.get(&Index::new(
+                                                    *index_type,
+                                                    lookup.cols.clone(),
+                                                )) {
+                                                    // this is the tag we would have used to fill a
+                                                    // lookup hole in this ancestor, so this is the
+                                                    // tag we need to evict from.
 
-                                                // TODO: could there have been multiple
-                                                invariant_eq!(tags.len(), 1);
-                                                evict_tag = Some(tags[0]);
+                                                    // TODO: could there have been multiple
+                                                    invariant_eq!(tags.len(), 1);
+                                                    evict_tags.push(tags[0]);
+                                                }
                                             }
                                         }
                                     }
 
+                                    if evict_tags.is_empty() {
+                                        internal!(
+                                            "no tag found for lookup target {:?}({:?}) (really {:?})",
+                                            self.nodes[lookup.on].borrow().global_addr(),
+                                            lookup.cols,
+                                            self.nodes[pn].borrow().global_addr());
+                                    }
+
                                     #[allow(clippy::indexing_slicing)] // came from self.nodes
-                                    if let Some(tag) = evict_tag {
+                                    for tag in &evict_tags {
                                         // NOTE: this assumes that the key order is the same
                                         trace!(
                                             node = self.nodes[pn].borrow().global_addr().index(),
                                             key = ?&lookup.key,
                                             "clearing keys from purgeable materialization after replay"
                                         );
-                                        state.mark_hole(&lookup.key, tag);
-                                    } else {
-                                        internal!(
-                                            "no tag found for lookup target {:?}({:?}) (really {:?})",
-                                            self.nodes[lookup.on].borrow().global_addr(),
-                                            lookup.cols,
-                                            self.nodes[pn].borrow().global_addr());
+                                        state.mark_hole(&lookup.key, *tag);
                                     }
                                 }
                             }
@@ -3236,9 +3265,9 @@ impl Domain {
                 // tag came from an internal data structure that guarantees it exists
                 #[allow(clippy::unwrap_used)]
                 // We already know this is a partial replay path
-                let key_cols = self.replay_paths[&tag]
+                let key_index = self.replay_paths[&tag]
                     .last_segment()
-                    .partial_key
+                    .partial_index
                     .clone()
                     .unwrap();
 
@@ -3252,7 +3281,7 @@ impl Domain {
                 #[allow(clippy::unwrap_used)]
                 // this is a partial replay (since it's in waiting), so it must have keys
                 for key in for_keys.unwrap() {
-                    let hole = (key_cols.clone(), key);
+                    let hole = (key_index.columns.clone(), key);
                     let replay = match waiting.redos.remove(&hole) {
                         Some(x) => x,
                         None => internal!(
@@ -3436,7 +3465,7 @@ impl Domain {
     ) -> Result<(), ReadySetError> {
         #[allow(clippy::too_many_arguments)]
         fn trigger_downstream_evictions(
-            key_columns: &[usize],
+            index: &Index,
             keys: &[KeyComparison],
             node: LocalNodeIndex,
             ex: &mut dyn Executor,
@@ -3450,10 +3479,10 @@ impl Domain {
             for (tag, path) in replay_paths {
                 if path.source == Some(node) {
                     // Check whether this replay path is for the same key.
-                    match path.trigger {
+                    match &path.trigger {
                         TriggerEndpoint::Local(ref key) | TriggerEndpoint::Start(ref key) => {
                             // what if just key order changed?
-                            if &key[..] != key_columns {
+                            if key != index {
                                 continue;
                             }
                         }
@@ -3489,7 +3518,7 @@ impl Domain {
                         #[allow(clippy::unwrap_used)]
                         // we can only evict from partial replay paths, so we must have a partial key
                         trigger_downstream_evictions(
-                            &target.partial_key.as_ref().unwrap()[..],
+                            target.partial_index.as_ref().unwrap(),
                             &keys[..],
                             target.node,
                             ex,
@@ -3521,7 +3550,7 @@ impl Domain {
                 // partial_key must be Some for partial replay paths
                 nodes[segment.node].borrow_mut().process_eviction(
                     from,
-                    &segment.partial_key.as_ref().unwrap()[..],
+                    &segment.partial_index.as_ref().unwrap().columns,
                     keys,
                     tag,
                     shard,
@@ -3633,10 +3662,11 @@ impl Domain {
                             .collect::<ReadySetResult<Vec<_>>>()?;
 
                         freed += evicted.bytes_freed;
+                        let index = evicted.index.clone();
 
                         if !keys.is_empty() {
                             trigger_downstream_evictions(
-                                &evicted.key_columns[..],
+                                &index,
                                 &keys[..],
                                 node,
                                 ex,
@@ -3706,10 +3736,12 @@ impl Domain {
                             return Ok(());
                         }
                         #[allow(clippy::indexing_slicing)] // came from replay paths
-                        if let Some(evicted) = self.state[target].evict_keys(tag, &keys) {
-                            let key_columns = evicted.0.to_vec();
+                        if let Some((index, _evicted_bytes)) =
+                            self.state[target].evict_keys(tag, &keys)
+                        {
+                            let index = index.clone();
                             trigger_downstream_evictions(
-                                &key_columns[..],
+                                &index,
                                 &keys[..],
                                 target,
                                 ex,
@@ -3732,7 +3764,7 @@ impl Domain {
         Ok(())
     }
 
-    pub fn id(&self) -> (Index, usize) {
+    pub fn id(&self) -> (DomainIndex, usize) {
         (self.index, self.shard.unwrap_or(0))
     }
 

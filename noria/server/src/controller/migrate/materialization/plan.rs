@@ -8,7 +8,7 @@
     clippy::unreachable
 )]
 
-use crate::controller::keys::{self, OptColumnRef};
+use crate::controller::keys::{self, IndexRef};
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::state::graphviz;
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
@@ -71,15 +71,15 @@ impl<'a> Plan<'a> {
         }
     }
 
-    fn paths(&mut self, columns: &[usize]) -> Result<Vec<Vec<OptColumnRef>>, ReadySetError> {
+    fn paths(&mut self, index: &Index) -> Result<Vec<Vec<IndexRef>>, ReadySetError> {
         let graph = self.graph;
         let ni = self.node;
         let mut paths = keys::replay_paths_for_opt(
             graph,
-            OptColumnRef {
+            IndexRef {
                 node: ni,
-                cols: if self.partial {
-                    Some(Vec1::try_from(columns)?)
+                index: if self.partial {
+                    Some(index.clone())
                 } else {
                     None
                 },
@@ -173,7 +173,7 @@ impl<'a> Plan<'a> {
         paths.dedup();
 
         // all columns better resolve if we're doing partial
-        if self.partial && !paths.iter().all(|p| p.iter().all(|cr| cr.cols.is_some())) {
+        if self.partial && !paths.iter().all(|p| p.iter().all(|cr| cr.index.is_some())) {
             internal!("tried to be partial over replay paths that require full materialization: paths = {:?}", paths);
         }
 
@@ -196,7 +196,7 @@ impl<'a> Plan<'a> {
             return Ok(());
         }
 
-        let paths = self.paths(&index_on.columns[..])?;
+        let paths = self.paths(&index_on)?;
 
         // all right, story time!
         //
@@ -283,7 +283,7 @@ impl<'a> Plan<'a> {
                 let graph = &self.graph;
                 path.iter()
                     .enumerate()
-                    .filter_map(move |(at, &OptColumnRef { node, .. })| {
+                    .filter_map(move |(at, &IndexRef { node, .. })| {
                         #[allow(clippy::indexing_slicing)] // replay paths contain valid indices
                         let n = &graph[node];
                         if n.is_union() && !n.is_shard_merger() {
@@ -330,16 +330,16 @@ impl<'a> Plan<'a> {
             // TODO(eta): figure out a way to check partial replay path idempotency
             self.paths.insert(
                 tag,
-                path.iter().map(|&OptColumnRef { node, .. }| node).collect(),
+                path.iter().map(|&IndexRef { node, .. }| node).collect(),
             );
 
-            // what key are we using for partial materialization (if any)?
-            let mut partial: Option<Vec<usize>> = None;
+            // what index are we using for partial materialization (if any)?
+            let mut partial: Option<Index> = None;
             if self.partial {
                 #[allow(clippy::unwrap_used)]
-                if let Some(&OptColumnRef { ref cols, .. }) = path.first() {
+                if let Some(IndexRef { index, .. }) = path.first() {
                     // unwrap: ok since `Plan::paths` validates paths if we're partial
-                    partial = Some(cols.as_ref().unwrap().iter().cloned().collect());
+                    partial = Some(index.clone().unwrap());
                 } else {
                     internal!("Plan::paths should have deleted zero-length path");
                 }
@@ -356,14 +356,14 @@ impl<'a> Plan<'a> {
                 partial_unicast_sharder = path
                     .iter()
                     .rev()
-                    .map(|&OptColumnRef { node, .. }| node)
+                    .map(|&IndexRef { node, .. }| node)
                     .find(|&ni| self.graph[ni].is_sharder());
             }
 
             // first, find out which domains we are crossing
             let mut segments = Vec::new();
             let mut last_domain = None;
-            for OptColumnRef { node, cols } in path.clone() {
+            for IndexRef { node, index } in path.clone() {
                 #[allow(clippy::indexing_slicing)] // paths contain valid node indices
                 let domain = self.graph[node].domain();
 
@@ -373,12 +373,10 @@ impl<'a> Plan<'a> {
                     last_domain = Some(domain);
                 }
 
-                let key = cols.map(Vec1::into_vec);
-
                 invariant!(!segments.is_empty());
 
                 #[allow(clippy::unwrap_used)] // checked by invariant!()
-                segments.last_mut().unwrap().1.push((node, key));
+                segments.last_mut().unwrap().1.push((node, index));
             }
 
             // technically redundant because path.len() > 1, but still
@@ -404,12 +402,12 @@ impl<'a> Plan<'a> {
                     // check to see if the column index is generated; if so, inform the domain
                     #[allow(clippy::unwrap_used)] // checked by invariant!()
                     let first = nodes.first().unwrap();
-                    if let Some(ref cols) = first.1 {
+                    if let Some(ref index) = first.1 {
                         let mut generated = false;
                         #[allow(clippy::indexing_slicing)] // replay paths contain valid nodes
                         if self.graph[first.0].is_internal() {
                             if let ColumnSource::GeneratedFromColumns(..) =
-                                self.graph[first.0].column_source(cols)
+                                self.graph[first.0].column_source(&index.columns)
                             {
                                 generated = true;
                             }
@@ -418,7 +416,7 @@ impl<'a> Plan<'a> {
                             debug!(
                                 domain = %domain.index(),
                                 "telling domain about generated columns {:?} on {}",
-                                cols,
+                                index.columns,
                                 first.0.index()
                             );
 
@@ -427,7 +425,7 @@ impl<'a> Plan<'a> {
                                 domain,
                                 DomainRequest::GeneratedColumns {
                                     node: self.graph[first.0].local_addr(),
-                                    cols: cols.clone(),
+                                    cols: index.columns.clone(),
                                 },
                             )?;
                         }
@@ -444,7 +442,7 @@ impl<'a> Plan<'a> {
                     .skip(skip_first)
                     .map(|&(ni, ref key)| ReplayPathSegment {
                         node: self.graph[ni].local_addr(),
-                        partial_key: key.clone(),
+                        partial_index: key.clone(),
                         force_tag_to: path_grouping.get(&(ni, pi)).copied(),
                     })
                     .collect();
@@ -540,10 +538,10 @@ impl<'a> Plan<'a> {
                                     // shard on the source. Otherwise, we need to check all of the shards.
                                     let key_column_source = &first_domain_node_key.1;
                                     match key_column_source {
-                                        Some(source_index_vector) => {
-                                            if source_index_vector.len() == 1 {
+                                        Some(source_index) => {
+                                            if source_index.len() == 1 {
                                                 #[allow(clippy::indexing_slicing)] // len == 1
-                                                if source_index_vector[0] == c {
+                                                if source_index[0] == c {
                                                     // the source node is sharded by the key column.
                                                     Some(0)
                                                 } else {
@@ -557,7 +555,8 @@ impl<'a> Plan<'a> {
                                                 // sharded by a single column. if the sharding key is one
                                                 // of the lookup keys, then we indeed only need to look at
                                                 // one shard, otherwise we need to ask all
-                                                source_index_vector
+                                                source_index
+                                                    .columns
                                                     .iter()
                                                     .position(|source_column| source_column == &c)
                                             }

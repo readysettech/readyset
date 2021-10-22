@@ -401,7 +401,7 @@ impl State for PersistentState {
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<(&[usize], u64)> {
+    fn evict_keys(&mut self, _: Tag, _: &[KeyComparison]) -> Option<(&Index, u64)> {
         unreachable!("can't evict keys from PersistentState")
     }
 
