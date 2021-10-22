@@ -375,7 +375,7 @@ Resources:
             export NORIA_PRIMARY_REGION="${AWS::Region}"
             export NORIA_QUORUM="1"
             export NORIA_REGION="${AWS::Region}"
-            export NORIA_SHARDS="1"
+            export NORIA_SHARDS="0"
             export REPLICATION_URL="${MySQLDatabaseURL}"
             export VOLUME_SIZE_GB="${ReadysetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
