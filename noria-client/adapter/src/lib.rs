@@ -193,6 +193,10 @@ pub struct Options {
     #[clap(long, requires = "prometheus-metrics")]
     query_log: bool,
 
+    /// Enables logging ad-hoc queries in the query log. Useful for testing.
+    #[clap(long, hidden = true, requires = "query-log")]
+    query_log_ad_hoc: bool,
+
     #[clap(flatten)]
     logging: readyset_logging::Options,
 }
@@ -390,7 +394,7 @@ where
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
-                .query_log(qlog_sender.clone())
+                .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .query_coverage_info(query_coverage_info)
                 .live_qca(options.live_qca)
                 .query_status_cache(query_status_cache.clone());

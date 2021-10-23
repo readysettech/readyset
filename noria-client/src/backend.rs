@@ -160,6 +160,7 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
     query_coverage_info: Option<QueryCoverageInfoRef>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    query_log_ad_hoc_queries: bool,
     // TODO(ENG-685): Remove option when live_qca flag is removed in main.
     query_status_cache: Option<Arc<QueryStatusCache>>,
     live_qca: bool,
@@ -178,6 +179,7 @@ impl Default for BackendBuilder {
             timestamp_client: None,
             query_coverage_info: None,
             query_log_sender: None,
+            query_log_ad_hoc_queries: false,
             query_status_cache: None,
             live_qca: false,
         }
@@ -214,6 +216,7 @@ impl BackendBuilder {
             prepared_statements: Default::default(),
             query_coverage_info: self.query_coverage_info,
             query_log_sender: self.query_log_sender,
+            query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
             query_status_cache: self.query_status_cache,
             live_qca: self.live_qca,
             _query_handler: PhantomData,
@@ -243,8 +246,10 @@ impl BackendBuilder {
     pub fn query_log(
         mut self,
         query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+        ad_hoc_queries: bool,
     ) -> Self {
         self.query_log_sender = query_log_sender;
+        self.query_log_ad_hoc_queries = ad_hoc_queries;
         self
     }
 
@@ -333,6 +338,9 @@ pub struct Backend<DB, Handler> {
     query_coverage_info: Option<QueryCoverageInfoRef>,
 
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+
+    /// Whether to log ad-hoc queries by full query text in the query logger.
+    query_log_ad_hoc_queries: bool,
 
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: Option<Arc<QueryStatusCache>>,
@@ -1343,6 +1351,9 @@ where
         let res = if let Some(ref mut upstream) = self.upstream {
             match parsed_query {
                 nom_sql::SqlQuery::Select(ref stmt) => {
+                    if self.query_log_ad_hoc_queries {
+                        event.query = Some(parsed_query.clone());
+                    }
                     let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
                         self.mirror_read(stmt.clone(), query.to_owned(), self.ticket.clone(), event)
@@ -1357,10 +1368,17 @@ where
                             // set the queries status in the cache and send it to fallback.
                             None => {
                                 query_status_cache.register_query(stmt).await;
-                                upstream.query(&query).await.map(QueryResult::Upstream)
+                                let handle = event.start_timer();
+                                let res = upstream.query(&query).await.map(QueryResult::Upstream);
+                                handle.set_upstream_duration();
+                                res
                             }
                             Some(AdmitStatus::Deny) => {
-                                upstream.query(&query).await.map(QueryResult::Upstream)
+                                query_status_cache.register_query(stmt).await;
+                                let handle = event.start_timer();
+                                let res = upstream.query(&query).await.map(QueryResult::Upstream);
+                                handle.set_upstream_duration();
+                                res
                             }
                             Some(AdmitStatus::Allow) => {
                                 let res = self
