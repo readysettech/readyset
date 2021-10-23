@@ -60,6 +60,24 @@ impl fmt::Debug for PreparedStatement {
     }
 }
 
+/// Wrapper around a NoriaBackendInner which may not have been successfully
+/// created. When this is the case, this wrapper allows returning an error
+/// from any call that requires NoriaBackendInner through an error
+/// returned by `get_mut`.
+#[derive(Clone)]
+pub struct NoriaBackend {
+    inner: Option<NoriaBackendInner>,
+}
+
+impl NoriaBackend {
+    async fn get_mut(&mut self) -> ReadySetResult<&mut NoriaBackendInner> {
+        // TODO(ENG-707): Support retrying to create a backend in the future.
+        self.inner
+            .as_mut()
+            .ok_or_else(|| internal_err("Failed to create a Noria backend."))
+    }
+}
+
 pub struct NoriaBackendInner {
     noria: ControllerHandle,
     inputs: BTreeMap<String, Table>,
@@ -86,28 +104,28 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(mut ch: ControllerHandle) -> Self {
-        ch.ready().await.unwrap();
-        let inputs = ch.inputs().await.expect("couldn't get inputs from Noria");
+    async fn new(mut ch: ControllerHandle) -> ReadySetResult<Self> {
+        ch.ready().await?;
+        let inputs = ch.inputs().await?;
         let mut i = BTreeMap::new();
         for (n, _) in inputs {
-            ch.ready().await.unwrap();
-            let t = ch.table(&n).await.unwrap();
+            ch.ready().await?;
+            let t = ch.table(&n).await?;
             i.insert(n, t);
         }
-        ch.ready().await.unwrap();
-        let outputs = ch.outputs().await.expect("couldn't get outputs from Noria");
+        ch.ready().await?;
+        let outputs = ch.outputs().await?;
         let mut o = BTreeMap::new();
         for (n, _) in outputs {
-            ch.ready().await.unwrap();
-            let t = ch.view(&n).await.unwrap();
+            ch.ready().await?;
+            let t = ch.view(&n).await?;
             o.insert(n, t);
         }
-        NoriaBackendInner {
+        Ok(NoriaBackendInner {
             inputs: i,
             outputs: o,
             noria: ch,
-        }
+        })
     }
 
     async fn ensure_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
@@ -224,7 +242,7 @@ impl<'a> QueryResult<'a> {
 }
 
 pub struct NoriaConnector {
-    inner: NoriaBackendInner,
+    inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
     /// global cache of view endpoints and prepared statements
     cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
@@ -280,8 +298,15 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
     ) -> Self {
+        let backend = NoriaBackendInner::new(ch).await;
+        if let Err(e) = &backend {
+            error!(%e, "Error creating a noria backend");
+        }
+
         NoriaConnector {
-            inner: NoriaBackendInner::new(ch).await,
+            inner: NoriaBackend {
+                inner: backend.ok(),
+            },
             auto_increments,
             cached: query_cache,
             tl_cached: HashMap::new(),
@@ -298,6 +323,8 @@ impl NoriaConnector {
     ) -> ReadySetResult<QueryResult<'_>> {
         let getter = self
             .inner
+            .get_mut()
+            .await?
             .ensure_getter(query_name, self.region.clone())
             .await?;
         let getter_schema = getter
@@ -315,7 +342,7 @@ impl NoriaConnector {
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
-        let table_handle = self.inner.noria.table(table_name).await?;
+        let table_handle = self.inner.get_mut().await?.noria.table(table_name).await?;
         Ok(table_handle.node)
     }
 
@@ -327,7 +354,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "query::insert::access mutator");
-        let putter = self.inner.ensure_mutator(table).await?;
+        let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
@@ -363,7 +390,12 @@ impl NoriaConnector {
         };
 
         trace!(table = %q.table.name, "insert::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&q.table.name)
+            .await?;
         trace!("insert::extract schema");
         let schema = mutator
             .schema()
@@ -438,7 +470,7 @@ impl NoriaConnector {
         match prep {
             PreparedStatement::Insert(ref q) => {
                 let table = &q.table.name;
-                let putter = self.inner.ensure_mutator(table).await?;
+                let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
                 trace!("insert::extract schema");
                 let schema = putter
                     .schema()
@@ -468,7 +500,12 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&q.table.name)
+            .await?;
 
         trace!("delete::extract schema");
         let pkey = if let Some(cts) = mutator.schema() {
@@ -525,7 +562,12 @@ impl NoriaConnector {
         };
 
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&q.table.name)
+            .await?;
         trace!("update::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
             internal_err(format!("Could not find schema for table {}", q.table.name))
@@ -590,7 +632,12 @@ impl NoriaConnector {
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
         trace!(table = %statement.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&statement.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&statement.table.name)
+            .await?;
         trace!("delete::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
             internal_err(format!(
@@ -652,8 +699,12 @@ impl NoriaConnector {
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
         info!(table = %q.table.name, "table::create");
         noria_await!(
-            self.inner,
-            self.inner.noria.extend_recipe(&format!("{};", q))
+            self.inner.get_mut().await?,
+            self.inner
+                .get_mut()
+                .await?
+                .noria
+                .extend_recipe(&format!("{};", q))
         )?;
         trace!("table::created");
         Ok(QueryResult::CreateTable)
@@ -686,8 +737,10 @@ impl NoriaConnector {
                             info!(query = %q, name = %qname, "adding ad-hoc query");
                         }
                         if let Err(e) = noria_await!(
-                            self.inner,
+                            self.inner.get_mut().await?,
                             self.inner
+                                .get_mut()
+                                .await?
                                 .noria
                                 .extend_recipe(&format!("QUERY {}: {};", qname, q))
                         ) {
@@ -719,7 +772,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "insert::access mutator");
-        let putter = self.inner.ensure_mutator(table).await?;
+        let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -889,7 +942,12 @@ impl NoriaConnector {
         // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
         // earlier one of the same name
         trace!("select::access view");
-        let getter = self.inner.ensure_getter(qname, self.region.clone()).await?;
+        let getter = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_getter(qname, self.region.clone())
+            .await?;
         let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err("No schema for view"))?;
@@ -999,7 +1057,12 @@ impl NoriaConnector {
         params: Option<Vec<DataType>>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "update::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&q.table.name)
+            .await?;
 
         let q = q.into_owned();
         let (key, updates) = {
@@ -1031,7 +1094,12 @@ impl NoriaConnector {
         params: Option<Vec<DataType>>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "delete::access mutator");
-        let mutator = self.inner.ensure_mutator(&q.table.name).await?;
+        let mutator = self
+            .inner
+            .get_mut()
+            .await?
+            .ensure_mutator(&q.table.name)
+            .await?;
 
         let q = q.into_owned();
         let key = {
@@ -1070,6 +1138,8 @@ impl NoriaConnector {
         trace!(%qname, "query::select::extract schema");
         let getter_schema = self
             .inner
+            .get_mut()
+            .await?
             .ensure_getter(&qname, self.region.clone())
             .await?
             .schema()
@@ -1131,6 +1201,8 @@ impl NoriaConnector {
         trace!(qname = %qname, "select::extract schema");
         let getter_schema = self
             .inner
+            .get_mut()
+            .await?
             .ensure_getter(&qname, self.region.clone())
             .await?
             .schema()
@@ -1224,8 +1296,10 @@ impl NoriaConnector {
         info!(%q.definition, %q.name, "view::create");
 
         noria_await!(
-            self.inner,
+            self.inner.get_mut().await?,
             self.inner
+                .get_mut()
+                .await?
                 .noria
                 .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
         )?;
