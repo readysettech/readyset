@@ -252,6 +252,7 @@ Resources:
         VPCID: !GetAtt
           - VPCStack
           - Outputs.VPCID
+        EnableTCPForwarding: true
   ReadysetConsulStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
