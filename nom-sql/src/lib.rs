@@ -26,6 +26,7 @@ pub use self::select::{
     CommonTableExpression, GroupByClause, JoinClause, LimitClause, SelectStatement,
 };
 pub use self::set::SetStatement;
+pub use self::show::ShowStatement;
 pub use self::table::Table;
 pub use self::update::UpdateStatement;
 pub use self::use_statement::UseStatement;
@@ -55,6 +56,7 @@ mod order;
 mod rename;
 mod select;
 mod set;
+mod show;
 mod table;
 mod transaction;
 mod update;
