@@ -1465,7 +1465,7 @@ where
                 nom_sql::SqlQuery::Use(stmt) => {
                     match self.upstream.as_ref().map(|u| u.database()).flatten() {
                         Some(db) if db == stmt.database => {
-                            Ok(QueryResult::Noria(noria_connector::QueryResult::Use))
+                            Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                         }
                         _ => {
                             error!("USE statement attempted to change the database");
