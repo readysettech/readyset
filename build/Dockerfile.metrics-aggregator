@@ -1,0 +1,36 @@
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly as chef
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+RUN apt-get update
+RUN apt-get install -y \
+    clang \
+    cmake \
+    libclang-dev \
+    libssl-dev \
+    liblz4-dev \
+    librdkafka-dev \
+    build-essential \
+    llvm
+
+FROM chef as planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef as builder
+ARG release
+WORKDIR /workdir
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)"
+RUN cargo install cargo-chef
+COPY --from=planner /workdir/recipe.json recipe.json
+RUN cargo chef cook ${release:+--release} --recipe-path recipe.json
+COPY . .
+RUN cargo build ${release:+--release} --bin metrics-aggregator
+RUN if [ -n "$release" ]; then strip target/release/metrics-aggregator; else strip target/debug/metrics-aggregator; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/debian:bullseye-slim
+RUN apt-get update && apt-get install -y curl && rm -Rf /var/lib/apt
+COPY --from=builder /workdir/target/*/metrics-aggregator /bin/metrics-aggregator
+ENTRYPOINT ["/bin/metrics-aggregator"]

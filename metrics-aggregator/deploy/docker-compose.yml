@@ -1,0 +1,134 @@
+version: "3.8"
+services:
+  consul:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  mysql:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/mysql:8.0
+    cap_add:
+      - SYS_NICE #CAP_SYS_NICE
+    expose:
+      - 3306
+    environment:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: root
+    # doesn't actually depend on consul, but I can't figure out a way to have
+    # a depends_on with multiple health check relationships, so chaining them to ensure
+    # readyset-server waits on both consul and mysql for fallback.
+    depends_on:
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: "mysqladmin ping"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+  readyset-server:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:latest
+    expose:
+      # ❯ cat /proc/sys/net/ipv4/ip_local_port_range
+      #   32768	60999
+      - "32768-60999"
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: consul
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: frameworktests
+      REPLICATION_URL: mysql://root:root@mysql/test
+      LOG_LEVEL: trace
+    links:
+      - mysql
+      - consul
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+  db:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:latest
+    command: ["--query-log", "--query-log-ad-hoc"]
+    expose:
+      - 3333
+      - 8089
+    ports:
+      - "3333:3333"
+      - "8089:8089"
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: consul
+      LISTEN_ADDRESS: 0.0.0.0:3333
+      METRICS_ADDRESS: 0.0.0.0:8089
+      NORIA_DEPLOYMENT: frameworktests
+      UPSTREAM_DB_URL: mysql://root:root@mysql/test
+      LOG_LEVEL: trace
+      LIVE_QCA: "true"
+      QUERY_LOG: "true"
+      ALLOWED_USERNAME: root
+      ALLOWED_PASSWORD: root
+    links:
+      - readyset-server
+      - mysql
+      - consul
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      readyset-server:
+        condition: service_healthy
+  prometheus:
+    image: prom/prometheus
+    expose:
+      - 9090
+    ports:
+      - "9090:9090"
+    links:
+      - db
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "9090"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+  aggregator:
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/metrics-aggregator:latest
+    command: ["--unsecured-prometheus", "--unsecured-adapters"]
+    ports:
+      - "8090:8090"
+    environment:
+      LISTEN_ADDRESS: 0.0.0.0:8090
+      NORIA_DEPLOYMENT: frameworktests
+      ADAPTER_ADDRESSES: db:8089
+      PROMETHEUS_ADDRESS: prometheus:9090
+    links:
+      - db
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:8090/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      prometheus:
+        condition: service_healthy

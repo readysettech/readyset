@@ -48,6 +48,19 @@ steps:
         login: true
         retries: 3
 
+  - label: ":docker: Build metrics-aggregator image"
+    key: metrics-aggregator-image
+    command: >-
+      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
+        .buildkite/build_image.sh  build/Dockerfile.metrics-aggregator metrics-aggregator --build-arg release=1
+      else
+        .buildkite/build_image.sh build/Dockerfile.metrics-aggregator metrics-aggregator
+      fi
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
   - label: ':docker: Build prettier image'
     key: prettier-image
     command: .buildkite/build_image.sh build/Dockerfile.prettier prettier

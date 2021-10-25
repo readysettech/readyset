@@ -1,0 +1,13 @@
+global:
+  scrape_interval:     15s # By default, scrape targets every 15 seconds.
+
+  external_labels:
+    monitor: 'local-noria'
+
+scrape_configs:
+  - job_name: 'noria-adapter'
+    scrape_interval: 5s
+    metrics_path: '/prometheus'
+    scheme: http
+    static_configs:
+      - targets: ['db:8089']

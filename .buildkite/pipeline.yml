@@ -82,6 +82,10 @@ steps:
                 - Cargo.toml
                 - rust-toolchain
 
+            - label: ':docker: Build metrics-aggregator image'
+              include:
+                - "metrics-aggregator/**"
+
             - label: ':rust: Run tests'
               include:
                 - "[!ops]*"
@@ -174,7 +178,6 @@ steps:
               include:
                 - "js-client/**"
             # --- END JS CLIENT STEPS --- #
-
             - label: 'List frameworks'
               include:
                 - "readyset-framework-testing/**"
@@ -310,6 +313,30 @@ steps:
           login: true
           retries: 3
 
+  - label: ':rust: Build metrics-aggregator release binary'
+    key: build-metrics-aggregator-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin metrics-aggregator
+    - strip target/release/metrics-aggregator
+    artifact_paths:
+    - target/release/metrics-aggregator
+    depends_on:
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - SCCACHE_BUCKET=readyset-sccache-e1
+          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
   - label: ':rust: Build noria-psql adapter release binary'
     key: build-noria-psql-adapter-release
     commands:
@@ -352,7 +379,7 @@ steps:
     - 'echo +++ :buildkite: Downloading binary artifacts'
     - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server .
+    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server,amazon-ebs.metrics-aggregator .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:
@@ -362,6 +389,7 @@ steps:
     - build-noria-mysql-adapter-release
     - build-noria-psql-adapter-release
     - build-ensure-ebs-volume-release
+    - build-metrics-aggregator-release
     plugins:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
