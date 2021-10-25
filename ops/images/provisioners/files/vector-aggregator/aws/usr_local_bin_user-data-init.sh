@@ -18,6 +18,11 @@ trap 'on_error' ERR
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 
+cat >> /etc/vector.d/env <<EOF
+NORIA_DEPLOYMENT=${DEPLOYMENT}
+NORIA_TYPE="readyset-monitor"
+EOF
+
 cat > /etc/vector.d/vector.toml <<EOF
 [sources.in]
 type = "vector"
@@ -33,6 +38,14 @@ inputs = ["in"]
 type = "console"
 target = "stdout"
 encoding.codec = "text"
+
+[transforms.metrics]
+ type = "remap"
+ inputs = ["node-exporter"]
+ source = '''
+   .tags.deployment = "${DEPLOYMENT}"
+   .tags.job = "readyset-monitor"
+'''
 
 [sinks.cloudwatch]
 type = "aws_cloudwatch_logs"
@@ -54,7 +67,7 @@ region = "us-east-2"
 
 [sinks.prometheus]
 type = "prometheus_exporter"
-inputs = ["in", "node-exporter"]
+inputs = ["in", "metrics"]
 address = "0.0.0.0:9090"
 EOF
 

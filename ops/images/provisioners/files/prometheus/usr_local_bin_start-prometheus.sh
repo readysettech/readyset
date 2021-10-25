@@ -17,6 +17,7 @@ scrape_configs:
   - job_name: "prometheus"
     static_configs:
       - targets: ["${log_aggregator_address}:9090"]
+    honor_labels: true
 EOF
 
 /usr/local/bin/prometheus \

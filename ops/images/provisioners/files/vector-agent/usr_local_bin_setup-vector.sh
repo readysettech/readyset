@@ -23,6 +23,15 @@ type = "prometheus_scrape"
 endpoints = [ "http://localhost:${PROMETHEUS_PORT:-6033}/prometheus" ]
 scrape_interval_secs = 15
 
+[transforms.metrics]
+type = "remap"
+inputs = ["node-exporter", "prometheus"]
+source = '''
+  .tags.deployment = "${NORIA_DEPLOYMENT}"
+  .tags.job = "${NORIA_TYPE}"
+  .tags.instance = "${SERVER_ADDRESS}"
+'''
+
 [transforms.metadata]
 type = "remap"
 inputs = ["in"]
@@ -33,7 +42,7 @@ source = '''
 '''
 
 [sinks.out]
-inputs = ["metadata", "prometheus", "node-exporter"]
+inputs = ["metadata", "metrics"]
 type = "vector"
 address = "${LOG_AGGREGATOR_ADDRESS}:9000"
 EOF

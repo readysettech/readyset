@@ -23,6 +23,16 @@ AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
 EOF
 chmod 600 /etc/default/readyset-mysql-adapter
 
+IMDS_TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+SERVER_ADDRESS=`curl -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4`
+
+
+cat >> /etc/vector.d/env <<EOF
+NORIA_DEPLOYMENT=${DEPLOYMENT}
+NORIA_TYPE="readyset-adapter"
+SERVER_ADDRESS=${SERVER_ADDRESS}
+EOF
+
 systemctl reset-failed
 systemctl enable readyset-mysql-adapter
 systemctl restart readyset-mysql-adapter
