@@ -10,4 +10,4 @@ upload_regressions() {
 echo '+++ Compiling vertical tests'
 cargo --locked test -p noria-mysql --features vertical_tests --test vertical --no-run
 echo '+++ Running vertical tests'
-cargo --locked test -p noria-mysql --features vertical_tests --test vertical || upload_artifacts
+cargo --locked test -p noria-mysql --features vertical_tests --test vertical || upload_regressions
