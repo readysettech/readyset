@@ -4,10 +4,11 @@ use noria::{internal, invariant};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
 use std::convert::TryInto;
+use std::mem;
 use std::num::NonZeroUsize;
-use tracing::warn;
+use tracing::trace;
 
 use crate::prelude::*;
 
@@ -16,7 +17,7 @@ use crate::processing::{IngredientLookupResult, SuggestedIndex};
 use nom_sql::OrderType;
 use noria::errors::{internal_err, ReadySetResult};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Order(Vec<(usize, OrderType)>);
 impl Order {
     fn cmp(&self, a: &[DataType], b: &[DataType]) -> Ordering {
@@ -38,6 +39,52 @@ impl From<Vec<(usize, OrderType)>> for Order {
         Order(other)
     }
 }
+
+/// Data structure used internally to topk to track rows currently within a group. Contains a
+/// reference to the `order` of the topk itself to allow for a custom Ord implementation, which
+/// compares records in reverse order for efficient determination of the minimum record via
+/// insertion into a [`BinaryHeap`]
+#[derive(Debug)]
+struct CurrentRecord<'topk, 'state> {
+    row: Cow<'state, [DataType]>,
+    order: &'topk Order,
+    is_new: bool,
+}
+
+impl<'topk, 'state> Ord for CurrentRecord<'topk, 'state> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        debug_assert_eq!(self.order, other.order);
+        self.order
+            .cmp(self.row.as_ref(), other.row.as_ref())
+            .reverse()
+    }
+}
+
+impl<'topk, 'state> PartialOrd for CurrentRecord<'topk, 'state> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<'topk, 'state> PartialOrd<[DataType]> for CurrentRecord<'topk, 'state> {
+    fn partial_cmp(&self, other: &[DataType]) -> Option<Ordering> {
+        Some(self.order.cmp(self.row.as_ref(), other))
+    }
+}
+
+impl<'topk, 'state> PartialEq for CurrentRecord<'topk, 'state> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl<'topk, 'state> PartialEq<[DataType]> for CurrentRecord<'topk, 'state> {
+    fn eq(&self, other: &[DataType]) -> bool {
+        self.partial_cmp(other).contains(&Ordering::Equal)
+    }
+}
+
+impl<'topk, 'state> Eq for CurrentRecord<'topk, 'state> {}
 
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
@@ -109,18 +156,16 @@ impl TopK {
     /// `original_group_len` contains the length of the group before we started making updates to
     /// it.
     #[allow(clippy::too_many_arguments)]
-    fn post_group<'a>(
-        &self,
+    fn post_group<'topk, 'state>(
+        &'topk self,
         out: &mut Vec<Record>,
-        current: &mut Vec<(Cow<'a, [DataType]>, bool)>,
+        current: &mut BinaryHeap<CurrentRecord<'topk, 'state>>,
         current_group_key: &mut Vec<DataType>,
         original_group_len: usize,
-        state: &'a StateMap,
+        state: &'state StateMap,
         nodes: &DomainNodes,
     ) -> ReadySetResult<Option<Lookup>> {
         let mut lookup = None;
-        current.sort_unstable_by(|a, b| self.order.cmp(&*a.0, &*b.0));
-
         let group_start_index = current.len().saturating_sub(self.k);
 
         if original_group_len == self.k {
@@ -149,7 +194,11 @@ impl TopK {
                         });
                         current.extend(
                             rs.into_iter()
-                                .map(|r| (r, true))
+                                .map(|row| CurrentRecord {
+                                    row,
+                                    order: &self.order,
+                                    is_new: true,
+                                })
                                 .skip(current.len())
                                 .take(diff.get()),
                         );
@@ -161,53 +210,42 @@ impl TopK {
                     }
                 }
             }
-
-            // FIXME: if all the elements with the smallest value in the new topk are new,
-            // then it *could* be that there exists some value that is greater than all
-            // those values, and <= the smallest old value. we would only discover that by
-            // querying. unfortunately, the check below isn't *quite* right because it does
-            // not consider old rows that were removed in this batch (which should still be
-            // counted for this condition).
-            if false {
-                let all_new_bottom = current[group_start_index..]
-                    .iter()
-                    .take_while(|(ref r, _)| {
-                        self.order.cmp(r, &current[group_start_index].0) == Ordering::Equal
-                    })
-                    .all(|&(_, is_new)| is_new);
-                if all_new_bottom {
-                    warn!("topk is guesstimating bottom row");
-                }
-            }
         }
+
+        let mut current = mem::take(current).into_sorted_vec();
+        // TODO(grfn): it'd be nice to skip this reverse - we could maybe do that with minmaxheap if
+        // they merge my addition of retain (https://github.com/tov/min-max-heap-rs/pull/19)
+        current.reverse();
 
         // optimization: if we don't *have to* remove something, we don't
         for i in group_start_index..current.len() {
-            if current[i].1 {
+            if current[i].is_new {
                 // we found an `is_new` in current
                 // can we replace it with a !is_new with the same order value?
-                let replace = current[0..group_start_index]
-                    .iter()
-                    .position(|&(ref r, is_new)| {
-                        !is_new && self.order.cmp(r, &current[i].0) == Ordering::Equal
-                    });
+                let replace = current[0..group_start_index].iter().position(
+                    |CurrentRecord {
+                         row: ref r, is_new, ..
+                     }| {
+                        !is_new && self.order.cmp(r, &current[i].row) == Ordering::Equal
+                    },
+                );
                 if let Some(ri) = replace {
                     current.swap(i, ri);
                 }
             }
         }
 
-        for (r, is_new) in current.drain(group_start_index..) {
+        for CurrentRecord { row, is_new, .. } in current.drain(group_start_index..) {
             if is_new {
-                out.push(Record::Positive(r.into_owned()));
+                out.push(Record::Positive(row.into_owned()));
             }
         }
 
         if !current.is_empty() {
-            for (r, is_new) in current.drain(..) {
+            for CurrentRecord { row, is_new, .. } in current.drain(..) {
                 if !is_new {
                     // Was in k, now isn't
-                    out.push(Record::Negative(r.clone().into()));
+                    out.push(Record::Negative(row.clone().into()));
                 }
             }
         }
@@ -281,8 +319,8 @@ impl Ingredient for TopK {
         // records (if we weren't originally at `k` records we don't need to do anything special).
         let mut original_group_len = 0;
         let mut missed = false;
-        // current holds (Cow<Row>, bool) where bool = is_new
-        let mut current: Vec<(Cow<'a, [DataType]>, bool)> = Vec::new();
+        // The current group being processed
+        let mut current: BinaryHeap<CurrentRecord> = BinaryHeap::new();
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
 
@@ -326,7 +364,11 @@ impl Ingredient for TopK {
 
                         missed = false;
                         original_group_len = local_records.len();
-                        current.extend(local_records.into_iter().map(|r| (r.clone(), false)))
+                        current.extend(local_records.into_iter().map(|row| CurrentRecord {
+                            row: row.clone(),
+                            is_new: false,
+                            order: &self.order,
+                        }))
                     }
                     LookupResult::Missing => {
                         missed = true;
@@ -344,20 +386,51 @@ impl Ingredient for TopK {
                 });
             } else {
                 match r {
-                    Record::Positive(r) => current.push((Cow::Owned(r.clone()), true)),
-                    Record::Negative(r) => {
-                        if let Some(p) = current.iter().position(|&(ref x, _)| *r == **x) {
-                            let (_, was_new) = current.swap_remove(p);
-                            // was_new = we received a positive and a negative
-                            // for the same value in one batch
-                            // [note: topk-record-ordering]
-                            // Note that since we sort records, and positive records compare less
-                            // than negative records, we'll always get the positive first and the
-                            // negative second
-                            if !was_new {
-                                out.push(Record::Negative(r.clone()));
+                    Record::Positive(r) => {
+                        // If we're at k records we can't consider positive records below our
+                        // minimum element, because it's possible that there are *other* records
+                        // *between* our minimum element and that positive record which we wouldn't
+                        // know about. If we drop below k records during processing and it turns out
+                        // that this positive record would have been in the topk, we'll figure that
+                        // out in post_group when we query our parent.
+                        if original_group_len >= self.k {
+                            if let Some(min) = current.peek() {
+                                if min > r.as_slice() {
+                                    trace!(row = ?r, "topk skipping positive below minimum");
+                                    continue;
+                                }
                             }
                         }
+
+                        current.push(CurrentRecord {
+                            row: Cow::Owned(r.clone()),
+                            is_new: true,
+                            order: &self.order,
+                        })
+                    }
+                    Record::Negative(r) => {
+                        let mut found = false;
+                        current.retain(|CurrentRecord { row, is_new, .. }| {
+                            if found {
+                                // we've already removed one copy of this row, don't need to do any more
+                                return true;
+                            }
+                            if **row == *r {
+                                found = true;
+                                // is_new = we received a positive and a negative for the same value in
+                                // one batch
+                                // [note: topk-record-ordering]
+                                // Note that since we sort records, and positive records compare less
+                                // than negative records, we'll always get the positive first and the
+                                // negative second
+                                if !is_new {
+                                    out.push(Record::Negative(r.clone()))
+                                }
+                                return false;
+                            }
+
+                            true
+                        });
                     }
                 }
             }
@@ -769,5 +842,28 @@ mod tests {
             ]
             .into()
         )
+    }
+
+    #[test]
+    fn update_shifting_out() {
+        let (mut g, s) = setup(false);
+        let ra1: Vec<DataType> = vec![1.into(), "a".try_into().unwrap(), 1.into()];
+        let ra2: Vec<DataType> = vec![2.into(), "a".try_into().unwrap(), 2.into()];
+        let ra3: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 3.into()];
+        let ra4: Vec<DataType> = vec![4.into(), "a".try_into().unwrap(), 4.into()];
+
+        g.seed(s, ra1.clone());
+        g.seed(s, ra2.clone());
+        g.seed(s, ra4.clone());
+
+        g.narrow_one_row(ra1.clone(), true);
+        g.narrow_one_row(ra2, true);
+        g.narrow_one_row(ra3.clone(), true);
+        g.narrow_one_row(ra4, true);
+
+        let ra0: Vec<DataType> = vec![3.into(), "a".try_into().unwrap(), 0.into()];
+
+        let emit = g.narrow_one(vec![(ra3.clone(), false), (ra0, true)], true);
+        assert_eq!(emit, vec![(ra3, false), (ra1, true)].into());
     }
 }

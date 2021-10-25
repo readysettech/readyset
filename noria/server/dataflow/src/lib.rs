@@ -7,6 +7,7 @@
 )]
 #![feature(
     iter_order_by,
+    binary_heap_retain,
     trait_alias,
     btree_drain_filter,
     option_result_contains,

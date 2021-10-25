@@ -49,3 +49,29 @@ select id from t1 where fk_id = ? order by value asc limit 3
 3
 4
 5
+
+statement ok
+insert into t1 (id, value, fk_id) values
+(6, 6, 3)
+
+
+query I nosort
+select id from t1 where fk_id = ? order by value asc limit 3
+? = 3
+----
+3
+4
+5
+
+# Update shifting a record out of the k should query the parent
+
+statement ok
+update t1 set value = 7 where id = 4;
+
+query I nosort
+select id from t1 where fk_id = ? order by value asc limit 3
+? = 3
+----
+3
+5
+6
