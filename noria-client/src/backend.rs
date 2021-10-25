@@ -957,6 +957,7 @@ where
             | nom_sql::SqlQuery::Commit(..)
             | nom_sql::SqlQuery::Rollback(..)
             | nom_sql::SqlQuery::Use(..)
+            | nom_sql::SqlQuery::Show(..)
             | nom_sql::SqlQuery::CompoundSelect(..) => {
                 if let Some(ref mut upstream) = self.upstream {
                     upstream.prepare(query).await.map(|r| {
@@ -1432,7 +1433,8 @@ where
                 nom_sql::SqlQuery::DropTable(_)
                 | nom_sql::SqlQuery::AlterTable(_)
                 | nom_sql::SqlQuery::RenameTable(_)
-                | nom_sql::SqlQuery::Use(_) => {
+                | nom_sql::SqlQuery::Use(_)
+                | nom_sql::SqlQuery::Show(_) => {
                     if self.mirror_reads {
                         let res = upstream.query(query).await;
                         handle.set_upstream_duration();

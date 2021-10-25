@@ -105,7 +105,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::CompoundSelect(_)
         | SqlQuery::StartTransaction(_)
         | SqlQuery::Commit(_)
-        | SqlQuery::Rollback(_) => false,
+        | SqlQuery::Rollback(_)
+        | SqlQuery::Show(_) => false,
         SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
