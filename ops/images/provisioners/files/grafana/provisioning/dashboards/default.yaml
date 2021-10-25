@@ -1,0 +1,7 @@
+apiVersion: 1
+
+providers:
+  - name: Query log
+    type: file
+    options:
+      path: /etc/grafana/dashboards/query_log.json

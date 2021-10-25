@@ -18,5 +18,10 @@ sudo install -o grafana -g grafana -m 644 \
   /tmp/grafana/etc_grafana_grafana.ini \
   /etc/grafana/grafana.ini
 
+sudo cp -r /tmp/grafana/provisioning \
+           /etc/grafana
+sudo cp -r /tmp/grafana/dashboards \
+           /etc/grafana
+
 sudo systemctl daemon-reload
 sudo systemctl start grafana-server.service
