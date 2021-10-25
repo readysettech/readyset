@@ -14,8 +14,8 @@ use tracing::warn;
 
 use crate::prelude::*;
 
-use crate::processing::SuggestedIndex;
 use crate::processing::{ColumnSource, LookupMode};
+use crate::processing::{IngredientLookupResult, SuggestedIndex};
 use nom_sql::OrderType;
 use noria::errors::{internal_err, ReadySetResult};
 
@@ -165,10 +165,13 @@ impl TopK {
                         nodes,
                         state,
                         LookupMode::Strict,
-                    ) {
-                        None => internal!("TopK must have its parent materialized"),
-                        Some(None) => internal!("We shouldn't have been able to get this record if the parent would miss"),
-                        Some(Some(rs)) => {
+                    )? {
+                        IngredientLookupResult::Miss => {
+                            internal!(
+                                "We shouldn't have been able to get this record if the parent would miss"
+                            )
+                        }
+                        IngredientLookupResult::Records(rs) => {
                             let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
                             rs.sort_unstable_by(|a, b| {
                                 self.order.cmp(a.as_ref(), b.as_ref()).reverse()

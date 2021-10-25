@@ -3,12 +3,11 @@
 // or removed.
 
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
 
@@ -121,7 +120,7 @@ impl Ingredient for ParamFilter {
         _nodes: &DomainNodes,
         _states: &'a StateMap,
         _mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
         todo!()
     }
 }

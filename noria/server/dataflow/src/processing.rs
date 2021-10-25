@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::ops::Bound;
+use std::{iter, mem};
 use vec1::Vec1;
 
 use crate::ops;
@@ -292,6 +293,107 @@ impl std::ops::Index<usize> for SuggestedIndex {
     }
 }
 
+/// The result returned from a lookup operation performed by an ingredient during processing.
+///
+/// This is distinct from [`LookupResult`] because the iterator of records returned is fallible, to
+/// allow for errors that occur in [`Ingredient::query_through`] (eg failure in evaluating a filter
+/// expression)
+pub(crate) enum IngredientLookupResult<'a> {
+    /// Records returned from a successful lookup
+    Records(Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>),
+    /// The lookup got a miss
+    Miss,
+}
+
+impl<'a> From<LookupResult<'a>> for IngredientLookupResult<'a> {
+    fn from(lookup_res: LookupResult<'a>) -> Self {
+        match lookup_res {
+            LookupResult::Some(rs) => Self::records(rs),
+            LookupResult::Missing => Self::Miss,
+        }
+    }
+}
+
+impl<'a, I> From<Box<I>> for IngredientLookupResult<'a>
+where
+    I: Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a,
+{
+    fn from(rs: Box<I>) -> Self {
+        Self::Records(rs as Box<_>)
+    }
+}
+
+impl<'a> IngredientLookupResult<'a> {
+    /// Construct a new [`IngredientLookupResult`] from the given iterator of records
+    pub(crate) fn records<I, R>(rs: I) -> Self
+    where
+        I: IntoIterator<Item = R> + 'a,
+        Cow<'a, [DataType]>: From<R>,
+        R: 'a,
+    {
+        Box::new(rs.into_iter().map(|r| Ok(r.into()))).into()
+    }
+
+    /// Construct an [`IngredientLookupResult::Records`] that yields no results on iteration
+    pub(crate) fn empty() -> Self {
+        Box::new(iter::empty()).into()
+    }
+
+    /// Construct an [`IngredientLookupResult::Records`] that yields a single error on iteration
+    pub(crate) fn err<E>(e: E) -> Self
+    where
+        ReadySetError: From<E>,
+    {
+        Box::new(iter::once(Err(e.into()))).into()
+    }
+
+    /// Transform into a new [`IngredientLookupResult`] of the same structure by calling `f` on all
+    /// records in [`Self::Records`], or by returning [`Self::Miss`]
+    pub(crate) fn map<F>(self, f: F) -> Self
+    where
+        F: 'a + FnMut(ReadySetResult<Cow<'a, [DataType]>>) -> ReadySetResult<Cow<'a, [DataType]>>,
+    {
+        match self {
+            Self::Records(rs) => Self::Records(Box::new(rs.map(f)) as _),
+            Self::Miss => Self::Miss,
+        }
+    }
+
+    /// Returns `true` if self is [`Miss`].
+    ///
+    /// [`Miss`]: IngredientLookupResult::Miss
+    pub(crate) fn is_miss(&self) -> bool {
+        matches!(self, Self::Miss)
+    }
+
+    /// Returns the contained [`Records`] value, consuming `self`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is [`IngredientLookupResult::Miss`]
+    #[cfg(test)]
+    pub(crate) fn unwrap(
+        self,
+    ) -> Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a> {
+        match self {
+            IngredientLookupResult::Records(rs) => rs,
+            IngredientLookupResult::Miss => {
+                #[allow(clippy::panic)] // documented
+                {
+                    panic!("unwrap() called on IngredientLookupResult::Miss")
+                }
+            }
+        }
+    }
+
+    /// Consume this IngredientLookupResult, leaving a [`Miss`][] in its place
+    ///
+    /// [`Miss`]: IngredientLookupResult::Miss
+    pub(crate) fn take(&mut self) -> Self {
+        mem::replace(self, Self::Miss)
+    }
+}
+
 pub(crate) trait Ingredient
 where
     Self: Send,
@@ -459,8 +561,6 @@ where
         false
     }
 
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::option_option)]
     fn query_through<'a>(
         &self,
         _columns: &[usize],
@@ -468,58 +568,50 @@ where
         _nodes: &DomainNodes,
         _states: &'a StateMap,
         _mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        None
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
+        internal!("Node does not support query_through")
     }
 
     /// Look up the given key in the given parent's state using the given `mode` to specify which
-    /// kind of index to look up into, falling back to query_through if necessary. The return values
-    /// signifies:
+    /// kind of index to look up into, falling back to query_through if necessary.
     ///
-    ///  - `None` => no materialization of the parent state exists
-    ///  - `Some(None)` => materialization exists, but lookup got a miss
-    ///  - `Some(Some(rs))` => materialization exists, and got results rs
+    /// Will return [`ReadySetError::IndexNotFound`] if no materialization exists in `parent` with
+    /// the given `columns` that can satisfy a lookup of `key` with `mode` (eg because
+    /// [`suggest_indexes`] did not suggest one).
     ///
     /// # Invariants
     ///
-    /// * The passed `columns` and `mode` must match an index previously created by
-    ///   `suggest_indexes`
     /// * `columns` and `key` must have the same length
-    #[allow(clippy::type_complexity)]
-    #[allow(clippy::option_option)]
     fn lookup<'a>(
         &self,
-        parent: LocalNodeIndex,
+        parent_index: LocalNodeIndex,
         columns: &[usize],
         key: &KeyType,
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        match states.get(parent) {
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
+        match states.get(parent_index) {
             Some(state) => match mode {
-                LookupMode::Weak if state.is_partial() => {
-                    Some(state.lookup_weak(columns, key).and_then(|rs| {
-                        (!rs.is_empty()).then(|| Box::new(rs.into_iter().map(Ok)) as Box<_>)
-                    }))
-                }
-                _ => match state.lookup(columns, key) {
-                    LookupResult::Some(rs) => {
-                        Some(Some(Box::new(rs.into_iter().map(Ok)) as Box<_>))
-                    }
-                    LookupResult::Missing => Some(None),
+                LookupMode::Weak if state.is_partial() => match state.lookup_weak(columns, key) {
+                    Some(rs) if !rs.is_empty() => Ok(IngredientLookupResult::records(rs)),
+                    _ => Ok(IngredientLookupResult::Miss),
                 },
+                _ => Ok(state.lookup(columns, key).into()),
             },
             None => {
                 // this is a long-shot.
                 // if our ancestor can be queried *through*, then we just use that state instead
                 #[allow(clippy::indexing_slicing)] // Node must exist to have gotten here.
-                let parent = nodes[parent].borrow();
+                let parent = nodes[parent_index].borrow();
 
                 if let Some(n) = parent.as_internal() {
                     n.query_through(columns, key, nodes, states, mode)
                 } else {
-                    None
+                    Err(ReadySetError::IndexNotFound {
+                        node: parent_index,
+                        columns: columns.to_vec(),
+                    })
                 }
             }
         }
