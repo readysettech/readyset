@@ -31,7 +31,16 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
   vector:
     image: timberio/vector:0.16.1-debian
-    ports: 
-      - 8383:9000
+    network_mode: "host"
     volumes:
       - ./vector/aggregator.toml:/etc/vector/vector.toml
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
