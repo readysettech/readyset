@@ -205,6 +205,7 @@ pub enum QueryResult<'a> {
     Delete {
         num_rows_deleted: u64,
     },
+    Use,
 }
 
 impl<'a> QueryResult<'a> {
@@ -237,6 +238,7 @@ impl<'a> QueryResult<'a> {
                 last_inserted_id,
             },
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
+            QueryResult::Use => QueryResult::Use,
         }
     }
 }

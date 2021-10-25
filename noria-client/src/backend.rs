@@ -1433,7 +1433,6 @@ where
                 nom_sql::SqlQuery::DropTable(_)
                 | nom_sql::SqlQuery::AlterTable(_)
                 | nom_sql::SqlQuery::RenameTable(_)
-                | nom_sql::SqlQuery::Use(_)
                 | nom_sql::SqlQuery::Show(_) => {
                     if self.mirror_reads {
                         let res = upstream.query(query).await;
@@ -1462,6 +1461,17 @@ where
                     let res = self.query_fallback(query).await;
                     handle.set_upstream_duration();
                     res
+                }
+                nom_sql::SqlQuery::Use(stmt) => {
+                    match self.upstream.as_ref().map(|u| u.database()).flatten() {
+                        Some(db) if db == stmt.database => {
+                            Ok(QueryResult::Noria(noria_connector::QueryResult::Use))
+                        }
+                        _ => {
+                            error!("USE statement attempted to change the database");
+                            unsupported!("USE");
+                        }
+                    }
                 }
             }
         } else {
