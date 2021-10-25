@@ -24,7 +24,7 @@ use noria_client_metrics::{EventType, QueryExecutionEvent};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::coverage::QueryCoverageInfoRef;
-use crate::query_status_cache::{QueryState, QueryStatusCache};
+use crate::query_status_cache::{AdmitStatus, QueryStatusCache};
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -870,14 +870,13 @@ where
                     if self.live_qca_enabled() {
                         // The query status cache is guaranteed to exist if `live_qca` is enabled.
                         #[allow(clippy::unwrap_used)]
-                        let cache = self.query_status_cache.as_ref().unwrap().clone();
+                        let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
 
-                        let result = match cache.query_state(stmt).await {
-                            // If this is the first time this adapter has seen the query, we should
-                            // set the queries status in the cache and attempt to validate column
-                            // headers to fast-track a query to the allow list.
+                        let result = match query_status_cache.admit(stmt).await {
+                            // Register the query if this is the first time we the
+                            // adapter has seen it.
                             None => {
-                                cache.register_query(stmt).await;
+                                query_status_cache.register_query(stmt).await;
                                 let handle = event.start_timer();
                                 let result = self
                                     .prepare_fallback(query)
@@ -886,9 +885,7 @@ where
                                 handle.set_upstream_duration();
                                 result
                             }
-                            Some(QueryState::NeedsProcessing) => {
-                                // Any query whose state is still being processed should be sent
-                                // directly to fallback.
+                            Some(AdmitStatus::Deny) => {
                                 let handle = event.start_timer();
                                 let result = self
                                     .prepare_fallback(query)
@@ -897,7 +894,7 @@ where
                                 handle.set_upstream_duration();
                                 result
                             }
-                            Some(QueryState::Allow) => {
+                            Some(AdmitStatus::Allow) => {
                                 // Prepare allowed queries on both noria and fallback so that
                                 // if there are errors during execute we can still fallback
                                 // correctly.
@@ -1102,14 +1099,15 @@ where
                         if self.live_qca_enabled() {
                             // The query status cache is guaranteed to exist if `live_qca` is enabled.
                             #[allow(clippy::unwrap_used)]
-                            let cache = self.query_status_cache.as_ref().unwrap().clone();
-                            let result = cache.query_state(stmt).await;
-                            match result {
+                            let stmt = stmt.clone();
+                            let query_status_cache =
+                                self.query_status_cache.as_ref().unwrap().clone();
+                            match query_status_cache.admit(&stmt).await {
                                 // If prepare was called for this query prior, it should be in the
                                 // query status cache.
                                 None => Err(PreparedStatementMissing { statement_id: id })
                                     .map_err(|e| e.into()),
-                                Some(QueryState::Allow) => {
+                                Some(AdmitStatus::Allow) => {
                                     // If the query is allowed and we have not yet prepared it noria - then
                                     // during our prepare we either encountered a transient noria
                                     // failure or the migration was pending. Prepare it now as we
@@ -1128,28 +1126,36 @@ where
                                         if let Ok(ref result) = res {
                                             self.store_prep_statement(id, result);
                                         } else {
-                                            cache.set_needs_processing(stmt).await;
+                                            query_status_cache.set_failed_prepare(&stmt).await;
                                         }
                                     }
 
+                                    // This will include the upstream and noria prepared
+                                    // statements, even if the noria prepare fails we will
+                                    // attempt execution on upstream via `cascade_execute`.
                                     let prepared_statement = self
                                         .prepared_statements
                                         .get(&id)
                                         .cloned()
                                         .ok_or(PreparedStatementMissing { statement_id: id })?;
 
-                                    self.cascade_execute(
-                                        id,
-                                        &prepared_statement,
-                                        params,
-                                        prep,
-                                        event,
-                                    )
-                                    .await
+                                    let res = self
+                                        .cascade_execute(
+                                            id,
+                                            &prepared_statement,
+                                            params,
+                                            prep,
+                                            event,
+                                        )
+                                        .await;
+
+                                    if event.noria_error.is_some() {
+                                        query_status_cache.set_failed_execute(&stmt).await;
+                                    }
+
+                                    res
                                 }
-                                Some(QueryState::NeedsProcessing) => {
-                                    // Prepare the statement if we have not seen this
-                                    // prepared statement yet.
+                                Some(AdmitStatus::Deny) => {
                                     if let (Some(statement_id), Some(upstream)) =
                                         (prepared_statement.upstream, &mut self.upstream)
                                     {
@@ -1167,8 +1173,6 @@ where
                                 }
                             }
                         } else {
-                            // If there is no upstream or live qca is disabled we just cascade
-                            // execute.
                             self.cascade_execute(id, prepared_statement, params, prep, event)
                                 .await
                         }
@@ -1346,24 +1350,24 @@ where
                     } else if live_qca_enabled {
                         // The query status cache is guarenteed to exist if `live_qca` is enabled.
                         #[allow(clippy::unwrap_used)]
-                        let cache = self.query_status_cache.as_ref().unwrap().clone();
+                        let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
 
-                        match cache.query_state(stmt).await {
+                        match query_status_cache.admit(stmt).await {
                             // If this is the first time this adapter has seen the query, we should
                             // set the queries status in the cache and send it to fallback.
                             None => {
-                                cache.register_query(stmt).await;
+                                query_status_cache.register_query(stmt).await;
                                 upstream.query(&query).await.map(QueryResult::Upstream)
                             }
-                            Some(QueryState::NeedsProcessing) => {
+                            Some(AdmitStatus::Deny) => {
                                 upstream.query(&query).await.map(QueryResult::Upstream)
                             }
-                            Some(QueryState::Allow) => {
+                            Some(AdmitStatus::Allow) => {
                                 let res = self
                                     .cascade_read(stmt.clone(), query, self.ticket.clone(), event)
                                     .await;
                                 if res.is_err() {
-                                    cache.set_needs_processing(stmt).await;
+                                    query_status_cache.set_failed_query(stmt).await;
                                 }
                                 res
                             }
