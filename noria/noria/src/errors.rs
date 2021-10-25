@@ -343,6 +343,15 @@ pub enum ReadySetError {
         index: usize,
     },
 
+    /// A lookup was performed on a node with a nonexistent index
+    #[error("Node with local index {node} does not have an index for {columns:?}")]
+    IndexNotFound {
+        /// The node that the lookup was performed into
+        node: LocalNodeIndex,
+        /// The set of columns for the index
+        columns: Vec<usize>,
+    },
+
     /// A worker tried to check in with a heartbeat payload, but the controller is unaware of it.
     #[error("Unknown worker at {unknown_uri} tried to check in with heartbeat")]
     UnknownWorker {

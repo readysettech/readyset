@@ -9,7 +9,7 @@ use maplit::hashmap;
 use nom_sql::SqlType;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use noria::errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
@@ -290,10 +290,9 @@ where
                                 &KeyType::from(&group[..]),
                                 nodes,
                                 state,
-                                LookupMode::Strict
-                            ).ok_or_else(|| internal_err("grouped operators must have their parents' state materialized"))?
-                            {
-                                None => {
+                                LookupMode::Strict,
+                            )? {
+                                IngredientLookupResult::Miss => {
                                     // We missed in our parent! This is fine, we can just emit a
                                     // miss and drop the write like normal.
                                     //
@@ -321,7 +320,7 @@ where
                                     misses.extend(rs.into_iter());
                                     return Ok(());
                                 }
-                                Some(rs) => {
+                                IngredientLookupResult::Records(rs) => {
                                     if replay_key_cols.is_some() {
                                         lookups.push(Lookup {
                                             on: *this.src,
@@ -332,14 +331,12 @@ where
                                                 .map_err(|_| internal_err("Empty group"))?,
                                         });
                                     }
-                                    rs.into_iter().map(|x| match x {
-                                        Ok(r) => {
-                                            Ok(r.into_owned())
-                                        }
-                                        Err(e) => {
-                                            Err(e)
-                                        }
-                                    }).collect::<ReadySetResult<Vec<_>>>()?
+                                    rs.into_iter()
+                                        .map(|x| match x {
+                                            Ok(r) => Ok(r.into_owned()),
+                                            Err(e) => Err(e),
+                                        })
+                                        .collect::<ReadySetResult<Vec<_>>>()?
                                 }
                             }
                         };

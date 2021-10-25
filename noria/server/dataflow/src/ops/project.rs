@@ -3,11 +3,10 @@ use noria::internal;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::iter;
 use tracing::error;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 use noria::errors::ReadySetResult;
 use std::convert::TryInto;
@@ -107,7 +106,7 @@ impl Ingredient for Project {
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
         let emit = self.emit.clone();
         let additional = self.additional.clone();
         let expressions = self.expressions.clone();
@@ -129,44 +128,42 @@ impl Ingredient for Project {
                 .collect();
             match c {
                 Ok(c) => Cow::Owned(c),
-                Err(e) => return Some(Some(Box::new(iter::once(Err(e))))),
+                Err(e) => return Ok(IngredientLookupResult::err(e)),
             }
         } else {
             Cow::Borrowed(columns)
         };
 
-        self.lookup(*self.src, &*in_cols, key, nodes, states, mode)
-            .map(|result| {
-                result.map(|rs| match emit {
-                    Some(emit) => Box::new(rs.map(move |r| {
-                        let r = r?;
-                        let mut new_r = Vec::with_capacity(r.len());
-                        let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
-                            e.iter()
-                                .map(|expr| Ok(expr.eval(&r)?.into_owned()))
-                                .collect::<ReadySetResult<Vec<DataType>>>()?
-                        } else {
-                            vec![]
-                        };
+        let res = self.lookup(*self.src, &*in_cols, key, nodes, states, mode)?;
+        Ok(match emit {
+            Some(emit) => res.map(move |r| {
+                let r = r?;
+                let mut new_r = Vec::with_capacity(r.len());
+                let mut expr: Vec<DataType> = if let Some(ref e) = expressions {
+                    e.iter()
+                        .map(|expr| Ok(expr.eval(&r)?.into_owned()))
+                        .collect::<ReadySetResult<Vec<DataType>>>()?
+                } else {
+                    vec![]
+                };
 
-                        new_r.extend(
-                            r.into_owned()
-                                .into_iter()
-                                .enumerate()
-                                .filter(|(i, _)| emit.iter().any(|e| e == i))
-                                .map(|(_, c)| c),
-                        );
+                new_r.extend(
+                    r.into_owned()
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(i, _)| emit.iter().any(|e| e == i))
+                        .map(|(_, c)| c),
+                );
 
-                        new_r.append(&mut expr);
-                        if let Some(ref a) = additional {
-                            new_r.append(&mut a.clone());
-                        }
+                new_r.append(&mut expr);
+                if let Some(ref a) = additional {
+                    new_r.append(&mut a.clone());
+                }
 
-                        Ok(Cow::from(new_r))
-                    })) as Box<_>,
-                    None => Box::new(rs) as Box<_>,
-                })
-            })
+                Ok(Cow::from(new_r))
+            }),
+            None => res,
+        })
     }
 
     fn on_connected(&mut self, g: &Graph) {

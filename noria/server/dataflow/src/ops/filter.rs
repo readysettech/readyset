@@ -1,8 +1,7 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::prelude::*;
-use crate::processing::{ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
 pub use nom_sql::BinaryOperator;
 use noria::errors::ReadySetResult;
@@ -92,12 +91,12 @@ impl Ingredient for Filter {
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
-        self.lookup(*self.src, columns, key, nodes, states, mode)
-            .map(|result| {
-                result.map(|rs| {
-                    let f = self.expression.clone();
-                    let filter = move |r: &[DataType]| Ok(f.eval(r)?.is_truthy());
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
+        match self.lookup(*self.src, columns, key, nodes, states, mode)? {
+            IngredientLookupResult::Records(rs) => {
+                let f = self.expression.clone();
+                let filter = move |r: &[DataType]| Ok(f.eval(r)?.is_truthy());
+                Ok(IngredientLookupResult::Records(
                     Box::new(rs.filter_map(move |r| {
                         match r {
                             Ok(data) => {
@@ -117,9 +116,11 @@ impl Ingredient for Filter {
                                 Some(Err(e))
                             }
                         }
-                    })) as Box<_>
-                })
-            })
+                    })) as _,
+                ))
+            }
+            IngredientLookupResult::Miss => Ok(IngredientLookupResult::Miss),
+        }
     }
 
     fn is_selective(&self) -> bool {

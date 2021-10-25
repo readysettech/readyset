@@ -4,12 +4,14 @@ use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
-use std::{iter, mem};
+use std::mem;
 use vec1::{vec1, Vec1};
 
 use super::Side;
 use crate::prelude::*;
-use crate::processing::{ColumnMiss, ColumnRef, ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{
+    ColumnMiss, ColumnRef, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
+};
 use noria::errors::{internal_err, ReadySetResult};
 use noria::{internal, KeyComparison};
 
@@ -433,70 +435,71 @@ impl Ingredient for Join {
             let nulls = prev_join_key.iter().any(|dt| dt.is_none());
 
             if from == *self.right && self.kind == JoinType::Left {
-                let rc = self
-                    .lookup(
-                        *self.right,
-                        &self.on_right(),
-                        &KeyType::from(prev_join_key.clone()),
-                        nodes,
-                        state,
-                        // Only do a lookup into a weak index if we're processing regular updates,
-                        // not if we're processing a replay, since regular updates should represent
-                        // all rows that won't hit holes downstream but replays need to have *all*
-                        // rows
-                        if replay_key_cols.is_some() {
-                            LookupMode::Strict
-                        } else {
-                            LookupMode::Weak
-                        },
-                    )
-                    .unwrap();
+                let rc = self.lookup(
+                    *self.right,
+                    &self.on_right(),
+                    &KeyType::from(prev_join_key.clone()),
+                    nodes,
+                    state,
+                    // Only do a lookup into a weak index if we're processing regular updates,
+                    // not if we're processing a replay, since regular updates should represent
+                    // all rows that won't hit holes downstream but replays need to have *all*
+                    // rows
+                    if replay_key_cols.is_some() {
+                        LookupMode::Strict
+                    } else {
+                        LookupMode::Weak
+                    },
+                )?;
 
-                if let Some(rc) = rc {
-                    if replay_key_cols.is_some() && !nulls {
-                        lookups.push(Lookup {
-                            on: *self.right,
-                            cols: self.on_right(),
-                            key: prev_join_key
-                                .clone()
-                                .into_iter()
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .try_into()
-                                .map_err(|_| internal_err("Empty join key"))?,
-                        });
+                match rc {
+                    IngredientLookupResult::Records(rc) => {
+                        if replay_key_cols.is_some() && !nulls {
+                            lookups.push(Lookup {
+                                on: *self.right,
+                                cols: self.on_right(),
+                                key: prev_join_key
+                                    .clone()
+                                    .into_iter()
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .try_into()
+                                    .map_err(|_| internal_err("Empty join key"))?,
+                            });
+                        }
+
+                        let rc = rc.count();
+                        old_right_count = Some(rc);
+                        new_right_count = Some(rc);
                     }
-
-                    let rc = rc.count();
-                    old_right_count = Some(rc);
-                    new_right_count = Some(rc);
-                } else {
-                    // we got something from right, but that row's key is not in right??
-                    //
-                    // this *can* happen! imagine if you have two partial indices on right,
-                    // one on column a and one on column b. imagine that a is the join key.
-                    // we get a replay request for b = 4, which must then be replayed from
-                    // right (since left doesn't have b). say right replays (a=1,b=4). we
-                    // will hit this case, since a=1 is not in right. the correct thing to
-                    // do here is to replay a=1 first, and *then* replay b=4 again
-                    // (possibly several times over for each a).
-                    at = rs[at..]
-                        .iter()
-                        .position(|r| {
-                            r.indices(from_key.clone())
-                                .into_iter()
-                                .any(|k| k != prev_join_key)
-                        })
-                        .map(|p| at + p)
-                        .unwrap_or_else(|| rs.len());
-                    continue;
+                    IngredientLookupResult::Miss => {
+                        // we got something from right, but that row's key is not in right??
+                        //
+                        // this *can* happen! imagine if you have two partial indices on right,
+                        // one on column a and one on column b. imagine that a is the join key.
+                        // we get a replay request for b = 4, which must then be replayed from
+                        // right (since left doesn't have b). say right replays (a=1,b=4). we
+                        // will hit this case, since a=1 is not in right. the correct thing to
+                        // do here is to replay a=1 first, and *then* replay b=4 again
+                        // (possibly several times over for each a).
+                        at = rs[at..]
+                            .iter()
+                            .position(|r| {
+                                r.indices(from_key.clone())
+                                    .into_iter()
+                                    .any(|k| k != prev_join_key)
+                            })
+                            .map(|p| at + p)
+                            .unwrap_or_else(|| rs.len());
+                        continue;
+                    }
                 }
             }
 
             // get rows from the other side
             let mut other_rows = if nulls {
                 // see [note: null-join-keys]
-                Some(Box::new(iter::empty()) as _)
+                IngredientLookupResult::empty()
             } else {
                 self.lookup(
                     other,
@@ -513,11 +516,10 @@ impl Ingredient for Join {
                     } else {
                         LookupMode::Weak
                     },
-                )
-                .unwrap()
+                )?
             };
 
-            if other_rows.is_none() {
+            if other_rows.is_miss() {
                 // we missed in the other side!
                 let from = at;
                 at = rs[at..]
@@ -647,7 +649,7 @@ impl Ingredient for Join {
                 let r = mem::replace(r, Record::Positive(Vec::new()));
                 let (row, positive) = r.extract();
 
-                if let Some(other_rows) = other_rows.take() {
+                if let IngredientLookupResult::Records(other_rows) = other_rows.take() {
                     // we have yet to iterate through other_rows
                     let mut other_rows = other_rows.peekable();
                     if other_rows.peek().is_none() {

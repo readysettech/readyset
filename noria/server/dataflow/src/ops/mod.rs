@@ -1,7 +1,6 @@
 use derive_more::From;
 use noria::KeyComparison;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use crate::prelude::*;
@@ -18,7 +17,9 @@ pub mod topk;
 pub mod union;
 
 use crate::ops::grouped::concat::GroupConcat;
-use crate::processing::{ColumnMiss, ColumnSource, LookupMode, SuggestedIndex};
+use crate::processing::{
+    ColumnMiss, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
+};
 
 /// Enum for distinguishing between the two parents of a union or join
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, Serialize, Deserialize)]
@@ -188,7 +189,7 @@ impl Ingredient for NodeOperator {
         nodes: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
         impl_ingredient_fn_ref!(self, query_through, columns, key, nodes, states, mode)
     }
     #[allow(clippy::type_complexity)]
@@ -200,7 +201,7 @@ impl Ingredient for NodeOperator {
         domain: &DomainNodes,
         states: &'a StateMap,
         mode: LookupMode,
-    ) -> Option<Option<Box<dyn Iterator<Item = ReadySetResult<Cow<'a, [DataType]>>> + 'a>>> {
+    ) -> ReadySetResult<IngredientLookupResult<'a>> {
         impl_ingredient_fn_ref!(self, lookup, parent, columns, key, domain, states, mode)
     }
     fn is_selective(&self) -> bool {
