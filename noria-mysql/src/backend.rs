@@ -466,11 +466,9 @@ where
 
     async fn on_query(&mut self, query: &str, results: QueryResultWriter<'_, W>) -> io::Result<()> {
         let res = match self.query(query).await {
-            Ok(QueryResult::Noria(
-                noria_connector::QueryResult::CreateTable
-                | noria_connector::QueryResult::CreateView
-                | noria_connector::QueryResult::Use,
-            )) => results.completed(0, 0, None).await,
+            Ok(QueryResult::Noria(noria_connector::QueryResult::Empty)) => {
+                results.completed(0, 0, None).await
+            }
             Ok(QueryResult::Noria(noria_connector::QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,

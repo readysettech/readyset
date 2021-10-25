@@ -188,8 +188,7 @@ pub enum PrepareResult {
 
 #[derive(Debug)]
 pub enum QueryResult<'a> {
-    CreateTable,
-    CreateView,
+    Empty,
     Insert {
         num_rows_inserted: u64,
         first_inserted_id: u64,
@@ -205,7 +204,6 @@ pub enum QueryResult<'a> {
     Delete {
         num_rows_deleted: u64,
     },
-    Use,
 }
 
 impl<'a> QueryResult<'a> {
@@ -221,8 +219,7 @@ impl<'a> QueryResult<'a> {
             },
             // Have to manually pass each variant to convince rustc that the
             // returned type is really owned
-            QueryResult::CreateTable => QueryResult::CreateTable,
-            QueryResult::CreateView => QueryResult::CreateView,
+            QueryResult::Empty => QueryResult::Empty,
             QueryResult::Insert {
                 num_rows_inserted,
                 first_inserted_id,
@@ -238,7 +235,6 @@ impl<'a> QueryResult<'a> {
                 last_inserted_id,
             },
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
-            QueryResult::Use => QueryResult::Use,
         }
     }
 }
@@ -709,7 +705,7 @@ impl NoriaConnector {
                 .extend_recipe(&format!("{};", q))
         )?;
         trace!("table::created");
-        Ok(QueryResult::CreateTable)
+        Ok(QueryResult::Empty)
     }
 }
 
@@ -1306,6 +1302,6 @@ impl NoriaConnector {
                 .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
         )?;
 
-        Ok(QueryResult::CreateView)
+        Ok(QueryResult::Empty)
     }
 }

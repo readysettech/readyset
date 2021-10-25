@@ -79,8 +79,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
         use ps::QueryResponse::*;
 
         match r.0 {
-            Noria(NoriaResult::CreateTable) => Ok(Command),
-            Noria(NoriaResult::CreateView) => Ok(Command),
+            Noria(NoriaResult::Empty) => Ok(Command),
             Noria(NoriaResult::Insert {
                 num_rows_inserted, ..
             }) => Ok(Insert(num_rows_inserted)),
@@ -99,7 +98,6 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 num_rows_updated, ..
             }) => Ok(Update(num_rows_updated)),
             Noria(NoriaResult::Delete { num_rows_deleted }) => Ok(Delete(num_rows_deleted)),
-            Noria(NoriaResult::Use) => Ok(Command),
             Upstream(upstream::QueryResult::Read { data: rows }) => {
                 let schema = match rows.first() {
                     None => vec![],

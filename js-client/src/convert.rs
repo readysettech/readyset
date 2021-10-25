@@ -183,9 +183,7 @@ where
 
     let js_query_result = cx.empty_object();
     match raw_query_result {
-        QueryResult::Noria(
-            NoriaResult::CreateTable | NoriaResult::CreateView | NoriaResult::Use,
-        ) => (),
+        QueryResult::Noria(NoriaResult::Empty) => (),
         QueryResult::Noria(NoriaResult::Insert {
             num_rows_inserted,
             first_inserted_id,
