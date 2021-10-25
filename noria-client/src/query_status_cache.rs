@@ -8,9 +8,10 @@
 //!
 //! If the query:
 //!   - NeedsProcessing: The query should be sent to the fallback database.
-//!   - Allowed: The query should be sent to noria.
+//!   - SuccessfulMigration: The query should be sent to noria.
+//!   - FailedExecute: The query should be sent to fallback if failed enough times.
 //!   - Is not in the cache: The queries status should be determined and
-//!                          set to either NeedsProcesing or Allowed.
+//!                          set to either NeedsProcesing or SuccessfulMigrationed.
 
 use chrono::{DateTime, Utc};
 use nom_sql::SelectStatement;
@@ -18,6 +19,10 @@ use serde::{ser::SerializeSeq, Serialize, Serializer};
 use std::collections::HashMap;
 
 use crate::rewrite::anonymize_literals;
+
+// TODO(): Consider a more complex flaky failure deteciton method for
+// failed executes.
+const MAXIMUM_FAILED_EXECUTES: u32 = 5;
 
 /// Holds metadata regarding when a query was first seen within the system,
 /// along with its current state.
@@ -82,7 +87,14 @@ impl Serialize for QueryList {
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryState {
     NeedsProcessing,
+    SuccessfulMigration,
+    FailedExecute(u32),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdmitStatus {
     Allow,
+    Deny,
 }
 
 /// Represents all queries that have been seen in the system, along with
@@ -128,19 +140,40 @@ impl QueryStatusCache {
             .or_insert_with(|| QueryStatus::new(QueryState::NeedsProcessing));
     }
 
-    /// Sets the provided query to have a QueryState of Allow.
+    /// Sets the provided query to have a QueryState of SuccessfulMigration.
     /// If not found we no-op. This function should never be called with a query that
     /// isn't already registered in the cache.
-    pub async fn set_allow(&self, query: &Query) {
+    pub async fn set_successful_migration(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::Allow;
+            s.state = QueryState::SuccessfulMigration;
             s
         });
     }
 
     /// Sets the provided query to have a QueryState of NeedsProcessing.
     /// If the query is not found this is a no-op.
-    pub async fn set_needs_processing(&self, query: &Query) {
+    pub async fn set_failed_query(&self, query: &Query) {
+        self.inner.write().await.get_mut(query).map(|s| {
+            s.state = QueryState::NeedsProcessing;
+            s
+        });
+    }
+
+    /// Sets the provided query to have a QueryState of FailedExecute.
+    /// If the query is not found this is a no-op.
+    pub async fn set_failed_execute(&self, query: &Query) {
+        self.inner.write().await.get_mut(query).map(|s| {
+            s.state = match s.state {
+                QueryState::FailedExecute(n) => QueryState::FailedExecute(n + 1),
+                _ => QueryState::FailedExecute(1),
+            };
+            s
+        });
+    }
+
+    /// Update the queries internal
+    /// If the query is not found this is a no-op.
+    pub async fn set_failed_prepare(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
             s.state = QueryState::NeedsProcessing;
             s
@@ -159,13 +192,13 @@ impl QueryStatusCache {
             .collect()
     }
 
-    /// Returns a list of queries that have a state of [`QueryState::Allow`].
+    /// Returns a list of queries that have a state of [`QueryState::SuccessfulMigration`].
     pub async fn allow_list(&self) -> QueryList {
         self.inner
             .read()
             .await
             .iter()
-            .filter(|(_, status)| matches!(status.state, QueryState::Allow))
+            .filter(|(_, status)| matches!(status.state, QueryState::SuccessfulMigration))
             .map(|(q, _)| q.clone())
             .collect::<Vec<Query>>()
             .into()
@@ -173,22 +206,32 @@ impl QueryStatusCache {
 
     /// Returns a list of queries that are in the deny list.
     pub async fn deny_list(&self) -> QueryList {
-        self
-                .inner
-                .read()
-                .await
-                .iter()
-                .filter(|(_, status)| matches!(status.state, QueryState::NeedsProcessing if status.first_seen < self.max_age())
-                )
-                .map(|(q, _)| q.clone())
-                .collect::<Vec<Query>>()
-                .into()
+        self.inner
+            .read()
+            .await
+            .iter()
+            .filter(|(_, status)| {
+                (matches!(status.state, QueryState::NeedsProcessing) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES)
+           })
+            .map(|(q, _)| q.clone())
+            .collect::<Vec<Query>>()
+            .into()
     }
 
-    /// Returns the a query's current status in the cache. If the query does not
-    /// exist this returns None.
-    pub async fn query_state(&self, query: &Query) -> Option<QueryState> {
-        self.inner.read().await.get(query).map(|s| s.state.clone())
+    /// Returns whether we should admit the query for execution in Noria.
+    pub async fn admit(&self, query: &Query) -> Option<AdmitStatus> {
+        self.inner.read().await.get(query).map(|s| {
+            let QueryStatus { state, .. } = &s;
+
+            match state {
+                QueryState::NeedsProcessing => AdmitStatus::Deny,
+                QueryState::SuccessfulMigration => AdmitStatus::Allow,
+                QueryState::FailedExecute(count) if count < &MAXIMUM_FAILED_EXECUTES => {
+                    AdmitStatus::Allow
+                }
+                _ => AdmitStatus::Deny,
+            }
+        })
     }
 
     /// Returns whether the given query exists in the query status cache.
@@ -221,22 +264,19 @@ mod tests {
         assert_eq!(cache.needs_processing().await.len(), 0);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
-        assert_eq!(cache.query_state(&query).await, None);
+        assert_eq!(cache.admit(&query).await, None);
 
         cache.register_query(&query).await;
         assert_eq!(cache.needs_processing().await, vec![query.clone()]);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
-        assert_eq!(
-            cache.query_state(&query).await,
-            Some(QueryState::NeedsProcessing)
-        );
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
 
-        cache.set_allow(&query).await;
+        cache.set_successful_migration(&query).await;
         assert_eq!(cache.needs_processing().await.len(), 0);
         assert_eq!(cache.allow_list().await, vec![query.clone()].into());
         assert_eq!(cache.deny_list().await.len(), 0);
-        assert_eq!(cache.query_state(&query).await, Some(QueryState::Allow));
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
     }
 
     #[tokio::test]
@@ -247,5 +287,41 @@ mod tests {
         cache.register_query(&query).await;
         cache.register_query(&query).await;
         assert_eq!(cache.needs_processing().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_executes() {
+        let cache = test_cache();
+        let query = select_statement("SELECT * FROM t1").unwrap();
+
+        cache.register_query(&query).await;
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
+
+        cache.set_successful_migration(&query).await;
+        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.allow_list().await, vec![query.clone()].into());
+        assert_eq!(cache.deny_list().await.len(), 0);
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
+
+        cache.set_failed_execute(&query).await;
+        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.allow_list().await.len(), 0);
+        assert_eq!(cache.deny_list().await.len(), 0);
+        // Allow until max_age has been hit.
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
+    }
+
+    #[tokio::test]
+    async fn repeated_failed_execute() {
+        let cache = test_cache();
+        let query = select_statement("SELECT * FROM t1").unwrap();
+
+        cache.register_query(&query).await;
+        for _ in 0..4 {
+            cache.set_failed_execute(&query).await;
+        }
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
+        cache.set_failed_execute(&query).await;
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
     }
 }

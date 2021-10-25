@@ -98,7 +98,7 @@ where
                     }
                 }
                 counter!(recorded::RECONCILER_ALLOWED, 1);
-                self.query_status_cache.set_allow(stmt).await
+                self.query_status_cache.set_successful_migration(stmt).await
             }
             // The query failed in Noria
             Ok(PrepareResult::Upstream(_)) => {}
