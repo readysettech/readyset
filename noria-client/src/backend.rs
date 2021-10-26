@@ -164,6 +164,7 @@ pub struct BackendBuilder {
     // TODO(ENG-685): Remove option when live_qca flag is removed in main.
     query_status_cache: Option<Arc<QueryStatusCache>>,
     live_qca: bool,
+    query_validate: bool,
 }
 
 impl Default for BackendBuilder {
@@ -182,6 +183,7 @@ impl Default for BackendBuilder {
             query_log_ad_hoc_queries: false,
             query_status_cache: None,
             live_qca: false,
+            query_validate: false,
         }
     }
 }
@@ -219,6 +221,7 @@ impl BackendBuilder {
             query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
             query_status_cache: self.query_status_cache,
             live_qca: self.live_qca,
+            query_validate: self.query_validate,
             _query_handler: PhantomData,
         }
     }
@@ -291,6 +294,11 @@ impl BackendBuilder {
         self.live_qca = live_qca;
         self
     }
+
+    pub fn query_validate(mut self, query_validate: bool) -> Self {
+        self.query_validate = query_validate;
+        self
+    }
 }
 
 pub struct Backend<DB, Handler> {
@@ -347,6 +355,9 @@ pub struct Backend<DB, Handler> {
 
     /// Run with query coverage analysis enabled in the serving path.
     live_qca: bool,
+
+    /// Run select statements with query validation.
+    query_validate: bool,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -641,6 +652,12 @@ where
         );
         handle.set_noria_duration();
         let upstream_res = upstream_res?;
+
+        if self.query_validate {
+            if let Err(e) = noria_res {
+                internal!("Query failed to execute on noria {}", e)
+            }
+        }
 
         // If noria and the upstream prepares both succeed we return a PrepareResult =
         // with both. If the upstream failed, we error propagate.
@@ -1405,6 +1422,12 @@ where
                             }
                         }
                     } else {
+                        // If we are validating the schema, explicitely compare the
+                        // prepare results for this select before we proceed.
+                        if self.query_validate {
+                            self.mirror_prepare(stmt.clone(), query, event).await?;
+                        }
+
                         self.cascade_read(stmt.clone(), query, self.ticket.clone(), event)
                             .await
                     };

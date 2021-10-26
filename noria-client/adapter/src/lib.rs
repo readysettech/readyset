@@ -112,6 +112,10 @@ pub struct Options {
     #[clap(long, env = "LIVE_QCA", requires("upstream-db-url"))]
     live_qca: bool,
 
+    /// Run with query coverage analysis enabled in the serving path.
+    #[clap(long, env = "QUERY_VALIDATE", requires("upstream-db-url"))]
+    query_validate: bool,
+
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
     #[clap(
         long,
@@ -405,7 +409,8 @@ where
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .query_coverage_info(query_coverage_info)
                 .live_qca(options.live_qca)
-                .query_status_cache(query_status_cache.clone());
+                .query_status_cache(query_status_cache.clone())
+                .query_validate(options.query_validate);
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
