@@ -1,14 +1,11 @@
-use launchpad::hash::hash;
 use launchpad::Indices;
 use maplit::hashmap;
 use noria::{internal, invariant};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::cmp::{min, Ordering};
-use std::collections::{hash_map::DefaultHasher, HashMap};
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::convert::TryInto;
-use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use tracing::warn;
 
@@ -42,8 +39,6 @@ impl From<Vec<(usize, OrderType)>> for Order {
     }
 }
 
-type GroupHash = u64;
-
 /// TopK provides an operator that will produce the top k elements for each group.
 ///
 /// Positives are generally fast to process, while negative records can trigger expensive backwards
@@ -52,15 +47,6 @@ type GroupHash = u64;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TopK {
     src: IndexPair,
-
-    /// Cached records, keyed by the hash of the group and ordered by the ordering of this TopK,
-    /// used when we are fully materialized and run out of records
-    ///
-    /// Note that key is equal to the *hash* of the group, to avoid the overhead of storing the
-    /// entire group
-    ///
-    /// Invariant: If this node is partial, this will always be empty
-    extra_records: RefCell<HashMap<GroupHash, Vec<Vec<DataType>>>>,
 
     /// The index of this node
     our_index: Option<IndexPair>,
@@ -94,8 +80,6 @@ impl TopK {
         TopK {
             src: src.into(),
 
-            extra_records: RefCell::new(Default::default()),
-
             our_index: None,
             cols: 0,
 
@@ -114,17 +98,6 @@ impl TopK {
             .map_err(|_| ReadySetError::InvalidRecordLength)
     }
 
-    /// Calculate a hash for the columns we are grouping by out of the given record, for use in
-    /// `self.extra_records`
-    fn group_hash<R>(&self, rec: &R) -> ReadySetResult<GroupHash>
-    where
-        R: Indices<'static, usize, Output = DataType> + ?Sized,
-    {
-        let mut hasher = DefaultHasher::new();
-        self.project_group(rec)?.hash(&mut hasher);
-        Ok(hasher.finish())
-    }
-
     /// Called inside of on_input after processing an individual group of input records, to turn
     /// that group into a set of records in `out`.
     ///
@@ -138,7 +111,6 @@ impl TopK {
     #[allow(clippy::too_many_arguments)]
     fn post_group<'a>(
         &self,
-        is_partial: bool,
         out: &mut Vec<Record>,
         current: &mut Vec<(Cow<'a, [DataType]>, bool)>,
         current_group_key: &mut Vec<DataType>,
@@ -157,52 +129,35 @@ impl TopK {
                 .and_then(NonZeroUsize::new)
             {
                 // there used to be k things in the group, now there are fewer than k.
-                if is_partial {
-                    match self.lookup(
-                        *self.src,
-                        &self.group_by,
-                        &KeyType::from(current_group_key.iter()),
-                        nodes,
-                        state,
-                        LookupMode::Strict,
-                    )? {
-                        IngredientLookupResult::Miss => {
-                            internal!(
-                                "We shouldn't have been able to get this record if the parent would miss"
-                            )
-                        }
-                        IngredientLookupResult::Records(rs) => {
-                            let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
-                            rs.sort_unstable_by(|a, b| {
-                                self.order.cmp(a.as_ref(), b.as_ref()).reverse()
-                            });
-                            current.extend(
-                                rs.into_iter()
-                                    .map(|r| (r, true))
-                                    .skip(current.len())
-                                    .take(diff.get()),
-                            );
-                            lookup = Some(Lookup {
-                                on: *self.src,
-                                cols: self.group_by.clone(),
-                                key: current_group_key.clone().try_into().expect("Empty group"),
-                            })
-                        }
+                match self.lookup(
+                    *self.src,
+                    &self.group_by,
+                    &KeyType::from(current_group_key.iter()),
+                    nodes,
+                    state,
+                    LookupMode::Strict,
+                )? {
+                    IngredientLookupResult::Miss => {
+                        internal!(
+                            "We shouldn't have been able to get this record if the parent would miss"
+                        )
                     }
-                } else {
-                    // If we're fully materialized, that means we've been keeping track of
-                    // records *out of* our topk group in `self.current_records` - let's
-                    // backfill up to k from that if we can.
-                    if let Some(ref mut extra_records) = self
-                        .extra_records
-                        .borrow_mut()
-                        .get_mut(&hash(&current_group_key))
-                    {
+                    IngredientLookupResult::Records(rs) => {
+                        let mut rs = rs.collect::<Result<Vec<_>, _>>()?;
+                        rs.sort_unstable_by(|a, b| {
+                            self.order.cmp(a.as_ref(), b.as_ref()).reverse()
+                        });
                         current.extend(
-                            extra_records
-                                .drain(0..min(diff.into(), extra_records.len()))
-                                .map(|r| (r.into(), true)),
+                            rs.into_iter()
+                                .map(|r| (r, true))
+                                .skip(current.len())
+                                .take(diff.get()),
                         );
+                        lookup = Some(Lookup {
+                            on: *self.src,
+                            cols: self.group_by.clone(),
+                            key: current_group_key.clone().try_into().expect("Empty group"),
+                        })
                     }
                 }
             }
@@ -253,18 +208,6 @@ impl TopK {
                 if !is_new {
                     // Was in k, now isn't
                     out.push(Record::Negative(r.clone().into()));
-                }
-
-                if !is_partial {
-                    // If we're fully materialized, save records beyond k into `extra_records`
-                    // so we can use them if we ever receive a negative.
-                    let mut extra_records = self.extra_records.borrow_mut();
-                    let entry = extra_records.entry(self.group_hash(&(*r))?).or_default();
-                    entry.push(r.into());
-                    // TODO(grfn): Sorting here every step of the way is not optimal, we should
-                    // make some sort of btree here wrapping a type with an (unsafe) reference
-                    // to self.order for comparison
-                    entry.sort_unstable_by(|a, b| self.order.cmp(b, a));
                 }
             }
         }
@@ -342,7 +285,6 @@ impl Ingredient for TopK {
         let mut current: Vec<(Cow<'a, [DataType]>, bool)> = Vec::new();
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
-        let is_partial = db.is_partial();
 
         // records are now chunked by group
         for r in &rs {
@@ -352,7 +294,6 @@ impl Ingredient for TopK {
                 // first, tidy up the old one
                 if !current_group_key.is_empty() {
                     if let Some(lookup) = self.post_group(
-                        is_partial,
                         &mut out,
                         &mut current,
                         &mut current_group_key,
@@ -416,16 +357,6 @@ impl Ingredient for TopK {
                             if !was_new {
                                 out.push(Record::Negative(r.clone()));
                             }
-                        } else if let Some(extra_records) = self
-                            .extra_records
-                            .borrow_mut()
-                            .get_mut(&self.group_hash(r.as_slice())?)
-                        {
-                            // If we have extra records cached for this group, remove the row from
-                            // them
-                            if let Some(idx) = extra_records.iter().position(|x| x == r) {
-                                extra_records.remove(idx);
-                            }
                         }
                     }
                 }
@@ -434,7 +365,6 @@ impl Ingredient for TopK {
 
         if !current_group_key.is_empty() {
             if let Some(lookup) = self.post_group(
-                is_partial,
                 &mut out,
                 &mut current,
                 &mut current_group_key,
@@ -565,14 +495,20 @@ mod tests {
     }
 
     #[test]
-    fn it_caches_when_full() {
-        let (mut g, _) = setup(false);
+    fn it_queries_parent_on_deletes() {
+        let (mut g, s) = setup(false);
 
         let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
         let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
         let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
         let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
         let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+
+        // fill the parent (but not with 15 since we'll delete it)
+        g.seed(s, r12.clone());
+        g.seed(s, r10.clone());
+        g.seed(s, r11.clone());
+        g.seed(s, r5.clone());
 
         // fill topk
         g.narrow_one_row(r12, true);
@@ -598,8 +534,8 @@ mod tests {
     }
 
     #[test]
-    fn fully_materialized_deletes_apply_to_cache() {
-        let (mut g, _) = setup(false);
+    fn it_queries_parent_on_deletes_reversed() {
+        let (mut g, s) = setup(true);
 
         let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
         let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
@@ -607,41 +543,11 @@ mod tests {
         let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
         let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
 
-        // fill topk
-        g.narrow_one_row(r12, true);
-        g.narrow_one_row(r10.clone(), true);
-        g.narrow_one_row(r11, true);
-        g.narrow_one_row(r5.clone(), true);
-        g.narrow_one_row(r15.clone(), true);
-
-        // [5, z, 15]
-        // [1, z, 12]
-        // [3, z, 11]
-
-        // delete 10
-        g.narrow_one_row((r10, false), true);
-
-        // check that removing 15 brings back 5 now (not 10)
-        let delta = g.narrow_one_row((r15.clone(), false), true);
-        assert_eq!(delta.len(), 2); // one negative, one positive
-        assert!(delta.iter().any(|r| r == &(r15.clone(), false).into()));
-        assert!(
-            delta.iter().any(|r| r == &(r5.clone(), true).into()),
-            "a = {:?} does not contain ({:?}, true)",
-            &delta,
-            r5
-        );
-    }
-
-    #[test]
-    fn it_caches_when_full_reversed() {
-        let (mut g, _) = setup(true);
-
-        let r12: Vec<DataType> = vec![1.into(), "z".try_into().unwrap(), 12.into()];
-        let r10: Vec<DataType> = vec![2.into(), "z".try_into().unwrap(), 10.into()];
-        let r11: Vec<DataType> = vec![3.into(), "z".try_into().unwrap(), 11.into()];
-        let r5: Vec<DataType> = vec![4.into(), "z".try_into().unwrap(), 5.into()];
-        let r15: Vec<DataType> = vec![5.into(), "z".try_into().unwrap(), 15.into()];
+        // fill the parent (but not with 5 since we'll delete it)
+        g.seed(s, r12.clone());
+        g.seed(s, r10.clone());
+        g.seed(s, r11.clone());
+        g.seed(s, r15.clone());
 
         // fill topk
         g.narrow_one_row(r12.clone(), true);
