@@ -22,12 +22,26 @@ use tracing::error;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-const PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
+const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
+const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
 
 /// Obtain the private ipv4 address of the AWS instance that the current program is running on using
 /// the AWS metadata service
 pub async fn get_aws_private_ip() -> anyhow::Result<IpAddr> {
-    Ok(reqwest::get(PRIVATE_IP_ENDPOINT)
+    let client = reqwest::Client::builder().build()?;
+    let token: String = client
+        .put(AWS_METADATA_TOKEN_ENDPOINT)
+        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+        .send()
+        .await?
+        .text()
+        .await?
+        .parse()?;
+
+    Ok(client
+        .get(AWS_PRIVATE_IP_ENDPOINT)
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
         .await?
         .text()
         .await?
