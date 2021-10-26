@@ -1162,7 +1162,10 @@ pub fn column_identifier_no_alias(dialect: Dialect) -> impl Fn(&[u8]) -> IResult
             }),
             map(
                 pair(
-                    opt(terminated(dialect.identifier(), tag("."))),
+                    opt(terminated(
+                        dialect.identifier(),
+                        tuple((multispace0, tag("."), multispace0)),
+                    )),
                     dialect.identifier(),
                 ),
                 |tup| Column {
@@ -1462,6 +1465,19 @@ mod tests {
 
     fn test_opt_delimited_fn_call(i: &str) -> IResult<&[u8], &[u8]> {
         opt_delimited(tag("("), tag("abc"), tag(")"))(i.as_bytes())
+    }
+
+    #[test]
+    fn qualified_column_with_spaces() {
+        let res = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"foo . bar");
+        assert_eq!(
+            res,
+            Column {
+                table: Some("foo".to_owned()),
+                name: "bar".to_owned(),
+                function: None,
+            }
+        )
     }
 
     #[test]
