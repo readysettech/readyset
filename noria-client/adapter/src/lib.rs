@@ -74,14 +74,6 @@ pub struct NoriaAdapter<H> {
     pub mirror_ddl: bool,
 }
 
-fn true_or_false(s: &str) -> Result<bool, &'static str> {
-    match &s.to_ascii_lowercase()[..] {
-        "true" | "t" | "yes" | "y" => Ok(true),
-        "false" | "f" | "no" | "n" => Ok(false),
-        _ => Err("expected `true`, `t,`, `yes`, `y`, `false`, `f`, `no`, or `n`"),
-    }
-}
-
 #[derive(Clap)]
 pub struct Options {
     /// IP:PORT to listen on
@@ -115,13 +107,7 @@ pub struct Options {
     allow_unauthenticated_connections: bool,
 
     /// Run with query coverage analysis enabled in the serving path.
-    #[clap(
-        long,
-        env = "LIVE_QCA",
-        default_value = "false",
-        requires("upstream-db-url"), 
-        parse(try_from_str = true_or_false)
-    )]
+    #[clap(long, env = "LIVE_QCA", requires("upstream-db-url"))]
     live_qca: bool,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
