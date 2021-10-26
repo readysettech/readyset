@@ -151,6 +151,11 @@ Resources:
           ToPort: 22
           SourceSecurityGroupId: !Ref BastionSecurityGroupID
         - IpProtocol: tcp
+          FromPort: 6034
+          ToPort: 6034
+          CidrIp: !Ref VPCCIDR
+          Description: Adapter HTTP server port, required for health checks.
+        - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
