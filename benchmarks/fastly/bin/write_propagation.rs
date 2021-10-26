@@ -12,9 +12,9 @@
 //!   issued, to the time that the view returns the result as
 //!   the write propagation time.
 
+use benchmarks::utils::generate::load_to_backend;
+use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{ArgGroup, Clap, ValueHint};
-use demo_utils::generate::load_to_backend;
-use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;

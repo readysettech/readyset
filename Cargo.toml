@@ -26,10 +26,8 @@ members = [
     "readyset-logging",
     "query_generator",
     "maths",
-    "demos/fastly",
+    "benchmarks",
     "demos/irl",
-    "demos/weavegrid",
-    "demos/utils",
     "xtask",
     "ensure-ebs-volume",
     "metrics-aggregator"

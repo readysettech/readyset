@@ -4,9 +4,9 @@
 //! Assumptions: There is only a single write client
 //! in the system.
 
+use benchmarks::utils::generate::load;
+use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Clap, ValueHint};
-use demo_utils::generate::load;
-use demo_utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use noria::DataType;
 use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;

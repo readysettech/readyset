@@ -445,6 +445,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 
 [[package]]
+name = "benchmarks"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.0.0-beta.4",
+ "futures 0.3.17",
+ "hdrhistogram",
+ "mysql",
+ "nom",
+ "nom-sql",
+ "noria",
+ "noria-client",
+ "noria-logictest",
+ "noria-mysql",
+ "query_generator",
+ "rand 0.8.4",
+ "reqwest",
+ "rinfluxdb",
+ "structopt",
+ "tokio",
+ "url",
+ "vec1",
+ "zipf",
+]
+
+[[package]]
 name = "bigdecimal"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,23 +1278,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "demo-utils"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 3.0.0-beta.4",
- "mysql",
- "nom",
- "nom-sql",
- "noria",
- "noria-client",
- "noria-logictest",
- "noria-mysql",
- "query_generator",
- "tokio",
-]
-
-[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1504,33 +1513,6 @@ name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
-
-[[package]]
-name = "fastly-demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 3.0.0-beta.4",
- "demo-utils",
- "futures 0.3.17",
- "hdrhistogram",
- "mysql",
- "nom",
- "nom-sql",
- "noria",
- "noria-client",
- "noria-logictest",
- "noria-mysql",
- "query_generator",
- "rand 0.8.4",
- "reqwest",
- "rinfluxdb",
- "structopt",
- "tokio",
- "url",
- "vec1",
- "zipf",
-]
 
 [[package]]
 name = "fastrand"
@@ -6097,22 +6079,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0237232789cf037d5480773fe568aac745bfe2afbc11a863e97901780a6b47cc"
-
-[[package]]
-name = "weavegrid-demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 3.0.0-beta.4",
- "demo-utils",
- "mysql",
- "nom",
- "nom-sql",
- "noria",
- "noria-logictest",
- "query_generator",
- "tokio",
-]
 
 [[package]]
 name = "web-sys"

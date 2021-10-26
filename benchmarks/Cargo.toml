@@ -1,5 +1,5 @@
 [package]
-name = "fastly-demo"
+name = "benchmarks"
 version = "0.1.0"
 authors = ["justin@readyset.io"]
 edition = "2018"
@@ -21,38 +21,44 @@ rinfluxdb = { version = "0.1.0" }
 reqwest = { version = "0.11" }
 
 # local dependencies
-demo-utils = { path = "../utils/" }
-noria = { path = "../../noria/noria/" }
-nom-sql = { path = "../../nom-sql" }
-query_generator = { path = "../../query_generator" }
-noria-logictest = { path = "../../noria/noria-logictest" }
-noria-client = { path = "../../noria-client" }
-noria-mysql = { path = "../../noria-mysql" }
+noria = { path = "../noria/noria/" }
+nom-sql = { path = "../nom-sql" }
+query_generator = { path = "../query_generator" }
+noria-logictest = { path = "../noria/noria-logictest" }
+noria-client = { path = "../noria-client" }
+noria-mysql = { path = "../noria-mysql" }
+
+[lib]
+path = "./lib.rs"
 
 [[bin]]
 name = "fastly_data_generator"
-path = "src/bin/fastly_data_generator.rs"
+path = "fastly/bin/fastly_data_generator.rs"
 
 [[bin]]
 name = "reader"
-path = "src/bin/reader.rs"
+path = "fastly/bin/reader.rs"
 
 [[bin]]
 name = "writer"
-path = "src/bin/writer.rs"
+path = "fastly/bin/writer.rs"
 
 [[bin]]
 name = "replicate"
-path = "src/bin/replicate.rs"
+path = "fastly/bin/replicate.rs"
 
 [[bin]]
 name = "extend_recipe"
-path = "src/bin/extend_recipe.rs"
+path = "fastly/bin/extend_recipe.rs"
 
 [[bin]]
 name = "extend_recipe_write_prop"
-path = "src/bin/extend_recipe_write_prop.rs"
+path = "fastly/bin/extend_recipe_write_prop.rs"
 
 [[bin]]
 name = "write_propagation"
-path = "src/bin/write_propagation.rs"
+path = "fastly/bin/write_propagation.rs"
+
+[[bin]]
+name = "weavegrid_data_generator"
+path = "weavegrid/bin/weavegrid_data_generator.rs"

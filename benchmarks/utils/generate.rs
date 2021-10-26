@@ -1,7 +1,7 @@
 //! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`,
 //! and generate batches of data to write to the connection.
 
-use crate::spec::DatabaseGenerationSpec;
+use super::spec::DatabaseGenerationSpec;
 use anyhow::{Context, Result};
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseConnection;
