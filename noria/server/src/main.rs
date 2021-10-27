@@ -16,7 +16,7 @@ use noria_server::metrics::{
     install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
 };
 use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
-use tracing::error;
+use tracing::{error, info};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -247,8 +247,9 @@ fn main() -> anyhow::Result<()> {
         builder.set_region(r);
     }
 
-    if let Some(v) = opts.volume_id {
-        builder.set_volume_id(v);
+    if let Some(volume_id) = opts.volume_id {
+        info!(%volume_id);
+        builder.set_volume_id(volume_id);
     }
 
     if let Some(pr) = opts.primary_region {
