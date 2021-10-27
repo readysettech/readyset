@@ -9,7 +9,6 @@ tokio = { version = "1.8.1", features = ["full"] }
 futures = "0.3.0"
 futures-util = "0.3.0"
 anyhow = "1.0"
-serial_test = "0.5.1"
 port_scanner = "0.1.5"
 rand = "0.8.3"
 url = "2.2.2"
@@ -19,3 +18,7 @@ serde = { version = "1.0.8", features = ["derive"] }
 
 # local deps
 noria = { path = "../noria" }
+
+[dev-dependencies]
+serial_test = "0.5.1"
+

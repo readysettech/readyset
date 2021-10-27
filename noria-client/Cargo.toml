@@ -29,7 +29,6 @@ metrics = "0.17.0"
 noria-client-metrics = { path = "metrics" }
 metrics-exporter-prometheus = "0.6.0"
 futures = "0.3.16"
-zookeeper = "0.5.4"
 noria-server = { path = "../noria/server/" }
 maplit = "1.0.2"
 readyset-logging = { path = "../readyset-logging" }
