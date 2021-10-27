@@ -2,6 +2,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::ReuseConfigType;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::{
@@ -40,6 +41,19 @@ pub async fn start_simple(prefix: &str) -> Handle {
 /// Builds a local worker without sharding.
 pub async fn start_simple_unsharded(prefix: &str) -> Handle {
     build(prefix, None, None).await
+}
+
+pub async fn start_simple_reuse_unsharded(prefix: &str) -> Handle {
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store,
+    )));
+    let mut builder = Builder::for_tests();
+    builder.set_reuse(Some(ReuseConfigType::Finkelstein));
+    builder.set_persistence(get_persistence_params(prefix));
+    builder.set_allow_topk(true);
+    builder.set_sharding(None);
+    builder.start_local_custom(authority.clone()).await.unwrap()
 }
 
 /// Builds a custom local worker with log prefix `prefix`,
