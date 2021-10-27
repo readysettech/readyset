@@ -16,6 +16,7 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tower::Service;
 
 use crate::query_status_cache::QueryStatusCache;
+use metrics_exporter_prometheus::PrometheusHandle;
 use noria_client_metrics::recorded;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
@@ -29,6 +30,10 @@ pub struct NoriaAdapterHttpRouter {
     pub query_cache: Option<Arc<QueryStatusCache>>,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
+
+    /// Used to retrive the prometheus scrape's render as a String when servicing
+    /// HTTP requests on /prometheus.
+    pub prometheus_handle: Option<PrometheusHandle>,
 }
 
 impl NoriaAdapterHttpRouter {
@@ -119,6 +124,17 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
 
                 Ok(res.unwrap())
             }),
+            (_, &Method::GET, "/prometheus") => {
+                let body = self.prometheus_handle.as_ref().map(|x| x.render());
+                let res = res.header(CONTENT_TYPE, "text/plain");
+                let res = match body {
+                    Some(metrics) => res.body(hyper::Body::from(metrics)),
+                    None => res
+                        .status(404)
+                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
+                };
+                Box::pin(async move { Ok(res.unwrap()) })
+            }
             _ => Box::pin(async move {
                 let res = res
                     .status(404)

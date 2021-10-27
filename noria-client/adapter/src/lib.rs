@@ -264,16 +264,22 @@ where
             ),
         ));
 
-        if options.prometheus_metrics {
+        let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label: noria_client_metrics::recorded::DatabaseType =
                 self.database_type.into();
-            PrometheusBuilder::new()
+
+            let recorder = PrometheusBuilder::new()
                 .add_global_label("database_type", database_label)
                 .add_global_label("deployment", &options.deployment)
-                .install()
-                .unwrap();
-        }
+                .build();
+
+            let handle = recorder.handle();
+            metrics::set_boxed_recorder(Box::new(recorder))?;
+            Some(handle)
+        } else {
+            None
+        };
 
         let query_coverage_info = options
             .coverage_analysis
@@ -355,6 +361,7 @@ where
                 listen_addr: options.metrics_address,
                 query_cache,
                 valve,
+                prometheus_handle,
             };
             let fut = async move {
                 let http_listener = http_server.create_listener().await.unwrap();
