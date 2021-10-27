@@ -3358,6 +3358,7 @@ dependencies = [
  "lazy_static",
  "maplit",
  "metrics",
+ "metrics-exporter-prometheus",
  "nom",
  "nom-sql",
  "noria",
