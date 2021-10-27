@@ -65,4 +65,9 @@ resource "aws_ecr_repository" "xtask" {
   image_tag_mutability = "MUTABLE"
 }
 
+resource "aws_ecr_repository" "metrics-aggregator" {
+  name                 = "metrics-aggregator"
+  image_tag_mutability = "MUTABLE"
+}
+
 # TODO: Import our existing repositories
