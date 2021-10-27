@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Readyset MySQL Cluster
+Description: Readyset for PostgreSQL
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -9,9 +9,7 @@ Metadata:
         Parameters:
           - VPCID
           - VPCCIDR
-          - PrivateSubnet1ID
-          - PrivateSubnet2ID
-          - PrivateSubnet3ID
+          - VPCPrivateSubnetIds
       - Label:
           default: "SSH Access Configuration"
         Parameters:
@@ -32,51 +30,49 @@ Metadata:
           - ReadysetServerNodes
           - ReadysetServerVolumeSizeGB
           - ReadysetMonitorInstanceType
-          - MySQLDatabaseURL
+          - PostgresDatabaseURL
           - MemoryLimitBytes
           - DeploymentName
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
-    Type: "AWS::EC2::SecurityGroup::Id"
+    Type: AWS::EC2::SecurityGroup::Id
   ReadysetAdapterInstanceType:
     Type: String
-    Description: The EC2 instance type to use for adapter instances.
+    Description: The EC2 instance type to use for ReadySet Adapter instances.
     Default: t3.small
   ReadysetServerInstanceType:
     Type: String
-    Description: The EC2 instance type to use for server instances.
-    Default: t3.small
+    Description: The EC2 instance type to use for ReadySet Server instances.
+    Default: c5.4xlarge
   ReadysetMonitorInstanceType:
     Type: String
-    Description: The EC2 instance type to use for the monitor instance.
+    Description: The EC2 instance type to use for the ReadySet monitoring instance.
     Default: t3.small
   ReadysetAdapterNodes:
     Type: String
-    Description: Number of Adapter nodes to create.
+    Description: Number of ReadySet Adapter nodes to create.
   ReadysetServerNodes:
     Type: String
-    Description: Number of Server nodes to create.
+    Description: Number of ReadySet Server nodes to create.
   ReadysetServerVolumeSizeGB:
     Type: Number
-    Description: Volume size, in gigabytes, to provision for Server instances.
+    Description: Volume size, in gigabytes, to provision for Server instances. This should match EBS volume size of RDS instance.
     MinValue: 32
     Default: 32
   KeyPairName:
-    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
-    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
-  PrivateSubnet1ID:
-    Type: AWS::EC2::Subnet::Id
-  PrivateSubnet2ID:
-    Type: AWS::EC2::Subnet::Id
-  PrivateSubnet3ID:
-    Type: AWS::EC2::Subnet::Id
+  VPCPrivateSubnetIds:
+    Description: Comma-delimited list of private VPC subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
+    Type: List<AWS::EC2::Subnet::Id>
   VPCID:
-    Description: VPC ID
-    Type: "AWS::EC2::VPC::Id"
+    Description: ID of the VPC to deploy resources in.
+    Type: AWS::EC2::VPC::Id
+    AllowedPattern: (^vpc-\w+)
   VPCCIDR:
-    Description: CIDR block for the VPC
+    Description: CIDR block for the VPC.
     Type: String
     AllowedPattern: >-
       ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
@@ -95,10 +91,10 @@ Parameters:
     Type: String
     Default: "Server"
     ConstraintDescription: Must match EC2 Tag Value requirements.
-  MySQLDatabaseURL:
+  PostgresDatabaseURL:
     Type: String
     NoEcho: True
-    Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
+    Description: Existing Database URL connection string, e.g. postgresql://username:password@localhost:5432/mydatabase
   MemoryLimitBytes:
     Type: Number
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
@@ -116,13 +112,12 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      # short commit id associated with AMIs: 209c959
-      READYSETMYSQLADAPTER: ami-0fabd9e9a28daf6c7
-      READYSETSERVER: ami-01ffc1b0ea791e7d8
-      READYSETMONITOR: ami-0abcef840f71d2942
+      # short commit id associated with AMIs: 9a5ffb581
+      READYSETPOSTGRESQLADAPTER: ami-0cf64137831c10aee
+      READYSETSERVER: ami-08576e703af0d21e9
+      READYSETMONITOR: ami-0aeafda7a724f0234
 Resources:
-  # --- START MYSQL ADAPTER --- #
-  ReadysetMySQLAdapterRole:
+  ReadysetPostgreSQLAdapterRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
@@ -134,13 +129,13 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
-  ReadysetMySQLAdapterProfile:
+  ReadysetPostgreSQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref ReadysetMySQLAdapterRole
-  ReadysetMySQLAdapterSecurityGroup:
+        - !Ref ReadysetPostgreSQLAdapterRole
+  ReadysetPostgreSQLAdapterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow connections to the adapter and SSH from inside the VPC
@@ -151,45 +146,44 @@ Resources:
           ToPort: 22
           SourceSecurityGroupId: !Ref BastionSecurityGroupID
         - IpProtocol: tcp
-          FromPort: 6034
-          ToPort: 6034
+          FromPort: 5432
+          ToPort: 5432
           CidrIp: !Ref VPCCIDR
-          Description: Adapter HTTP server port, required for health checks.
         - IpProtocol: tcp
           FromPort: 8300
           ToPort: 8301
           CidrIp: !Ref VPCCIDR
         - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
+          FromPort: 6034
+          ToPort: 6034
           CidrIp: !Ref VPCCIDR
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-  ReadysetMySQLAdapterTargetGroup:
+  ReadysetPostgreSQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckProtocol: HTTP
       HealthCheckPath: /health
       HealthCheckPort: 6034
-      Port: 3306
+      Port: 5432
       Protocol: TCP
       VpcId: !Ref VPCID
-  ReadysetMySQLAdapterLC:
+  ReadysetPostgreSQLAdapterLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       InstanceType: !Ref ReadysetAdapterInstanceType
       AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ReadysetMySQLAdapterSecurityGroup
+        - !Ref ReadysetPostgreSQLAdapterSecurityGroup
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
         - !Ref "AWS::Region"
-        - READYSETMYSQLADAPTER
-      IamInstanceProfile: !Ref ReadysetMySQLAdapterProfile
+        - READYSETPOSTGRESQLADAPTER
+      IamInstanceProfile: !Ref ReadysetPostgreSQLAdapterProfile
       UserData:
         Fn::Base64: !Sub
           - |
@@ -200,59 +194,54 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadysetMySQLAdapterASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadysetPostgreSQLAdapterASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export UPSTREAM_DB_URL="${MySQLDatabaseURL}"
+            export UPSTREAM_DB_URL="${PostgresDatabaseURL}"
             export DEPLOYMENT="${DeploymentName}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-  ReadysetMySQLAdapterASG:
+  ReadysetPostgreSQLAdapterASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      LaunchConfigurationName: !Ref ReadysetMySQLAdapterLC
+      LaunchConfigurationName: !Ref ReadysetPostgreSQLAdapterLC
       MaxSize: !Ref ReadysetAdapterNodes
       MinSize: !Ref ReadysetAdapterNodes
       TargetGroupARNs:
-        - !Ref ReadysetMySQLAdapterTargetGroup
-      VPCZoneIdentifier:
-        - !Ref PrivateSubnet1ID
-        - !Ref PrivateSubnet2ID
-        - !Ref PrivateSubnet3ID
+        - !Ref ReadysetPostgreSQLAdapterTargetGroup
+      VPCZoneIdentifier: !Ref VPCPrivateSubnetIds
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-MySQLAdapter"]]
+          Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-PostgreSQLAdapter"]]
           PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
         Count: !Ref ReadysetAdapterNodes
         Timeout: PT20M
-  ReadysetMySQLAdapterNLB:
+  ReadysetPostgreSQLAdapterNLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Type: "network"
       Scheme: "internal"
-      Subnets:
-        - !Ref PrivateSubnet1ID
-        - !Ref PrivateSubnet2ID
-        - !Ref PrivateSubnet3ID
-  ReadysetMySQLAdapterListener:
+      IpAddressType: "ipv4"
+      Subnets: !Ref VPCPrivateSubnetIds
+  ReadysetPostgreSQLAdapterListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       Protocol: TCP
-      Port: 3306
+      Port: 5432
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref ReadysetMySQLAdapterTargetGroup
-      LoadBalancerArn: !Ref ReadysetMySQLAdapterNLB
-  ReadysetMySQLAdapterVPCEndpointService:
+          TargetGroupArn: !Ref ReadysetPostgreSQLAdapterTargetGroup
+      LoadBalancerArn: !Ref ReadysetPostgreSQLAdapterNLB
+  ReadysetPostgreSQLAdapterVPCEndpointService:
     Type: AWS::EC2::VPCEndpointService
     Properties:
       NetworkLoadBalancerArns:
-        - !Ref ReadysetMySQLAdapterNLB
-  # --- END MYSQL ADAPTER --- #
+        - !Ref ReadysetPostgreSQLAdapterNLB
+  # --- END PostgreSQL ADAPTER --- #
   # --- START SERVER --- #
   ReadysetServerRole:
     Type: AWS::IAM::Role
@@ -317,14 +306,14 @@ Resources:
           ToPort: 6033
           SourceSecurityGroupId:
             Fn::GetAtt:
-            - ReadysetMySQLAdapterSecurityGroup
+            - ReadysetPostgreSQLAdapterSecurityGroup
             - GroupId
         - IpProtocol: tcp
           FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
           ToPort: 61000
           SourceSecurityGroupId:
             Fn::GetAtt:
-            - ReadysetMySQLAdapterSecurityGroup
+            - ReadysetPostgreSQLAdapterSecurityGroup
             - GroupId
       SecurityGroupEgress:
         - IpProtocol: -1
@@ -387,7 +376,7 @@ Resources:
             export NORIA_QUORUM="${ReadysetServerNodes}"
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="0"
-            export REPLICATION_URL="${MySQLDatabaseURL}"
+            export REPLICATION_URL="${PostgresDatabaseURL}"
             export VOLUME_SIZE_GB="${ReadysetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
@@ -398,10 +387,7 @@ Resources:
       LaunchConfigurationName: !Ref ReadysetServerLC
       MaxSize: !Ref ReadysetServerNodes
       MinSize: !Ref ReadysetServerNodes
-      VPCZoneIdentifier:
-        - !Ref PrivateSubnet1ID
-        - !Ref PrivateSubnet2ID
-        - !Ref PrivateSubnet3ID
+      VPCZoneIdentifier: !Ref VPCPrivateSubnetIds
       Tags:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-Server"]]
@@ -414,16 +400,16 @@ Resources:
   ReadysetDBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow connections from Readyset to RDS
+      GroupDescription: Allow connections from Readyset to Postgres RDS
       VpcId: !Ref VPCID
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadysetMySQLAdapterSecurityGroup
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ReadysetPostgreSQLAdapterSecurityGroup
         - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
+          FromPort: 5432
+          ToPort: 5432
           SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
   # --- START LOGS AGGREGATOR --- #
   ReadysetAggregatorCloudWatchLogsManagedPolicy:
@@ -497,7 +483,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref ReadysetMonitorInstanceType
-      SubnetId: !Ref PrivateSubnet1ID
+      SubnetId: !Select [ 0, !Ref VPCPrivateSubnetIds ]
       SecurityGroupIds:
         - !Ref ReadysetMonitorSecurityGroup
       KeyName: !Ref KeyPairName
@@ -534,9 +520,9 @@ Outputs:
     Description: Attach this Security Group to your RDS instance.
   ReadysetAdapterNLBDNSName:
     Value: !GetAtt
-      - ReadysetMySQLAdapterNLB
+      - ReadysetPostgreSQLAdapterNLB
       - DNSName
     Description: Host for Readyset connection string.
-  ReadysetMySQLVPCEndpointService:
-    Value: !Ref ReadysetMySQLAdapterVPCEndpointService
+  ReadysetPostgreSQLVPCEndpointService:
+    Value: !Ref ReadysetPostgreSQLAdapterVPCEndpointService
     Description: VPC Endpoint Service to allow connections from outside the VPC.
