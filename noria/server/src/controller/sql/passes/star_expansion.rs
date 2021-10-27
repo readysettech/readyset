@@ -1,11 +1,21 @@
 use nom_sql::{
     Column, CommonTableExpression, Expression, FieldDefinitionExpression, JoinClause,
-    JoinRightSide, SelectStatement, SqlQuery,
+    JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
 use noria::{ReadySetError, ReadySetResult};
 use std::collections::HashMap;
 use std::mem;
+
+fn extract_tables_from_join(joins: &[JoinClause]) -> impl Iterator<Item = &Table> {
+    use itertools::Either;
+    joins.iter().flat_map(|j| match j.right {
+        // subquery schemas should be handled separately
+        JoinRightSide::NestedSelect(..) => Either::Left(Either::Left(std::iter::empty())),
+        JoinRightSide::Table(ref t) => Either::Left(Either::Right(std::iter::once(t))),
+        JoinRightSide::Tables(ref v) => Either::Right(v.iter()),
+    })
+}
 
 pub trait StarExpansion: Sized {
     fn expand_stars(self, write_schemas: &HashMap<String, Vec<String>>) -> ReadySetResult<Self>;
@@ -65,6 +75,11 @@ impl StarExpansion for SelectStatement {
                 FieldDefinitionExpression::All => {
                     for table in &self.tables {
                         for field in expand_table(table.name.clone())? {
+                            self.fields.push(field);
+                        }
+                    }
+                    for t in extract_tables_from_join(&self.join) {
+                        for field in expand_table(t.name.clone())? {
                             self.fields.push(field);
                         }
                     }
@@ -185,6 +200,18 @@ mod tests {
             "SELECT users.uid, users.name FROM PaperTag JOIN (SELECT Users.uid, Users.name FROM Users) users On paper_id = uid",
             schema: {
                 "Users".into() => vec!["uid".into(), "name".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn simple_join() {
+        expands_stars!(
+            "SELECT * FROM t1 JOIN t2 on t1.a = t2.b",
+            "SELECT t1.a, t2.b FROM t1 JOIN t2 on t1.a = t2.b",
+            schema: {
+                "t1".into() => vec!["a".into()],
+                "t2".into() => vec!["b".into()],
             }
         );
     }
