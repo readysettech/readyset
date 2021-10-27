@@ -9,35 +9,24 @@ publish = false
 chrono = { version = "0.4.0", features = ["serde"] }
 clap = "2.25.0"
 anyhow = "1.0"
-flurry = "0.3"
 futures-core = "0.3.0"
 futures-util = "0.3.0"
 hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec and funty:
                       # https://github.com/nucypher/rust-umbral/issues/34
 itertools = "0.9"
-memcached-rs = "0.4.2"
 mysql_async = "0.27.1"
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../server", package = "noria-server" }
 readyset-logging = { path = "../../readyset-logging" }
 num_cpus = "1"
 rand = "0.7"
-rand_distr = "0.2"
-redis = { version = "0.16", features = ["tokio-rt-core"] }
 regex = "1.0.0"
 tokio = { version = "1.8.1", features = ["full"] }
-tokio-test = "0.2.0"
 tower-service = "0.3.0"
-tower-limit = "0.3.1"
-# need 0.3.1 for https://github.com/tower-rs/tower/pull/427
-tower-util = "0.3.1"
-trawler = "0.11.0-alpha.7"
 vec_map = { version = "0.8.0" }
-zipf = "6"
 zookeeper = "0.5.3"
 mysql = "21.0.1"
 vec1 = "1.6.0"
-csv = "1.1.5"
 tracing = "0.1.26"
 
 # mssql

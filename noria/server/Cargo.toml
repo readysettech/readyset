@@ -71,7 +71,6 @@ vec_map = { version = "0.8.0", features = ["eders"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 zookeeper = "0.5.3"
 tokio-tower = "0.5.1"
-tower-util = "0.3.1"
 tower = { version = "0.4.6", features = ["util"] }
 strawpoll = "0.2.2"
 

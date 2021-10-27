@@ -18,12 +18,10 @@ azure-devops = { project = "mit-pdos/mit-pdos", pipeline = "noria", build = "1" 
 maintenance = { status = "experimental" }
 
 [dependencies]
-assert_infrequent = "0.1.0"
 anyhow = "1.0"
 thiserror = "1.0.26"
 hyper = { version = "0.14.10", features = [ "stream", "client", "http2" ] }
 nom-sql = { path = "../../nom-sql" }
-maths = { path = "../../maths" }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }
 serde_bytes = "0.11"
