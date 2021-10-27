@@ -158,10 +158,12 @@ impl NoriaAdapter {
                 let replicator = MySqlReplicator { pool, tables: None };
 
                 span.in_scope(|| info!("Starting snapshot"));
-                replicator
+                let pos = replicator
                     .replicate_to_noria(&mut noria, true)
-                    .instrument(span)
-                    .await?
+                    .instrument(span.clone())
+                    .await?;
+                span.in_scope(|| info!("Snapshot finished"));
+                pos
             }
             Some(pos) => pos,
         };
