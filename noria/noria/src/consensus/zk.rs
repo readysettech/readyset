@@ -1,9 +1,12 @@
 // TODO: Replace how leader election is done and locking implementation of recipes from
 // https://zookeeper.apache.org/doc/current/recipes.html
 
-use std::collections::{HashMap, HashSet};
 use std::process;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+};
 
 use anyhow::{bail, Error};
 use async_trait::async_trait;
@@ -16,10 +19,9 @@ use zookeeper_async::{
     Acl, CreateMode, KeeperState, Stat, WatchedEvent, Watcher, ZkError, ZooKeeper,
 };
 
-use super::WorkerId;
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
-    WorkerDescriptor,
+    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    WorkerDescriptor, WorkerId,
 };
 use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
@@ -431,6 +433,14 @@ impl AuthorityControl for ZookeeperAuthority {
         }
 
         Ok(worker_descriptors)
+    }
+
+    async fn register_adapter(&self, _: SocketAddr) -> Result<Option<AdapterId>, Error> {
+        todo!();
+    }
+
+    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+        todo!();
     }
 }
 
