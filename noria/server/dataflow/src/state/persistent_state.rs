@@ -15,6 +15,11 @@
 //!
 //! [0]: https://rocksdb.org/
 
+use crate::node::special::base::SnapshotMode;
+use crate::prelude::*;
+use crate::state::{RangeLookupResult, RecordResult, State};
+use bincode::Options;
+use common::SizeOf;
 use itertools::Itertools;
 use noria::{KeyComparison, ReplicationOffset};
 use rocksdb::{
@@ -25,11 +30,6 @@ use std::borrow::Cow;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
 use tracing::error;
-
-use crate::node::special::base::SnapshotMode;
-use crate::prelude::*;
-use crate::state::{RangeLookupResult, RecordResult, State};
-use common::SizeOf;
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -52,7 +52,7 @@ const INDEX_BATCH_SIZE: usize = 100_000;
 fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
     db.get_pinned(META_KEY)
         .unwrap()
-        .map(|data| bincode::deserialize(data.as_ref()).unwrap())
+        .map(|data| bincode::options().deserialize(data.as_ref()).unwrap())
         .unwrap_or_default()
 }
 
@@ -95,7 +95,7 @@ fn save_meta<DB>(db: DB, meta: &PersistentMeta)
 where
     DB: Put,
 {
-    db.do_put(META_KEY, bincode::serialize(meta).unwrap());
+    db.do_put(META_KEY, bincode::options().serialize(meta).unwrap());
 }
 
 /// Load the saved [`PersistentMeta`] from the database, increment its
@@ -204,7 +204,7 @@ impl State for PersistentState {
                 // (no need to use prefix_iterator).
                 let raw_row = db.get_pinned_cf(cf, &prefix).unwrap();
                 if let Some(raw) = raw_row {
-                    vec![bincode::deserialize(&raw).unwrap()]
+                    vec![bincode::options().deserialize(&raw).unwrap()]
                 } else {
                     vec![]
                 }
@@ -212,7 +212,8 @@ impl State for PersistentState {
                 // This could correspond to more than one value, so we'll use a prefix_iterator:
                 db.prefix_iterator_cf(cf, &prefix)
                     .map(|(_key, value)| {
-                        bincode::deserialize(&*value)
+                        bincode::options()
+                            .deserialize(&*value)
                             .expect("Error deserializing data from rocksdb")
                     })
                     .collect()
@@ -267,7 +268,8 @@ impl State for PersistentState {
             RangeLookupResult::Some(RecordResult::Owned(
                 iterator
                     .map(|(_, value)| {
-                        bincode::deserialize(&*value)
+                        bincode::options()
+                            .deserialize(&*value)
                             .expect("Error deserializing data from rocksdb")
                     })
                     .collect(),
@@ -306,6 +308,7 @@ impl State for PersistentState {
         tokio::task::block_in_place(|| {
             let db = self.db.as_mut().unwrap();
             db.create_cf(&index_id, &self.db_opts).unwrap();
+            let cf = db.cf_handle(&index_id).unwrap();
 
             // Build the new index for existing values:
             if !self.indices.is_empty() {
@@ -314,10 +317,9 @@ impl State for PersistentState {
                 for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
                     let mut batch = WriteBatch::default();
                     for (ref pk, ref value) in chunk {
-                        let row: Vec<DataType> = bincode::deserialize(value).unwrap();
+                        let row: Vec<DataType> = deserialize(value);
                         let index_key = Self::build_key(&row, columns);
                         let key = Self::serialize_secondary(&index_key, pk);
-                        let cf = db.cf_handle(&index_id).unwrap();
                         batch.put_cf(cf, &key, value);
                     }
 
@@ -343,7 +345,7 @@ impl State for PersistentState {
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         self.all_rows()
-            .map(|(_, ref value)| bincode::deserialize(value).unwrap())
+            .map(|(_, ref value)| deserialize(value))
             .collect()
     }
 
@@ -409,8 +411,14 @@ impl State for PersistentState {
 }
 
 fn serialize<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
-    let size: u64 = bincode::serialized_size(&k).unwrap();
-    bincode::serialize(&(size, k, extra)).unwrap()
+    let size: u64 = bincode::options().serialized_size(&k).unwrap();
+    bincode::options().serialize(&(size, k, extra)).unwrap()
+}
+
+fn deserialize<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> T {
+    bincode::options()
+        .deserialize(bytes)
+        .expect("Deserializing from rocksdb")
 }
 
 impl PersistentState {
@@ -736,7 +744,7 @@ impl PersistentState {
         };
 
         // First insert the actual value for our primary index:
-        let serialized_row = bincode::serialize(&r).unwrap();
+        let serialized_row = bincode::options().serialize(&r).unwrap();
 
         tokio::task::block_in_place(|| {
             let db = self.db();
@@ -783,7 +791,7 @@ impl PersistentState {
                         .get_cf(value_cf, &prefix)
                         .unwrap()
                         .expect("tried removing non-existant primary key row");
-                    let value: Vec<DataType> = bincode::deserialize(&*raw).unwrap();
+                    let value: Vec<DataType> = deserialize(&*raw);
                     assert_eq!(r, &value[..], "tried removing non-matching primary key row");
                 }
 
@@ -792,7 +800,7 @@ impl PersistentState {
                 let (key, _value) = db
                     .prefix_iterator_cf(value_cf, &prefix)
                     .find(|(_, raw_value)| {
-                        let value: Vec<DataType> = bincode::deserialize(&*raw_value).unwrap();
+                        let value: Vec<DataType> = deserialize(&*raw_value);
                         r == &value[..]
                     })
                     .expect("tried removing non-existant row");
@@ -843,8 +851,7 @@ impl PersistentState {
                     while iter.valid()
                         && iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false)
                     {
-                        let val = bincode::deserialize(iter.value().unwrap())
-                            .expect("Deserializing from rocksdb");
+                        let val = deserialize(iter.value().unwrap());
                         rows.push(val);
                         iter.next();
                     }
@@ -893,10 +900,12 @@ fn prefix_transform(key: &[u8]) -> &[u8] {
         return key;
     }
 
-    // We encoded the size of the key itself with a u64, which bincode uses 8 bytes to encode:
-    let size_offset = 8;
-    let key_size: u64 = bincode::deserialize(&key[..size_offset]).unwrap();
-    let prefix_len = size_offset + key_size as usize;
+    let key_size: u64 = bincode::options()
+        .allow_trailing_bytes()
+        .deserialize(key)
+        .unwrap();
+    let size_offset = bincode::options().serialized_size(&key_size).unwrap();
+    let prefix_len = (size_offset + key_size) as usize;
     // Strip away the key suffix if we haven't already done so:
     &key[..prefix_len]
 }
@@ -1466,7 +1475,7 @@ mod tests {
 
         let actual_rows: Vec<Vec<DataType>> = state
             .all_rows()
-            .map(|(_key, value)| bincode::deserialize(&value).unwrap())
+            .map(|(_key, value)| deserialize(&value))
             .collect();
 
         assert_eq!(actual_rows, rows);
@@ -1569,8 +1578,11 @@ mod tests {
         let r = KeyType::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);
         let prefix = prefix_transform(&k);
-        let size: u64 = bincode::deserialize(prefix).unwrap();
-        assert_eq!(size, bincode::serialized_size(&data).unwrap());
+        let size: u64 = bincode::options()
+            .allow_trailing_bytes()
+            .deserialize(prefix)
+            .unwrap();
+        assert_eq!(size, bincode::options().serialized_size(&data).unwrap());
 
         // prefix_extractor requirements:
         // 1) key.starts_with(prefix(key))
