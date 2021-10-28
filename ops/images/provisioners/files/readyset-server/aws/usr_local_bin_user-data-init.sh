@@ -39,8 +39,17 @@ NORIA_TYPE="readyset-server"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
 
+cat > /etc/default/ensure-ebs-volume <<EOF
+AWS_CLOUDFORMATION_STACK=${AWS_CLOUDFORMATION_STACK}
+AWS_CLOUDFORMATION_RESOURCE=${AWS_CLOUDFORMATION_RESOURCE}
+AWS_CLOUDFORMATION_REGION=${AWS_CLOUDFORMATION_REGION}
+VOLUME_SIZE_GB=${VOLUME_SIZE_GB}
+VOLUME_TAG_VALUE=${DEPLOYMENT}
+EOF
+
 mkdir -p /var/lib/readyset-server
-ensure-ebs-volume \
-  /var/lib/readyset-server \
-  --volume-size-gb "${VOLUME_SIZE_GB:-32}" \
-  --volume-tag-value "$DEPLOYMENT"
+systemctl reset-failed
+systemctl enable ensure-ebs-volume
+systemctl start ensure-ebs-volume
+
+/usr/local/bin/cfn-signal-wrapper.sh 0

@@ -487,8 +487,7 @@ impl Opts {
         .await?;
         info!("Starting readyset-server");
         start_readyset_server().await?;
-        info!("Signalling success to cloudformation");
-        run(Command::new("/usr/local/bin/cfn-signal-wrapper.sh").arg("0")).await?;
+
         Ok(())
     }
 }

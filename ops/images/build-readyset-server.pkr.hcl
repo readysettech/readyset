@@ -37,6 +37,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "provisioners/files/ensure-ebs-volume"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
     source      = "${local.binaries_path}/noria-server"
     destination = "/tmp/readyset-server-binary"
   }
