@@ -1,7 +1,10 @@
 use anyhow::anyhow;
 use futures::future::join_all;
 use itertools::Itertools;
-use noria::ReadySetResult;
+use noria::{
+    consensus::{AuthorityControl, ConsulAuthority},
+    ReadySetResult,
+};
 use prometheus_http_query::{
     response::{InstantVector, QueryResultType},
     Client, InstantVector as InstantVectorReq, Selector,
@@ -27,8 +30,8 @@ use crate::cache::{
 };
 
 pub struct MetricsReconciler {
-    /// Noria adapter addresses to scrape metrics from.
-    adapter_addrs: Vec<SocketAddr>,
+    /// Consul client that is used to retrieve the current list of adapter addresses.
+    consul: ConsulAuthority,
 
     /// Prometheus client to scrape metrics from a prom server.
     prom_client: Client,
@@ -56,7 +59,7 @@ pub struct MetricsReconciler {
 
 impl MetricsReconciler {
     pub fn new(
-        adapter_addrs: Vec<SocketAddr>,
+        consul: ConsulAuthority,
         prom_client: Client,
         deployment: String,
         query_metrics_cache: Arc<Mutex<QueryMetricsCache>>,
@@ -65,7 +68,7 @@ impl MetricsReconciler {
         insecure_adapters: bool,
     ) -> MetricsReconciler {
         MetricsReconciler {
-            adapter_addrs,
+            consul,
             prom_client,
             deployment,
             query_metrics_cache,
@@ -80,9 +83,17 @@ impl MetricsReconciler {
         loop {
             select! {
                 _ = interval.tick() => {
+                    let adapter_addrs = match self.consul.get_adapters().await {
+                        Err(e) => {
+                            error!(%e, "received an error from consul while trying to retrieve adapter endpoints");
+                            continue;
+                        }
+                        Ok(addrs) => addrs,
+                    };
+
                     let mut deny_list = HashSet::new();
                     let mut allow_list = HashSet::new();
-                    let metrics_futs = self.adapter_addrs.iter().map(|a| {
+                    let metrics_futs = adapter_addrs.iter().map(|a| {
                         let addr = *a;
                         let insecure_adapters = self.insecure_adapters;
                         reconcile_adapter_metrics(addr, insecure_adapters)

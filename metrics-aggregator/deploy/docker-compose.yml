@@ -118,8 +118,8 @@ services:
     environment:
       LISTEN_ADDRESS: 0.0.0.0:8090
       NORIA_DEPLOYMENT: frameworktests
-      ADAPTER_ADDRESSES: db:8089
       PROMETHEUS_ADDRESS: prometheus:9090
+      AUTHORITY_ADDRESS: consul:8500
     links:
       - db
       - prometheus
