@@ -430,9 +430,7 @@ Resources:
             export VOLUME_SIZE_GB="${ReadySetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
-          - SqsQueueUrl: !GetAtt
-              - ReadySetServerASGLifecycleTerminateSQS
-              - Arn
+          - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
   ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
