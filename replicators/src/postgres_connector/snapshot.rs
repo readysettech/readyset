@@ -9,7 +9,7 @@ use std::fmt::{self, Display};
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, trace, Instrument};
 
-const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
+const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
 
 pub struct PostgresReplicator<'a> {
     /// This is the underlying (regular) PostgreSQL transaction
