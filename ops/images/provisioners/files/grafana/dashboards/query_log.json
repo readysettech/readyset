@@ -22,8 +22,7 @@
   "fiscalYearStartMonth": 0,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 2,
-  "iteration": 1635216333682,
+  "iteration": 1635397046033,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -41,177 +40,64 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
-      "description": "The amount of time performing a read query against ReadySet.",
+      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "Query time",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "log": 2,
-              "type": "log"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "yellow",
                 "value": null
               },
               {
-                "color": "red",
-                "value": 80
+                "color": "green",
+                "value": 1
               }
             ]
-          },
-          "unit": "ms"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 7,
+        "h": 5,
+        "w": 14,
         "x": 0,
         "y": 1
       },
-      "id": 6,
+      "id": 2,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "right"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single"
-        }
+        "text": {},
+        "textMode": "auto"
       },
+      "pluginVersion": "8.2.2",
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg by (quantile) (noria_client_execution_time{query_type=\"read\", quantile=~\"0.5|0.9|0.99\"}*.001)",
-          "format": "time_series",
-          "instant": false,
+          "expr": "sum by (database_type) (rate(query_log_execution_time_count[1m]))",
           "interval": "",
-          "legendFormat": "{{quantile}}",
+          "legendFormat": "{{database_type}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
       ],
-      "title": "ReadySet Read End-to-End Latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "The end-to-end latency of a write query; the amount of time from when a write was sent from the adapter to MySQL until the write was confirmed and returned to the client.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "Query time",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "log": 2,
-              "type": "log"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 7,
-        "x": 7,
-        "y": 1
-      },
-      "id": 7,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "right"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "avg by (quantile) (noria_client_execution_time{query_type=\"write\", quantile=~\"0.5|0.9|0.99\"}*.001)",
-          "format": "time_series",
-          "instant": false,
-          "interval": "",
-          "legendFormat": "{{quantile}}",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "ReadySet+MySQL write latency",
-      "type": "timeseries"
+      "title": "Queries Per Second (1 minute intervals)",
+      "type": "stat"
     },
     {
       "datasource": "DS_PROMETHEUS",
@@ -333,287 +219,6 @@
         }
       ],
       "title": "ReadySet Servers",
-      "type": "stat"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "The count of each type of query executed against ReadySet.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "displayMode": "auto",
-            "filterable": false
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 50p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 50p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Noria 99p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "MySQL 99p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 90
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Query Text"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 398
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ReadySet 90p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 118
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ReadySet 99p"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 124
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Query"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 380
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Count"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 67
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 6,
-        "x": 14,
-        "y": 7
-      },
-      "id": 11,
-      "options": {
-        "frameIndex": 0,
-        "showHeader": true,
-        "sortBy": []
-      },
-      "pluginVersion": "8.2.2",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (query) (query_log_execution_time_count)",
-          "format": "table",
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "Queries Executed",
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "indexByName": {},
-            "renameByName": {
-              "Value": "Count",
-              "query": "Query"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "desc": true,
-                "field": "Count"
-              }
-            ]
-          }
-        }
-      ],
-      "type": "table"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 14,
-        "x": 0,
-        "y": 9
-      },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.2.2",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (database_type) (rate(query_log_execution_time_count[1m])) * 60",
-          "interval": "",
-          "legendFormat": "{{database_type}}",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "title": "Queries Per Second (1 minute intervals)",
       "type": "stat"
     },
     {
@@ -758,10 +363,10 @@
         ]
       },
       "gridPos": {
-        "h": 6,
+        "h": 17,
         "w": 14,
         "x": 0,
-        "y": 14
+        "y": 6
       },
       "id": 4,
       "options": {
@@ -773,7 +378,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.5\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -783,7 +388,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.5\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.5\"}) *1000 ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -794,7 +399,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.9\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -805,7 +410,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.9\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.9\"}) *1000 ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -816,7 +421,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.99\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -827,7 +432,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.99\"})",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.99\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -866,9 +471,94 @@
               "query": "Query Text"
             }
           }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "ReadySet 50p"
+              }
+            ]
+          }
         }
       ],
       "type": "table"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 14,
+        "y": 7
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.2.2",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "max ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 10,
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "avg ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "Avg",
+          "refId": "B"
+        }
+      ],
+      "title": "ReadySet Server Memory Utilization",
+      "transformations": [],
+      "type": "stat"
     },
     {
       "datasource": "DS_PROMETHEUS",
@@ -902,12 +592,12 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 8,
         "w": 6,
-        "x": 0,
-        "y": 20
+        "x": 14,
+        "y": 13
       },
-      "id": 15,
+      "id": 16,
       "options": {
         "colWidth": 0.9,
         "legend": {
@@ -921,11 +611,10 @@
         }
       },
       "pluginVersion": "8.2.2",
-      "repeat": null,
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -934,7 +623,7 @@
           "refId": "A"
         }
       ],
-      "title": "System Memory Utilization",
+      "title": "System CPU Utilization",
       "transformations": [],
       "type": "status-history"
     },
@@ -970,12 +659,12 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 8,
         "w": 6,
-        "x": 6,
-        "y": 20
+        "x": 14,
+        "y": 21
       },
-      "id": 16,
+      "id": 15,
       "options": {
         "colWidth": 0.9,
         "legend": {
@@ -989,10 +678,11 @@
         }
       },
       "pluginVersion": "8.2.2",
+      "repeat": null,
       "targets": [
         {
           "exemplar": true,
-          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -1001,7 +691,7 @@
           "refId": "A"
         }
       ],
-      "title": "System CPU Utilization",
+      "title": "System Memory Utilization",
       "transformations": [],
       "type": "status-history"
     }
