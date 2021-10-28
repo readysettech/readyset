@@ -260,6 +260,20 @@ Resources:
         - !Ref ReadySetMySQLAdapterNLB
   # --- END MYSQL ADAPTER --- #
   # --- START SERVER --- #
+  ReadySetServerASGLifecycleTerminateSQS:
+    Type: AWS::SQS::Queue
+  ReadySetServerASGRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AutoScalingNotificationAccessRole
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: "sts:AssumeRole"
+            Principal:
+              Service: autoscaling.amazonaws.com
+            Effect: Allow
+            Sid: ""
   ReadySetServerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -385,6 +399,7 @@ Resources:
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
             export AWS_CLOUDFORMATION_RESOURCE="ReadySetServerASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            export SQS_QUEUE_URL="${SqsQueueUrl}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
@@ -397,7 +412,9 @@ Resources:
             export VOLUME_SIZE_GB="${ReadySetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
-          - {}
+          - SqsQueueUrl: !GetAtt
+              - ReadySetServerASGLifecycleTerminateSQS
+              - Arn
   ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -408,6 +425,15 @@ Resources:
         - !Ref PrivateSubnet1ID
         - !Ref PrivateSubnet2ID
         - !Ref PrivateSubnet3ID
+      LifecycleHookSpecificationList:
+        - LifecycleHookName: ReadySetServerASGTerminateSNS
+          LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+          NotificationTargetARN: !GetAtt
+            - ReadySetServerASGLifecycleTerminateSQS
+            - Arn
+          RoleARN: !GetAtt
+            - ReadySetServerASGRole
+            - Arn
       Tags:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-Server"]]
