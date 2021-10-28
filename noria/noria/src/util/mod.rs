@@ -9,7 +9,10 @@ pub mod like;
 
 /// Timeout, in seconds, applied to outgoing RPC requests sent with [`do_noria_rpc`]. Also used to
 /// set up the controller rpc timeout in `controller.rs`.
-pub static RPC_REQUEST_TIMEOUT_SECS: u64 = 10;
+// TODO(): This timeout is set to almost never be hit except when a network partition occurs.
+// This needs to be adjusted in the future when we reduce the time it takes to process
+// rpc requests on large amounts of data.
+pub static RPC_REQUEST_TIMEOUT_SECS: u64 = 1800;
 
 /// Make a request to a remote noria-server instance, using an already partially constructed
 /// [`RequestBuilder`]. This handles sending the request with a timeout ([`RPC_REQUEST_TIMEOUT_SECS`])
