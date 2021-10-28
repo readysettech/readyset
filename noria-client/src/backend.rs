@@ -1100,7 +1100,13 @@ where
             // If we have a `prepared_statement` but not a `SqlQuery` associated with it,
             // this is an unparseable prepared statement, issue this directly to
             // upstream.
-            None => self.execute_upstream(id, params, event).await,
+            None => match prepared_statement.upstream {
+                Some(upstream_id) => self.execute_upstream(upstream_id, params, event).await,
+                None => {
+                    error!("Missing upstream statement ID for unparseable query (adapter statement ID {})", id);
+                    Err(PreparedStatementMissing { statement_id: id }.into())
+                }
+            },
             Some(prep) => {
                 match prep {
                     SqlQuery::Select(ref stmt) => {
@@ -1187,7 +1193,15 @@ where
                     }
                     SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
                         if self.upstream.is_some() {
-                            self.execute_upstream(id, params, event).await
+                            match prepared_statement.upstream {
+                                Some(upstream_id) => {
+                                    self.execute_upstream(upstream_id, params, event).await
+                                }
+                                None => {
+                                    error!("Missing upstream statement ID for write query (adapter statement ID {})", id);
+                                    Err(PreparedStatementMissing { statement_id: id }.into())
+                                }
+                            }
                         } else {
                             Self::execute_noria(
                                 &mut self.noria,
