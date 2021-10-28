@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
+use tracing::error;
 
+use crate::node::special::base::SnapshotMode;
 use crate::prelude::*;
 use crate::state::{RangeLookupResult, RecordResult, State};
 use common::SizeOf;
@@ -144,6 +146,9 @@ pub struct PersistentState {
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
     _directory: Option<TempDir>,
+    /// When set to true automatic compaction will be disabled and writes will bypass WAL
+    /// and fsync
+    pub(crate) snapshot_mode: SnapshotMode,
 }
 
 impl State for PersistentState {
@@ -174,9 +179,13 @@ impl State for PersistentState {
             self.set_replication_offset(&mut batch, offset);
         }
 
-        // Sync the writes to RocksDB's WAL:
         let mut opts = rocksdb::WriteOptions::default();
-        opts.set_sync(true);
+        if self.snapshot_mode.is_enabled() {
+            opts.disable_wal(true);
+        } else {
+            // Sync the writes to RocksDB's WAL:
+            opts.set_sync(true);
+        }
         tokio::task::block_in_place(|| self.db().write_opt(batch, &opts)).unwrap();
     }
 
@@ -267,6 +276,10 @@ impl State for PersistentState {
     }
 
     fn as_persistent(&self) -> Option<&PersistentState> {
+        Some(self)
+    }
+
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
         Some(self)
     }
 
@@ -472,6 +485,7 @@ impl PersistentState {
                 db_opts: opts,
                 db: Some(db),
                 _directory: directory,
+                snapshot_mode: SnapshotMode::SnapshotModeDisabled,
             };
 
             if let Some(pk) = primary_key {
@@ -589,6 +603,40 @@ impl PersistentState {
         // be modified by a single thread.
         self.replication_offset = Some(offset);
         save_meta(batch, &self.meta());
+    }
+
+    /// Enables or disables the snapshot mode. In snapshot mode auto compactions are
+    /// disabled and writes don't go to WAL first. When set to false manual compaction
+    /// will be triggered, which may block for some time.
+    pub(crate) fn set_snapshot_mode(&mut self, snapshot: SnapshotMode) {
+        self.snapshot_mode = snapshot;
+        let opts = &[(
+            "disable_auto_compactions",
+            if snapshot.is_enabled() {
+                "true"
+            } else {
+                "false"
+            },
+        )];
+
+        self.indices.first().and_then(|pi| {
+            self.db().cf_handle(&pi.column_family).map(|cf| {
+                // If done snapshotting, perform a manual compaction
+                if !snapshot.is_enabled() {
+                    tokio::task::block_in_place(|| {
+                        self.db().compact_range_cf(
+                            cf,
+                            Option::<&[u8]>::None,
+                            Option::<&[u8]>::None,
+                        );
+                    });
+                }
+                // Enable/disable auto compaction
+                if let Err(err) = self.db().set_options_cf(cf, opts) {
+                    error!(%err, "Error setting cf options");
+                }
+            })
+        });
     }
 
     // Our RocksDB keys come in three forms, and are encoded as follows:

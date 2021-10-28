@@ -123,6 +123,11 @@ pub(crate) trait State: SizeOf + Send {
         None
     }
 
+    /// If the internal type is a `PersistentState` return a mutable reference to itself
+    fn as_persistent_mut(&mut self) -> Option<&mut PersistentState> {
+        None
+    }
+
     fn rows(&self) -> usize;
 
     fn keys(&self) -> Vec<Vec<usize>>;

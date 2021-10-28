@@ -1,4 +1,4 @@
-use crate::node::special::base::BaseWrite;
+use crate::node::special::base::{BaseWrite, SetSnapshotMode, SnapshotMode};
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
@@ -139,10 +139,25 @@ impl Node {
                         let data = data
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
+
+                        let snapshot_mode = state
+                            .get(addr)
+                            .and_then(|s| s.as_persistent())
+                            .map(|p| p.snapshot_mode)
+                            .unwrap_or(SnapshotMode::SnapshotModeDisabled);
+
                         let BaseWrite {
                             records: mut rs,
                             replication_offset,
-                        } = b.process(addr, data, &*state)?;
+                            set_snapshot_mode,
+                        } = b.process(addr, data, &*state, snapshot_mode)?;
+
+                        if let (Some(SetSnapshotMode::EnterSnapshotMode), Some(s)) = (
+                            set_snapshot_mode,
+                            state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
+                        ) {
+                            s.set_snapshot_mode(SnapshotMode::SnapshotModeEnabled);
+                        }
 
                         // When a replay originates at a base node, we replay the data *through* that
                         // same base node because its column set may have changed. However, this replay
@@ -153,6 +168,13 @@ impl Node {
                         // So: only materialize if the message we're processing is not a replay!
                         if keyed_by.is_none() {
                             materialize(&mut rs, replication_offset, None, state.get_mut(addr));
+                        }
+
+                        if let (Some(SetSnapshotMode::FinishSnapshotMode), Some(s)) = (
+                            set_snapshot_mode,
+                            state.get_mut(addr).and_then(|s| s.as_persistent_mut()),
+                        ) {
+                            s.set_snapshot_mode(SnapshotMode::SnapshotModeDisabled);
                         }
 
                         *m = Some(Box::new(Packet::Message {

@@ -318,6 +318,7 @@ impl Table {
                         }
                     }
                     TableOperation::SetReplicationOffset(_) => {}
+                    TableOperation::SetSnapshotMode(_) => {}
                 }
             }
             Ok(())
@@ -807,6 +808,15 @@ impl Table {
     ) -> ReadySetResult<()> {
         self.quick_n_dirty(TableRequest::TableOperations(vec![
             TableOperation::SetReplicationOffset(offset),
+        ]))
+        .await
+    }
+
+    /// Enable or disable snapshot mode for this table. In snapshot mode compactions are disabled
+    /// and writes don't go into WAL.
+    pub async fn set_snapshot_mode(&mut self, snapshot: bool) -> ReadySetResult<()> {
+        self.quick_n_dirty(TableRequest::TableOperations(vec![
+            TableOperation::SetSnapshotMode(snapshot),
         ]))
         .await
     }
