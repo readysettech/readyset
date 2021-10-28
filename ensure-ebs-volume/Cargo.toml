@@ -11,9 +11,13 @@ aws-config = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-a
 aws-sdk-ec2 = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-alpha", package = "aws-sdk-ec2" }
 aws-types = { git = "https://github.com/awslabs/aws-sdk-rust", tag = "v0.0.19-alpha", package = "aws-types" }
 clap = "3.0.0-beta.4"
+itertools = "0.10.1"
 lazy_static = "1.4.0"
 regex = "1.5.4"
 serde_json = "1.0.68"
 tokio = { version = "1.12.0", features = ["full"] }
 tracing = "0.1.29"
 tracing-subscriber = { version = "0.2.25", features = ["fmt"] }
+
+[dev-dependencies]
+tempfile = "3.2.0"

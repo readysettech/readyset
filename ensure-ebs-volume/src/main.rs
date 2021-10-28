@@ -1,4 +1,7 @@
+#![feature(iter_intersperse)]
+
 use std::env;
+use std::iter;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str;
@@ -13,6 +16,9 @@ use clap::Clap;
 use lazy_static::lazy_static;
 use regex::Regex;
 use tokio::fs::create_dir_all;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time;
@@ -67,6 +73,20 @@ where
 async fn exists(path: &Path) -> Result<bool> {
     let path = path.to_path_buf();
     Ok(task::spawn_blocking(move || path.exists()).await?)
+}
+
+async fn run(command: &mut Command) -> Result<()> {
+    let status = command.status().await?;
+    if !status.success() {
+        bail!("Command exited with {}", status);
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct AttachedVolume {
+    ebs_volume_id: String,
+    block_device_path: PathBuf,
 }
 
 #[instrument(skip(ec2))]
@@ -197,6 +217,37 @@ async fn find_block_device(device_name: &Path) -> Result<Option<PathBuf>> {
     }
 }
 
+#[instrument]
+async fn configure_volume_id(environment_file: &Path, volume_id: &str) -> Result<()> {
+    info!("writing VOLUME_ID for readyset-server");
+    let mut env_file = File::open(environment_file).await?;
+    let mut env = Vec::new();
+    env_file.read_to_end(&mut env).await?;
+
+    let new_env = env
+        .split(|p| *p == b'\n')
+        .filter(|line| !line.starts_with(b"VOLUME_ID="))
+        .chain(iter::once(format!("VOLUME_ID={}", volume_id).as_bytes()))
+        .intersperse(b"\n")
+        .flatten()
+        .copied()
+        .collect::<Vec<_>>();
+
+    File::create(environment_file)
+        .await?
+        .write_all(&new_env)
+        .await?;
+    Ok(())
+}
+
+#[instrument]
+async fn start_readyset_server() -> Result<()> {
+    run(Command::new("systemctl").arg("reset-failed")).await?;
+    run(Command::new("systemctl").args(["enable", "readyset-server"])).await?;
+    run(Command::new("systemctl").args(["restart", "readyset-server"])).await?;
+    Ok(())
+}
+
 impl Opts {
     fn volume_tag_filter(&self) -> Filter {
         filter(
@@ -207,6 +258,32 @@ impl Opts {
 
     fn volume_tag(&self) -> Tag {
         tag(&self.volume_tag_key, &self.volume_tag_value)
+    }
+
+    #[instrument(skip(self, ec2))]
+    async fn find_attached_volume_id(
+        &self,
+        ec2: &Client,
+        device: &Path,
+        instance_id: &str,
+    ) -> Result<String> {
+        info!("Finding volume ID of attached volume");
+        let description = ec2
+            .describe_volumes()
+            .filters(self.volume_tag_filter())
+            .filters(filter("attachment.instance-id", instance_id))
+            .filters(filter("status", "in-use"))
+            .send()
+            .await?;
+        description
+            .volumes
+            .into_iter()
+            .flat_map(|volumes| volumes.into_iter())
+            .flat_map(|volumes| volumes.volume_id)
+            .next()
+            .ok_or_else(|| {
+                anyhow!("Volume mounted, but could not find attached EBS volume ID in API response")
+            })
     }
 
     #[instrument(skip(self, ec2))]
@@ -225,6 +302,7 @@ impl Opts {
             .flat_map(|volume| volume.volume_id)
             .next())
     }
+
     #[instrument(skip(ec2))]
     async fn create_volume_and_return_id(&self, ec2: &Client, az: &str) -> Result<String> {
         let tag_specification = TagSpecification::builder()
@@ -274,7 +352,7 @@ impl Opts {
         ec2: &Client,
         volume_id: &str,
         instance_id: &str,
-    ) -> Result<PathBuf> {
+    ) -> Result<AttachedVolume> {
         info!("Attaching volume...");
         ec2.attach_volume()
             .device(self.device.to_string_lossy())
@@ -288,7 +366,12 @@ impl Opts {
         loop {
             info!("Waiting for volume to attach successfully...");
             match find_block_device(&self.device).await? {
-                Some(block_device_path) => return Ok(block_device_path),
+                Some(block_device_path) => {
+                    return Ok(AttachedVolume {
+                        ebs_volume_id: volume_id.to_owned(),
+                        block_device_path,
+                    })
+                }
                 None => {
                     time::sleep(WAIT_TIMER).await;
                 }
@@ -297,15 +380,7 @@ impl Opts {
     }
 
     #[instrument(skip(self))]
-    async fn ensure_volume_attached(&self) -> Result<PathBuf> {
-        info!("Checking to see whether device exists...");
-        if let Some(block_device_path) = find_block_device(&self.device).await? {
-            info!(path = %block_device_path.display(), "It does");
-            return Ok(block_device_path);
-        } else {
-            info!("It does not");
-        }
-
+    async fn ensure_volume_attached(&self) -> Result<AttachedVolume> {
         let imds = aws_config::imds::client::Client::builder()
             .configure(&ProviderConfig::with_default_region().await)
             .build()
@@ -324,6 +399,20 @@ impl Opts {
                 .await;
             Client::new(&shared_config)
         };
+
+        info!("Checking to see whether device exists...");
+        if let Some(block_device_path) = find_block_device(&self.device).await? {
+            info!(path = %block_device_path.display(), "It does");
+            let ebs_volume_id = self
+                .find_attached_volume_id(&ec2, &self.device, &instance_id)
+                .await?;
+            return Ok(AttachedVolume {
+                ebs_volume_id,
+                block_device_path,
+            });
+        } else {
+            info!("It does not");
+        }
 
         let volume_id = self
             .ensure_volume_exists(&ec2, &instance_id, &region, &az)
@@ -380,14 +469,26 @@ impl Opts {
         if !result.success() {
             bail!("mount {} {} failed")
         }
+
         info!("Done");
         Ok(())
     }
 
     async fn run(&self) -> Result<()> {
-        let block_device = self.ensure_volume_attached().await?;
-        self.ensure_disk_formatted(&block_device).await?;
-        self.ensure_filesystem_mounted(&block_device).await?;
+        let attached_volume = self.ensure_volume_attached().await?;
+        self.ensure_disk_formatted(&attached_volume.block_device_path)
+            .await?;
+        self.ensure_filesystem_mounted(&attached_volume.block_device_path)
+            .await?;
+        configure_volume_id(
+            Path::new("/etc/default/readyset-server"),
+            &attached_volume.ebs_volume_id,
+        )
+        .await?;
+        info!("Starting readyset-server");
+        start_readyset_server().await?;
+        info!("Signalling success to cloudformation");
+        run(Command::new("/usr/local/bin/cfn-signal-wrapper.sh").arg("0")).await?;
         Ok(())
     }
 }
@@ -406,4 +507,38 @@ pub async fn main() -> Result<()> {
     info!("Done");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use tokio::fs::{File, OpenOptions};
+
+    #[tokio::test]
+    async fn configure_volume_id_existing_volume_id() {
+        let file = NamedTempFile::new().unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(file.path())
+            .await
+            .unwrap()
+            .write_all(b"X=y\nVOLUME_ID=asdf")
+            .await
+            .unwrap();
+
+        configure_volume_id(file.path(), "new-volume-id")
+            .await
+            .unwrap();
+
+        let mut new_content = Vec::new();
+        File::open(file.path())
+            .await
+            .unwrap()
+            .read_to_end(&mut new_content)
+            .await
+            .unwrap();
+        let new_content = String::from_utf8(new_content).unwrap();
+        assert_eq!(new_content, "X=y\nVOLUME_ID=new-volume-id");
+    }
 }

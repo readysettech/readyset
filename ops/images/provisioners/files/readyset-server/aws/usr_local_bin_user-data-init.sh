@@ -16,19 +16,6 @@ trap 'on_error' ERR
 /usr/local/bin/configure-consul-client.sh
 /usr/local/bin/configure-vector.sh
 
-mkdir -p /var/lib/readyset-server
-ensure-ebs-volume \
-  /var/lib/readyset-server \
-  --volume-size-gb "${VOLUME_SIZE_GB:-32}" \
-  --volume-tag-value "$DEPLOYMENT"
-
-if [ -f /var/lib/readyset-server/volume_id ]; then
-  volume_id=$(< /var/lib/readyset-server/volume_id)
-else
-  volume_id=$(< /proc/sys/kernel/random/uuid)
-  echo -n "$volume_id" > /var/lib/readyset-server/volume_id
-fi
-
 NORIA_MEMORY_BYTES=$((${NORIA_MEMORY_LIMIT_GB}<<30))
 
 cat > /etc/default/readyset-server <<EOF
@@ -40,7 +27,6 @@ NORIA_REGION=${NORIA_REGION}
 NORIA_SHARDS=${NORIA_SHARDS}
 REPLICATION_URL=${REPLICATION_URL}
 AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
-VOLUME_ID=${volume_id}
 EOF
 chmod 600 /etc/default/readyset-server
 
@@ -53,8 +39,8 @@ NORIA_TYPE="readyset-server"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
 
-systemctl reset-failed
-systemctl enable readyset-server
-systemctl restart readyset-server
-
-/usr/local/bin/cfn-signal-wrapper.sh 0
+mkdir -p /var/lib/readyset-server
+ensure-ebs-volume \
+  /var/lib/readyset-server \
+  --volume-size-gb "${VOLUME_SIZE_GB:-32}" \
+  --volume-tag-value "$DEPLOYMENT"
