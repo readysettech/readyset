@@ -9,12 +9,17 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use aws_config::provider_config::ProviderConfig;
+use aws_sdk_autoscaling as autoscaling;
+use aws_sdk_ec2 as ec2;
 use aws_sdk_ec2::model::{Filter, ResourceType, Tag, TagSpecification, VolumeState};
-use aws_sdk_ec2::Client;
+use aws_sdk_sqs as sqs;
+use aws_types::config::Config;
 use aws_types::region::Region;
 use clap::Clap;
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use sqs::output::ReceiveMessageOutput;
 use tokio::fs::create_dir_all;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -22,8 +27,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time;
+use tokio::time::sleep;
 use tracing::debug;
-use tracing::{info, instrument};
+use tracing::warn;
+use tracing::{error, info, instrument};
 use tracing_subscriber::EnvFilter;
 
 const WAIT_TIMER: Duration = Duration::from_secs(1);
@@ -52,6 +59,19 @@ struct Opts {
     /// Tag value to use for volumes
     #[clap(long, default_value = "true", env = "VOLUME_TAG_VALUE")]
     volume_tag_value: String,
+
+    /// URL of the SQS queue to watch for ASG instance lifecycle events
+    #[clap(long, env = "SQS_QUEUE_URL")]
+    sqs_queue: String,
+
+    #[clap(skip)]
+    region: Option<String>,
+
+    #[clap(skip)]
+    instance_id: Option<String>,
+
+    #[clap(skip)]
+    ec2: Option<ec2::Client>,
 }
 
 fn filter<K, V>(key: K, value: V) -> Filter
@@ -89,9 +109,42 @@ struct AttachedVolume {
     block_device_path: PathBuf,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct LifecycleMessage {
+    #[serde(rename = "Service")]
+    service: String,
+
+    #[serde(rename = "Time")]
+    time: String,
+
+    #[serde(rename = "RequestId")]
+    request_id: String,
+
+    #[serde(rename = "LifecycleActionToken")]
+    lifecycle_action_token: String,
+
+    #[serde(rename = "AccountId")]
+    account_id: String,
+
+    #[serde(rename = "AutoScalingGroupName")]
+    auto_scaling_group_name: String,
+
+    #[serde(rename = "LifecyleHookName")]
+    lifecycle_hook_name: String,
+
+    #[serde(rename = "EC2InstanceId")]
+    ec2_instance_id: String,
+
+    #[serde(rename = "LifecycleTransition")]
+    lifecycle_transition: String,
+
+    #[serde(rename = "NotificationMetadata")]
+    notification_metadata: String,
+}
+
 #[instrument(skip(ec2))]
 async fn wait_for_volume_state(
-    ec2: &Client,
+    ec2: &ec2::Client,
     volume_id: &str,
     desired_state: VolumeState,
 ) -> Result<()> {
@@ -249,6 +302,25 @@ async fn start_readyset_server() -> Result<()> {
 }
 
 impl Opts {
+    fn ec2(&self) -> &ec2::Client {
+        self.ec2.as_ref().unwrap()
+    }
+
+    fn instance_id(&self) -> &str {
+        self.instance_id.as_ref().unwrap()
+    }
+
+    fn region(&self) -> &str {
+        self.region.as_ref().unwrap()
+    }
+
+    async fn aws_config(&self) -> Config {
+        aws_config::from_env()
+            .region(Region::new(self.region().to_owned()))
+            .load()
+            .await
+    }
+
     fn volume_tag_filter(&self) -> Filter {
         filter(
             format!("tag:{}", self.volume_tag_key),
@@ -260,15 +332,11 @@ impl Opts {
         tag(&self.volume_tag_key, &self.volume_tag_value)
     }
 
-    #[instrument(skip(self, ec2))]
-    async fn find_attached_volume_id(
-        &self,
-        ec2: &Client,
-        device: &Path,
-        instance_id: &str,
-    ) -> Result<String> {
+    #[instrument(skip(self))]
+    async fn find_attached_volume_id(&self, device: &Path, instance_id: &str) -> Result<String> {
         info!("Finding volume ID of attached volume");
-        let description = ec2
+        let description = self
+            .ec2()
             .describe_volumes()
             .filters(self.volume_tag_filter())
             .filters(filter("attachment.instance-id", instance_id))
@@ -286,9 +354,10 @@ impl Opts {
             })
     }
 
-    #[instrument(skip(self, ec2))]
-    async fn find_existing_volume_id(&self, ec2: &Client, az: &str) -> Result<Option<String>> {
-        let description = ec2
+    #[instrument(skip(self))]
+    async fn find_existing_volume_id(&self, az: &str) -> Result<Option<String>> {
+        let description = self
+            .ec2()
             .describe_volumes()
             .filters(self.volume_tag_filter())
             .filters(filter("availability-zone", az))
@@ -303,13 +372,14 @@ impl Opts {
             .next())
     }
 
-    #[instrument(skip(ec2))]
-    async fn create_volume_and_return_id(&self, ec2: &Client, az: &str) -> Result<String> {
+    #[instrument(skip(self))]
+    async fn create_volume_and_return_id(&self, az: &str) -> Result<String> {
         let tag_specification = TagSpecification::builder()
             .resource_type(ResourceType::Volume)
             .tags(self.volume_tag())
             .build();
-        let result = ec2
+        let result = self
+            .ec2()
             .create_volume()
             .availability_zone(az)
             .size(self.volume_size_gb)
@@ -321,47 +391,42 @@ impl Opts {
             .ok_or_else(|| anyhow!("No volume ID was returned by EC2"))
     }
 
-    #[instrument(skip(self, ec2))]
+    #[instrument(skip(self))]
     async fn ensure_volume_exists(
         &self,
-        ec2: &Client,
         instance_id: &str,
         region: &str,
         az: &str,
     ) -> Result<String> {
         info!("Searching for volume...");
-        let volume_id = match self.find_existing_volume_id(ec2, az).await? {
+        let volume_id = match self.find_existing_volume_id(az).await? {
             Some(vid) => {
                 info!(volume_id = vid.as_str(), "...found");
                 vid
             }
             None => {
                 info!("...not found.  Creating...");
-                let vid = self.create_volume_and_return_id(ec2, az).await?;
+                let vid = self.create_volume_and_return_id(az).await?;
                 info!(volume_id = vid.as_str(), "...created");
                 vid
             }
         };
-        wait_for_volume_state(ec2, &volume_id, VolumeState::Available).await?;
+        wait_for_volume_state(self.ec2(), &volume_id, VolumeState::Available).await?;
         Ok(volume_id)
     }
 
-    #[instrument(skip(self, ec2))]
-    async fn attach_volume(
-        &self,
-        ec2: &Client,
-        volume_id: &str,
-        instance_id: &str,
-    ) -> Result<AttachedVolume> {
+    #[instrument(skip(self))]
+    async fn attach_volume(&self, volume_id: &str, instance_id: &str) -> Result<AttachedVolume> {
         info!("Attaching volume...");
-        ec2.attach_volume()
+        self.ec2()
+            .attach_volume()
             .device(self.device.to_string_lossy())
             .instance_id(instance_id)
             .volume_id(volume_id)
             .send()
             .await?;
 
-        wait_for_volume_state(ec2, volume_id, VolumeState::InUse).await?;
+        wait_for_volume_state(self.ec2(), volume_id, VolumeState::InUse).await?;
 
         loop {
             info!("Waiting for volume to attach successfully...");
@@ -380,31 +445,26 @@ impl Opts {
     }
 
     #[instrument(skip(self))]
-    async fn ensure_volume_attached(&self) -> Result<AttachedVolume> {
+    async fn ensure_volume_attached(&mut self) -> Result<AttachedVolume> {
         let imds = aws_config::imds::client::Client::builder()
             .configure(&ProviderConfig::with_default_region().await)
             .build()
             .await?;
 
         let instance_id = imds.get("/latest/meta-data/instance-id").await?;
+        self.instance_id = Some(instance_id.clone());
         let region = imds.get("/latest/meta-data/placement/region").await?;
         let az = imds
             .get("/latest/meta-data/placement/availability-zone")
             .await?;
 
-        let ec2 = {
-            let shared_config = aws_config::from_env()
-                .region(Region::new(region.clone()))
-                .load()
-                .await;
-            Client::new(&shared_config)
-        };
+        self.ec2 = Some(ec2::Client::new(&self.aws_config().await));
 
         info!("Checking to see whether device exists...");
         if let Some(block_device_path) = find_block_device(&self.device).await? {
             info!(path = %block_device_path.display(), "It does");
             let ebs_volume_id = self
-                .find_attached_volume_id(&ec2, &self.device, &instance_id)
+                .find_attached_volume_id(&self.device, &instance_id)
                 .await?;
             return Ok(AttachedVolume {
                 ebs_volume_id,
@@ -415,9 +475,9 @@ impl Opts {
         }
 
         let volume_id = self
-            .ensure_volume_exists(&ec2, &instance_id, &region, &az)
+            .ensure_volume_exists(&instance_id, &region, &az)
             .await?;
-        self.attach_volume(&ec2, &volume_id, &instance_id).await
+        self.attach_volume(&volume_id, &instance_id).await
     }
 
     #[instrument(skip(self))]
@@ -474,7 +534,119 @@ impl Opts {
         Ok(())
     }
 
-    async fn run(&self) -> Result<()> {
+    #[instrument(skip(self))]
+    async fn wait_for_terminate_message(&self, volume: AttachedVolume) -> Result<()> {
+        let shared_config = aws_config::from_env().load().await;
+        let sqs = sqs::Client::new(&shared_config);
+
+        loop {
+            let sqs_result = sqs
+                .receive_message()
+                .queue_url(&self.sqs_queue)
+                .max_number_of_messages(1)
+                .wait_time_seconds(20)
+                .send()
+                .await;
+
+            match sqs_result {
+                Ok(ReceiveMessageOutput {
+                    messages: Some(messages),
+                    ..
+                }) => {
+                    let message = if let Some(message) = messages.first() {
+                        message
+                    } else {
+                        continue;
+                    };
+                    let body = if let Some(body) = &message.body {
+                        body
+                    } else {
+                        continue;
+                    };
+                    let lifecycle_message = match serde_json::from_str::<LifecycleMessage>(body) {
+                        Ok(msg) => msg,
+                        Err(error) => {
+                            warn!(%error, "Error parsing lifecycle message from SQS message");
+                            continue;
+                        }
+                    };
+
+                    if lifecycle_message.ec2_instance_id != *self.instance_id() {
+                        debug!(
+                            received_instance_id = %lifecycle_message.ec2_instance_id,
+                            our_instance_id = %self.instance_id(),
+                            "Received message for another instance; ignoring"
+                        );
+                        continue;
+                    }
+
+                    info!("Received terminating lifecycle message");
+                    self.teardown_volume(&volume).await?;
+
+                    self.notify_asg_complete_lifecycle_action(lifecycle_message)
+                        .await?;
+
+                    if let Some(rh) = &message.receipt_handle {
+                        if let Err(error) = sqs
+                            .delete_message()
+                            .queue_url(&self.sqs_queue)
+                            .receipt_handle(rh)
+                            .send()
+                            .await
+                        {
+                            error!(%error, "Error deleting message");
+                        }
+                    }
+
+                    info!("Successfully torn down, exiting");
+                    return Ok(());
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    error!(%error, "Error receiving message from SQS queue");
+                    sleep(Duration::from_secs(30)).await;
+                }
+            }
+        }
+    }
+
+    #[instrument(skip(self))]
+    async fn teardown_volume(&self, volume: &AttachedVolume) -> Result<()> {
+        info!("Stopping readyset-server");
+        run(Command::new("systemctl").args(["stop", "readyset-server"])).await?;
+
+        info!(mountpoint = %self.mountpoint.display(), "Unmounting filesystem");
+        run(Command::new("umount").arg(&self.mountpoint)).await?;
+
+        info!("Detaching volume");
+        self.ec2()
+            .detach_volume()
+            .instance_id(self.instance_id())
+            .volume_id(&volume.ebs_volume_id)
+            .send()
+            .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self, lifecycle_message))]
+    async fn notify_asg_complete_lifecycle_action(
+        &self,
+        lifecycle_message: LifecycleMessage,
+    ) -> Result<()> {
+        let client = autoscaling::Client::new(&self.aws_config().await);
+        client
+            .complete_lifecycle_action()
+            .auto_scaling_group_name(&lifecycle_message.auto_scaling_group_name)
+            .lifecycle_hook_name(&lifecycle_message.lifecycle_hook_name)
+            .lifecycle_action_token(&lifecycle_message.lifecycle_action_token)
+            .lifecycle_action_result("CONTINUE")
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    async fn run(&mut self) -> Result<()> {
         let attached_volume = self.ensure_volume_attached().await?;
         self.ensure_disk_formatted(&attached_volume.block_device_path)
             .await?;
@@ -485,9 +657,11 @@ impl Opts {
             &attached_volume.ebs_volume_id,
         )
         .await?;
+
         info!("Starting readyset-server");
         start_readyset_server().await?;
 
+        self.wait_for_terminate_message(attached_volume).await?;
         Ok(())
     }
 }
@@ -501,9 +675,8 @@ pub async fn main() -> Result<()> {
         ))
         .init();
 
-    let opts = Opts::parse();
+    let mut opts = Opts::parse();
     opts.run().await?;
-    info!("Done");
 
     Ok(())
 }

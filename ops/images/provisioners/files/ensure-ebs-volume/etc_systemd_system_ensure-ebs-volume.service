@@ -4,7 +4,6 @@ Description=Ensure EBS Volume
 StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
 ExecStart=/usr/local/bin/ensure-ebs-volume /var/lib/readyset-server
 EnvironmentFile=/etc/default/ensure-ebs-volume
 Restart=on-failure

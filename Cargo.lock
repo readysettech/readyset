@@ -266,6 +266,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-autoscaling"
+version = "0.0.19-alpha"
+source = "git+https://github.com/awslabs/aws-sdk-rust?tag=v0.0.19-alpha#74bae11ae1af170e33fb695488f1f514f21884ae"
+dependencies = [
+ "aws-auth",
+ "aws-endpoint",
+ "aws-http",
+ "aws-hyper",
+ "aws-sig-auth",
+ "aws-types",
+ "bytes 1.1.0",
+ "http",
+ "smithy-client",
+ "smithy-http",
+ "smithy-query",
+ "smithy-types",
+ "smithy-xml",
+]
+
+[[package]]
 name = "aws-sdk-ec2"
 version = "0.0.19-alpha"
 source = "git+https://github.com/awslabs/aws-sdk-rust?tag=v0.0.19-alpha#74bae11ae1af170e33fb695488f1f514f21884ae"
@@ -303,6 +323,26 @@ dependencies = [
  "smithy-client",
  "smithy-eventstream",
  "smithy-http",
+ "smithy-types",
+ "smithy-xml",
+]
+
+[[package]]
+name = "aws-sdk-sqs"
+version = "0.0.19-alpha"
+source = "git+https://github.com/awslabs/aws-sdk-rust?tag=v0.0.19-alpha#74bae11ae1af170e33fb695488f1f514f21884ae"
+dependencies = [
+ "aws-auth",
+ "aws-endpoint",
+ "aws-http",
+ "aws-hyper",
+ "aws-sig-auth",
+ "aws-types",
+ "bytes 1.1.0",
+ "http",
+ "smithy-client",
+ "smithy-http",
+ "smithy-query",
  "smithy-types",
  "smithy-xml",
 ]
@@ -1376,12 +1416,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aws-config",
+ "aws-sdk-autoscaling",
  "aws-sdk-ec2",
+ "aws-sdk-sqs",
  "aws-types",
  "clap 3.0.0-beta.4",
  "itertools 0.10.1",
  "lazy_static",
  "regex",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -5847,8 +5890,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 1.0.0",
- "rand 0.8.4",
+ "cfg-if 0.1.10",
+ "rand 0.7.3",
  "static_assertions",
 ]
 

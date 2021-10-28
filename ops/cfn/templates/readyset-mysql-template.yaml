@@ -319,6 +319,16 @@ Resources:
                 - ec2:DetachVolume
                 Resource:
                 - "arn:aws:ec2:*:*:instance/*"
+              - Effect: Allow
+                Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                Resource:
+                - !GetAtt [ ReadySetServerASGLifecycleTerminateSQS, Arn ]
+              - Effect: Allow
+                Action:
+                - autoscaling:CompleteLifecycleAction
+                Resource: '*'
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
