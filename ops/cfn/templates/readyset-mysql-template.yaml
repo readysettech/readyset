@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Readyset MySQL Cluster
+Description: ReadySet MySQL Cluster
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -24,44 +24,63 @@ Metadata:
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
       - Label:
-          default: "Readyset Configuration"
+          default: "ReadySet Configuration"
         Parameters:
-          - ReadysetAdapterInstanceType
-          - ReadysetAdapterNodes
-          - ReadysetServerInstanceType
-          - ReadysetServerNodes
-          - ReadysetServerVolumeSizeGB
-          - ReadysetMonitorInstanceType
+          - ReadySetAdapterInstanceType
+          - ReadySetAdapterNodes
+          - ReadySetServerInstanceType
+          - ReadySetServerNodes
+          - ReadySetMonitorInstanceType
+          - ReadySetServerVolumeSizeGB
+          - ReadySetMemoryLimitGB
+          - ReadySetDeploymentName
           - MySQLDatabaseURL
-          - MemoryLimitBytes
-          - DeploymentName
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
     Type: "AWS::EC2::SecurityGroup::Id"
-  ReadysetAdapterInstanceType:
+  ReadySetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
     Default: t3.small
-  ReadysetServerInstanceType:
+  ReadySetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for server instances.
     Default: t3.small
-  ReadysetMonitorInstanceType:
+  ReadySetMonitorInstanceType:
     Type: String
     Description: The EC2 instance type to use for the monitor instance.
     Default: t3.small
-  ReadysetAdapterNodes:
+  ReadySetAdapterNodes:
     Type: String
+    Default: 3
+    AllowedPattern: >-
+      ^\d+$
     Description: Number of Adapter nodes to create.
-  ReadysetServerNodes:
+  ReadySetServerNodes:
     Type: String
+    Default: 3
+    AllowedPattern: >-
+      ^\d+$
     Description: Number of Server nodes to create.
-  ReadysetServerVolumeSizeGB:
+  ReadySetServerVolumeSizeGB:
     Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances.
     MinValue: 32
     Default: 32
+  ReadySetMemoryLimitGB:
+    Type: Number
+    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Default: 0
+    MinValue: 0
+  ReadySetDeploymentName:
+    Description:
+      A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+    Type: String
+    MinLength: 1
+    AllowedPattern: >-
+      ^[^/ ]+$
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: "AWS::EC2::KeyPair::KeyName"
@@ -99,19 +118,6 @@ Parameters:
     Type: String
     NoEcho: True
     Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
-  MemoryLimitBytes:
-    Type: Number
-    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
-    Default: 0
-    MinValue: 0
-  DeploymentName:
-    Description:
-      A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
-    Type: String
-    MinLength: 1
-    AllowedPattern: >-
-      ^[^/ ]+$
-    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
@@ -122,7 +128,7 @@ Mappings:
       READYSETMONITOR: ami-0abcef840f71d2942
 Resources:
   # --- START MYSQL ADAPTER --- #
-  ReadysetMySQLAdapterRole:
+  ReadySetMySQLAdapterRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
@@ -134,13 +140,13 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
-  ReadysetMySQLAdapterProfile:
+  ReadySetMySQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref ReadysetMySQLAdapterRole
-  ReadysetMySQLAdapterSecurityGroup:
+        - !Ref ReadySetMySQLAdapterRole
+  ReadySetMySQLAdapterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow connections to the adapter and SSH from inside the VPC
@@ -168,7 +174,7 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-  ReadysetMySQLAdapterTargetGroup:
+  ReadySetMySQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckProtocol: HTTP
@@ -177,19 +183,19 @@ Resources:
       Port: 3306
       Protocol: TCP
       VpcId: !Ref VPCID
-  ReadysetMySQLAdapterLC:
+  ReadySetMySQLAdapterLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      InstanceType: !Ref ReadysetAdapterInstanceType
+      InstanceType: !Ref ReadySetAdapterInstanceType
       AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ReadysetMySQLAdapterSecurityGroup
+        - !Ref ReadySetMySQLAdapterSecurityGroup
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
         - !Ref "AWS::Region"
         - READYSETMYSQLADAPTER
-      IamInstanceProfile: !Ref ReadysetMySQLAdapterProfile
+      IamInstanceProfile: !Ref ReadySetMySQLAdapterProfile
       UserData:
         Fn::Base64: !Sub
           - |
@@ -200,23 +206,23 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadysetMySQLAdapterASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMySQLAdapterASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export UPSTREAM_DB_URL="${MySQLDatabaseURL}"
-            export DEPLOYMENT="${DeploymentName}"
+            export DEPLOYMENT="${ReadySetDeploymentName}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-  ReadysetMySQLAdapterASG:
+  ReadySetMySQLAdapterASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      LaunchConfigurationName: !Ref ReadysetMySQLAdapterLC
-      MaxSize: !Ref ReadysetAdapterNodes
-      MinSize: !Ref ReadysetAdapterNodes
+      LaunchConfigurationName: !Ref ReadySetMySQLAdapterLC
+      MaxSize: !Ref ReadySetAdapterNodes
+      MinSize: !Ref ReadySetAdapterNodes
       TargetGroupARNs:
-        - !Ref ReadysetMySQLAdapterTargetGroup
+        - !Ref ReadySetMySQLAdapterTargetGroup
       VPCZoneIdentifier:
         - !Ref PrivateSubnet1ID
         - !Ref PrivateSubnet2ID
@@ -227,9 +233,9 @@ Resources:
           PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
-        Count: !Ref ReadysetAdapterNodes
+        Count: !Ref ReadySetAdapterNodes
         Timeout: PT20M
-  ReadysetMySQLAdapterNLB:
+  ReadySetMySQLAdapterNLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Type: "network"
@@ -238,23 +244,23 @@ Resources:
         - !Ref PrivateSubnet1ID
         - !Ref PrivateSubnet2ID
         - !Ref PrivateSubnet3ID
-  ReadysetMySQLAdapterListener:
+  ReadySetMySQLAdapterListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       Protocol: TCP
       Port: 3306
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref ReadysetMySQLAdapterTargetGroup
-      LoadBalancerArn: !Ref ReadysetMySQLAdapterNLB
-  ReadysetMySQLAdapterVPCEndpointService:
+          TargetGroupArn: !Ref ReadySetMySQLAdapterTargetGroup
+      LoadBalancerArn: !Ref ReadySetMySQLAdapterNLB
+  ReadySetMySQLAdapterVPCEndpointService:
     Type: AWS::EC2::VPCEndpointService
     Properties:
       NetworkLoadBalancerArns:
-        - !Ref ReadysetMySQLAdapterNLB
+        - !Ref ReadySetMySQLAdapterNLB
   # --- END MYSQL ADAPTER --- #
   # --- START SERVER --- #
-  ReadysetServerRole:
+  ReadySetServerRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
@@ -267,7 +273,7 @@ Resources:
             Effect: Allow
             Sid: ""
       Policies:
-        - PolicyName: ReadysetServerEBSVolumePolicy
+        - PolicyName: ReadySetServerEBSVolumePolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -292,13 +298,13 @@ Resources:
                 - ec2:DetachVolume
                 Resource:
                 - "arn:aws:ec2:*:*:instance/*"
-  ReadysetServerProfile:
+  ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref ReadysetServerRole
-  ReadysetServerSecurityGroup:
+        - !Ref ReadySetServerRole
+  ReadySetServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow connections to and between servers and SSH from inside the VPC
@@ -317,14 +323,14 @@ Resources:
           ToPort: 6033
           SourceSecurityGroupId:
             Fn::GetAtt:
-            - ReadysetMySQLAdapterSecurityGroup
+            - ReadySetMySQLAdapterSecurityGroup
             - GroupId
         - IpProtocol: tcp
           FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
           ToPort: 61000
           SourceSecurityGroupId:
             Fn::GetAtt:
-            - ReadysetMySQLAdapterSecurityGroup
+            - ReadySetMySQLAdapterSecurityGroup
             - GroupId
       SecurityGroupEgress:
         - IpProtocol: -1
@@ -335,38 +341,38 @@ Resources:
   ReadySetServerSecurityGroupIngressControllerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref ReadysetServerSecurityGroup
+      GroupId: !Ref ReadySetServerSecurityGroup
       IpProtocol: tcp
       FromPort: 6033
       ToPort: 6033
-      SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
-  ReadysetServerSecurityGroupIngressWorkerRule:
+      SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+  ReadySetServerSecurityGroupIngressWorkerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId:
         Fn::GetAtt:
-        - ReadysetServerSecurityGroup
+        - ReadySetServerSecurityGroup
         - GroupId
       IpProtocol: tcp
       FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
       ToPort: 61000
       SourceSecurityGroupId:
         Fn::GetAtt:
-          - ReadysetServerSecurityGroup
+          - ReadySetServerSecurityGroup
           - GroupId
-  ReadysetServerLC:
+  ReadySetServerLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      InstanceType: !Ref ReadysetServerInstanceType
+      InstanceType: !Ref ReadySetServerInstanceType
       AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ReadysetServerSecurityGroup
+        - !Ref ReadySetServerSecurityGroup
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
         - !Ref "AWS::Region"
         - READYSETSERVER
-      IamInstanceProfile: !Ref ReadysetServerProfile
+      IamInstanceProfile: !Ref ReadySetServerProfile
       UserData:
         Fn::Base64: !Sub
           - |
@@ -377,56 +383,56 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadysetServerASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadySetServerASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export DEPLOYMENT="${DeploymentName}"
-            export NORIA_MEMORY_BYTES="${MemoryLimitBytes}"
+            export DEPLOYMENT="${ReadySetDeploymentName}"
+            export NORIA_MEMORY_BYTES="${ReadySetMemoryLimitGB}"
             export NORIA_PRIMARY_REGION="${AWS::Region}"
-            export NORIA_QUORUM="${ReadysetServerNodes}"
+            export NORIA_QUORUM="${ReadySetServerNodes}"
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="0"
             export REPLICATION_URL="${MySQLDatabaseURL}"
-            export VOLUME_SIZE_GB="${ReadysetServerVolumeSizeGB}"
+            export VOLUME_SIZE_GB="${ReadySetServerVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-  ReadysetServerASG:
+  ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      LaunchConfigurationName: !Ref ReadysetServerLC
-      MaxSize: !Ref ReadysetServerNodes
-      MinSize: !Ref ReadysetServerNodes
+      LaunchConfigurationName: !Ref ReadySetServerLC
+      MaxSize: !Ref ReadySetServerNodes
+      MinSize: !Ref ReadySetServerNodes
       VPCZoneIdentifier:
         - !Ref PrivateSubnet1ID
         - !Ref PrivateSubnet2ID
         - !Ref PrivateSubnet3ID
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-Server"]]
+          Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-Server"]]
           PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
-        Count: !Ref ReadysetServerNodes
+        Count: !Ref ReadySetServerNodes
         Timeout: PT20M
   # --- END SERVER --- #
-  ReadysetDBSecurityGroup:
+  ReadySetDBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow connections from Readyset to RDS
+      GroupDescription: Allow connections from ReadySet to RDS
       VpcId: !Ref VPCID
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadysetMySQLAdapterSecurityGroup
+          SourceSecurityGroupId: !Ref ReadySetMySQLAdapterSecurityGroup
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadysetServerSecurityGroup
+          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
   # --- START LOGS AGGREGATOR --- #
-  ReadysetAggregatorCloudWatchLogsManagedPolicy:
+  ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       PolicyDocument:
@@ -441,12 +447,12 @@ Resources:
               - "logs:PutLogEvents"
               - "cloudwatch:PutMetricData"
             Resource: "*"
-  ReadysetMonitorRole:
+  ReadySetMonitorRole:
     Type: AWS::IAM::Role
     Properties:
       ManagedPolicyArns:
         - !Ref ConsulJoinManagedPolicyArn
-        - !Ref ReadysetAggregatorCloudWatchLogsManagedPolicy
+        - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
           - Action: "sts:AssumeRole"
@@ -454,13 +460,13 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
-  ReadysetMonitorProfile:
+  ReadySetMonitorProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
-        - !Ref ReadysetMonitorRole
-  ReadysetMonitorSecurityGroup:
+        - !Ref ReadySetMonitorRole
+  ReadySetMonitorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow connections to and from the aggregator within the VPC.
@@ -493,13 +499,13 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
-  ReadysetMonitorInstance:
+  ReadySetMonitorInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: !Ref ReadysetMonitorInstanceType
+      InstanceType: !Ref ReadySetMonitorInstanceType
       SubnetId: !Ref PrivateSubnet1ID
       SecurityGroupIds:
-        - !Ref ReadysetMonitorSecurityGroup
+        - !Ref ReadySetMonitorSecurityGroup
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
           - AWSAMIRegionMap
@@ -508,7 +514,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "Monitor"]]
-      IamInstanceProfile: !Ref ReadysetMonitorProfile
+      IamInstanceProfile: !Ref ReadySetMonitorProfile
       UserData:
         Fn::Base64: !Sub
           - |
@@ -519,24 +525,24 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadysetServerASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorASG"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export DEPLOYMENT="${DeploymentName}"
+            export DEPLOYMENT="${ReadySetDeploymentName}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
   # --- END LOGS AGGREGATOR --- #
 Outputs:
-  ReadysetDBSecurityGroup:
-    Value: !Ref ReadysetDBSecurityGroup
+  ReadySetDBSecurityGroup:
+    Value: !Ref ReadySetDBSecurityGroup
     Description: Attach this Security Group to your RDS instance.
-  ReadysetAdapterNLBDNSName:
+  ReadySetAdapterNLBDNSName:
     Value: !GetAtt
-      - ReadysetMySQLAdapterNLB
+      - ReadySetMySQLAdapterNLB
       - DNSName
-    Description: Host for Readyset connection string.
-  ReadysetMySQLVPCEndpointService:
-    Value: !Ref ReadysetMySQLAdapterVPCEndpointService
+    Description: Host for ReadySet connection string.
+  ReadySetMySQLVPCEndpointService:
+    Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Description: VPC Endpoint Service to allow connections from outside the VPC.

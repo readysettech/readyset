@@ -1,5 +1,27 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC Network Configuration"
+        Parameters:
+          - VPCID
+          - VPCCIDR
+          - PrivateSubnet1ID
+          - PrivateSubnet2ID
+          - PrivateSubnet3ID
+      - Label:
+          default: "SSH Access Configuration"
+        Parameters:
+          - BastionSecurityGroupID
+          - KeyPairName
+      - Label:
+          default: "Consul Configuration"
+        Parameters:
+          - ConsulEc2RetryJoinTagKey
+          - ConsulEc2RetryJoinTagValue
+          - ConsulServerNodes
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
