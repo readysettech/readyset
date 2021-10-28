@@ -1,13 +1,13 @@
 #![warn(clippy::dbg_macro)]
 #![deny(macro_use_extern_crate)]
 
-use std::collections::HashMap;
-use std::io;
 use std::marker::Send;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
+use std::{collections::HashMap, time::Duration};
+use std::{io, net::IpAddr};
 
 use anyhow::anyhow;
 use async_compression::tokio::write::GzipEncoder;
@@ -23,22 +23,24 @@ use noria_client::{coverage::QueryCoverageInfoRef, http_router::NoriaAdapterHttp
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use stream_cancel::Valve;
-use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::net;
 use tokio::select;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::{fs::OpenOptions, net::UdpSocket};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, info_span, span, Level};
 use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement, SqlQuery};
-use noria::consensus::AuthorityType;
+use noria::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use noria::{ControllerHandle, ReadySetError};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::rewrite::anonymize_literals;
 use noria_client::{Backend, BackendBuilder};
+
+const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
 
 #[async_trait]
 pub trait ConnectionHandler {
@@ -373,6 +375,19 @@ where
             handle
         };
 
+        // Spin up async thread that is in charge of creating a session with the authority,
+        // regularly updating the heartbeat to keep the session live, and registering the adapters
+        // http endpoint.
+        // For now we only support registering adapters over consul.
+        if let AuthorityType::Consul = options.authority {
+            let fut = reconcile_endpoint_registration(
+                authority_address,
+                deployment,
+                options.metrics_address.port(),
+            );
+            rt.handle().spawn(fut);
+        }
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
@@ -485,6 +500,72 @@ where
         rt.shutdown_timeout(std::time::Duration::from_secs(20));
 
         Ok(())
+    }
+}
+
+async fn my_ip(destination: &str) -> Option<IpAddr> {
+    let socket = match UdpSocket::bind("0.0.0.0:0").await {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+
+    match socket.connect(destination).await {
+        Ok(()) => (),
+        Err(_) => return None,
+    };
+
+    match socket.local_addr() {
+        Ok(addr) => Some(addr.ip()),
+        Err(_) => None,
+    }
+}
+
+/// Facilitates continuously updating consul with this adapters externally accessibly http
+/// endpoint.
+async fn reconcile_endpoint_registration(authority_address: String, deployment: String, port: u16) {
+    let authority =
+        ConsulAuthority::new(&format!("http://{}/{}", &authority_address, &deployment)).unwrap();
+
+    let mut interval = tokio::time::interval(REGISTER_HTTP_INTERVAL);
+    let mut session_id = None;
+
+    async fn needs_refresh(id: &Option<String>, consul: &ConsulAuthority) -> bool {
+        if let Some(id) = id {
+            consul.worker_heartbeat(id.to_owned()).await.is_err()
+        } else {
+            true
+        }
+    }
+
+    loop {
+        interval.tick().await;
+
+        if needs_refresh(&session_id, &authority).await {
+            // If we fail this heartbeat, we assume we need to create a new session.
+            if let Err(e) = authority.init().await {
+                error!(%e, "encountered error while trying to initialize authority in readyset-adapter");
+                // Try again on next tick.
+                continue;
+            }
+        }
+
+        // We try to update our http endpoint every iteration regardless because it may
+        // have changed.
+        let ip = match my_ip(&authority_address).await {
+            Some(ip) => ip,
+            None => {
+                // Failed to retrieve our IP. We'll try again on next tick iteration.
+                continue;
+            }
+        };
+        let http_endpoint = SocketAddr::new(ip, port);
+
+        match authority.register_adapter(http_endpoint).await {
+            Ok(id) => session_id = id,
+            Err(e) => {
+                error!(%e, "encountered error while trying to register adapter endpoint in authority")
+            }
+        }
     }
 }
 
