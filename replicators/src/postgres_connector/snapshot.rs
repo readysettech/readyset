@@ -1,5 +1,6 @@
 use super::PostgresPosition;
 use chrono::{DateTime, FixedOffset};
+use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
@@ -355,11 +356,13 @@ impl<'a> PostgresReplicator<'a> {
             // TODO: parallelize with a connection pool if performance here matters
             let span = info_span!("Replicating table", table = %table.name);
             span.in_scope(|| info!("Replicating table"));
-            let noria_table = self
+            let mut noria_table = self
                 .noria
                 .table(&table.name)
                 .instrument(span.clone())
                 .await?;
+
+            noria_table.set_snapshot_mode(true).await?;
 
             table
                 .dump(&self.transaction, noria_table)
@@ -373,6 +376,21 @@ impl<'a> PostgresReplicator<'a> {
         self.noria
             .set_replication_offset(Some(PostgresPosition::default().into()))
             .await?;
+
+        let mut compacting = FuturesUnordered::new();
+        for table in tables {
+            let mut noria_table = self.noria.table(&table.name).await?;
+            compacting.push(async move {
+                let span = info_span!("Compacting table", table = %table.name);
+                span.in_scope(|| info!("Compacting table"));
+                noria_table.set_snapshot_mode(false).await?;
+                span.in_scope(|| info!("Compacting finished"));
+                ReadySetResult::Ok(())
+            })
+        }
+        while let Some(f) = compacting.next().await {
+            f?;
+        }
 
         Ok(())
     }

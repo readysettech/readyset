@@ -2513,6 +2513,10 @@ pub enum TableOperation {
     /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
     SetReplicationOffset(ReplicationOffset),
+
+    /// Enter or exit snapshot mode for the underlying persistent storage. In snapshot mode
+    /// compactions are disabled and writes don't go into WAL first.
+    SetSnapshotMode(bool),
 }
 
 impl TableOperation {
@@ -2540,6 +2544,7 @@ impl TableOperation {
             TableOperation::Update { key, .. } => Some(&key[0]),
             TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
             TableOperation::SetReplicationOffset(_) => None,
+            TableOperation::SetSnapshotMode(_) => None,
         };
 
         if let Some(key) = key {

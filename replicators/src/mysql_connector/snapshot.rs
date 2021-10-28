@@ -235,6 +235,11 @@ impl MySqlReplicator {
             .set_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
 
+        drop(tx);
+
+        // After the lock is released we want to compact the tables
+        self.finish_snapshot(noria).await?;
+
         Ok(binlog_position)
     }
 
@@ -269,7 +274,28 @@ impl MySqlReplicator {
 
         drop(_lock);
 
+        // After the lock is released we want to compact the tables
+        self.finish_snapshot(noria).await?;
+
         Ok(binlog_position)
+    }
+
+    async fn finish_snapshot(&self, noria: &mut noria::ControllerHandle) -> ReadySetResult<()> {
+        let mut compacting = FuturesUnordered::new();
+        for table_name in self.tables.as_ref().unwrap() {
+            let mut noria_table = noria.table(table_name).await?;
+            compacting.push(async move {
+                let span = info_span!("Compacting table", table = %table_name);
+                span.in_scope(|| info!("Compacting table"));
+                noria_table.set_snapshot_mode(false).await?;
+                span.in_scope(|| info!("Compacting finished"));
+                ReadySetResult::Ok(())
+            })
+        }
+        while let Some(f) = compacting.next().await {
+            f?;
+        }
+        Ok(())
     }
 
     /// Copy all base tables into noria
@@ -279,7 +305,9 @@ impl MySqlReplicator {
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
             let dumper = self.dump_table(table_name).await?;
-            let table_mutator = noria.table(table_name).await?;
+            let mut table_mutator = noria.table(table_name).await?;
+
+            table_mutator.set_snapshot_mode(true).await?;
 
             let span = info_span!("replicating table", table = %table_name);
             span.in_scope(|| debug!("Replicating table"));

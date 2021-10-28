@@ -12,6 +12,24 @@ use std::convert::TryFrom;
 use tracing::warn;
 use vec_map::VecMap;
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum SetSnapshotMode {
+    EnterSnapshotMode,
+    FinishSnapshotMode,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum SnapshotMode {
+    SnapshotModeEnabled,
+    SnapshotModeDisabled,
+}
+
+impl SnapshotMode {
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, SnapshotMode::SnapshotModeEnabled)
+    }
+}
+
 /// A batch of writes to be persisted to the state backing a [`Base`] node
 #[derive(Debug, PartialEq)]
 pub struct BaseWrite {
@@ -26,6 +44,9 @@ pub struct BaseWrite {
     /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
     pub replication_offset: Option<ReplicationOffset>,
+
+    /// Optionally enter or exit the snapshot mode for this table
+    pub set_snapshot_mode: Option<SetSnapshotMode>,
 }
 
 impl From<Records> for BaseWrite {
@@ -33,6 +54,7 @@ impl From<Records> for BaseWrite {
         Self {
             records,
             replication_offset: None,
+            set_snapshot_mode: None,
         }
     }
 }
@@ -154,6 +176,7 @@ fn key_val(i: usize, col: usize, r: &TableOperation) -> Option<&DataType> {
         TableOperation::Update { ref key, .. } => Some(&key[i]),
         TableOperation::InsertOrUpdate { ref row, .. } => Some(&row[col]),
         TableOperation::SetReplicationOffset(_) => None,
+        TableOperation::SetSnapshotMode(_) => None,
     }
 }
 
@@ -174,6 +197,7 @@ impl Base {
     fn process_unkeyed(&mut self, operations: Vec<TableOperation>) -> ReadySetResult<BaseWrite> {
         // Keep track of the maximal replication offset in the list, if any
         let mut replication_offset: Option<ReplicationOffset> = None;
+        let mut set_snapshot_mode: Option<SetSnapshotMode> = None;
 
         // This is a non keyed table, can only apply non-keyed operations
         let mut records = Vec::with_capacity(operations.len());
@@ -190,6 +214,13 @@ impl Base {
                 TableOperation::SetReplicationOffset(offset) => {
                     offset.try_max_into(&mut replication_offset)?;
                 }
+                TableOperation::SetSnapshotMode(s) => {
+                    set_snapshot_mode = Some(if s {
+                        SetSnapshotMode::EnterSnapshotMode
+                    } else {
+                        SetSnapshotMode::FinishSnapshotMode
+                    })
+                }
                 _ => {
                     internal!("unkeyed base got keyed operation {:?}", op);
                 }
@@ -199,6 +230,7 @@ impl Base {
         Ok(BaseWrite {
             records: records.into(),
             replication_offset,
+            set_snapshot_mode,
         })
     }
 
@@ -208,6 +240,7 @@ impl Base {
         our_index: LocalNodeIndex,
         mut ops: Vec<TableOperation>,
         state: &StateMap,
+        snapshot_mode: SnapshotMode,
     ) -> ReadySetResult<BaseWrite> {
         if self.primary_key.is_none() || ops.is_empty() {
             return self.process_unkeyed(ops);
@@ -223,11 +256,27 @@ impl Base {
 
         // First compute the replication offset
         let mut replication_offset: Option<ReplicationOffset> = None;
-        while let Some(TableOperation::SetReplicationOffset(offset)) = ops.peek() {
-            // Process all of the `SetReplicationOffset` ops, then proceed to the keyed operations as usual
-            offset.try_max_into(&mut replication_offset)?;
-            ops.next();
-            n_ops -= 1;
+        let mut set_snapshot_mode: Option<SetSnapshotMode> = None;
+
+        while let Some(op) = ops.peek() {
+            // Process all of the `SetReplicationOffset` and `SetSnapshotMode` ops, then proceed to the keyed operations as usual
+            match op {
+                TableOperation::SetReplicationOffset(offset) => {
+                    offset.try_max_into(&mut replication_offset)?;
+                    ops.next();
+                    n_ops -= 1;
+                }
+                TableOperation::SetSnapshotMode(s) => {
+                    set_snapshot_mode = Some(if *s {
+                        SetSnapshotMode::EnterSnapshotMode
+                    } else {
+                        SetSnapshotMode::FinishSnapshotMode
+                    });
+                    ops.next();
+                    n_ops -= 1;
+                }
+                _ => break,
+            }
         }
 
         // starting record state
@@ -250,17 +299,23 @@ impl Base {
         for (key, ops) in &ops {
             // It is not enough to check the persisted value for the key, as it may have been changed in previous iteration,
             // therefore we have to check it was not changed in one of the outstanding records
-            let stored_value = match touched_keys.get(&key) {
-                Some(TouchedKey::Inserted(row)) => Some(row.clone()), // Row was added in previous iteration
-                Some(TouchedKey::Deleted) => None,                    // Row was deleted previously
-                None => match db.lookup(key_cols, &KeyType::from(&key)) {
-                    LookupResult::Missing => internal!(),
-                    LookupResult::Some(rows) if rows.is_empty() => None,
-                    LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
-                    LookupResult::Some(rows) => {
-                        internal!("key {:?} not unique; n={}", key, rows.len())
-                    }
-                },
+            let stored_value = if snapshot_mode.is_enabled() {
+                // In snapshot mode don't check the currently store values as it doesn't matter for
+                // correctness but imposes a heavy toll on batched writes
+                None
+            } else {
+                match touched_keys.get(&key) {
+                    Some(TouchedKey::Inserted(row)) => Some(row.clone()), // Row was added in previous iteration
+                    Some(TouchedKey::Deleted) => None, // Row was deleted previously
+                    None => match db.lookup(key_cols, &KeyType::from(&key)) {
+                        LookupResult::Missing => internal!(),
+                        LookupResult::Some(rows) if rows.is_empty() => None,
+                        LookupResult::Some(rows) if rows.len() == 1 => rows.into_iter().next(),
+                        LookupResult::Some(rows) => {
+                            internal!("key {:?} not unique; n={}", key, rows.len())
+                        }
+                    },
+                }
             };
 
             // Current value for the given key following the operations that were already applied to it
@@ -333,6 +388,7 @@ impl Base {
         Ok(BaseWrite {
             records: results.into(),
             replication_offset,
+            set_snapshot_mode,
         })
     }
 
@@ -424,7 +480,7 @@ mod tests {
                 let mut m = n
                     .get_base_mut()
                     .unwrap()
-                    .process(local, u, &states)
+                    .process(local, u, &states, SnapshotMode::SnapshotModeDisabled)
                     .unwrap()
                     .records;
                 node::materialize(&mut m, None, None, states.get_mut(local));
@@ -527,7 +583,8 @@ mod tests {
                             row: vec![2.into(), 3.into(), 4.into()]
                         }
                     ],
-                    &state_map
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled
                 )
                 .unwrap(),
                 BaseWrite {
@@ -537,6 +594,7 @@ mod tests {
                     ]
                     .into(),
                     replication_offset: None,
+                    set_snapshot_mode: None,
                 }
             )
         }
@@ -570,7 +628,8 @@ mod tests {
                             row: vec![2.into(), 3.into(), 4.into()]
                         }
                     ],
-                    &state_map
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled
                 )
                 .unwrap(),
                 BaseWrite {
@@ -580,6 +639,7 @@ mod tests {
                     ]
                     .into(),
                     replication_offset: None,
+                    set_snapshot_mode: None,
                 }
             )
         }
@@ -620,7 +680,8 @@ mod tests {
                             key: vec![3.into()]
                         }
                     ],
-                    &state_map
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled
                 )
                 .unwrap(),
                 BaseWrite {
@@ -631,6 +692,7 @@ mod tests {
                     ]
                     .into(),
                     replication_offset: None,
+                    set_snapshot_mode: None,
                 }
             )
         }
