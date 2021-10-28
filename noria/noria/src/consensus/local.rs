@@ -12,9 +12,9 @@
 //! The LocalAuthority supports ephemeral keys, instead of tying these keys to
 //! an active session similar to Zookeeper, the authority will drop ephemeral
 //! keys it created when it is dropped.
-use std::collections::HashMap;
 use std::collections::{btree_map::Entry, BTreeMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{collections::HashMap, net::SocketAddr};
 
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use super::{
-    AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
+    AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
 use crate::errors::internal_err;
@@ -401,6 +401,14 @@ impl AuthorityControl for LocalAuthority {
                     .map(|data| (id, serde_json::from_slice(data).unwrap()))
             })
             .collect())
+    }
+
+    async fn register_adapter(&self, _: SocketAddr) -> Result<Option<AdapterId>, Error> {
+        todo!();
+    }
+
+    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+        todo!();
     }
 }
 

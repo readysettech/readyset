@@ -3,15 +3,19 @@ use async_trait::async_trait;
 use consul::kv::{KVPair, KV};
 use consul::session::{Session, SessionEntry};
 use consul::Config;
+use futures::future::join_all;
 use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+};
 use tracing::{error, warn};
 
-use super::WorkerId;
+use super::{AdapterId, WorkerId};
 use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor,
@@ -24,6 +28,8 @@ pub const WORKER_PREFIX: &str = "workers/";
 pub const CONTROLLER_KEY: &str = "controller";
 /// Path to the controller state.
 pub const STATE_KEY: &str = "state";
+/// Path to the adapter http endpoints.
+pub const ADAPTER_PREFIX: &str = "adapters/";
 /// The delay before another client can claim a lock.
 const SESSION_LOCK_DELAY: u64 = 0;
 /// When the authority releases locks on keys, the keys should
@@ -54,13 +60,23 @@ pub struct ConsulAuthority {
 }
 
 fn path_to_worker_id(path: &str) -> WorkerId {
-    // See `worker_id_to_prefix` for the type of path this is called on.
+    // See `worker_id_to_path` for the type of path this is called on.
+    #[allow(clippy::unwrap_used)]
+    path[(path.rfind('/').unwrap() + 1)..].to_owned()
+}
+
+fn path_to_adapter_id(path: &str) -> AdapterId {
+    // See `adapter_id_to_path` for the type of path this is called on.
     #[allow(clippy::unwrap_used)]
     path[(path.rfind('/').unwrap() + 1)..].to_owned()
 }
 
 fn worker_id_to_path(id: &str) -> String {
     WORKER_PREFIX.to_owned() + id
+}
+
+fn adapter_id_to_path(id: &str) -> String {
+    ADAPTER_PREFIX.to_owned() + id
 }
 
 impl ConsulAuthority {
@@ -507,6 +523,72 @@ impl AuthorityControl for ConsulAuthority {
 
         Ok(worker_descriptors)
     }
+
+    async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error> {
+        // Each adapter is associated with the key:
+        // `ADAPTER_PREFIX`/<session>.
+        let session = self.get_session()?;
+        let key = adapter_id_to_path(&session);
+
+        let pair = KVPair {
+            Key: self.prefix_with_deployment(&key),
+            Value: endpoint.to_string(),
+            Session: Some(session.clone()),
+            ..Default::default()
+        };
+
+        // Acquire will only write a new Value for the KVPair if no other leader
+        // holds the lock. The lock is released if a leader's session dies.
+        match self.consul.acquire(&pair, None).await {
+            Ok(_) => Ok(Some(session)),
+            Err(e) => bail!(e.to_string()),
+        }
+    }
+
+    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
+        let adapter_ids: HashSet<AdapterId> = match consul::kv::KV::list(
+            &self.consul,
+            &self.prefix_with_deployment(ADAPTER_PREFIX),
+            None,
+        )
+        .await
+        {
+            Ok((children, _)) => children
+                .into_iter()
+                .map(|kv| path_to_adapter_id(&kv.Key))
+                .collect(),
+            // The API currently throws an error that it cannot parse the json
+            // if the key does not exist.
+            Err(e) => bail!(e.to_string()),
+        };
+
+        let consul = self.consul.clone();
+        let consul_addresses: Vec<String> = adapter_ids
+            .iter()
+            .map(|id| self.prefix_with_deployment(&adapter_id_to_path(id)))
+            .collect();
+        let adapter_futs = consul_addresses
+            .iter()
+            .map(|addr| consul::kv::KV::get(&consul, addr, None));
+        let endpoints = join_all(adapter_futs)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!(e.to_string()))?
+            .into_iter()
+            .filter_map(|data| data.0.map(|kv| value_to_socket_addr(kv.Value)))
+            .collect::<Result<HashSet<SocketAddr>, Error>>()?;
+
+        Ok(endpoints)
+    }
+}
+
+/// Helper method to convert a consul value into a SocketAddr.
+fn value_to_socket_addr(value: String) -> Result<SocketAddr, Error> {
+    let bytes = base64::decode(value)?;
+    let as_str = serde_json::from_slice::<String>(&bytes)?;
+    let endpoint = as_str.parse::<SocketAddr>()?;
+    Ok(endpoint)
 }
 
 #[cfg(test)]
@@ -678,5 +760,35 @@ mod tests {
             authority.try_get_leader().await.unwrap(),
             GetLeaderResult::NoLeader,
         );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn retrieve_adapter_endpoints() {
+        let authority_address = "http://127.0.0.1:8500/retrieve_adapter_endpoints";
+        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority.init().await.unwrap();
+
+        let adapter_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
+
+        let adapter_addrs = authority.get_adapters().await.unwrap();
+        assert!(adapter_addrs.is_empty());
+
+        authority
+            .register_adapter(adapter_addr.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let adapter_addrs = authority.get_adapters().await.unwrap();
+
+        assert_eq!(adapter_addrs.len(), 1);
+        assert!(adapter_addrs.contains(&adapter_addr));
+
+        // Kill the session, this should remove the keys from the worker set.
+        authority.destroy_session().await.unwrap();
+
+        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let adapter_addrs = authority.get_adapters().await.unwrap();
+        assert_eq!(adapter_addrs.len(), 0);
     }
 }

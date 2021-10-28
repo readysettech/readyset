@@ -29,6 +29,7 @@ type LeaderPayload = ControllerDescriptor;
 
 pub type VolumeId = String;
 pub type WorkerId = String;
+pub type AdapterId = String;
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
 /// status within the system.
@@ -152,6 +153,12 @@ pub trait AuthorityControl: Send + Sync {
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
         E: Send;
+
+    /// Register an adapters http port.
+    async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error>;
+
+    /// Retrieves the current set of adapter endpoints from the authority.
+    async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error>;
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to
