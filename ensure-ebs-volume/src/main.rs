@@ -36,15 +36,15 @@ struct Opts {
     device: PathBuf,
 
     /// Size of the volume to create in gigabytes
-    #[clap(long, default_value = "32")]
+    #[clap(long, default_value = "32", env = "VOLUME_SIZE_GB")]
     volume_size_gb: i32,
 
     /// Tag key to use for volumes
-    #[clap(long, default_value = "ReadySet:ServerVolume")]
+    #[clap(long, default_value = "ReadySet:ServerVolume", env = "VOLUME_TAG_KEY")]
     volume_tag_key: String,
 
     /// Tag value to use for volumes
-    #[clap(long, default_value = "true")]
+    #[clap(long, default_value = "true", env = "VOLUME_TAG_VALUE")]
     volume_tag_value: String,
 }
 
