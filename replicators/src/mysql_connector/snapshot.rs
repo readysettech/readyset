@@ -9,7 +9,7 @@ use tracing_futures::Instrument;
 
 use super::BinlogPosition;
 
-const BATCH_SIZE: usize = 100; // How many queries to buffer before pushing to Noria
+const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
 
 enum TableKind {
     BaseTable,
