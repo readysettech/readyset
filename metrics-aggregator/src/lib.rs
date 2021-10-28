@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use clap::Clap;
+use noria::consensus::ConsulAuthority;
 use prometheus_http_query::{Client, Scheme};
 use stream_cancel::Valve;
 use tokio::sync::Mutex;
@@ -33,13 +34,13 @@ pub struct Options {
     )]
     address: SocketAddr,
 
+    /// Consul connection string.
+    #[clap(long, short = 'c', env = "AUTHORITY_ADDRESS")]
+    consul_address: String,
+
     /// ReadySet deployment ID to filter by when aggregating metrics.
     #[clap(long, env = "NORIA_DEPLOYMENT", forbid_empty_values = true)]
     deployment: String,
-
-    /// A comma separated list of adapter addresses.
-    #[clap(long, env = "ADAPTER_ADDRESSES", parse(try_from_str))]
-    adapter_addresses: String,
 
     /// Prometheus connection string.
     #[clap(long, short = 'p', env = "PROMETHEUS_ADDRESS", parse(try_from_str))]
@@ -64,9 +65,6 @@ pub struct Options {
 pub fn run(options: Options) -> anyhow::Result<()> {
     options.logging.init()?;
 
-    // TODO(peter): We should probably discover adapters via a central Authority rather than
-    // reading them in from a list.
-    let addrs = options.adapter_addresses.to_socket_addrs()?.collect();
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();
     if prom_address_res.is_empty() {
         return Err(anyhow!(
@@ -93,6 +91,11 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     } else {
         Client::new(Scheme::Https, &prom_ip.to_string(), prom_port)
     };
+    let consul = ConsulAuthority::new(&format!(
+        "http://{}/{}",
+        &options.consul_address, &options.deployment
+    ))
+    .unwrap();
 
     let query_metrics_cache = {
         let cache = Arc::new(Mutex::new(QueryMetricsCache::new()));
@@ -102,7 +105,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         let unsecured_adapters = options.unsecured_adapters;
         let fut = async move {
             let mut reconciler = MetricsReconciler::new(
-                addrs,
+                consul,
                 prom_client,
                 deployment,
                 cache_for_reconciler,
@@ -182,10 +185,10 @@ mod tests {
             "test",
             "--address",
             "0.0.0.0:8090",
+            "-c",
+            "0.0.0.0:8500",
             "-p",
             "8.8.8.8:9090",
-            "--adapter-addresses",
-            "8.8.8.8:5000",
         ]);
 
         assert_eq!(opts.deployment, "test");
