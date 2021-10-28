@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Readyset created in a new VPC with a new database
+Description: ReadySet created in a new VPC with a new database
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -38,17 +38,17 @@ Metadata:
           - DatabaseUsername
           - DatabasePassword
       - Label:
-          default: "Readyset Configuration"
+          default: "ReadySet Configuration"
         Parameters:
-          - ReadysetS3BucketName
-          - ReadysetAdapterInstanceType
-          - ReadysetAdapterNodes
-          - ReadysetServerInstanceType
-          - ReadysetServerNodes
-          - ReadysetServerVolumeSizeGB
-          - ReadysetMonitorInstanceType
-          - MemoryLimitBytes
-          - DeploymentName
+          - ReadySetS3BucketName
+          - ReadySetAdapterInstanceType
+          - ReadySetAdapterNodes
+          - ReadySetServerInstanceType
+          - ReadySetServerNodes
+          - ReadySetServerVolumeSizeGB
+          - ReadySetMonitorInstanceType
+          - ReadySetMemoryLimitGB
+          - ReadySetDeploymentName
       - Label:
           default: AWS Quick Start Configuration
         Parameters:
@@ -70,14 +70,14 @@ Parameters:
       include numbers, lowercase letters, uppercase letters, and hyphens (-). It
       cannot start or end with a hyphen (-).
     Type: String
-  ReadysetS3BucketName:
+  ReadySetS3BucketName:
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
     ConstraintDescription: >-
-      Readyset bucket name can include numbers, lowercase letters, uppercase
+      ReadySet bucket name can include numbers, lowercase letters, uppercase
       letters, and hyphens (-). It cannot start or end with a hyphen (-).
     # Default: tbd
     Description: >-
-      S3 bucket name for the Readyset assets. Readyset bucket name can
+      S3 bucket name for the ReadySet assets. ReadySet bucket name can
       include numbers, lowercase letters, uppercase letters, and hyphens (-). It
       cannot start or end with a hyphen (-).
     Type: String
@@ -132,14 +132,14 @@ Parameters:
     AllowedPattern: >-
       ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     Description: >-
-      The CIDR IP range that is permitted to access this new VPC containing Readyset resources.
+      The CIDR IP range that is permitted to access this new VPC containing ReadySet resources.
       Note: a value of 0.0.0.0/0 will allow access from ANY IP address
     Type: String
   ConsulEc2RetryJoinTagKey:
     Description:
       The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: "ReadysetConsulNodeType"
+    Default: "ReadySetConsulNodeType"
     ConstraintDescription: Must match EC2 Tag Name requirements.
   ConsulEc2RetryJoinTagValue:
     Description:
@@ -147,23 +147,23 @@ Parameters:
     Type: String
     Default: "Server"
     ConstraintDescription: Must match EC2 Tag Value requirements.
-  ReadysetAdapterInstanceType:
+  ReadySetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
     Default: t3.small
-  ReadysetAdapterNodes:
+  ReadySetAdapterNodes:
     Type: String
     Description: Number of adapter nodes to create
     Default: 3
-  ReadysetServerInstanceType:
+  ReadySetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for server instances.
     Default: t3.small
-  ReadysetServerNodes:
+  ReadySetServerNodes:
     Type: String
     Description: Number of server nodes to create
     Default: 3
-  ReadysetMonitorInstanceType:
+  ReadySetMonitorInstanceType:
     Type: String
     Description: The EC2 instance type to use for the logs aggregation instance.
     Default: t3.small
@@ -199,18 +199,18 @@ Parameters:
     Description: Password to log into the MySQL Database
     MinLength: 8
     MaxLength: 41
-  MemoryLimitBytes:
+  ReadySetMemoryLimitGB:
     Type: Number
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
     Default: 0
     MinValue: 0
-  DeploymentName:
+  ReadySetDeploymentName:
     Type: String
     MinLength: 1
     AllowedPattern: >-
       ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
-  ReadysetServerVolumeSizeGB:
+  ReadySetServerVolumeSizeGB:
     Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances.
     MinValue: 32
@@ -253,11 +253,11 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         EnableTCPForwarding: true
-  ReadysetConsulStack:
+  ReadySetConsulStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
       Parameters:
         BastionSecurityGroupID: !GetAtt
           - BastionStack
@@ -278,11 +278,11 @@ Resources:
         VPCCIDR: !Ref VPCCIDR
         ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
-  ReadysetRDSMySQLStack:
+  ReadySetRDSMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml
       Parameters:
         PrivateSubnet1ID: !GetAtt
           - VPCStack
@@ -303,17 +303,17 @@ Resources:
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
         DatabasePassword: !Ref DatabasePassword
-  ReadysetMySQLStack:
+  ReadySetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadysetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml
       Parameters:
         BastionSecurityGroupID: !GetAtt
           - BastionStack
           - Outputs.BastionSecurityGroupID
         ConsulJoinManagedPolicyArn: !GetAtt
-          - ReadysetConsulStack
+          - ReadySetConsulStack
           - Outputs.ConsulJoinManagedPolicyArn
         PrivateSubnet1ID: !GetAtt
           - VPCStack
@@ -329,26 +329,26 @@ Resources:
           - Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
         ConsulEc2RetryJoinTagKey: !GetAtt
-          - ReadysetConsulStack
+          - ReadySetConsulStack
           - Outputs.ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !GetAtt
-          - ReadysetConsulStack
+          - ReadySetConsulStack
           - Outputs.ConsulEc2RetryJoinTagValue
         KeyPairName: !Ref KeyPairName
         MySQLDatabaseURL: !GetAtt
-          - ReadysetRDSMySQLStack
+          - ReadySetRDSMySQLStack
           - Outputs.DatabaseURL
-        ReadysetAdapterInstanceType: !Ref ReadysetAdapterInstanceType
-        ReadysetAdapterNodes: !Ref ReadysetAdapterNodes
-        ReadysetServerInstanceType: !Ref ReadysetServerInstanceType
-        ReadysetServerNodes: !Ref ReadysetServerNodes
-        ReadysetServerVolumeSizeGB: !Ref ReadysetServerVolumeSizeGB
-        ReadysetMonitorInstanceType: !Ref ReadysetMonitorInstanceType
-        MemoryLimitBytes: !Ref MemoryLimitBytes
-        DeploymentName: !Ref DeploymentName
+        ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
+        ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
+        ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
+        ReadySetServerNodes: !Ref ReadySetServerNodes
+        ReadySetServerVolumeSizeGB: !Ref ReadySetServerVolumeSizeGB
+        ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
+        ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
+        ReadySetDeploymentName: !Ref ReadySetDeploymentName
 Outputs:
-  ReadysetMySQLVPCEndpointService:
+  ReadySetMySQLVPCEndpointService:
     Value: !GetAtt
-      - ReadysetMySQLStack
-      - Outputs.ReadysetMySQLVPCEndpointService
-    Description: VPC Endpoint to connect to to access Readyset
+      - ReadySetMySQLStack
+      - Outputs.ReadySetMySQLVPCEndpointService
+    Description: VPC Endpoint to connect to to access ReadySet
