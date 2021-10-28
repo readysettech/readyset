@@ -3,7 +3,7 @@ use std::env;
 use anyhow::{bail, Result};
 use reqwest::blocking as http;
 use serde_json::json;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{substrate, terraform};
 
@@ -11,6 +11,16 @@ pub(crate) fn post_terraform_plan(
     root_module: &substrate::RootModule,
     plan: &terraform::Plan,
 ) -> Result<()> {
+    let (change_id, patchset) = match (env::var("GERRIT_CHANGE_ID"), env::var("GERRIT_PATCHSET")) {
+        (Ok(change_id), Ok(patchset)) => (change_id, patchset),
+        _ => {
+            info!(
+                "Not a CL build (no GERRIT_CHANGE_ID or GERRIT_PATCHSET env vars), skipping posting comment"
+            );
+            return Ok(());
+        }
+    };
+
     let comment_text = format!(
         "Plan generated for terraform module {}:\n\n```\n{}\n```",
         root_module,
@@ -40,8 +50,7 @@ pub(crate) fn post_terraform_plan(
 
     let url = format!(
         "https://gerrit.readyset.name/a/changes/{}/revisions/{}/review",
-        env::var("GERRIT_CHANGE_ID")?,
-        env::var("GERRIT_PATCHSET")?
+        change_id, patchset,
     );
 
     let client = http::Client::new();
