@@ -311,8 +311,8 @@ Resources:
                 Resource:
                 - "arn:aws:ec2:*:*:volume/*"
                 Condition:
-                  StringLike:
-                    'aws:ResourceTag/ReadySet:ServerVolume': '*'
+                  'Null':
+                    'aws:ResourceTag/ReadySet:ServerVolume': 'false'
               - Effect: Allow
                 Action:
                 - ec2:AttachVolume
