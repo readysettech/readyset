@@ -269,6 +269,8 @@ Resources:
   # --- START SERVER --- #
   ReadySetServerASGLifecycleTerminateSQS:
     Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 0
   ReadySetServerASGRole:
     Type: AWS::IAM::Role
     Properties:
