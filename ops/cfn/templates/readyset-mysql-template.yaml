@@ -456,6 +456,9 @@ Resources:
         - Key: Name
           Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-Server"]]
           PropagateAtLaunch: true
+        - Key: ReadySet:ServerInstance
+          Value: !Ref ReadySetDeploymentName
+          PropagateAtLaunch: true
     CreationPolicy:
       ResourceSignal:
         Count: !Ref ReadySetServerNodes
