@@ -60,6 +60,9 @@ struct Opts {
     #[clap(long, default_value = "true", env = "VOLUME_TAG_VALUE")]
     volume_tag_value: String,
 
+    #[clap(long, default_value = "1", env = "NORIA_QUORUM")]
+    volume_count: usize,
+
     /// URL of the SQS queue to watch for ASG instance lifecycle events
     #[clap(long, env = "SQS_QUEUE_URL")]
     sqs_queue: String,
@@ -107,6 +110,14 @@ async fn run(command: &mut Command) -> Result<()> {
 struct AttachedVolume {
     ebs_volume_id: String,
     block_device_path: PathBuf,
+}
+
+// This maps onto a Volume from AWS but makes sure that all the fields are valid
+// so we do not need to unwrap the Options in more than one place.
+struct Volume {
+    id: String,
+    availability_zone: String,
+    state: VolumeState,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -355,21 +366,29 @@ impl Opts {
     }
 
     #[instrument(skip(self))]
-    async fn find_existing_volume_id(&self, az: &str) -> Result<Option<String>> {
+    async fn find_existing_volumes(&self) -> Result<Vec<Volume>> {
         let description = self
             .ec2()
             .describe_volumes()
             .filters(self.volume_tag_filter())
-            .filters(filter("availability-zone", az))
-            .filters(filter("status", "available"))
             .send()
             .await?;
         Ok(description
             .volumes
             .into_iter()
             .flat_map(|volumes| volumes.into_iter().next())
-            .flat_map(|volume| volume.volume_id)
-            .next())
+            .flat_map(|volume| {
+                // TODO: Validate all of this and otherwise return None
+                let id = volume.volume_id.unwrap();
+                let availability_zone = volume.availability_zone.unwrap();
+                let state = volume.state.unwrap();
+                Some(Volume {
+                    id,
+                    availability_zone,
+                    state,
+                })
+            })
+            .collect())
     }
 
     #[instrument(skip(self))]
@@ -398,17 +417,29 @@ impl Opts {
         region: &str,
         az: &str,
     ) -> Result<String> {
-        info!("Searching for volume...");
-        let volume_id = match self.find_existing_volume_id(az).await? {
-            Some(vid) => {
-                info!(volume_id = vid.as_str(), "...found");
-                vid
+        info!("Finding all volumes...");
+        let volumes = self.find_existing_volumes().await?;
+        let first_available_volume_in_az = volumes.iter().find(|volume| {
+            volume.availability_zone == az && volume.state == VolumeState::Available
+        });
+        let volume_id = match first_available_volume_in_az {
+            Some(volume) => {
+                info!(
+                    volume_id = volume.id.as_str(),
+                    "Found available volume in instance AZ."
+                );
+                volume.id.clone()
             }
             None => {
-                info!("...not found.  Creating...");
-                let vid = self.create_volume_and_return_id(az).await?;
-                info!(volume_id = vid.as_str(), "...created");
-                vid
+                info!("Did not find available volume in instance AZ.");
+                if volumes.len() < self.volume_count {
+                    let vid = self.create_volume_and_return_id(az).await?;
+                    info!(volume_id = vid.as_str(), "Created new volume.");
+                    vid
+                } else {
+                    // TODO: Handle the situation where we should not create a new volume
+                    bail!("All volumes have been created.");
+                }
             }
         };
         wait_for_volume_state(self.ec2(), &volume_id, VolumeState::Available).await?;
