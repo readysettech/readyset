@@ -139,7 +139,7 @@ pub struct Options {
     #[clap(
         long,
         env = "MAX_PROCESSING_MINUTES",
-        default_value = "5",
+        default_value = "15",
         requires("upstream-db-url")
     )]
     max_processing_minutes: i64,
