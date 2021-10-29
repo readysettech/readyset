@@ -40,15 +40,21 @@ Parameters:
   ReadysetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for ReadySet Adapter instances.
-    Default: t3.small
+    Default: m5.large
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation.
   ReadysetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for ReadySet Server instances.
     Default: c5.4xlarge
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation
   ReadysetMonitorInstanceType:
     Type: String
     Description: The EC2 instance type to use for the ReadySet monitoring instance.
-    Default: t3.small
+    Default: c5.large
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation
   ReadysetAdapterNodes:
     Type: String
     Description: Number of ReadySet Adapter nodes to create.
@@ -176,6 +182,7 @@ Resources:
     Properties:
       InstanceType: !Ref ReadysetAdapterInstanceType
       AssociatePublicIpAddress: false
+      EbsOptimized: true
       SecurityGroups:
         - !Ref ReadysetPostgreSQLAdapterSecurityGroup
       KeyName: !Ref KeyPairName
@@ -348,6 +355,7 @@ Resources:
     Properties:
       InstanceType: !Ref ReadysetServerInstanceType
       AssociatePublicIpAddress: false
+      EbsOptimized: true
       SecurityGroups:
         - !Ref ReadysetServerSecurityGroup
       KeyName: !Ref KeyPairName

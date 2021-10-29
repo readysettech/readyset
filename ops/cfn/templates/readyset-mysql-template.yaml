@@ -41,16 +41,22 @@ Parameters:
     Type: "AWS::EC2::SecurityGroup::Id"
   ReadySetAdapterInstanceType:
     Type: String
-    Description: The EC2 instance type to use for adapter instances.
-    Default: t3.small
+    Description: The EC2 instance type to use for ReadySet Adapter instances.
+    Default: m5.large
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation
   ReadySetServerInstanceType:
     Type: String
-    Description: The EC2 instance type to use for server instances.
-    Default: t3.small
+    Description: The EC2 instance type to use for ReadySet Server instances.
+    Default: c5.4xlarge
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation
   ReadySetMonitorInstanceType:
     Type: String
-    Description: The EC2 instance type to use for the monitor instance.
-    Default: t3.small
+    Description: The EC2 instance type to use for the ReadySet monitoring instance.
+    Default: c5.large
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation
   ReadySetAdapterNodes:
     Type: String
     Default: 3
@@ -188,6 +194,7 @@ Resources:
     Properties:
       InstanceType: !Ref ReadySetAdapterInstanceType
       AssociatePublicIpAddress: false
+      EbsOptimized: true
       SecurityGroups:
         - !Ref ReadySetMySQLAdapterSecurityGroup
       KeyName: !Ref KeyPairName
@@ -378,6 +385,7 @@ Resources:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       InstanceType: !Ref ReadySetServerInstanceType
+      EbsOptimized: true
       AssociatePublicIpAddress: false
       SecurityGroups:
         - !Ref ReadySetServerSecurityGroup
