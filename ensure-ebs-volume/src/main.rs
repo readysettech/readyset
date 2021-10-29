@@ -11,7 +11,9 @@ use anyhow::{anyhow, bail, Result};
 use aws_config::provider_config::ProviderConfig;
 use aws_sdk_autoscaling as autoscaling;
 use aws_sdk_ec2 as ec2;
-use aws_sdk_ec2::model::{Filter, ResourceType, Tag, TagSpecification, VolumeState};
+use aws_sdk_ec2::model::{
+    Filter, InstanceStateName, ResourceType, Tag, TagSpecification, VolumeState,
+};
 use aws_sdk_sqs as sqs;
 use aws_types::config::Config;
 use aws_types::region::Region;
@@ -59,6 +61,18 @@ struct Opts {
     /// Tag value to use for volumes
     #[clap(long, default_value = "true", env = "VOLUME_TAG_VALUE")]
     volume_tag_value: String,
+
+    /// Tag key to use for instances
+    #[clap(
+        long,
+        default_value = "ReadySet:ServerInstance",
+        env = "INSTANCE_TAG_KEY"
+    )]
+    instance_tag_key: String,
+
+    /// Tag value to use for instances
+    #[clap(long, default_value = "true", env = "INSTANCE_TAG_VALUE")]
+    instance_tag_value: String,
 
     #[clap(long, default_value = "1", env = "NORIA_QUORUM")]
     volume_count: usize,
@@ -112,12 +126,56 @@ struct AttachedVolume {
     block_device_path: PathBuf,
 }
 
-// This maps onto a Volume from AWS but makes sure that all the fields are valid
-// so we do not need to unwrap the Options in more than one place.
+/// This maps onto a Volume from AWS but makes sure that all the fields are valid
+/// so we do not need to unwrap the Options in more than one place.
 struct Volume {
     id: String,
     availability_zone: String,
     state: VolumeState,
+}
+
+impl Volume {
+    /// Constructs a Volume from an AWS Volume model, e.g. what we get back from
+    /// ec2::describe_volumes(); if any of the incoming fields we want are None, return None for
+    /// the whole thing.
+    fn from_remote(remote: ec2::model::Volume) -> Option<Self> {
+        Some(Self {
+            id: remote.volume_id?,
+            availability_zone: remote.availability_zone?,
+            state: remote.state?,
+        })
+    }
+}
+
+/// This maps to an EC2 Instance model, e.g. what we get back from ec2::describe_instances().  Pared
+/// down to just the fields we need, and ensures that all fields are Some at construction time so we
+/// don't need to unwrap them all over the place.
+struct Instance {
+    id: String,
+    state: InstanceStateName,
+}
+
+impl Instance {
+    /// Constructs a Instance from an AWS Instance model, e.g. what we get back from
+    /// ec2::describe_volumes(); if any of the incoming fields we want are None, return None for the
+    /// whole thing.
+    fn from_remote(remote: ec2::model::Instance) -> Option<Self> {
+        Some(Self {
+            id: remote.instance_id?,
+            state: remote.state?.name?,
+        })
+    }
+
+    /// Whether or not the state matches a list that we consider running and healthy
+    fn is_up_and_healthy(&self) -> bool {
+        !matches!(
+            self.state,
+            InstanceStateName::ShuttingDown
+                | InstanceStateName::Stopped
+                | InstanceStateName::Stopping
+                | InstanceStateName::Terminated
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -332,6 +390,7 @@ impl Opts {
             .await
     }
 
+    /// Convenience function to construct a Filter for the [configured volume tag](Opts::volume_tag_key)
     fn volume_tag_filter(&self) -> Filter {
         filter(
             format!("tag:{}", self.volume_tag_key),
@@ -339,8 +398,17 @@ impl Opts {
         )
     }
 
+    /// Convenience function to construct the [configured volume Tag](Opts::volume_tag_key)
     fn volume_tag(&self) -> Tag {
         tag(&self.volume_tag_key, &self.volume_tag_value)
+    }
+
+    /// Convenience function to construct a Filter for the [configured instance tag](Opts::instance_tag_key)
+    fn instance_tag_filter(&self) -> Filter {
+        filter(
+            format!("tag:{}", self.instance_tag_key),
+            &self.instance_tag_value,
+        )
     }
 
     #[instrument(skip(self))]
@@ -377,17 +445,7 @@ impl Opts {
             .volumes
             .into_iter()
             .flat_map(|volumes| volumes.into_iter().next())
-            .flat_map(|volume| {
-                // TODO: Validate all of this and otherwise return None
-                let id = volume.volume_id.unwrap();
-                let availability_zone = volume.availability_zone.unwrap();
-                let state = volume.state.unwrap();
-                Some(Volume {
-                    id,
-                    availability_zone,
-                    state,
-                })
-            })
+            .flat_map(Volume::from_remote)
             .collect())
     }
 
@@ -410,6 +468,34 @@ impl Opts {
             .ok_or_else(|| anyhow!("No volume ID was returned by EC2"))
     }
 
+    async fn find_instances_in_az(&self, az: &str) -> Result<Vec<Instance>> {
+        let description = self
+            .ec2()
+            .describe_instances()
+            .filters(filter("availability-zone", az))
+            .filters(self.instance_tag_filter())
+            .send()
+            .await?;
+        Ok(description
+            .reservations
+            .into_iter()
+            .flat_map(|reservations| reservations.into_iter())
+            .flat_map(|reservation| reservation.instances)
+            .flatten()
+            .flat_map(Instance::from_remote)
+            .collect())
+    }
+
+    #[instrument(skip(self))]
+    async fn terminate_instance(&self, instance_id: &str) -> Result<()> {
+        self.ec2()
+            .terminate_instances()
+            .instance_ids(instance_id)
+            .send()
+            .await?;
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     async fn ensure_volume_exists(
         &self,
@@ -417,30 +503,47 @@ impl Opts {
         region: &str,
         az: &str,
     ) -> Result<String> {
-        info!("Finding all volumes...");
-        let volumes = self.find_existing_volumes().await?;
-        let first_available_volume_in_az = volumes.iter().find(|volume| {
-            volume.availability_zone == az && volume.state == VolumeState::Available
-        });
-        let volume_id = match first_available_volume_in_az {
-            Some(volume) => {
-                info!(
-                    volume_id = volume.id.as_str(),
-                    "Found available volume in instance AZ."
-                );
-                volume.id.clone()
-            }
-            None => {
-                info!("Did not find available volume in instance AZ.");
-                if volumes.len() < self.volume_count {
-                    let vid = self.create_volume_and_return_id(az).await?;
-                    info!(volume_id = vid.as_str(), "Created new volume.");
-                    vid
-                } else {
-                    // TODO: Handle the situation where we should not create a new volume
-                    bail!("All volumes have been created.");
+        let volume_id = loop {
+            info!("Finding all volumes...");
+            let volumes = self.find_existing_volumes().await?;
+            let first_available_volume_in_az = volumes.iter().find(|volume| {
+                volume.availability_zone == az && volume.state == VolumeState::Available
+            });
+            match first_available_volume_in_az {
+                Some(volume) => {
+                    info!(
+                        volume_id = volume.id.as_str(),
+                        "Found available volume in instance AZ."
+                    );
+                    break volume.id.clone();
                 }
-            }
+                None => {
+                    info!("Did not find available volume in instance AZ.");
+                    if volumes.len() < self.volume_count {
+                        let vid = self.create_volume_and_return_id(az).await?;
+                        info!(volume_id = vid.as_str(), "Created new volume.");
+                        break vid;
+                    } else {
+                        info!("All volumes have been created.");
+                        let instances = self.find_instances_in_az(az).await?;
+                        let terminating = instances
+                            .into_iter()
+                            .filter(|i| !i.is_up_and_healthy())
+                            .collect::<Vec<_>>();
+                        if terminating.is_empty() {
+                            self.terminate_instance(instance_id).await?;
+                        } else {
+                            info!(
+                                "Instance {} is {}; waiting for it to come down.  Found {} total instances that are stopping/stopped.",
+                                terminating[0].id,
+                                terminating[0].state.as_str(),
+                                terminating.len()
+                            );
+                        }
+                        time::sleep(WAIT_TIMER).await;
+                    }
+                }
+            };
         };
         wait_for_volume_state(self.ec2(), &volume_id, VolumeState::Available).await?;
         Ok(volume_id)
