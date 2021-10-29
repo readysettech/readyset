@@ -20,8 +20,8 @@ use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
 use noria::DataType;
 use noria_server::metrics::{
-    get_global_recorder, install_global_recorder, BufferedRecorder, Clear,
-    CompositeMetricsRecorder, MetricsRecorder, NoriaMetricsRecorder,
+    get_global_recorder, install_global_recorder, Clear, CompositeMetricsRecorder, MetricsRecorder,
+    NoriaMetricsRecorder,
 };
 use noria_server::{DurabilityMode, PersistenceParameters};
 use query_generator::{ColumnName, GenerateOpts, GeneratorState, QuerySeed, TableName};
@@ -215,9 +215,10 @@ impl Benchmark {
     pub async fn run(self) -> anyhow::Result<()> {
         // SAFETY: Called before we spawn any other tasks
         unsafe {
-            let rec = CompositeMetricsRecorder::new();
-            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
-            install_global_recorder(BufferedRecorder::new(rec, 1024))?;
+            let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
+                NoriaMetricsRecorder::new(),
+            )]);
+            install_global_recorder(rec)?;
         }
 
         let queries = self.options.clone().into_query_seeds().collect::<Vec<_>>();

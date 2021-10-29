@@ -121,8 +121,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 })
             }
             (&Method::GET, "/prometheus") => {
-                let body =
-                    get_global_recorder().flush_and_then(|x| x.render(RecorderType::Prometheus));
+                let body = get_global_recorder().render(RecorderType::Prometheus);
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match body {
                     Some(metrics) => res.body(hyper::Body::from(metrics)),
@@ -133,17 +132,15 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/metrics_dump") => {
-                let res = get_global_recorder().flush_and_then(|recorder| {
-                    match recorder.render(RecorderType::Noria) {
-                        Some(metrics) => res
-                            .header(CONTENT_TYPE, "application/json")
-                            .body(hyper::Body::from(metrics)),
-                        None => res
-                            .status(404)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from("Noria metrics were not enabled. To fix this, run Noria with --noria-metrics".to_string())),
-                    }
-                });
+                let res = match get_global_recorder().render(RecorderType::Noria) {
+                    Some(metrics) => res
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(hyper::Body::from(metrics)),
+                    None => res
+                        .status(404)
+                        .header(CONTENT_TYPE, "text/plain")
+                        .body(hyper::Body::from("Noria metrics were not enabled. To fix this, run Noria with --noria-metrics".to_string())),
+                };
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/reset_metrics") => {

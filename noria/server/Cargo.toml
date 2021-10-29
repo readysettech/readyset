@@ -44,7 +44,6 @@ maths = { path = "../../maths" }
 metrics = "0.17.0"
 metrics-util = "0.10.0"
 metrics-exporter-prometheus = "0.6.0"
-crossbeam = "0.8"
 nom = "5"
 nom-sql = { path = "../../nom-sql" }
 petgraph = { version = "0.5", features = ["serde-1"] }
