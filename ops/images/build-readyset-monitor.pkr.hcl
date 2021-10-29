@@ -41,7 +41,20 @@ build {
     destination = "/tmp/"
   }
 
+  provisioner "file" {
+    source      = "provisioners/files/metrics-aggregator"
+    destination = "/tmp/"
+  }
+
+  provisioner "file" {
+    source      = "${local.binaries_path}/metrics-aggregator"
+    destination = "/tmp/metrics-aggregator-binary"
+  }
+
   provisioner "shell" {
+    environment_vars = [
+      "PROMETHEUS_ADDRESS=127.0.0.1:9000",
+    ]
     scripts = [
       "provisioners/scripts/wait-for-cloud-init.sh",
       "provisioners/scripts/external-base/00-init.sh",
@@ -58,6 +71,7 @@ build {
       "provisioners/scripts/prometheus/10-aws.sh",
       "provisioners/scripts/grafana/00-init.sh",
       "provisioners/scripts/grafana/10-aws.sh",
+      "provisioners/scripts/metrics-aggregator/00-init.sh",
     ]
   }
 

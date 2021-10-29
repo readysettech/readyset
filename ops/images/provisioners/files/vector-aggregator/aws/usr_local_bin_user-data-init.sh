@@ -21,6 +21,15 @@ trap 'on_error' ERR
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 
+# TODO: This user-data script should be refactored to be in another package for
+# the readyset-monitor.
+cat > /etc/default/metrics-aggregator <<EOF
+NORIA_DEPLOYMENT=${DEPLOYMENT}
+AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
+PROMETHEUS_ADDRESS=127.0.0.1:9091
+EOF
+chmod 600 /etc/default/metrics-aggregator
+
 cat >> /etc/vector.d/env <<EOF
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 NORIA_TYPE="readyset-monitor"
@@ -67,4 +76,8 @@ inputs = ["in", "metrics"]
 address = "0.0.0.0:9090"
 EOF
 
-usr/local/bin/cfn-signal-wrapper.sh 0
+systemctl reset-failed
+systemctl enable metrics-aggregator
+systemctl restart metrics-aggregator
+
+/usr/local/bin/cfn-signal-wrapper.sh 0

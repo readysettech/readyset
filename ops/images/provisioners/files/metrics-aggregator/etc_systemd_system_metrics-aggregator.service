@@ -1,0 +1,13 @@
+[Unit]
+After=network.target
+Description=Metrics Aggregator
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/metrics-aggregator -a 0.0.0.0:6035 --log-format json --unsecured-prometheus --unsecured-adapters
+EnvironmentFile=/etc/default/metrics-aggregator
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
