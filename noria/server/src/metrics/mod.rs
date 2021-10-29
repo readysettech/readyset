@@ -1,37 +1,21 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
-use crossbeam::queue::ArrayQueue;
-use metrics::{GaugeValue, Unit};
-
 use noria::metrics::Key;
 use thiserror::Error;
 
-pub use crate::metrics::buffered_recorder::BufferedRecorder;
 pub use crate::metrics::composite_recorder::CompositeMetricsRecorder;
 pub use crate::metrics::composite_recorder::RecorderType;
 pub use crate::metrics::noria_recorder::NoriaMetricsRecorder;
 pub use crate::metrics::recorders::MetricsRecorder;
 
-mod buffered_recorder;
 mod composite_recorder;
 mod noria_recorder;
 mod prometheus_recorder;
 mod recorders;
 
 /// The type of the static, globally accessible metrics recorder.
-type GlobalRecorder = BufferedRecorder<CompositeMetricsRecorder>;
+type GlobalRecorder = CompositeMetricsRecorder;
 static mut METRICS_RECORDER: Option<GlobalRecorder> = None;
-
-enum MetricsOp {
-    RegisterCounter(Key, Option<Unit>, Option<&'static str>),
-    RegisterGauge(Key, Option<Unit>, Option<&'static str>),
-    RegisterHistogram(Key, Option<Unit>, Option<&'static str>),
-    IncrementCounter(Key, u64),
-    UpdateGauge(Key, GaugeValue),
-    RecordHistogram(Key, f64),
-}
-
-type OpQueue = ArrayQueue<MetricsOp>;
 
 /// Error value returned from [`install_global_recorder`] if a metrics recorder is already set.
 ///

@@ -12,9 +12,7 @@ use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 
 use noria_server::consensus::AuthorityType;
-use noria_server::metrics::{
-    install_global_recorder, BufferedRecorder, CompositeMetricsRecorder, MetricsRecorder,
-};
+use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
 use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
 use tracing::{error, info};
 
@@ -206,19 +204,18 @@ fn main() -> anyhow::Result<()> {
 
     // SAFETY: we haven't initialized threads that might call the recorder yet
     unsafe {
-        let rec = CompositeMetricsRecorder::new();
+        let mut recs = Vec::new();
         if opts.noria_metrics {
-            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
+            recs.push(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
         }
         if opts.prometheus_metrics {
-            rec.add(MetricsRecorder::Prometheus(
+            recs.push(MetricsRecorder::Prometheus(
                 PrometheusBuilder::new()
                     .add_global_label("deployment", &opts.deployment)
                     .build(),
             ));
         }
-        let bufrec = BufferedRecorder::new(rec, opts.metrics_queue_len);
-        install_global_recorder(bufrec).unwrap();
+        install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
     }
 
     let mut builder = Builder::default();

@@ -3291,7 +3291,6 @@ dependencies = [
  "chrono",
  "clap 3.0.0-beta.4",
  "criterion",
- "crossbeam 0.8.1",
  "diff",
  "futures 0.3.17",
  "futures-core",

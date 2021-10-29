@@ -1,8 +1,4 @@
-use std::collections::HashMap;
-use std::sync::RwLock;
-
 use metrics::{GaugeValue, Recorder, Unit};
-
 use noria::metrics::Key;
 
 use crate::metrics::recorders::MetricsRecorder;
@@ -11,54 +7,52 @@ use crate::metrics::{Clear, Render};
 /// A recorder that maintains a set of recorders and notifies all of them of all updates.
 #[derive(Default)]
 pub struct CompositeMetricsRecorder {
-    elements: RwLock<HashMap<RecorderType, MetricsRecorder>>,
+    recorders: [Option<MetricsRecorder>; 2],
 }
 
 /// The name for the Recorder as stored in CompositeMetricsRecorder.
 #[derive(Eq, PartialEq, Hash, Clone, Copy)]
 pub enum RecorderType {
     /// A Noria recorder.
-    Noria,
+    Noria = 0,
     /// A Prometheus recorder.
-    Prometheus,
-}
-
-macro_rules! try_poisoned {
-    ($expr:expr) => {
-        $expr.expect("Metrics mutex poisoned.")
-    };
+    Prometheus = 1,
 }
 
 impl CompositeMetricsRecorder {
-    /// Makes a new `CompositeMetricsRecorder`
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Add a new sub-recorder to this CompositeMetricsRecorder
-    pub fn add(&self, recorder: MetricsRecorder) {
-        let mut elements = try_poisoned!(self.elements.write());
-        match recorder {
-            MetricsRecorder::Noria(_) => (*elements).insert(RecorderType::Noria, recorder),
-            MetricsRecorder::Prometheus(_) => {
-                (*elements).insert(RecorderType::Prometheus, recorder)
-            }
+    /// Makes a new `CompositeMetricsRecorder` from a vector of recorders
+    pub fn with_recorders(recorders: Vec<MetricsRecorder>) -> Self {
+        let mut rec = CompositeMetricsRecorder {
+            recorders: Default::default(),
         };
+
+        for recorder in recorders {
+            match recorder {
+                MetricsRecorder::Noria(_) => {
+                    rec.recorders[RecorderType::Noria as usize] = Some(recorder)
+                }
+                MetricsRecorder::Prometheus(_) => {
+                    rec.recorders[RecorderType::Prometheus as usize] = Some(recorder)
+                }
+            }
+        }
+
+        rec
     }
 
     /// Render the named sub-recorder of this CompositeMetricsRecorder, if it exists
     pub fn render(&self, recorder_type: RecorderType) -> Option<String> {
-        let elements = try_poisoned!(self.elements.read());
-        (*elements).get(&recorder_type).map(|x| x.render())
+        self.recorders[recorder_type as usize]
+            .as_ref()
+            .map(|x| x.render())
     }
 }
 
 impl Clear for CompositeMetricsRecorder {
     fn clear(&self) -> bool {
-        let elements = try_poisoned!(self.elements.read());
         let mut cleared = true;
-        for recorder in elements.values() {
-            cleared = cleared && recorder.clear();
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
+            cleared = cleared && recorder.clear()
         }
         cleared
     }
@@ -66,43 +60,37 @@ impl Clear for CompositeMetricsRecorder {
 
 impl Recorder for CompositeMetricsRecorder {
     fn register_counter(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.register_counter(key, unit.clone(), description);
         }
     }
 
     fn register_gauge(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.register_gauge(key, unit.clone(), description);
         }
     }
 
     fn register_histogram(&self, key: &Key, unit: Option<Unit>, description: Option<&'static str>) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.register_histogram(key, unit.clone(), description);
         }
     }
 
     fn increment_counter(&self, key: &Key, value: u64) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.increment_counter(key, value);
         }
     }
 
     fn update_gauge(&self, key: &Key, value: GaugeValue) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.update_gauge(key, value.clone());
         }
     }
 
     fn record_histogram(&self, key: &Key, value: f64) {
-        let elements = try_poisoned!(self.elements.read());
-        for recorder in elements.values() {
+        for recorder in self.recorders.iter().filter_map(Option::as_ref) {
             recorder.record_histogram(key, value);
         }
     }

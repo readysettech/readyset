@@ -11,8 +11,8 @@ use noria::{
 };
 
 use crate::metrics::{
-    get_global_recorder_opt, install_global_recorder, BufferedRecorder, CompositeMetricsRecorder,
-    MetricsRecorder, NoriaMetricsRecorder,
+    get_global_recorder_opt, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
+    NoriaMetricsRecorder,
 };
 use crate::{Builder, Handle};
 
@@ -136,10 +136,10 @@ pub async fn sleep() {
 pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
     unsafe {
         if get_global_recorder_opt().is_none() {
-            let rec = CompositeMetricsRecorder::new();
-            rec.add(MetricsRecorder::Noria(NoriaMetricsRecorder::new()));
-            let bufrec = BufferedRecorder::new(rec, 1024);
-            install_global_recorder(bufrec).unwrap();
+            let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
+                NoriaMetricsRecorder::new(),
+            )]);
+            install_global_recorder(rec).unwrap();
         }
     }
 
