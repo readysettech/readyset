@@ -1468,8 +1468,7 @@ where
                 nom_sql::SqlQuery::CreateTable(stmt) => handle_ddl!(handle_create_table(stmt)),
                 nom_sql::SqlQuery::DropTable(_)
                 | nom_sql::SqlQuery::AlterTable(_)
-                | nom_sql::SqlQuery::RenameTable(_)
-                | nom_sql::SqlQuery::Show(_) => {
+                | nom_sql::SqlQuery::RenameTable(_) => {
                     if self.mirror_reads {
                         let res = upstream.query(query).await;
                         handle.set_upstream_duration();
@@ -1478,11 +1477,10 @@ where
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
                 }
-                nom_sql::SqlQuery::Set(_) => {
-                    let res = upstream
-                        .query(&parsed_query.to_string())
-                        .await
-                        .map(QueryResult::Upstream);
+                nom_sql::SqlQuery::Set(_)
+                | nom_sql::SqlQuery::Show(_)
+                | nom_sql::SqlQuery::CompoundSelect(_) => {
+                    let res = upstream.query(query).await.map(QueryResult::Upstream);
                     handle.set_upstream_duration();
                     res
                 }
@@ -1490,11 +1488,6 @@ where
                 | nom_sql::SqlQuery::Commit(_)
                 | nom_sql::SqlQuery::Rollback(_) => {
                     let res = self.handle_transaction_boundaries(parsed_query).await;
-                    handle.set_upstream_duration();
-                    res
-                }
-                nom_sql::SqlQuery::CompoundSelect(_) => {
-                    let res = self.query_fallback(query).await;
                     handle.set_upstream_duration();
                     res
                 }
