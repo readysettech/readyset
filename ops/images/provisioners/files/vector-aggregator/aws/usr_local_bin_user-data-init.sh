@@ -33,12 +33,6 @@ type = "prometheus_scrape"
 endpoints = [ "http://localhost:9100/metrics" ]
 scrape_interval_secs = 15
 
-[sinks.out]
-inputs = ["in"]
-type = "console"
-target = "stdout"
-encoding.codec = "text"
-
 [transforms.metrics]
  type = "remap"
  inputs = ["node-exporter"]
@@ -46,6 +40,12 @@ encoding.codec = "text"
    .tags.deployment = "${DEPLOYMENT}"
    .tags.job = "readyset-monitor"
 '''
+
+[sinks.out]
+inputs = ["in"]
+type = "console"
+target = "stdout"
+encoding.codec = "json"
 
 [sinks.cloudwatch]
 type = "aws_cloudwatch_logs"
@@ -57,13 +57,6 @@ compression = "none"
 region = "${AWS_CLOUDFORMATION_REGION}"
 stream_name = "readyset"
 encoding.codec = "json"
-
-[sinks.cloudwatch-metrics]
-type = "aws_cloudwatch_metrics"
-inputs = ["in"]
-default_namespace = "${AWS_CLOUDFORMATION_STACK}"
-compression = "none"
-region = "us-east-2"
 
 [sinks.prometheus]
 type = "prometheus_exporter"
