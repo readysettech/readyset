@@ -123,9 +123,9 @@ Mappings:
   AWSAMIRegionMap:
     us-east-2:
       # short commit id associated with AMIs: 209c959
-      READYSETMYSQLADAPTER: ami-0fabd9e9a28daf6c7
-      READYSETSERVER: ami-01ffc1b0ea791e7d8
-      READYSETMONITOR: ami-0abcef840f71d2942
+      READYSETMYSQLADAPTER: ami-046e4471d38dc542e
+      READYSETSERVER: ami-021f5b4a1ef4eff47
+      READYSETMONITOR: ami-06732b8cf5f88d9ea
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadySetMySQLAdapterRole:
@@ -304,8 +304,8 @@ Resources:
                 Resource:
                 - "arn:aws:ec2:*:*:volume/*"
                 Condition:
-                  StringEquals:
-                    'aws:ResourceTag/ReadySet:ServerVolume': 'true'
+                  StringLike:
+                    'aws:ResourceTag/ReadySet:ServerVolume': '*'
               - Effect: Allow
                 Action:
                 - ec2:AttachVolume
