@@ -151,6 +151,10 @@ pub(crate) struct WriteHandle {
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
+fn size_of_key(key: &Key) -> u64 {
+    key.iter().map(SizeOf::deep_size_of).sum()
+}
+
 pub(crate) struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
     key: Key<'a>,
@@ -180,6 +184,7 @@ impl<'a> MutWriteHandleEntry<'a> {
             .iter()
             .any(LookupError::is_miss)
         {
+            self.handle.mem_size += size_of_key(&self.key) as usize;
             self.handle.handle.clear(self.key);
             Ok(())
         } else {
@@ -195,7 +200,10 @@ impl<'a> MutWriteHandleEntry<'a> {
             .meta_get_and(&self.key, |rs| rs.iter().map(SizeOf::deep_size_of).sum())
             .map(|(size, _)| size)
             .unwrap_or(0);
-        self.handle.mem_size = self.handle.mem_size.saturating_sub(size as usize);
+        self.handle.mem_size = self
+            .handle
+            .mem_size
+            .saturating_sub((size + size_of_key(&self.key)) as usize);
         self.handle.handle.empty(self.key)
     }
 }
@@ -308,7 +316,7 @@ impl WriteHandle {
 
     /// Evict `count` randomly selected keys from state and return them along with the number of
     /// bytes that will be freed once the underlying `reader_map` applies the operation.
-    pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, mut n: usize) -> u64 {
+    pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, n: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             debug_assert!(
@@ -317,11 +325,7 @@ impl WriteHandle {
                 self.mem_size
             );
 
-            self.handle.empty_random_for_each(rng, n, |vs| {
-                let size: u64 = vs.iter().map(|r| r.deep_size_of() as u64).sum();
-                bytes_to_be_freed += size;
-                n -= 1;
-            });
+            bytes_to_be_freed += self.handle.empty_random(rng, n);
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);

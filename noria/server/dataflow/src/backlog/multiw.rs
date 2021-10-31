@@ -93,19 +93,27 @@ impl Handle {
         }
     }
 
-    /// Evict `n` randomly selected keys from state, and invoke `f` with each of the values that
-    /// have been evicted
-    pub fn empty_random_for_each(
-        &mut self,
-        rng: &mut impl rand::Rng,
-        n: usize,
-        mut f: impl FnMut(&reader_map::refs::Values<Vec<DataType>, RandomState>),
-    ) {
+    /// Evict `n` randomly selected keys from state, and return the number of bytes
+    /// freed.
+    pub fn empty_random(&mut self, rng: &mut impl rand::Rng, n: usize) -> u64 {
+        let mut mem_freed = 0u64;
         match *self {
-            Handle::Single(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
-            Handle::Double(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
-            Handle::Many(ref mut h) => h.empty_random(rng, n).for_each(|r| f(r.1)),
+            Handle::Single(ref mut h) => h.empty_random(rng, n).for_each(|r| {
+                mem_freed +=
+                    r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>() + r.0.deep_size_of();
+            }),
+            Handle::Double(ref mut h) => h.empty_random(rng, n).for_each(|r| {
+                mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
+                    + r.0 .0.deep_size_of()
+                    + r.0 .1.deep_size_of();
+            }),
+            Handle::Many(ref mut h) => h.empty_random(rng, n).for_each(|r| {
+                mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
+                    + r.0.iter().map(|r| r.deep_size_of() as u64).sum::<u64>();
+            }),
         }
+
+        mem_freed
     }
 
     pub fn refresh(&mut self) {
