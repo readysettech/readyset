@@ -5,7 +5,7 @@ scrape_interval_secs = 15
 
 [sources.prometheus-adapter]
 type = "prometheus_scrape"
-endpoints = [ "http://localhost:9000/prometheus" ]
+endpoints = [ "http://localhost:6034/prometheus" ]
 scrape_interval_secs = 15
 
 [sources.prometheus-server]

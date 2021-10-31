@@ -22,7 +22,7 @@
   "fiscalYearStartMonth": 0,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1635397046033,
+  "iteration": 1635627037264,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -363,7 +363,7 @@
         ]
       },
       "gridPos": {
-        "h": 17,
+        "h": 8,
         "w": 14,
         "x": 0,
         "y": 6
@@ -493,6 +493,74 @@
           "color": {
             "mode": "thresholds"
           },
+          "custom": {
+            "fillOpacity": 74,
+            "lineWidth": 1
+          },
+          "decimals": 0,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 14,
+        "y": 7
+      },
+      "id": 16,
+      "options": {
+        "colWidth": 0.9,
+        "legend": {
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "rowHeight": 0.94,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.2.2",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 10,
+          "legendFormat": "{{job}} ({{instance}})",
+          "refId": "A"
+        }
+      ],
+      "title": "System CPU Utilization",
+      "transformations": [],
+      "type": "status-history"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
           "max": 100,
           "min": 0,
@@ -516,8 +584,8 @@
       "gridPos": {
         "h": 6,
         "w": 6,
-        "x": 14,
-        "y": 7
+        "x": 0,
+        "y": 14
       },
       "id": 17,
       "options": {
@@ -567,10 +635,6 @@
           "color": {
             "mode": "thresholds"
           },
-          "custom": {
-            "fillOpacity": 74,
-            "lineWidth": 1
-          },
           "mappings": [],
           "max": 100,
           "min": 0,
@@ -581,51 +645,60 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "decbytes"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 14,
-        "y": 13
+        "h": 6,
+        "w": 8,
+        "x": 6,
+        "y": 14
       },
-      "id": 16,
+      "id": 18,
       "options": {
-        "colWidth": 0.9,
-        "legend": {
-          "displayMode": "hidden",
-          "placement": "bottom"
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "rowHeight": 0.94,
-        "showValue": "never",
-        "tooltip": {
-          "mode": "single"
-        }
+        "text": {},
+        "textMode": "auto"
       },
       "pluginVersion": "8.2.2",
       "targets": [
         {
           "exemplar": true,
-          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "expr": "sum (domain_total_node_state_size_bytes)",
           "format": "time_series",
-          "instant": false,
+          "instant": true,
           "interval": "",
           "intervalFactor": 10,
-          "legendFormat": "{{job}} ({{instance}})",
+          "legendFormat": "Dataflow Usage",
           "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum (node_memory_MemTotal_bytes{job=\"readyset-server\"} - node_memory_MemAvailable_bytes)",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "Server Total Usage",
+          "refId": "B"
         }
       ],
-      "title": "System CPU Utilization",
+      "title": "ReadySet State Size",
       "transformations": [],
-      "type": "status-history"
+      "type": "stat"
     },
     {
       "datasource": "DS_PROMETHEUS",
@@ -638,6 +711,7 @@
             "fillOpacity": 74,
             "lineWidth": 1
           },
+          "decimals": 0,
           "mappings": [],
           "max": 100,
           "min": 0,
@@ -662,7 +736,7 @@
         "h": 8,
         "w": 6,
         "x": 14,
-        "y": 21
+        "y": 15
       },
       "id": 15,
       "options": {
@@ -672,7 +746,7 @@
           "placement": "bottom"
         },
         "rowHeight": 0.94,
-        "showValue": "never",
+        "showValue": "auto",
         "tooltip": {
           "mode": "single"
         }
@@ -696,6 +770,7 @@
       "type": "status-history"
     }
   ],
+  "refresh": "5s",
   "schemaVersion": 31,
   "style": "dark",
   "tags": [],
