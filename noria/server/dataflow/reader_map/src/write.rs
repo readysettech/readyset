@@ -94,6 +94,11 @@ where
         }
     }
 
+    /// Returns the base size of inner data associated with this write handle.
+    pub fn base_value_size(&self) -> usize {
+        std::mem::size_of::<ValuesInner<V, S, crate::aliasing::NoDrop>>()
+    }
+
     /// Publish all changes since the last call to `publish` to make them visible to readers.
     ///
     /// This can take some time, especially if readers are executing slow operations, or if there
@@ -328,7 +333,7 @@ where
         self.add_op(Operation::Reserve(k, additional))
     }
 
-    /// Remove the value-bag for `n` randomly chosen keys.
+    /// Remove the value-bag for randomly chosen keys in an attempt to evict `bytes`.
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
     /// it returns match the elements that will be emptied on the next call to
@@ -337,7 +342,7 @@ where
     pub fn empty_random<'a>(
         &'a mut self,
         rng: &mut impl rand::Rng,
-        n: usize,
+        bytes: usize,
     ) -> impl ExactSizeIterator<Item = (&'a K, &'a crate::values::Values<V, S>)> {
         // force a publish so that our view into self.r_handle matches the indices we choose.
         // if we didn't do this, the `i`th element of r_handle may be a completely different
@@ -358,8 +363,12 @@ where
             unsafe { std::mem::transmute::<&Inner<K, V, M, T, S>, _>(inner.as_ref()) };
         let inner = &inner.data;
 
+        // Base value size is always greater than 0 so this cannot panic. Round this value
+        // up using mod to avoid float conversion.
+        let num_keys =
+            bytes / self.base_value_size() + (bytes % self.base_value_size() != 0) as usize;
+        let n = num_keys.min(inner.len());
         // let's pick some (distinct) indices to evict!
-        let n = n.min(inner.len());
         let keys: Vec<&K> = inner.keys().choose_multiple(rng, n);
 
         self.add_ops(keys.iter().map(|k| Operation::RemoveEntry((*k).clone())));

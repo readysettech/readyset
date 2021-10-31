@@ -293,13 +293,11 @@ impl Reader {
     }
 
     /// Evict a randomly selected key, returning the number of bytes evicted.
-    /// Note that due to how `reader_map` applies the evictions asynchronously, we can only evict a
-    /// single key at a time here.
-    pub(crate) fn evict_random_keys(&mut self, n: usize) -> u64 {
+    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
             let mut rng = rand::thread_rng();
-            bytes_freed = handle.evict_random_keys(&mut rng, n);
+            bytes_freed = handle.evict_bytes(&mut rng, bytes);
             handle.swap();
         }
         bytes_freed

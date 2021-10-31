@@ -3515,12 +3515,14 @@ impl Domain {
                 node,
                 mut num_bytes,
             } => {
+                let start = std::time::Instant::now();
                 counter!(
                     recorded::DOMAIN_EVICTION_REQUESTS,
                     1,
                     "domain" => self.index.index().to_string(),
                     "shard" => self.shard.unwrap_or(0).to_string()
                 );
+
                 let mut total_freed = 0;
                 let nodes = if let Some(node) = node {
                     vec![(node, num_bytes)]
@@ -3598,7 +3600,7 @@ impl Domain {
                         if n.is_dropped() {
                             break; // Node was dropped. Give up.
                         } else if let Some(r) = n.as_mut_reader() {
-                            let freed_now = r.evict_random_keys(16);
+                            let freed_now = r.evict_bytes(num_bytes - freed as usize);
 
                             freed += freed_now;
                             if r.is_empty() {
@@ -3653,7 +3655,13 @@ impl Domain {
                     total_freed,
                     "domain" => self.index.index().to_string(),
                     "shard" => self.shard.unwrap_or(0).to_string()
-                )
+                );
+
+                histogram!(
+                    recorded::DOMAIN_EVICTION_TIME,
+                    start.elapsed().as_micros() as f64,
+                    "domain" => self.index.index().to_string(),
+                );
             }
             Packet::EvictKeys {
                 link: Link { dst, .. },
