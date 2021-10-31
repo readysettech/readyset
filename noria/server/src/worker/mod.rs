@@ -5,7 +5,7 @@ use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use launchpad::select;
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, histogram};
 use noria::internal::DomainIndex;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
@@ -351,6 +351,8 @@ async fn do_eviction(
 
     use std::cmp;
 
+    let start = std::time::Instant::now();
+
     // 2. add current state sizes (could be out of date, as packet sent below is not
     //    necessarily received immediately)
     let mut sizes: Vec<((DomainIndex, usize), usize)> = tokio::task::block_in_place(|| {
@@ -460,6 +462,11 @@ async fn do_eviction(
                     }
                 }
             }
+            histogram!(
+                recorded::EVICTION_WORKER_EVICTION_TIME,
+                start.elapsed().as_micros() as f64,
+            );
+
             Ok(())
         }
     }

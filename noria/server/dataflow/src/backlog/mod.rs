@@ -151,9 +151,6 @@ pub(crate) struct WriteHandle {
 }
 
 type Key<'a> = Cow<'a, [DataType]>;
-fn size_of_key(key: &Key) -> u64 {
-    key.iter().map(SizeOf::deep_size_of).sum()
-}
 
 pub(crate) struct MutWriteHandleEntry<'a> {
     handle: &'a mut WriteHandle,
@@ -174,6 +171,13 @@ impl<'a> WriteHandleEntry<'a> {
 }
 
 impl<'a> MutWriteHandleEntry<'a> {
+    pub(crate) fn key_value_size(&self, key: &Key) -> usize {
+        self.handle.handle.base_value_size()
+            + key.iter().map(SizeOf::deep_size_of).sum::<u64>() as usize
+    }
+}
+
+impl<'a> MutWriteHandleEntry<'a> {
     pub(crate) fn mark_filled(self) -> ReadySetResult<()> {
         if self
             .handle
@@ -184,7 +188,10 @@ impl<'a> MutWriteHandleEntry<'a> {
             .iter()
             .any(LookupError::is_miss)
         {
-            self.handle.mem_size += size_of_key(&self.key) as usize;
+            // TODO(ENG-726): Trying to introspect how much memory these data structures
+            // are using for storing key value pairs can provide a poor estimate. Handling
+            // memory tracking closer to where the data is stored will be beneficial.
+            self.handle.mem_size += self.key_value_size(&self.key);
             self.handle.handle.clear(self.key);
             Ok(())
         } else {
@@ -203,7 +210,7 @@ impl<'a> MutWriteHandleEntry<'a> {
         self.handle.mem_size = self
             .handle
             .mem_size
-            .saturating_sub((size + size_of_key(&self.key)) as usize);
+            .saturating_sub(size as usize + self.key_value_size(&self.key));
         self.handle.handle.empty(self.key)
     }
 }
@@ -314,9 +321,9 @@ impl WriteHandle {
         self.partial
     }
 
-    /// Evict `count` randomly selected keys from state and return them along with the number of
-    /// bytes that will be freed once the underlying `reader_map` applies the operation.
-    pub(crate) fn evict_random_keys(&mut self, rng: &mut ThreadRng, n: usize) -> u64 {
+    /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
+    /// these keys may not have exactly `bytes` worth of state.
+    pub(crate) fn evict_bytes(&mut self, rng: &mut ThreadRng, bytes: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             debug_assert!(
@@ -325,7 +332,7 @@ impl WriteHandle {
                 self.mem_size
             );
 
-            bytes_to_be_freed += self.handle.empty_random(rng, n);
+            bytes_to_be_freed += self.handle.empty_random(rng, bytes);
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);

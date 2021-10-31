@@ -212,6 +212,15 @@ pub mod recorded {
     /// | tag | The client tag of the request that the Finish packet is required for. |
     pub const DOMAIN_TOTAL_SEED_ALL_TIME: &str = "domain.total_seed_all_time_us";
 
+    /// Histogram: The amount of time the domain spends handling an eviction
+    /// request.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    ///
+    /// | domain | The domain that the eviction is performed in. |
+    pub const DOMAIN_EVICTION_TIME: &str = "domain.eviction_time_us";
+
     /// Histogram: The time in microseconds that the controller spent committing
     /// a migration to the soup graph. Recorded at the controller at the end of
     /// the `commit` call.
@@ -230,8 +239,11 @@ pub mod recorded {
     pub const EVICTION_WORKER_PARTIAL_MEMORY_BYTES_USED: &str =
         "eviction_worker.partial_memory_used_bytes";
 
-    /// Gauge: The amount of bytes required to store a dataflow node's state.
-    ///
+    /// Histogram: The amount of time that the eviction worker spends making an eviction
+    /// decision and sending packets.
+    pub const EVICTION_WORKER_EVICTION_TIME: &str = "eviction_worker.eviction_time_us";
+
+    /// Gauge: The amount of bytes required to store a dataflow node's state./
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
