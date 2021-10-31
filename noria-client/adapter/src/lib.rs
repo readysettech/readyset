@@ -3,32 +3,29 @@
 
 use std::marker::Send;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 use std::{collections::HashMap, time::Duration};
 use std::{io, net::IpAddr};
 
 use anyhow::anyhow;
-use async_compression::tokio::write::GzipEncoder;
 use async_trait::async_trait;
 use clap::Clap;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
+use noria_client::http_router::NoriaAdapterHttpRouter;
 use noria_client::query_reconciler::QueryReconciler;
 use noria_client::query_status_cache::QueryStatusCache;
-use noria_client::{coverage::QueryCoverageInfoRef, http_router::NoriaAdapterHttpRouter};
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use stream_cancel::Valve;
-use tokio::io::AsyncWriteExt;
 use tokio::net;
+use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::{fs::OpenOptions, net::UdpSocket};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, error, info, info_span, span, Level};
 use tracing_futures::Instrument;
@@ -131,12 +128,6 @@ pub struct Options {
     /// Make all reads run against Noria and upstream, returning the upstream result.
     #[clap(long, requires("upstream-db-url"))]
     mirror_reads: bool,
-
-    /// Analyze coverage of queries during execution, and save a report of coverage on exit.
-    ///
-    /// Implies --race-reads
-    #[clap(long, env = "COVERAGE_ANALYSIS", requires("upstream-db-url"))]
-    coverage_analysis: Option<PathBuf>,
 
     /// Set max processing time in minutes for any query within the system before it's deemed to be
     /// unsupported by ReadySet, and will be sent exclusively to fallback.
@@ -294,11 +285,6 @@ where
             None
         };
 
-        let query_coverage_info = options
-            .coverage_analysis
-            .is_some()
-            .then(QueryCoverageInfoRef::default);
-
         let (shutdown_sender, shutdown_recv) = tokio::sync::broadcast::channel(1);
 
         // Gate query log code path on the log flag existing.
@@ -409,13 +395,12 @@ where
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
-                .mirror_reads(options.mirror_reads || options.coverage_analysis.is_some())
+                .mirror_reads(options.mirror_reads)
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
-                .query_coverage_info(query_coverage_info)
                 .live_qca(options.live_qca)
                 .query_status_cache(query_status_cache.clone())
                 .query_validate(options.query_validate);
@@ -461,50 +446,6 @@ where
 
         // Shut down all tcp streams started by the adapters http router.
         drop(router_handle);
-
-        if let Some(path) = options.coverage_analysis.as_ref() {
-            let _guard = rt.enter();
-            let file = rt.block_on(
-                OpenOptions::new()
-                    .read(false)
-                    .write(true)
-                    .append(false)
-                    .truncate(true)
-                    .create(true)
-                    .open(path),
-            )?;
-            let mut tar = tokio_tar::Builder::new(GzipEncoder::new(file));
-
-            if let Some(url) = options.upstream_db_url {
-                let result: Result<(), anyhow::Error> = rt.block_on(async {
-                    let mut upstream = H::UpstreamDatabase::connect(url).await?;
-                    let schema = upstream.schema_dump().await?;
-                    let mut header = tokio_tar::Header::new_gnu();
-                    tar.append_data(&mut header, "schema.sql", schema.as_slice())
-                        .await?;
-                    Ok(())
-                });
-                if let Err(e) = result {
-                    error!("Failed to dump database schema:  {}", e);
-                }
-            }
-
-            let qci = query_coverage_info.unwrap().serialize()?;
-            let mut header = tokio_tar::Header::new_gnu();
-            let result: Result<(), anyhow::Error> = rt.block_on(async {
-                tar.append_data(&mut header, "query-info.json", qci.as_slice())
-                    .await?;
-                let mut gz = tar.into_inner().await?;
-                gz.shutdown().await?;
-                let mut file = gz.into_inner();
-                file.flush().await?;
-                file.sync_all().await?;
-                Ok(())
-            });
-            if let Err(e) = result {
-                error!("Failed to write query info: {}", e);
-            }
-        }
 
         drop(ch);
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
@@ -627,13 +568,17 @@ async fn query_logger(
     loop {
         select! {
             event = receiver.recv() => {
-                if let Some(mut event) = event {
-                    let query = match &mut event.query {
-                        Some(SqlQuery::Select(stmt)) => {
-                            anonymize_literals(stmt);
-                            stmt.to_string()
-                        }
-                        _ => "".to_string(),
+                if let Some(event) = event {
+                    let query = match event.query {
+                        Some(s) => match s.as_ref() {
+                            SqlQuery::Select(stmt) => {
+                                let mut stmt = stmt.clone();
+                                anonymize_literals(&mut stmt);
+                                stmt.to_string()
+                            },
+                            _ => "".to_string()
+                        },
+                        _ => "".to_string()
                     };
 
                     if let Some(noria) = event.noria_duration {
@@ -654,7 +599,7 @@ async fn query_logger(
                         );
                     }
                 } else {
-                info!("Metrics thread shutting down after request handle dropped.");
+                    info!("Metrics thread shutting down after request handle dropped.");
                 }
             }
             _ = shutdown_recv.recv() => {

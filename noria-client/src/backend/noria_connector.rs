@@ -346,7 +346,7 @@ impl NoriaConnector {
 
     pub async fn handle_insert(
         &mut self,
-        mut q: nom_sql::InsertStatement,
+        q: &nom_sql::InsertStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
         let table = &q.table.name;
 
@@ -359,9 +359,14 @@ impl NoriaConnector {
             .ok_or_else(|| internal_err(format!("no schema for table '{}'", table)))?;
 
         // set column names (insert schema) if not set
-        if q.fields.is_none() {
-            q.fields = Some(schema.fields.iter().map(|cs| cs.column.clone()).collect());
-        }
+        let q = match q.fields {
+            Some(_) => Cow::Borrowed(q),
+            None => {
+                let mut query = q.clone();
+                query.fields = Some(schema.fields.iter().map(|cs| cs.column.clone()).collect());
+                Cow::Owned(query)
+            }
+        };
 
         let data: Vec<Vec<DataType>> = q
             .data
@@ -490,10 +495,11 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_delete(
         &mut self,
-        q: nom_sql::DeleteStatement,
+        q: &nom_sql::DeleteStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
         let cond = q
             .where_clause
+            .as_ref()
             .ok_or_else(|| unsupported_err("only supports DELETEs with WHERE-clauses"))?;
 
         // create a mutator if we don't have one for this table already
@@ -516,7 +522,7 @@ impl NoriaConnector {
         };
 
         trace!("delete::flatten conditionals");
-        match utils::flatten_conditional(&cond, &pkey)? {
+        match utils::flatten_conditional(cond, &pkey)? {
             None => Ok(QueryResult::Delete {
                 num_rows_deleted: 0_u64,
             }),
@@ -542,9 +548,9 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_update(
         &mut self,
-        q: nom_sql::UpdateStatement,
+        q: &nom_sql::UpdateStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
-        self.do_update(Cow::Owned(q), None).await
+        self.do_update(Cow::Borrowed(q), None).await
     }
 
     pub(crate) async fn prepare_update(
@@ -691,7 +697,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_create_table(
         &mut self,
-        q: nom_sql::CreateTableStatement,
+        q: &nom_sql::CreateTableStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria ever time. On the other hand, CREATE TABLE is rare...
@@ -1124,6 +1130,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_select(
         &mut self,
+        // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
         mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'_>> {
@@ -1286,7 +1293,7 @@ impl NoriaConnector {
 
     pub(crate) async fn handle_create_view(
         &mut self,
-        q: nom_sql::CreateViewStatement,
+        q: &nom_sql::CreateViewStatement,
     ) -> ReadySetResult<QueryResult<'_>> {
         // TODO(malte): we should perhaps check our usual caches here, rather than just blindly
         // doing a migration on Noria every time. On the other hand, CREATE VIEW is rare...
