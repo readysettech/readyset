@@ -23,7 +23,6 @@ use noria_client_metrics::recorded::SqlQueryType;
 use noria_client_metrics::{EventType, QueryExecutionEvent};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
-use crate::coverage::QueryCoverageInfoRef;
 use crate::query_status_cache::{AdmitStatus, QueryStatusCache};
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
@@ -158,7 +157,6 @@ pub struct BackendBuilder {
     require_authentication: bool,
     ticket: Option<Timestamp>,
     timestamp_client: Option<TimestampClient>,
-    query_coverage_info: Option<QueryCoverageInfoRef>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_ad_hoc_queries: bool,
     // TODO(ENG-685): Remove option when live_qca flag is removed in main.
@@ -178,7 +176,6 @@ impl Default for BackendBuilder {
             require_authentication: true,
             ticket: None,
             timestamp_client: None,
-            query_coverage_info: None,
             query_log_sender: None,
             query_log_ad_hoc_queries: false,
             query_status_cache: None,
@@ -216,7 +213,6 @@ impl BackendBuilder {
             ticket: self.ticket,
             timestamp_client: self.timestamp_client,
             prepared_statements: Default::default(),
-            query_coverage_info: self.query_coverage_info,
             query_log_sender: self.query_log_sender,
             query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
             query_status_cache: self.query_status_cache,
@@ -277,14 +273,6 @@ impl BackendBuilder {
         self
     }
 
-    pub fn query_coverage_info(
-        mut self,
-        query_coverage_info: Option<QueryCoverageInfoRef>,
-    ) -> Self {
-        self.query_coverage_info = query_coverage_info;
-        self
-    }
-
     pub fn query_status_cache(mut self, query_status_cache: Option<Arc<QueryStatusCache>>) -> Self {
         self.query_status_cache = query_status_cache;
         self
@@ -305,7 +293,7 @@ pub struct Backend<DB, Handler> {
     // a cache of all previously parsed queries
     parsed_query_cache: HashMap<String, SqlQuery>,
     // all queries previously prepared on noria or upstream, mapped by their ID.
-    prepared_queries: HashMap<u32, SqlQuery>,
+    prepared_queries: HashMap<u32, Arc<SqlQuery>>,
     prepared_count: u32,
     /// Noria connector used for reads, and writes when no upstream DB is present
     noria: NoriaConnector,
@@ -337,13 +325,6 @@ pub struct Backend<DB, Handler> {
     /// If set to `true`, all DDL changes will be mirrored to both the upstream db (if present) and
     /// noria. Otherwise, DDL changes will only go to the upstream if configured, or noria otherwise
     mirror_ddl: bool,
-
-    /// Shared reference to information about the queries that have been executed during the runtime
-    /// of this adapter.
-    ///
-    /// If None, query coverage analysis is disabled
-    #[allow(dead_code)] // TODO: Remove once this is used
-    query_coverage_info: Option<QueryCoverageInfoRef>,
 
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
 
@@ -495,7 +476,7 @@ where
     /// Rollback. Used to handle transaction boundary queries.
     pub async fn handle_transaction_boundaries(
         &mut self,
-        query: nom_sql::SqlQuery,
+        query: &nom_sql::SqlQuery,
     ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
@@ -573,7 +554,7 @@ where
     /// If fallback is not configured, returns an error.
     async fn mirror_read(
         &mut self,
-        q: nom_sql::SelectStatement,
+        q: &nom_sql::SelectStatement,
         query_str: String,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
@@ -590,7 +571,7 @@ where
             QueryResult::Upstream(r)
         });
         handle = event.start_timer();
-        match self.noria.handle_select(q, ticket).await {
+        match self.noria.handle_select(q.clone(), ticket).await {
             Ok(_) => {
                 handle.set_noria_duration();
             }
@@ -601,32 +582,6 @@ where
         };
 
         upstream_res
-    }
-
-    /// Used to link the statement ids of two successful prepare results
-    fn link_prepare_results(
-        &mut self,
-        upstream_result: &UpstreamPrepare<DB>,
-        noria_result: &noria_connector::PrepareResult,
-    ) {
-        let query_coverage_info = match self.query_coverage_info {
-            Some(qci) => qci,
-            None => return,
-        };
-
-        let UpstreamPrepare {
-            statement_id: upstream_statement_id,
-            ..
-        } = upstream_result;
-
-        match noria_result {
-            noria_connector::PrepareResult::Select { statement_id, .. }
-            | noria_connector::PrepareResult::Insert { statement_id, .. }
-            | noria_connector::PrepareResult::Update { statement_id, .. }
-            | noria_connector::PrepareResult::Delete { statement_id, .. } => {
-                query_coverage_info.link_statement_ids(*upstream_statement_id, *statement_id)
-            }
-        }
     }
 
     /// Executes the given prepare select against both noria, and the upstream database, returning
@@ -662,13 +617,7 @@ where
         // If noria and the upstream prepares both succeed we return a PrepareResult =
         // with both. If the upstream failed, we error propagate.
         match noria_res {
-            Ok(noria) => {
-                if self.mirror_reads {
-                    self.link_prepare_results(&upstream_res, &noria);
-                }
-
-                Ok(PrepareResult::Both(noria, upstream_res))
-            }
+            Ok(noria) => Ok(PrepareResult::Both(noria, upstream_res)),
             Err(e) => {
                 event.set_noria_error(&e);
                 error!(error = %e, "Error received from noria during mirror_prepare()");
@@ -698,13 +647,14 @@ where
     }
 
     /// Handles executing against only noria.
-    async fn execute_noria(
-        noria: &mut NoriaConnector,
+    #[allow(clippy::needless_lifetimes)] // Because Clippy says that 'noria can be elided, but that does not appear to be the case
+    async fn execute_noria<'noria>(
+        noria: &'noria mut NoriaConnector,
         noria_statement_id: u32,
         params: Vec<DataType>,
-        statement: SqlQuery,
+        statement: &SqlQuery,
         ticket: Option<Timestamp>,
-    ) -> ReadySetResult<QueryResult<'_, DB>> {
+    ) -> ReadySetResult<QueryResult<'noria, DB>> {
         let res = match statement {
             SqlQuery::Select(_) => {
                 let try_read = noria
@@ -746,52 +696,56 @@ where
     /// # Panics
     ///
     /// Panics if query coverage info is not enabled.
-    #[allow(clippy::unwrap_used)] // Should not be called unless QCA is enabled.
     async fn mirror_execute(
         &mut self,
-        upstream_statement_id: u32,
-        params: Vec<DataType>,
+        id: u32,
+        params: &[DataType],
         event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'static, DB>, DB::Error> {
-        let upstream_res = self
-            .execute_upstream(upstream_statement_id, params.clone(), event)
-            .await;
+    ) -> Option<Result<QueryResult<'static, DB>, DB::Error>> {
+        let prepared_statement = match self.prepared_statements.get(&id).cloned() {
+            Some(v) => v,
+            None => return Some(Err(PreparedStatementMissing { statement_id: id }.into())),
+        };
 
-        if let Some(noria_statement_id) = self
-            .query_coverage_info
-            .unwrap()
-            .noria_statement_id(upstream_statement_id)
-        {
-            let statement: SqlQuery =
-                if let Some(q_t) = self.prepared_queries.get(&noria_statement_id).cloned() {
-                    q_t
-                } else {
+        let upstream_res = match prepared_statement.upstream {
+            Some(upstream_statement_id) => Some(
+                self.execute_upstream(upstream_statement_id, params.to_vec(), event)
+                    .await,
+            ),
+            None => {
+                error!("Mirror reads were enabled, and a client gave us a statement id for a noria prepared statement. This shouldn't be possible");
+                None
+            }
+        };
+
+        if let Some(noria_statement_id) = prepared_statement.noria {
+            let handle = event.start_timer();
+            let statement = match self.prepared_queries.get(&noria_statement_id).cloned() {
+                Some(v) => v,
+                None => {
                     let e = PreparedStatementMissing {
                         statement_id: noria_statement_id,
                     };
                     event.set_noria_error(&e);
                     error!(error = %e, "Error received from noria during mirror_execute()");
                     return upstream_res;
-                };
-
-            let handle = event.start_timer();
+                }
+            };
             match Self::execute_noria(
                 &mut self.noria,
                 noria_statement_id,
-                params,
-                statement,
+                params.to_vec(),
+                &statement,
                 self.ticket.clone(),
             )
             .await
             {
-                Ok(_) => {
-                    handle.set_noria_duration();
-                }
+                Ok(_) => handle.set_noria_duration(),
                 Err(e) => {
                     event.set_noria_error(&e);
                     error!(error = %e, "Error received from noria during mirror_execute()");
                 }
-            }
+            };
         }
 
         upstream_res
@@ -1015,7 +969,7 @@ where
 
         if let Ok(ref result) = res {
             self.prepared_queries
-                .insert(self.prepared_count, parsed_query.to_owned());
+                .insert(self.prepared_count, Arc::new(parsed_query));
             self.store_prep_statement(self.prepared_count, result);
         }
         res
@@ -1027,27 +981,28 @@ where
     pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
         let res = self.prepare_inner(query, &mut query_event).await;
-        if let (Some(info), e) = (self.query_coverage_info, query_event) {
-            info.query_prepared(query.to_string(), e, self.prepared_count);
-        }
         res
     }
 
     async fn cascade_execute(
         &mut self,
         id: u32,
-        prepared_statement: &PreparedStatement,
         params: Vec<DataType>,
-        prep: SqlQuery,
+        prep: &SqlQuery,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        let prepared_statement = self
+            .prepared_statements
+            .get(&id)
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
+
         let handle = event.start_timer();
         if let Some(id) = prepared_statement.noria {
             let res = Self::execute_noria(
                 &mut self.noria,
                 id,
                 params.clone(),
-                prep.clone(),
+                prep,
                 self.ticket.clone(),
             )
             .await;
@@ -1095,23 +1050,21 @@ where
         &mut self,
         id: u32,
         params: Vec<DataType>,
-        prepared_statement: &PreparedStatement,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
         if self.mirror_reads {
-            match prepared_statement.upstream {
-                Some(upstream_id) => {
-                    return self.mirror_execute(upstream_id, params, event).await;
-                }
-                None => {
-                    // No idea how we got here. We'll fall through so we can still handle this.
-                    error!("Mirror reads were enabled, and a client gave us a statement id for a noria prepared statement. This shouldn't be possible");
-                }
+            if let Some(res) = self.mirror_execute(id, &params, event).await {
+                return res;
             }
         }
+
+        let prepared_statement = self
+            .prepared_statements
+            .get(&id)
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         match self.prepared_queries.get(&id).cloned() {
             // If we have a `prepared_statement` but not a `SqlQuery` associated with it,
@@ -1125,7 +1078,7 @@ where
                 }
             },
             Some(prep) => {
-                match prep {
+                match prep.as_ref() {
                     SqlQuery::Select(ref stmt) => {
                         if self.live_qca_enabled() {
                             // The query status cache is guaranteed to exist if `live_qca` is enabled.
@@ -1161,24 +1114,7 @@ where
                                         }
                                     }
 
-                                    // This will include the upstream and noria prepared
-                                    // statements, even if the noria prepare fails we will
-                                    // attempt execution on upstream via `cascade_execute`.
-                                    let prepared_statement = self
-                                        .prepared_statements
-                                        .get(&id)
-                                        .cloned()
-                                        .ok_or(PreparedStatementMissing { statement_id: id })?;
-
-                                    let res = self
-                                        .cascade_execute(
-                                            id,
-                                            &prepared_statement,
-                                            params,
-                                            prep,
-                                            event,
-                                        )
-                                        .await;
+                                    let res = self.cascade_execute(id, params, &prep, event).await;
 
                                     if event.noria_error.is_some() {
                                         query_status_cache.set_failed_execute(&stmt).await;
@@ -1204,8 +1140,7 @@ where
                                 }
                             }
                         } else {
-                            self.cascade_execute(id, prepared_statement, params, prep, event)
-                                .await
+                            self.cascade_execute(id, params, &prep, event).await
                         }
                     }
                     SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
@@ -1224,7 +1159,7 @@ where
                                 &mut self.noria,
                                 id,
                                 params,
-                                prep,
+                                &prep,
                                 self.ticket.clone(),
                             )
                             .await
@@ -1245,30 +1180,15 @@ where
         id: u32,
         params: Vec<DataType>,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let query_coverage_info = self.query_coverage_info;
         // Requires clone as no references are allowed after self.execute_inner
         // due to borrow checker rules.
         let query_logger = self.query_log_sender.clone();
-        let prepared_statement = self
-            .prepared_statements
-            .get(&id)
-            .cloned()
-            .ok_or(PreparedStatementMissing { statement_id: id })?;
-
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
-        let prepared_query = self.prepared_queries.get(&id).cloned();
-        query_event.query = prepared_query;
-
-        let res = self
-            .execute_inner(id, params, &prepared_statement, &mut query_event)
-            .await;
-
-        if let Some(info) = query_coverage_info {
-            info.prepare_executed(id, query_event.clone());
-        }
+        query_event.query = self.prepared_queries.get(&id).cloned();
+        let res = self.execute_inner(id, params, &mut query_event).await?;
 
         log_query(query_logger, query_event);
-        res
+        Ok(res)
     }
 
     #[instrument(level = "trace", name = "query", skip(self, event))]
@@ -1295,7 +1215,7 @@ where
 
         // fallback to upstream database on query parse failure
         let parsed_query = match parse_result {
-            Ok(parsed_tuple) => parsed_tuple,
+            Ok(parsed_tuple) => Arc::new(parsed_tuple),
             Err(e) => {
                 // Do not fall back if the set is not allowed
                 if matches!(e, ReadySetError::SetDisallowed { statement: _ }) {
@@ -1340,7 +1260,7 @@ where
         // If we have an upstream then we will pass valid set statements across to that upstream.
         // If no upstream is present we will ignore the statement
         // Disallowed set statements always produce an error
-        if let nom_sql::SqlQuery::Set(s) = &parsed_query {
+        if let nom_sql::SqlQuery::Set(s) = parsed_query.as_ref() {
             if !is_allowed_set(s) {
                 warn!(%s, "received unsupported SET statement");
                 let e = ReadySetError::SetDisallowed {
@@ -1380,14 +1300,14 @@ where
         // default when the upstream connector is present.
         let live_qca_enabled = self.live_qca_enabled();
         let res = if let Some(ref mut upstream) = self.upstream {
-            match parsed_query {
+            match parsed_query.as_ref() {
                 nom_sql::SqlQuery::Select(ref stmt) => {
                     if self.query_log_ad_hoc_queries {
                         event.query = Some(parsed_query.clone());
                     }
                     let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
-                        self.mirror_read(stmt.clone(), query.to_owned(), self.ticket.clone(), event)
+                        self.mirror_read(stmt, query.to_owned(), self.ticket.clone(), event)
                             .await
                     } else if live_qca_enabled {
                         // The query status cache is guarenteed to exist if `live_qca` is enabled.
@@ -1510,7 +1430,7 @@ where
                 nom_sql::SqlQuery::StartTransaction(_)
                 | nom_sql::SqlQuery::Commit(_)
                 | nom_sql::SqlQuery::Rollback(_) => {
-                    let res = self.handle_transaction_boundaries(parsed_query).await;
+                    let res = self.handle_transaction_boundaries(&parsed_query).await;
                     handle.set_upstream_duration();
                     res
                 }
@@ -1532,13 +1452,15 @@ where
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
             let mut execution_timer = None;
 
-            let res = match parsed_query {
+            let res = match parsed_query.as_ref() {
                 SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                 SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await,
 
                 SqlQuery::Select(q) => {
                     execution_timer = Some((Instant::now(), SqlQueryType::Read));
-                    self.noria.handle_select(q, self.ticket.clone()).await
+                    self.noria
+                        .handle_select(q.clone(), self.ticket.clone())
+                        .await
                 }
                 SqlQuery::Insert(q) => {
                     execution_timer = Some((Instant::now(), SqlQueryType::Write));
@@ -1575,12 +1497,8 @@ where
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
-        let query_coverage_info = self.query_coverage_info;
         let query_logger = self.query_log_sender.clone();
         let res = self.query_inner(query, &mut query_event).await;
-        if let Some(info) = query_coverage_info {
-            info.query_executed(query.to_string(), query_event.clone());
-        }
 
         log_query(query_logger, query_event);
         res

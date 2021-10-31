@@ -9,7 +9,6 @@
 
 pub mod backend;
 mod convert;
-pub mod coverage;
 pub mod http_router;
 mod query_handler;
 #[allow(dead_code)]

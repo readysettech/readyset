@@ -1,6 +1,7 @@
 use nom_sql::SqlQuery;
 use noria::ReadySetError;
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub mod recorded;
@@ -12,7 +13,7 @@ pub struct QueryExecutionEvent {
     pub event: EventType,
 
     /// SqlQuery associated with this execution event.
-    pub query: Option<SqlQuery>,
+    pub query: Option<Arc<SqlQuery>>,
 
     /// How long the execute request took to run on the upstream database
     pub upstream_duration: Option<Duration>,
