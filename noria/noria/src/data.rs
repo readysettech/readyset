@@ -421,6 +421,7 @@ impl DataType {
             | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(Cow::Borrowed(self)),
             (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i32, i8),
             (_, Some(Int(_)), UnsignedTinyint(_)) => convert_numeric!(self, i32, u8),
+            (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i32, u32),
             (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i32, i16),
             (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i32, u16),
             (_, Some(Bigint(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
