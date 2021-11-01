@@ -319,8 +319,12 @@ Resources:
                 Action:
                 - ec2:AttachVolume
                 - ec2:DetachVolume
+                - ec2:TerminateInstance
                 Resource:
                 - "arn:aws:ec2:*:*:instance/*"
+                Condition:
+                  'Null':
+                    'aws:ResourceTag/ReadySet:ServerInstance': 'false'
               - Effect: Allow
                 Action:
                 - sqs:ReceiveMessage
