@@ -29,6 +29,8 @@ else
   echo -n "$volume_id" > /var/lib/readyset-server/volume_id
 fi
 
+NORIA_MEMORY_BYTES=$((${NORIA_MEMORY_LIMIT_GB}<<30))
+
 cat > /etc/default/readyset-server <<EOF
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 NORIA_MEMORY_BYTES=${NORIA_MEMORY_BYTES}

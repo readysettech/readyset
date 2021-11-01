@@ -411,7 +411,7 @@ Resources:
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
-            export NORIA_MEMORY_BYTES="${ReadySetMemoryLimitGB}"
+            export NORIA_MEMORY_LIMIT_GB="${ReadySetMemoryLimitGB}"
             export NORIA_PRIMARY_REGION="${AWS::Region}"
             export NORIA_QUORUM="${ReadySetServerNodes}"
             export NORIA_REGION="${AWS::Region}"
