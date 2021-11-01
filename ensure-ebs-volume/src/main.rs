@@ -588,6 +588,7 @@ impl Opts {
         let instance_id = imds.get("/latest/meta-data/instance-id").await?;
         self.instance_id = Some(instance_id.clone());
         let region = imds.get("/latest/meta-data/placement/region").await?;
+        self.region = Some(region.clone());
         let az = imds
             .get("/latest/meta-data/placement/availability-zone")
             .await?;
