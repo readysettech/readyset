@@ -7,7 +7,6 @@ use common::SizeOf;
 use itertools::Either;
 use noria::KeyComparison;
 use rand::prelude::*;
-use std::collections::HashMap;
 use std::ops::{Bound, RangeBounds};
 use std::rc::Rc;
 use vec1::Vec1;
@@ -183,6 +182,8 @@ impl SingleState {
         self.state.insert_range(range);
     }
 
+    /// Marks the given key `filled` and returns the amount of memory bytes used to store
+    /// the state.
     pub(super) fn mark_filled(&mut self, key: KeyComparison) {
         match key {
             KeyComparison::Equal(k) => self.mark_point_filled(k),
@@ -295,7 +296,7 @@ impl SingleState {
         removed
             .filter(|(r, _)| Rc::strong_count(&r.0) == 1)
             .map(|(r, count)| SizeOf::deep_size_of(&r) * (count as u64))
-            .sum()
+            .sum::<u64>()
     }
 
     pub(super) fn clear(&mut self) {
@@ -318,24 +319,13 @@ impl SingleState {
         };
     }
 
-    /// Evict `count` randomly selected keys from state and return them along with the removed
-    /// rows
-    pub(super) fn evict_random_keys(
-        &mut self,
-        count: usize,
-        rng: &mut ThreadRng,
-    ) -> Option<HashMap<Vec<DataType>, Rows>> {
-        let mut removed_rows: Option<HashMap<_, _>> = None;
-        for _ in 0..count {
-            if let Some((rows, key)) = self.state.evict_with_seed(rng.gen()) {
-                removed_rows.get_or_insert_default().insert(key, rows);
-                self.rows = self.rows.saturating_sub(1);
-            } else {
-                break;
-            }
-        }
-
-        removed_rows
+    /// Evict up to `bytes` by randomly selected keys from state and return them along with the
+    /// removed rows
+    pub(super) fn evict_random(&mut self, rng: &mut ThreadRng) -> Option<(Vec<DataType>, Rows)> {
+        self.state.evict_with_seed(rng.gen()).map(|(rows, key)| {
+            self.rows = self.rows.saturating_sub(1);
+            (key, rows)
+        })
     }
 
     /// Evicts a specified key from this state, returning the removed rows
