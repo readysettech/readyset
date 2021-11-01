@@ -385,7 +385,7 @@ impl State for PersistentState {
 
     /// Panics if called
     #[allow(clippy::unreachable)] // this should never happen!
-    fn evict_random_keys(&mut self, _: usize) -> Option<super::StateEvicted> {
+    fn evict_bytes(&mut self, _: usize) -> Option<super::StateEvicted> {
         unreachable!("can't evict keys from PersistentState")
     }
 

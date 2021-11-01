@@ -3610,7 +3610,9 @@ impl Domain {
                                 );
                                 break;
                             }
-                        } else if let Some(evicted) = self.state[node].evict_random_keys(16) {
+                        } else if let Some(evicted) =
+                            self.state[node].evict_bytes(num_bytes - freed as usize)
+                        {
                             let keys = evicted
                                 .keys_evicted
                                 .into_iter()

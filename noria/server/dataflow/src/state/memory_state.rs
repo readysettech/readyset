@@ -38,6 +38,19 @@ impl SizeOf for MemoryState {
     }
 }
 
+fn base_row_bytes_from_comparison(keys: &KeyComparison) -> u64 {
+    if let KeyComparison::Equal(keys) = keys {
+        base_row_bytes(keys)
+    } else {
+        // TODO(ENG-726): Properly calculate memory utilized by ranges.
+        0
+    }
+}
+
+fn base_row_bytes(keys: &[DataType]) -> u64 {
+    keys.iter().map(SizeOf::deep_size_of).sum::<u64>() + std::mem::size_of::<Row>() as u64
+}
+
 impl State for MemoryState {
     fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
         let (i, exists) = if let Some(i) = self.state_for(&index.columns) {
@@ -135,6 +148,7 @@ impl State for MemoryState {
     fn mark_filled(&mut self, key: KeyComparison, tag: Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[&tag];
+        self.mem_size += base_row_bytes_from_comparison(&key);
         self.state[index].mark_filled(key);
     }
 
@@ -142,7 +156,9 @@ impl State for MemoryState {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[&tag];
         let freed_bytes = self.state[index].mark_hole(key);
-        self.mem_size = self.mem_size.saturating_sub(freed_bytes);
+        self.mem_size = self
+            .mem_size
+            .saturating_sub(freed_bytes + base_row_bytes_from_comparison(key));
     }
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
@@ -226,40 +242,48 @@ impl State for MemoryState {
         self.state[0].values().flat_map(fix).collect()
     }
 
-    /// Evicts `count` random keys from the state. The key are first evicted from the strongly
+    /// Evicts `bytes` by evicting random keys from the state. The key are first evicted from the strongly
     /// referenced `state`, then they are removed from the weakly referenced `weak_indices`.
-    fn evict_random_keys(&mut self, count: usize) -> Option<StateEvicted> {
+    fn evict_bytes(&mut self, bytes: usize) -> Option<StateEvicted> {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0, self.state.len());
-        let mut bytes_freed = 0;
+        let mut bytes_freed = 0u64;
+        let mut keys_evicted = Vec::new();
 
-        let evicted = self.state[index].evict_random_keys(count, &mut rng)?;
+        while bytes_freed < bytes as u64 {
+            let evicted = self.state[index].evict_random(&mut rng);
 
-        let keys_evicted: Vec<_> = evicted
-            .into_iter()
-            .map(|(key, rows)| {
-                for row in &rows {
-                    for (key, weak_index) in self.weak_indices.iter_mut() {
-                        weak_index.remove(key, row, None);
-                    }
+            if evicted.is_none() {
+                // There are no more keys in this state.
+                break;
+            }
 
-                    // Only count strong references after we removed a row from `weak_indices`
-                    // otherwise if it is there, it will never have a reference count of 1
-                    if Rc::strong_count(&row.0) == 1 {
-                        bytes_freed += row.deep_size_of();
-                    }
+            let (keys, rows) = evicted?;
+            for row in &rows {
+                for (key, weak_index) in self.weak_indices.iter_mut() {
+                    weak_index.remove(key, row, None);
                 }
-                key
-            })
-            .collect();
+
+                // Only count strong references after we removed a row from `weak_indices`
+                // otherwise if it is there, it will never have a reference count of 1
+                if Rc::strong_count(&row.0) == 1 {
+                    bytes_freed += row.deep_size_of();
+                }
+            }
+            bytes_freed += base_row_bytes(&keys);
+            keys_evicted.push(keys);
+        }
+
+        if bytes_freed == 0 {
+            return None;
+        }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
-
-        Some(StateEvicted {
+        return Some(StateEvicted {
             key_columns: self.state[index].key().to_vec(),
             keys_evicted,
             bytes_freed,
-        })
+        });
     }
 
     fn evict_keys(&mut self, tag: Tag, keys: &[KeyComparison]) -> Option<(&[usize], u64)> {
@@ -282,7 +306,12 @@ impl State for MemoryState {
                 }
             }
 
-            self.mem_size = self.mem_size.saturating_sub(bytes);
+            let key_bytes = keys
+                .iter()
+                .map(|k| base_row_bytes_from_comparison(k))
+                .sum::<u64>();
+
+            self.mem_size = self.mem_size.saturating_sub(bytes + key_bytes);
             (self.state[index].key(), bytes)
         })
     }
