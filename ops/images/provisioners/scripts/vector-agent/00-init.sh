@@ -14,4 +14,8 @@ sudo install -o vector -g vector -m 755 \
   /tmp/vector-agent/usr_local_bin_setup-vector.sh \
   /usr/local/bin/setup-vector.sh
 
+sudo install -o vector -g vector -m 755 \
+  /tmp/vector-agent/usr_local_bin_check-vector.sh \
+  /usr/local/bin/check-vector.sh
+
 sudo bash -c "echo 'PROMETHEUS_PORT=${PROMETHEUS_PORT}' >> /etc/vector.d/env"

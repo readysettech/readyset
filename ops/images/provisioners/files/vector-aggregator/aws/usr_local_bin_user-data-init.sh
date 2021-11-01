@@ -14,7 +14,10 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
-/usr/local/bin/configure-vector.sh
+
+# Drop errors from vector which can flakily fail to start
+# if vector fails to open a prometheus scrape endpoint.
+/usr/local/bin/configure-vector.sh || true
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 

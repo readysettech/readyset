@@ -15,3 +15,7 @@ sudo install -D -o vector -g vector -m 644 \
 sudo install -o vector -g vector -m 755 \
   /tmp/vector-aggregator/usr_local_bin_setup-vector.sh \
   /usr/local/bin/setup-vector.sh
+
+sudo install -o vector -g vector -m 755 \
+  /tmp/vector-aggregator/usr_local_bin_check-vector.sh \
+  /usr/local/bin/check-vector.sh
