@@ -150,7 +150,7 @@ Parameters:
   ReadySetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for adapter instances.
-    Default: t3.small
+    Default: c5.large
   ReadySetAdapterNodes:
     Type: String
     Description: Number of adapter nodes to create
@@ -158,7 +158,7 @@ Parameters:
   ReadySetServerInstanceType:
     Type: String
     Description: The EC2 instance type to use for server instances.
-    Default: t3.small
+    Default: c5.large
   ReadySetServerNodes:
     Type: String
     Description: Number of server nodes to create
@@ -166,7 +166,7 @@ Parameters:
   ReadySetMonitorInstanceType:
     Type: String
     Description: The EC2 instance type to use for the logs aggregation instance.
-    Default: t3.small
+    Default: c5.large
   DatabaseStorageType:
     Description: Database storage type
     Type: String
