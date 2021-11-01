@@ -4,7 +4,7 @@ Description=ReadySet Server
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/readyset-server -a 0.0.0.0 --use-aws-external-address --prometheus-metrics --authority consul --log-format json
+ExecStart=/usr/local/bin/readyset-server -a 0.0.0.0 --use-aws-external-address --prometheus-metrics --authority consul --log-format json --memory-check-every 15
 StateDirectory=readyset-server
 WorkingDirectory=/var/lib/readyset-server
 EnvironmentFile=/etc/default/readyset-server
