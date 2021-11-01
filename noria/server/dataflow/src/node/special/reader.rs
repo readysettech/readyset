@@ -284,10 +284,6 @@ impl Reader {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.writer.as_ref().map(|w| w.is_empty()).unwrap_or(true)
-    }
-
     pub(crate) fn state_size(&self) -> Option<u64> {
         self.writer.as_ref().map(SizeOf::deep_size_of)
     }

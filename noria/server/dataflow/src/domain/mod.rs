@@ -3595,66 +3595,49 @@ impl Domain {
                     let mut freed = 0u64;
                     #[allow(clippy::indexing_slicing)] // we got the node from self.nodes
                     let mut n = self.nodes[node].borrow_mut();
-                    while freed < num_bytes as u64 {
-                        // TODO: use (num_bytes - freed) / SOMETHING to compute # keys to evict
-                        if n.is_dropped() {
-                            break; // Node was dropped. Give up.
-                        } else if let Some(r) = n.as_mut_reader() {
-                            let freed_now = r.evict_bytes(num_bytes - freed as usize);
 
-                            freed += freed_now;
-                            if r.is_empty() {
-                                trace!(
-                                    node = ?n,
-                                    "done evicting from now-empty reader node"
-                                );
-                                break;
-                            }
-                        } else if let Some(evicted) =
-                            self.state[node].evict_bytes(num_bytes - freed as usize)
-                        {
-                            let keys = evicted
-                                .keys_evicted
-                                .into_iter()
-                                .map(|k| {
-                                    KeyComparison::try_from(k)
-                                        .map_err(|_| internal_err("Empty key evicted"))
-                                })
-                                .collect::<ReadySetResult<Vec<_>>>()?;
+                    if n.is_dropped() {
+                        continue; // Node was dropped. Skip.
+                    } else if let Some(r) = n.as_mut_reader() {
+                        freed += r.evict_bytes(num_bytes as usize);
+                    } else if let Some(evicted) = self.state[node].evict_bytes(num_bytes as usize) {
+                        let keys = evicted
+                            .keys_evicted
+                            .into_iter()
+                            .map(|k| {
+                                KeyComparison::try_from(k)
+                                    .map_err(|_| internal_err("Empty key evicted"))
+                            })
+                            .collect::<ReadySetResult<Vec<_>>>()?;
 
-                            freed += evicted.bytes_freed;
+                        freed += evicted.bytes_freed;
 
-                            if !keys.is_empty() {
-                                trigger_downstream_evictions(
-                                    &evicted.key_columns[..],
-                                    &keys[..],
-                                    node,
-                                    ex,
-                                    &self.not_ready,
-                                    &self.replay_paths,
-                                    self.shard,
-                                    &mut self.state,
-                                    &self.nodes,
-                                )?;
-                            }
-
-                            #[allow(clippy::indexing_slicing)] // came from self.nodes
-                            if self.state[node].is_empty() {
-                                trace!("done evicting from now-empty node {:?}", n);
-                                break;
-                            }
-                        } else {
-                            // This node was unable to evict any keys
-                            break;
+                        if !keys.is_empty() {
+                            trigger_downstream_evictions(
+                                &evicted.key_columns[..],
+                                &keys[..],
+                                node,
+                                ex,
+                                &self.not_ready,
+                                &self.replay_paths,
+                                self.shard,
+                                &mut self.state,
+                                &self.nodes,
+                            )?;
                         }
+                    } else {
+                        // This node was unable to evict any keys
+                        continue;
                     }
+
                     debug!(%freed, node = ?n, "evicted from node");
                     self.state_size.fetch_sub(freed as usize, Ordering::AcqRel);
                     total_freed += freed;
                 }
-                counter!(
+
+                histogram!(
                     recorded::DOMAIN_EVICTION_FREED_MEMORY,
-                    total_freed,
+                    total_freed as f64,
                     "domain" => self.index.index().to_string(),
                     "shard" => self.shard.unwrap_or(0).to_string()
                 );

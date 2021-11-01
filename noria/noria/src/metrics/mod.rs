@@ -321,7 +321,7 @@ pub mod recorded {
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_EVICTION_REQUESTS: &str = "domain.eviction_requests";
 
-    /// Counter: The total number of bytes that a domain has evicted.
+    /// Histogram: The total number of bytes that a domain has evicted.
     ///
     /// | Tag | Description |
     /// | --- | ----------- |
