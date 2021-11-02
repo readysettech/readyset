@@ -22,9 +22,9 @@ variable "readyset_authority_consul_ami_id" {
   default     = env("READYSET_AUTHORITY_CONSUL_AMI_ID")
 }
 
-variable "readyset_vector_aggregator_ami_id" {
+variable "readyset_monitor_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-vector-aggregator image"
+  description = "AMI ID for the readyset-monitor image"
   default     = env("READYSET_MONITOR_AMI_ID")
 }
 
