@@ -53,7 +53,7 @@ fn base_row_bytes(keys: &[DataType]) -> u64 {
 
 impl State for MemoryState {
     fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
-        let (i, exists) = if let Some(i) = self.state_for(&index.columns) {
+        let (i, exists) = if let Some(i) = self.state_for(&index.columns, index.index_type) {
             // already keyed by this key; just adding tags
             (i, true)
         } else {
@@ -164,7 +164,7 @@ impl State for MemoryState {
     fn lookup<'a>(&'a self, columns: &[usize], key: &KeyType) -> LookupResult<'a> {
         debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
         let index = self
-            .state_for(columns)
+            .state_for(columns, IndexType::HashMap)
             .expect("lookup on non-indexed column set");
         let ret = self.state[index].lookup(key);
         if ret.is_some() {
@@ -223,7 +223,7 @@ impl State for MemoryState {
             "lookup_range on uninitialized index"
         );
         let index = self
-            .state_for(columns)
+            .state_for(columns, IndexType::BTreeMap)
             .expect("lookup on non-indexed column set");
         self.state[index].lookup_range(key)
     }
@@ -338,10 +338,12 @@ impl State for MemoryState {
 }
 
 impl MemoryState {
-    /// Returns the index in `self.state` of the index keyed on `cols`, or None if no such index
-    /// exists.
-    fn state_for(&self, cols: &[usize]) -> Option<usize> {
-        self.state.iter().position(|s| s.columns() == cols)
+    /// Returns the index in `self.state` of the index keyed on `cols` and with the given
+    /// `index_type`, or None if no such index exists.
+    fn state_for(&self, cols: &[usize], index_type: IndexType) -> Option<usize> {
+        self.state
+            .iter()
+            .position(|s| s.columns() == cols && s.index_type() == index_type)
     }
 
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
@@ -405,7 +407,7 @@ impl MemoryState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
+    use std::{convert::TryInto, ops::Bound};
 
     fn insert<S: State>(state: &mut S, row: Vec<DataType>) {
         let record: Record = row.into();
@@ -423,7 +425,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::hash_map(vec![0]), None);
         state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
         state.process_records(&mut records[3].clone().into(), None, None);
 
@@ -448,9 +450,9 @@ mod tests {
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
-        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::hash_map(vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::hash_map(vec![1]), None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
@@ -458,6 +460,36 @@ mod tests {
             }
             _ => unreachable!(),
         };
+    }
+
+    #[test]
+    fn multiple_indices_on_same_columns() {
+        let mut state = MemoryState::default();
+        state.add_key(Index::hash_map(vec![0]), None);
+        state.add_key(Index::btree_map(vec![0]), None);
+        insert(&mut state, vec![1.into()]);
+        insert(&mut state, vec![2.into()]);
+        insert(&mut state, vec![3.into()]);
+        insert(&mut state, vec![4.into()]);
+
+        assert_eq!(
+            state
+                .lookup(&[0], &KeyType::Single(&1.into()))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            state
+                .lookup_range(
+                    &[0],
+                    &RangeKey::Single((Bound::Unbounded, Bound::Included(&3.into())))
+                )
+                .unwrap()
+                .len(),
+            3
+        );
     }
 
     mod lookup_range {
