@@ -125,10 +125,6 @@ pub struct Options {
     )]
     metrics_address: SocketAddr,
 
-    /// Make all reads run against Noria and upstream, returning the upstream result.
-    #[clap(long, requires("upstream-db-url"))]
-    mirror_reads: bool,
-
     /// Set max processing time in minutes for any query within the system before it's deemed to be
     /// unsupported by ReadySet, and will be sent exclusively to fallback.
     ///
@@ -395,7 +391,6 @@ where
             let upstream_db_url = options.upstream_db_url.clone();
             let backend_builder = BackendBuilder::new()
                 .slowlog(options.log_slow)
-                .mirror_reads(options.mirror_reads)
                 .users(users.clone())
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.dialect)
