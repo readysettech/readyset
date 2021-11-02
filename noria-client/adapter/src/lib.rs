@@ -41,6 +41,8 @@ use noria_client::rewrite::anonymize_literals;
 use noria_client::{Backend, BackendBuilder};
 
 const REGISTER_HTTP_INTERVAL: Duration = Duration::from_secs(20);
+const AWS_PRIVATE_IP_ENDPOINT: &str = "http://169.254.169.254/latest/meta-data/local-ipv4";
+const AWS_METADATA_TOKEN_ENDPOINT: &str = "http://169.254.169.254/latest/api/token";
 
 #[async_trait]
 pub trait ConnectionHandler {
@@ -188,6 +190,11 @@ pub struct Options {
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
     #[clap(long, hidden = true, requires = "query-log")]
     query_log_ad_hoc: bool,
+
+    /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
+    /// http endpoint.
+    #[clap(long)]
+    use_aws_external_address: bool,
 
     #[clap(flatten)]
     logging: readyset_logging::Options,
@@ -388,6 +395,7 @@ where
                 authority_address,
                 deployment,
                 options.metrics_address.port(),
+                options.use_aws_external_address,
             );
             rt.handle().spawn(fut);
         }
@@ -508,7 +516,11 @@ where
     }
 }
 
-async fn my_ip(destination: &str) -> Option<IpAddr> {
+async fn my_ip(destination: &str, use_aws_external: bool) -> Option<IpAddr> {
+    if use_aws_external {
+        return my_aws_ip().await.ok();
+    }
+
     let socket = match UdpSocket::bind("0.0.0.0:0").await {
         Ok(s) => s,
         Err(_) => return None,
@@ -525,9 +537,36 @@ async fn my_ip(destination: &str) -> Option<IpAddr> {
     }
 }
 
+// TODO(peter): Pull this out to a shared util between noria-server and noria-adapter
+async fn my_aws_ip() -> anyhow::Result<IpAddr> {
+    let client = reqwest::Client::builder().build()?;
+    let token: String = client
+        .put(AWS_METADATA_TOKEN_ENDPOINT)
+        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+        .send()
+        .await?
+        .text()
+        .await?
+        .parse()?;
+
+    Ok(client
+        .get(AWS_PRIVATE_IP_ENDPOINT)
+        .header("X-aws-ec2-metadata-token", &token)
+        .send()
+        .await?
+        .text()
+        .await?
+        .parse()?)
+}
+
 /// Facilitates continuously updating consul with this adapters externally accessibly http
 /// endpoint.
-async fn reconcile_endpoint_registration(authority_address: String, deployment: String, port: u16) {
+async fn reconcile_endpoint_registration(
+    authority_address: String,
+    deployment: String,
+    port: u16,
+    use_aws_external: bool,
+) {
     let authority =
         ConsulAuthority::new(&format!("http://{}/{}", &authority_address, &deployment)).unwrap();
 
@@ -556,7 +595,7 @@ async fn reconcile_endpoint_registration(authority_address: String, deployment: 
 
         // We try to update our http endpoint every iteration regardless because it may
         // have changed.
-        let ip = match my_ip(&authority_address).await {
+        let ip = match my_ip(&authority_address, use_aws_external).await {
             Some(ip) => ip,
             None => {
                 // Failed to retrieve our IP. We'll try again on next tick iteration.
