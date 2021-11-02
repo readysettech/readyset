@@ -179,7 +179,20 @@ impl Instance {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum QueueMessage {
+    LifecycleMessage(LifecycleMessage),
+    TestMessage(TestMessage),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct LifecycleMessage {
+    #[serde(rename = "Origin")]
+    origin: String,
+
+    #[serde(rename = "Destination")]
+    destination: String,
+
     #[serde(rename = "Service")]
     service: String,
 
@@ -198,7 +211,7 @@ struct LifecycleMessage {
     #[serde(rename = "AutoScalingGroupName")]
     auto_scaling_group_name: String,
 
-    #[serde(rename = "LifecyleHookName")]
+    #[serde(rename = "LifecycleHookName")]
     lifecycle_hook_name: String,
 
     #[serde(rename = "EC2InstanceId")]
@@ -208,7 +221,31 @@ struct LifecycleMessage {
     lifecycle_transition: String,
 
     #[serde(rename = "NotificationMetadata")]
-    notification_metadata: String,
+    notification_metadata: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TestMessage {
+    #[serde(rename = "Service")]
+    service: String,
+
+    #[serde(rename = "Time")]
+    time: String,
+
+    #[serde(rename = "RequestId")]
+    request_id: String,
+
+    #[serde(rename = "Event")]
+    event: String,
+
+    #[serde(rename = "AccountId")]
+    account_id: String,
+
+    #[serde(rename = "AutoScalingGroupName")]
+    auto_scaling_group_name: String,
+
+    #[serde(rename = "AutoScalingGroupARN")]
+    auto_scaling_group_arn: String,
 }
 
 #[instrument(skip(ec2))]
@@ -698,7 +735,7 @@ impl Opts {
                     } else {
                         continue;
                     };
-                    let lifecycle_message = match serde_json::from_str::<LifecycleMessage>(body) {
+                    let parsed_message = match serde_json::from_str::<QueueMessage>(body) {
                         Ok(msg) => msg,
                         Err(error) => {
                             warn!(%error, "Error parsing lifecycle message from SQS message");
@@ -706,20 +743,30 @@ impl Opts {
                         }
                     };
 
-                    if lifecycle_message.ec2_instance_id != *self.instance_id() {
-                        debug!(
-                            received_instance_id = %lifecycle_message.ec2_instance_id,
-                            our_instance_id = %self.instance_id(),
-                            "Received message for another instance; ignoring"
-                        );
-                        continue;
+                    match parsed_message {
+                        QueueMessage::LifecycleMessage(lifecycle_message) => {
+                            if lifecycle_message.ec2_instance_id != *self.instance_id() {
+                                debug!(
+                                    received_instance_id = %lifecycle_message.ec2_instance_id,
+                                    our_instance_id = %self.instance_id(),
+                                    "Received message for another instance; ignoring"
+                                );
+                                continue;
+                            }
+
+                            info!("Received terminating lifecycle message");
+                            self.teardown_volume(&volume).await?;
+
+                            self.notify_asg_complete_lifecycle_action(lifecycle_message)
+                                .await?;
+
+                            info!("Successfully torn down, exiting");
+                            return Ok(());
+                        }
+                        QueueMessage::TestMessage(_) => {
+                            info!("Handling test notification");
+                        }
                     }
-
-                    info!("Received terminating lifecycle message");
-                    self.teardown_volume(&volume).await?;
-
-                    self.notify_asg_complete_lifecycle_action(lifecycle_message)
-                        .await?;
 
                     if let Some(rh) = &message.receipt_handle {
                         if let Err(error) = sqs
@@ -732,9 +779,6 @@ impl Opts {
                             error!(%error, "Error deleting message");
                         }
                     }
-
-                    info!("Successfully torn down, exiting");
-                    return Ok(());
                 }
                 Ok(_) => {}
                 Err(error) => {
@@ -847,5 +891,25 @@ mod tests {
             .unwrap();
         let new_content = String::from_utf8(new_content).unwrap();
         assert_eq!(new_content, "X=y\nVOLUME_ID=new-volume-id");
+    }
+
+    #[test]
+    fn can_parse_actual_message() {
+        let _: LifecycleMessage = serde_json::from_str(
+            r#"{
+                "Origin": "AutoScalingGroup",
+                "LifecycleHookName": "ReadySetServerASGTerminateSNS",
+                "Destination": "EC2",
+                "AccountId": "000000000000",
+                "RequestId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "LifecycleTransition": "autoscaling:EC2_INSTANCE_TERMINATING",
+                "AutoScalingGroupName": "[redacted]",
+                "Service": "AWS Auto Scaling",
+                "Time": "2021-11-01T00:00:00.000Z",
+                "EC2InstanceId": "i-xxxxxxxxxxxxxxxxx",
+                "LifecycleActionToken": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            }"#,
+        )
+        .unwrap();
     }
 }
