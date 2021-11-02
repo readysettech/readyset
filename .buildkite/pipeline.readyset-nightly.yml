@@ -32,7 +32,7 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
     agents:
-      queue: nightly
+      queue: r5a-2xlarge
 
   - label: ':arrow_up: Run vertical tests'
     key: vertical-tests
@@ -55,7 +55,7 @@ steps:
           login: true
           retries: 3
     agents:
-      queue: nightly
+      queue: r5a-2xlarge
 
   - label: 'Run test flakiness check'
     key: flaky-finder
@@ -80,7 +80,7 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
     agents:
-      queue: nightly
+      queue: r5a-2xlarge
 
   - label: 'Run clustertests'
     key: noria-clustertest
@@ -114,4 +114,4 @@ steps:
     env:
       SCCACHE_BUCKET: readyset-sccache
     agents:
-      queue: nightly
+      queue: r5a-2xlarge
