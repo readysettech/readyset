@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use metrics::{GaugeValue, Recorder, Unit};
 use metrics_util::Histogram;
-use parking_lot::lock_api::Mutex;
-use parking_lot::RawMutex;
+use parking_lot::Mutex;
 
 use noria::metrics::{Key, MetricsDump};
 
@@ -13,9 +12,9 @@ use crate::metrics::{Clear, Render};
 /// A simplistic metrics recorder for Noria, which just stores the different metrics.
 #[derive(Default)]
 pub struct NoriaMetricsRecorder {
-    counters: Arc<Mutex<RawMutex, HashMap<Key, u64>>>,
-    gauges: Arc<Mutex<RawMutex, HashMap<Key, f64>>>,
-    histograms: Arc<Mutex<RawMutex, HashMap<Key, Histogram>>>,
+    counters: Arc<Mutex<HashMap<Key, u64>>>,
+    gauges: Arc<Mutex<HashMap<Key, f64>>>,
+    histograms: Arc<Mutex<HashMap<Key, Histogram>>>,
 }
 
 impl NoriaMetricsRecorder {
