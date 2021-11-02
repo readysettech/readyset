@@ -15,7 +15,6 @@ use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use noria::ReadySetError;
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use tracing::{debug, trace};
@@ -117,60 +116,7 @@ impl<'a> Plan<'a> {
         // since we cut off part of each path, we *may* now have multiple paths that are the same
         // (i.e., if there was a union above the nearest materialization). this would be bad, as it
         // would cause a domain to request replays *twice* for a key from one view!
-        //
-        // As for this `sort_by`, story time!
-        // Imagine you had two unions in a diamond shape:
-        // a -> b -> u_1 -> d -> u_2 -> f
-        //   -> c ->     -> e ->
-        //
-        // There are going to be four different paths:
-        // a -> b -> u_1 -> d -> u_2 -> f
-        // a -> b -> u_1 -> e -> u_2 -> f
-        // a -> c -> u_1 -> d -> u_2 -> f
-        // a -> c -> u_1 -> e -> u_2 -> f
-        //
-        // For the sake of making this easier to understand, let's represent those paths based only
-        // on the node they choose at each bifurcation:
-        // 1. (b, d)
-        // 2. (b, e)
-        // 3. (c, d)
-        // 4. (c, e)
-        //
-        // Now, before this `sort_by` was introduced, the paths were sorted like that.
-        // The problem is that unions, when receiving replay messages, wait until they receive all
-        // of them to release the full replay.
-        // That waiting (buffering) mechanism relies solely on how many messages they get.
-        // Once they get as many messages as ancestors they have, they release the full replay.
-        //
-        // Now, following the example, this is what happens:
-        // 1. u_1 receives message from b, and buffers it
-        // 2. u_1 receives message from b (which will be the same as before), now it has two
-        // messages, so it releases it. WRONG.
-        //
-        // So, the paths must be sorted based on the node indexes, but backwards
-        // 1. (b, d)
-        // 2. (c, d)
-        // 3. (b, e)
-        // 4. (c, e)
-        //
-        // That's what we are doing here.
-        // TODO(fran): Unless there's a better fix that I can't picture right now, this is still
-        //  less than ideal imho (very prone to errors).
-        //  A better fix would require a redesign of how we handle replay paths in the presence of
-        //  unions, since even with this fix, we still generate paths that will be traversed more
-        //  than once (in the example, we go through b and c twice).
-        paths.sort_by(|a, b| {
-            if a.len() != b.len() {
-                a.cmp(b)
-            } else {
-                a.iter()
-                    .rev()
-                    .zip(b.iter().rev())
-                    .fold(Ordering::Equal, |acc, (item_a, item_b)| {
-                        acc.then(item_a.node.cmp(&item_b.node))
-                    })
-            }
-        });
+        paths.sort();
         paths.dedup();
 
         // all columns better resolve if we're doing partial
