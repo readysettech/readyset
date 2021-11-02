@@ -26,6 +26,12 @@ pub use partial_map::PartialMap;
 pub(crate) use self::memory_state::MemoryState;
 pub(crate) use self::persistent_state::PersistentState;
 
+pub(crate) struct StateEvicted {
+    pub(crate) key_columns: Vec<usize>,
+    pub(crate) keys_evicted: Vec<Vec<DataType>>,
+    pub(crate) bytes_freed: u64,
+}
+
 /// The state of an individual, non-reader node in the graph
 ///
 /// The [`State`] trait is the interface to the state of a non-reader node in the graph, containing
@@ -52,13 +58,6 @@ pub(crate) use self::persistent_state::PersistentState;
 /// [`add_weak_key`]: State::add_weak_key
 /// [`lookup_weak`]: State::lookup_weak
 /// [weak-keys-doc]: https://docs.google.com/document/d/1JFyvA_3GhMaTewaR0Bsk4N8uhzOwMtB0uH7dD4gJvoQ
-
-pub(crate) struct StateEvicted {
-    pub(crate) key_columns: Vec<usize>,
-    pub(crate) keys_evicted: Vec<Vec<DataType>>,
-    pub(crate) bytes_freed: u64,
-}
-
 pub(crate) trait State: SizeOf + Send {
     /// Add an index of the given type, keyed by the given columns and replayed to by the given
     /// partial tags.
