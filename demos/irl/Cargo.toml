@@ -1,0 +1,14 @@
+[package]
+name = "irl_demo"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+tokio = { version = "1.8.1", features = ["full"] }
+futures = "0.3.0"
+futures-util = "0.3.0"
+mysql = "21.0.1"
+clap = "3.0.0-beta.4"
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.2.25", features = ["fmt"] }
+time = { version = "0.2", features = ["std"], optional = true, default-features = false }

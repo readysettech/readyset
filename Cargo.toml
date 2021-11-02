@@ -27,6 +27,7 @@ members = [
     "query_generator",
     "maths",
     "demos/fastly",
+    "demos/irl",
     "demos/weavegrid",
     "demos/utils",
     "xtask",
