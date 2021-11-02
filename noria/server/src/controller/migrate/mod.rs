@@ -39,7 +39,7 @@ use noria::metrics::recorded;
 use noria::ReadySetError;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tracing::{debug, debug_span, error, info, info_span, instrument, trace, warn};
+use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::{InvalidEdge, Materializations};
 use crate::controller::{
@@ -72,7 +72,7 @@ impl StoredDomainRequest {
             }
         })?;
         if let DomainRequest::QueryReplayDone = self.req {
-            info!("waiting for a done message");
+            debug!("waiting for a done message");
 
             invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
 
@@ -91,7 +91,7 @@ impl StoredDomainRequest {
 
                 spins += 1;
                 if spins == 10 {
-                    warn!("waiting for setup()-initiated replay to complete");
+                    info!("waiting for setup()-initiated replay to complete");
                     spins = 0;
                 }
                 std::thread::sleep(Duration::from_millis(200));
@@ -167,7 +167,7 @@ impl MigrationPlan {
             mut dmp,
         } = self;
 
-        warn!(
+        info!(
             new_domains = dmp.place.len(),
             messages = dmp.stored.len(),
             "applying migration plan",
@@ -200,7 +200,7 @@ impl MigrationPlan {
                 source: Box::new(e),
             });
         } else {
-            warn!(ms = %start.elapsed().as_millis(), "migration plan applied");
+            info!(ms = %start.elapsed().as_millis(), "migration plan applied");
         }
 
         ret
@@ -424,7 +424,7 @@ impl Migration {
 
         // add to the graph
         let ni = self.ingredients.add_node(i);
-        info!(
+        debug!(
             node = ni.index(),
             node_type = ?self.ingredients[ni],
             "adding new node"
@@ -458,7 +458,7 @@ impl Migration {
         let ni = self
             .ingredients
             .add_node(node::Node::new(name.to_string(), fields, b));
-        info!(node = ni.index(), "adding new base");
+        debug!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
         self.added.insert(ni);
@@ -479,7 +479,7 @@ impl Migration {
     /// marked.
     #[cfg(test)]
     pub(crate) fn mark_shallow(&mut self, ni: NodeIndex) {
-        info!(
+        debug!(
             node = ni.index(),
             "marking node as beyond materialization frontier"
         );
@@ -638,7 +638,7 @@ impl Migration {
     pub(super) fn plan(self, mainline: &Leader) -> ReadySetResult<MigrationPlan> {
         let span = info_span!("plan");
         let _g = span.enter();
-        info!(num_nodes = self.added.len(), "finalizing migration");
+        debug!(num_nodes = self.added.len(), "finalizing migration");
 
         let start = self.start;
         let mut ingredients = self.ingredients;
@@ -939,14 +939,14 @@ impl Migration {
             }
 
             // And now, the last piece of the puzzle -- set up materializations
-            info!("initializing new materializations");
+            debug!("initializing new materializations");
             let mut materializations = mainline.materializations.clone();
 
             materializations.extend(&mut ingredients, &new)?;
             if let Some(InvalidEdge { parent, child }) =
                 materializations.validate(&ingredients, &new)?
             {
-                info!(
+                debug!(
                     ?child,
                     ?parent,
                     "rerouting full node found below partial node",
@@ -994,7 +994,7 @@ impl Migration {
                 augmentation::inform(source, &mut ingredients, &mut dmp, uninformed_domain_nodes)?;
 
                 // Set up inter-domain connections
-                info!("bringing up inter-domain connections");
+                debug!("bringing up inter-domain connections");
                 routing::connect(&ingredients, &mut dmp, &new)?;
 
                 materializations.commit(&mut ingredients, &new, &mut dmp)?;

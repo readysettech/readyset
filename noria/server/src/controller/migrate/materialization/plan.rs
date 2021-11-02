@@ -17,7 +17,7 @@ use dataflow::DomainRequest;
 use noria::ReadySetError;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 use vec1::Vec1;
 
 pub(super) struct Plan<'a> {
@@ -331,7 +331,7 @@ impl<'a> Plan<'a> {
             // technically redundant because path.len() > 1, but still
             invariant!(!segments.is_empty());
 
-            info!(%tag, "domain replay path is {:?}", segments);
+            debug!(%tag, "domain replay path is {:?}", segments);
 
             // tell all the domains about their segment of this replay path
             let mut pending = None;
@@ -362,7 +362,7 @@ impl<'a> Plan<'a> {
                             }
                         }
                         if generated {
-                            info!(
+                            debug!(
                                 domain = %domain.index(),
                                 "telling domain about generated columns {:?} on {}",
                                 cols,

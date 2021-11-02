@@ -8,7 +8,7 @@ use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
@@ -391,7 +391,7 @@ impl SqlToMirConverter {
     }
 
     pub(super) fn remove_base(&mut self, name: &str, mq: &MirQuery) -> ReadySetResult<()> {
-        info!(%name, "Removing base node");
+        debug!(%name, "Removing base node");
         self.remove_query(name, mq)?;
         if self.base_schemas.remove(name).is_none() {
             warn!(%name, "Attempted to remove non-existent base node");
@@ -463,7 +463,7 @@ impl SqlToMirConverter {
                 // TODO(malte): check the keys too
                 if &schema[..] == cols {
                     // exact match, so reuse the existing base node
-                    info!(
+                    debug!(
                         %name,
                         %existing_version,
                         "base table already exists with identical schema; reusing it.",
@@ -478,7 +478,7 @@ impl SqlToMirConverter {
                     //  1) reuse the existing node, but add an upgrader for any changes in the
                     //     column set, or
                     //  2) give up and just make a new node
-                    info!(
+                    debug!(
                         %name,
                         %existing_version,
                         "base table already exists, but has a different schema!",
@@ -560,7 +560,7 @@ impl SqlToMirConverter {
                             columns_removed,
                         ));
                     } else {
-                        info!("base table has complex schema change");
+                        warn!("base table has complex schema change");
                         break;
                     }
                 }
