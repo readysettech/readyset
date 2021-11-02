@@ -7,8 +7,8 @@ READYSET_AUTHORITY_CONSUL_AMI_ID=$(jq -r\
   '.builds[] | select(.name == "readyset-authority-consul") | .artifact_id | split(":")[1]'\
   "$manifest_path"
 )
-READYSET_VECTOR_AGGREGATOR_AMI_ID=$(jq -r\
-  '.builds[] | select(.name == "readyset-vector-aggregator") | .artifact_id | split(":")[1]'\
+READYSET_MONITOR_AMI_ID=$(jq -r\
+  '.builds[] | select(.name == "readyset-monitor") | .artifact_id | split(":")[1]'\
   "$manifest_path"
 )
 READYSET_MYSQL_ADAPTER_AMI_ID=$(jq -r\
@@ -20,7 +20,7 @@ READYSET_SERVER_AMI_ID=$(jq -r\
   "$manifest_path"
 )
 export READYSET_AUTHORITY_CONSUL_AMI_ID
-export READYSET_VECTOR_AGGREGATOR_AMI_ID
+export READYSET_MONITOR_AMI_ID
 export READYSET_MYSQL_ADAPTER_AMI_ID
 export READYSET_SERVER_AMI_ID
 exec "$@"
