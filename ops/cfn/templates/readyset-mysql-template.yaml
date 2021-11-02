@@ -439,6 +439,7 @@ Resources:
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
   ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: [ ReadySetServerASGLifecycleTerminateSQS, ReadySetServerASGRole ]
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
       MaxSize: !Ref ReadySetServerNodes
@@ -450,6 +451,7 @@ Resources:
       LifecycleHookSpecificationList:
         - LifecycleHookName: ReadySetServerASGTerminateSNS
           LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+          HeartbeatTimeout: 1800
           NotificationTargetARN: !GetAtt
             - ReadySetServerASGLifecycleTerminateSQS
             - Arn
