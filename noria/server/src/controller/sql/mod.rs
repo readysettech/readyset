@@ -15,7 +15,7 @@ use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
 use noria::{internal, unsupported, ReadySetError};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::controller::Migration;
 use crate::errors::internal_err;
@@ -228,7 +228,7 @@ impl SqlIncorporator {
                 {
                     // we already have this exact query, down to the exact same reader key columns
                     // in exactly the same order
-                    info!(
+                    debug!(
                         %query_name,
                         "An exact match already exists, reusing it"
                     );
@@ -303,7 +303,7 @@ impl SqlIncorporator {
                         && !is_new_bogokey_needed
                     {
                         // QGs are identical, except for parameters (or their order)
-                        info!(
+                        debug!(
                             %query_name,
                             matching_query = %mir_query.name,
                             "Query has an exact match modulo parameters, so making a new reader",
@@ -401,7 +401,7 @@ impl SqlIncorporator {
         let reuse_candidates = reuse_config.reuse_candidates(&mut qg, &self.query_graphs)?;
 
         if !reuse_candidates.is_empty() {
-            info!(
+            debug!(
                 num_candidates = reuse_candidates.len(),
                 "Identified candidate QGs for reuse",
             );
@@ -414,7 +414,7 @@ impl SqlIncorporator {
                 ),
             ));
         } else {
-            info!("No reuse opportunity, adding fresh query");
+            debug!("No reuse opportunity, adding fresh query");
         }
 
         Ok((qg, QueryGraphReuse::None))
@@ -637,7 +637,7 @@ impl SqlIncorporator {
     }
 
     pub(super) fn remove_base(&mut self, name: &str) -> ReadySetResult<()> {
-        info!(%name, "Removing base from SqlIncorporator");
+        debug!(%name, "Removing base from SqlIncorporator");
         if self.base_schemas.remove(name).is_none() {
             warn!(
                 %name,
@@ -722,7 +722,7 @@ impl SqlIncorporator {
         }
         let qfp = mir_query_to_flow_parts(&mut reused_mir, &mut mig)?;
 
-        info!(%query_name, num_reused_nodes);
+        debug!(%query_name, num_reused_nodes);
 
         // register local state
         self.register_query(query_name, Some(qg), &reused_mir);
@@ -1000,7 +1000,7 @@ impl SqlIncorporator {
     /// `new_version` must be strictly greater than the current version in `self.schema_version`.
     pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
         invariant!(new_version > self.schema_version);
-        info!(
+        debug!(
             "Schema version advanced from {} to {}",
             self.schema_version, new_version
         );

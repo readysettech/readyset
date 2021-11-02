@@ -454,7 +454,7 @@ impl Leader {
         // first, translate from the affected workers to affected data-flow nodes
         let mut affected_nodes = Vec::new();
         for wi in failed {
-            info!(worker = ?wi, "handling failure of worker");
+            warn!(worker = ?wi, "handling failure of worker");
             affected_nodes.extend(self.get_failed_nodes(&wi));
             self.workers.remove(&wi);
         }

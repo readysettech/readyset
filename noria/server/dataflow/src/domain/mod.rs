@@ -1238,7 +1238,7 @@ impl Domain {
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for (index, tags) in strict {
-                            info!(
+                            debug!(
                                 index = ?index,
                                 tags = ?tags,
                                 "told to prepare partial state"
@@ -1256,7 +1256,7 @@ impl Domain {
                         }
                         let state = self.state.get_mut(node).unwrap();
                         for index in strict {
-                            info!(
+                            debug!(
                                 key = ?index,
                                 "told to prepare full state"
                             );
@@ -1430,11 +1430,11 @@ impl Domain {
                 raw_path,
             } => {
                 if notify_done {
-                    info!(?path, ?tag, "told about terminating replay path",);
+                    debug!(?path, ?tag, "told about terminating replay path",);
                     // NOTE: we set self.replaying_to when we first receive a replay with
                     // this tag
                 } else {
-                    info!(?path, ?tag, "told about replay path");
+                    debug!(?path, ?tag, "told about replay path");
                 }
 
                 use crate::payload;

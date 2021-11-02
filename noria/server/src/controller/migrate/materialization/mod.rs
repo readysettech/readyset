@@ -17,7 +17,7 @@ use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-use tracing::{debug, error, info, info_span, trace, warn};
+use tracing::{debug, error, info, info_span, trace};
 use vec1::Vec1;
 
 mod plan;
@@ -357,7 +357,7 @@ impl Materializations {
             }
 
             for columns in indices {
-                info!(
+                debug!(
                     node = %ni.index(),
                     ?columns,
                     "adding lookup index to view"
@@ -420,7 +420,7 @@ impl Materializations {
             }
 
             if graph[ni].is_internal() && graph[ni].requires_full_materialization() {
-                warn!(node = %ni.index(), "full because required");
+                debug!(node = %ni.index(), "full because required");
                 able = false;
             }
 
@@ -430,7 +430,7 @@ impl Materializations {
                     != self.have.get(&ni).map(|i| i.len()).unwrap_or(0)
                 && !self.partial.contains(&ni)
             {
-                warn!(node = %ni.index(), "cannot turn full into partial");
+                debug!(node = %ni.index(), "cannot turn full into partial");
                 able = false;
             }
 
@@ -449,7 +449,7 @@ impl Materializations {
                     // materialized child -- don't need to keep walking along this path
                     if !self.partial.contains(&child) {
                         // child is full, so we can't be partial
-                        warn!(node = %ni.index(), child = %child.index(), "full because descendant is full");
+                        debug!(node = %ni.index(), child = %child.index(), "full because descendant is full");
                         stack.clear();
                         able = false
                     }
@@ -457,7 +457,7 @@ impl Materializations {
                     // reader child (which is effectively materialized)
                     if !self.partial.contains(&child) {
                         // reader is full, so we can't be partial
-                        warn!(node = %ni.index(), reader = %child.index(), "full because reader below is full");
+                        debug!(node = %ni.index(), reader = %child.index(), "full because reader below is full");
                         stack.clear();
                         able = false
                     }
@@ -491,7 +491,7 @@ impl Materializations {
                     {
                         match cols {
                             None => {
-                                warn!(
+                                debug!(
                                     node = %node.index(),
                                     "full because node before requested full replay",
                                 );
@@ -512,7 +512,7 @@ impl Materializations {
                                 }
                                 if i == 0 && n_to_skip == 0 {
                                     self.have.entry(node).or_insert_with(|| {
-                                        warn!(node = %node.index(), "forcing materialization for node with generated columns");
+                                        debug!(node = %node.index(), "forcing materialization for node with generated columns");
                                         HashSet::new()
                                     });
 
@@ -529,7 +529,7 @@ impl Materializations {
             if able {
                 // we can do partial if we add all those indices!
                 self.partial.insert(ni);
-                warn!(node = %ni.index(), "using partial materialization");
+                debug!(node = %ni.index(), "using partial materialization");
                 for (mi, indices) in add {
                     let m = replay_obligations.entry(mi).or_default();
                     for index in indices {
@@ -549,7 +549,7 @@ impl Materializations {
                     let new_index = m.insert(index.clone());
 
                     if new_index {
-                        info!(
+                        debug!(
                           on = %ni.index(),
                           columns = ?index,
                           "adding index to view to enable partial"
@@ -615,7 +615,7 @@ impl Materializations {
                         continue;
                     }
                     if !self.have.contains_key(&pi) {
-                        warn!(node = %ni.index(), "no associated state with purged node");
+                        debug!(node = %ni.index(), "no associated state with purged node");
                         continue;
                     }
                     invariant!(
@@ -953,7 +953,7 @@ impl Materializations {
                     }
                 }
 
-                warn!(
+                debug!(
                     node = %node.index(),
                     cols = ?index_on,
                     "materializing existing non-materialized node"
@@ -962,7 +962,7 @@ impl Materializations {
 
             let n = &graph[node];
             if self.partial.contains(&node) {
-                info!(
+                debug!(
                     node = %node.index(),
                     cols = ?index_on,
                     "adding partial index to existing {:?}", n
@@ -1052,7 +1052,7 @@ impl Materializations {
 
         if n.is_base() {
             // a new base must be empty, so we can materialize it immediately
-            info!(node = %ni.index(), "no need to replay empty new base");
+            debug!(node = %ni.index(), "no need to replay empty new base");
             assert!(!self.partial.contains(&ni));
             return Ok(());
         }
@@ -1074,7 +1074,7 @@ impl Materializations {
         {
             let span = info_span!("reconstructing node", node = %ni.index());
             let _guard = span.enter();
-            info!("beginning reconstruction of {:?}", n);
+            info!(node = %ni.index(), "beginning reconstruction");
             self.setup(ni, index_on, graph, dmp)?;
         }
 
@@ -1124,7 +1124,7 @@ impl Materializations {
             // prepare for, start, and wait for replays
             for pending in pending {
                 // tell the first domain to start playing
-                info!(
+                debug!(
                     domain = %pending.source_domain.index(),
                     "telling root domain to start replay"
                 );
@@ -1139,7 +1139,7 @@ impl Materializations {
             }
             // and then wait for the last domain to receive all the records
             let target = graph[ni].domain();
-            info!(
+            debug!(
                domain = %target.index(),
                "waiting for done message from target"
             );
