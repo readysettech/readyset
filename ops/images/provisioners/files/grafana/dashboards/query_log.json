@@ -19,25 +19,12 @@
     ]
   },
   "editable": true,
-  "fiscalYearStartMonth": 0,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1635627037264,
+  "id": 3,
+  "iteration": 1635825382168,
   "links": [],
-  "liveNow": false,
   "panels": [
-    {
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 13,
-      "title": "Row title",
-      "type": "row"
-    },
     {
       "datasource": "DS_PROMETHEUS",
       "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
@@ -67,7 +54,7 @@
         "h": 5,
         "w": 14,
         "x": 0,
-        "y": 1
+        "y": 0
       },
       "id": 2,
       "options": {
@@ -85,7 +72,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
@@ -127,7 +114,7 @@
         "h": 6,
         "w": 3,
         "x": 14,
-        "y": 1
+        "y": 0
       },
       "id": 9,
       "options": {
@@ -145,7 +132,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
@@ -188,7 +175,7 @@
         "h": 6,
         "w": 3,
         "x": 17,
-        "y": 1
+        "y": 0
       },
       "id": 10,
       "options": {
@@ -206,7 +193,7 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
@@ -366,7 +353,7 @@
         "h": 8,
         "w": 14,
         "x": 0,
-        "y": 6
+        "y": 5
       },
       "id": 4,
       "options": {
@@ -374,7 +361,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
@@ -385,17 +372,6 @@
           "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.5\"}) *1000 ",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "B"
         },
         {
           "exemplar": true,
@@ -410,17 +386,6 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.9\"}) *1000 ",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "D"
-        },
-        {
-          "exemplar": true,
           "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
           "format": "table",
           "hide": false,
@@ -429,17 +394,6 @@
           "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "E"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.99\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "F"
         }
       ],
       "title": "Query Log",
@@ -491,11 +445,35 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 74,
-            "lineWidth": 1
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "decimals": 0,
           "mappings": [],
@@ -519,25 +497,23 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 6,
         "x": 14,
-        "y": 7
+        "y": 6
       },
       "id": 16,
       "options": {
-        "colWidth": 0.9,
         "legend": {
-          "displayMode": "hidden",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom"
         },
-        "rowHeight": 0.94,
-        "showValue": "auto",
         "tooltip": {
           "mode": "single"
         }
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
@@ -545,171 +521,52 @@
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "intervalFactor": 10,
+          "intervalFactor": 1,
           "legendFormat": "{{job}} ({{instance}})",
           "refId": "A"
         }
       ],
       "title": "System CPU Utilization",
       "transformations": [],
-      "type": "status-history"
+      "type": "timeseries"
     },
     {
       "datasource": "DS_PROMETHEUS",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "noValue": "0",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 6,
-        "x": 0,
-        "y": 14
-      },
-      "id": 17,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.2.2",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "max ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
-          "format": "time_series",
-          "instant": false,
-          "interval": "",
-          "intervalFactor": 10,
-          "legendFormat": "Max",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Avg",
-          "refId": "B"
-        }
-      ],
-      "title": "ReadySet Server Memory Utilization",
-      "transformations": [],
-      "type": "stat"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "noValue": "0",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "decbytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 6,
-        "y": 14
-      },
-      "id": 18,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "8.2.2",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum (domain_total_node_state_size_bytes)",
-          "format": "time_series",
-          "instant": true,
-          "interval": "",
-          "intervalFactor": 10,
-          "legendFormat": "Dataflow Usage",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "sum (node_memory_MemTotal_bytes{job=\"readyset-server\"} - node_memory_MemAvailable_bytes)",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "Server Total Usage",
-          "refId": "B"
-        }
-      ],
-      "title": "ReadySet State Size",
-      "transformations": [],
-      "type": "stat"
-    },
-    {
-      "datasource": "DS_PROMETHEUS",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 74,
-            "lineWidth": 1
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "decimals": 0,
           "mappings": [],
@@ -733,20 +590,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 6,
         "x": 14,
-        "y": 15
+        "y": 13
       },
       "id": 15,
       "options": {
-        "colWidth": 0.9,
         "legend": {
-          "displayMode": "hidden",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom"
         },
-        "rowHeight": 0.94,
-        "showValue": "auto",
         "tooltip": {
           "mode": "single"
         }
@@ -760,18 +615,18 @@
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "intervalFactor": 10,
+          "intervalFactor": 1,
           "legendFormat": "{{job}} ({{instance}})",
           "refId": "A"
         }
       ],
       "title": "System Memory Utilization",
       "transformations": [],
-      "type": "status-history"
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 31,
+  "schemaVersion": 30,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -790,12 +645,12 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "ReadySet Overview",
-  "uid": "DxveTjdnka",
+  "uid": "ba7jMxKnz",
   "version": 1
 }
