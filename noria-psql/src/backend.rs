@@ -29,11 +29,7 @@ impl Backend {
         Ok(PrepareResponse(self.0.prepare(query).await?))
     }
 
-    async fn execute(
-        &mut self,
-        id: u32,
-        params: Vec<DataType>,
-    ) -> Result<QueryResponse<'_>, Error> {
+    async fn execute(&mut self, id: u32, params: &[DataType]) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.execute(id, params).await?))
     }
 }
@@ -65,7 +61,7 @@ impl ps::Backend for Backend {
             .iter()
             .map(|p| ParamRef(p).try_into())
             .collect::<Result<Vec<DataType>, ps::Error>>()?;
-        self.execute(statement_id, params).await?.try_into()
+        self.execute(statement_id, &params).await?.try_into()
     }
 
     async fn on_close(&mut self, _statement_id: u32) -> Result<(), ps::Error> {

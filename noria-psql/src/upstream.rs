@@ -192,7 +192,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     async fn execute(
         &mut self,
         statement_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> Result<Self::QueryResult, Error> {
         let statement = self
             .prepared_statements

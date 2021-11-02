@@ -534,7 +534,7 @@ where
 
 /// coerce params to correct sql types
 pub(crate) fn coerce_params(
-    params: Option<Vec<DataType>>,
+    params: Option<&[DataType]>,
     q: &SqlQuery,
     schema: &CreateTableStatement,
 ) -> ReadySetResult<Option<Vec<DataType>>> {

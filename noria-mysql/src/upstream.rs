@@ -17,8 +17,8 @@ use crate::Error;
 
 type StatementID = u32;
 
-fn dt_to_value_params(dt: Vec<DataType>) -> Result<Vec<mysql_async::Value>, noria::ReadySetError> {
-    dt.into_iter().map(|v| v.try_into()).collect()
+fn dt_to_value_params(dt: &[DataType]) -> Result<Vec<mysql_async::Value>, noria::ReadySetError> {
+    dt.iter().map(|v| v.try_into()).collect()
 }
 
 #[derive(Debug)]
@@ -145,11 +145,7 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn execute(
-        &mut self,
-        id: u32,
-        params: Vec<DataType>,
-    ) -> Result<Self::QueryResult, Error> {
+    async fn execute(&mut self, id: u32, params: &[DataType]) -> Result<Self::QueryResult, Error> {
         let params = dt_to_value_params(params)?;
         let mut result = self
             .conn

@@ -86,7 +86,7 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn execute(
         &mut self,
         statement_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> Result<Self::QueryResult, Self::Error>;
 
     /// Execute a raw, un-prepared query

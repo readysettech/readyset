@@ -160,7 +160,7 @@ fn async_execute(mut cx: FunctionContext) -> JsResult<JsUndefined> {
         let res = backend
             .lock()
             .await
-            .execute(statement_id, params)
+            .execute(statement_id, &params)
             .await
             .map(|v| v.into_owned());
 
