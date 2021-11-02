@@ -3359,6 +3359,7 @@ dependencies = [
  "noria-common",
  "noria-dataflow",
  "noria-mir",
+ "parking_lot",
  "petgraph",
  "pin-project 1.0.8",
  "proptest",
