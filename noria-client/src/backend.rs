@@ -555,7 +555,7 @@ where
     async fn mirror_read(
         &mut self,
         q: &nom_sql::SelectStatement,
-        query_str: String,
+        query_str: &str,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
@@ -1301,7 +1301,7 @@ where
                     }
                     let execution_timer = Instant::now();
                     let res = if self.mirror_reads {
-                        self.mirror_read(stmt, query.to_owned(), self.ticket.clone(), event)
+                        self.mirror_read(stmt, query, self.ticket.clone(), event)
                             .await
                     } else if live_qca_enabled {
                         // The query status cache is guarenteed to exist if `live_qca` is enabled.
