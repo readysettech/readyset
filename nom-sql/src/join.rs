@@ -73,6 +73,7 @@ impl fmt::Display for JoinOperator {
 pub enum JoinConstraint {
     On(Expression),
     Using(Vec<Column>),
+    Empty,
 }
 
 impl fmt::Display for JoinConstraint {
@@ -88,6 +89,7 @@ impl fmt::Display for JoinConstraint {
                     .collect::<Vec<_>>()
                     .join(", ")
             )?,
+            JoinConstraint::Empty => {}
         }
         Ok(())
     }

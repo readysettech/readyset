@@ -92,6 +92,7 @@ impl ReplaceLiteralsWithPlaceholders for SelectStatement {
                         }
                     }
                 }
+                JoinConstraint::Empty => {}
             };
         }
         if let Some(expr) = self.where_clause.as_mut() {
