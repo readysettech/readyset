@@ -535,6 +535,10 @@ Resources:
           CidrIp: 0.0.0.0/0
   ReadySetMonitorInstance:
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
     Properties:
       InstanceType: !Ref ReadySetMonitorInstanceType
       SubnetId: !Ref PrivateSubnet1ID
@@ -559,7 +563,7 @@ Resources:
             #!/bin/bash -v
             set -eu -o pipefail
             export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
-            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorASG"
+            export AWS_CLOUDFORMATION_RESOURCE="ReadySetMonitorInstance"
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
