@@ -258,7 +258,7 @@ fn join_constraint(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], JoinCon
             JoinConstraint::On(t.1)
         });
 
-        alt((using_clause, on_clause))(i)
+        alt((using_clause, on_clause))(i).or(Ok((i, JoinConstraint::Empty)))
     }
 }
 

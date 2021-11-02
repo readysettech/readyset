@@ -671,8 +671,8 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                 let left_table;
                 let right_table;
 
-                let join_preds = match jc.constraint {
-                    JoinConstraint::On(ref cond) => {
+                let join_preds = match &jc.constraint {
+                    JoinConstraint::On(cond) => {
                         use nom_sql::analysis::ReferredTables;
 
                         // find all distinct tables mentioned in the condition
@@ -724,7 +724,7 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
 
                         join_preds
                     }
-                    JoinConstraint::Using(ref cols) => {
+                    JoinConstraint::Using(cols) => {
                         invariant_eq!(cols.len(), 1);
                         let col = cols.iter().next().unwrap();
 
@@ -735,6 +735,12 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
                             left: col_expr(&left_table, &col.name),
                             right: col_expr(&right_table, &col.name),
                         }]
+                    }
+                    JoinConstraint::Empty => {
+                        left_table = prev_table.as_ref().unwrap().clone();
+                        right_table = table.name.clone();
+                        // An empty predicate indicates a cartesian product is expected
+                        vec![]
                     }
                 };
 

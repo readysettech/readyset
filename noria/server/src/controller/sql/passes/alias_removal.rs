@@ -331,7 +331,7 @@ impl AliasRemoval for SqlQuery {
                         JoinConstraint::On(ref cond) => {
                             JoinConstraint::On(rewrite_expression(&col_table_remap, cond))
                         }
-                        c @ JoinConstraint::Using(..) => c,
+                        c @ JoinConstraint::Using(..) | c @ JoinConstraint::Empty => c,
                     };
                     jc
                 })

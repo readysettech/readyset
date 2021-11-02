@@ -1173,6 +1173,12 @@ mod tests {
         }
 
         #[test]
+        fn create_view_irl() {
+            let qstring = "CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`%` SQL SECURITY DEFINER VIEW `org_default_recurring_invites_view` AS select `default_recurring_invites_data`.`title` AS `recurring_invite_title`,`default_titles`.`title` AS `group_title`,`default_recurring_invites_data`.`by_day` AS `day_of_week`,`default_recurring_invites_data`.`length_in_minutes` AS `length_in_minutes`,`default_recurring_invites_data`.`start_time` AS `start_time` from (`default_titles` join `default_recurring_invites_data`) where (`default_titles`.`default_recurring_invite_data_id` = `default_recurring_invites_data`.`id`);";
+            view_creation(Dialect::MySQL)(qstring.as_bytes()).unwrap();
+        }
+
+        #[test]
         fn double_precision_column() {
             let (rem, res) =
                 creation(Dialect::MySQL)(b"create table t(x double precision)").unwrap();

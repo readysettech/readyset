@@ -187,6 +187,7 @@ fn check_select_statement<'a>(
                     unsupported!("Self-joins using the same column are unsupported")
                 }
             }
+            JoinConstraint::Empty => {}
         }
     }
 
