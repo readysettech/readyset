@@ -273,7 +273,7 @@ where
         // We have to perform this check before self is mutably borrowed by execute
         let is_cached = self.schema_cache.contains_key(&id);
 
-        let res = match self.execute(id, datatype_params).await {
+        let res = match self.execute(id, &datatype_params).await {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
                 data,
                 select_schema,

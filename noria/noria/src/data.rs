@@ -1590,6 +1590,8 @@ impl<'a> TryFrom<&'a DataType> for Vec<u8> {
 
     fn try_from(data: &'a DataType) -> Result<Self, Self::Error> {
         match *data {
+            DataType::Text(ref t) => Ok(t.as_bytes().to_vec()),
+            DataType::TinyText(ref tt) => Ok(tt.as_str().as_bytes().to_vec()),
             DataType::ByteArray(ref array) => Ok(array.as_ref().clone()),
             _ => Err(Self::Error::DataTypeConversionError {
                 val: format!("{:?}", data),
@@ -2206,16 +2208,23 @@ impl TryFrom<DataType> for mysql_common::value::Value {
     type Error = ReadySetError;
 
     fn try_from(dt: DataType) -> Result<Self, Self::Error> {
+        Self::try_from(&dt)
+    }
+}
+
+impl TryFrom<&DataType> for mysql_common::value::Value {
+    type Error = ReadySetError;
+    fn try_from(dt: &DataType) -> Result<Self, Self::Error> {
         use mysql_common::value::Value;
 
         match dt {
             DataType::None => Ok(Value::NULL),
-            DataType::Int(val) => Ok(Value::Int(i64::from(val))),
-            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(val))),
-            DataType::BigInt(val) => Ok(Value::Int(val)),
-            DataType::UnsignedBigInt(val) => Ok(Value::UInt(val)),
-            DataType::Float(val, _) => Ok(Value::Float(val)),
-            DataType::Double(val, _) => Ok(Value::Double(val)),
+            DataType::Int(val) => Ok(Value::Int(i64::from(*val))),
+            DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(*val))),
+            DataType::BigInt(val) => Ok(Value::Int(*val)),
+            DataType::UnsignedBigInt(val) => Ok(Value::UInt(*val)),
+            DataType::Float(val, _) => Ok(Value::Float(*val)),
+            DataType::Double(val, _) => Ok(Value::Double(*val)),
             DataType::Numeric(_) => {
                 internal!("DataType::Numeric to MySQL DECIMAL is not implemented")
             }

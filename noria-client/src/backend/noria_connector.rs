@@ -253,10 +253,14 @@ pub struct NoriaConnector {
 
 /// Removes limit and offset params passed in with an execute function. These are not sent to the
 /// server.
-fn pop_limit_offset_params(
-    mut params: Vec<DataType>,
+fn pop_limit_offset_params<'param>(
+    mut params: &'param [DataType],
     ignored_columns: &[ColumnSchema],
-) -> (Option<DataType>, Option<DataType>, Vec<DataType>) {
+) -> (
+    Option<&'param DataType>,
+    Option<&'param DataType>,
+    &'param [DataType],
+) {
     let mut offset = None;
     let mut row_count = None;
 
@@ -264,13 +268,19 @@ fn pop_limit_offset_params(
         .iter()
         .any(|col| matches!(col.spec.column.name.as_str(), "__offset"))
     {
-        offset = params.pop();
+        offset = params.split_last().map(|(last, rest)| {
+            params = rest;
+            last
+        });
     }
     if ignored_columns
         .iter()
         .any(|col| matches!(col.spec.column.name.as_str(), "__row_count"))
     {
-        row_count = params.pop();
+        row_count = params.split_last().map(|(last, rest)| {
+            params = rest;
+            last
+        });
     }
 
     (offset, row_count, params)
@@ -462,7 +472,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_insert(
         &mut self,
         q_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -612,7 +622,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_update(
         &mut self,
         q_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -678,7 +688,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_delete(
         &mut self,
         q_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = self
             .prepared_statement_cache
@@ -938,7 +948,7 @@ impl NoriaConnector {
         &mut self,
         qname: &str,
         q: &nom_sql::SelectStatement,
-        mut keys: Vec<Vec<DataType>>,
+        mut keys: Vec<Cow<'_, [DataType]>>,
         key_column_indices: &[usize],
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'_>> {
@@ -971,7 +981,7 @@ impl NoriaConnector {
                     .map(|op| (i, col, op))
             })
             .map(|(idx, col, operator)| -> ReadySetResult<_> {
-                let mut key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
+                let key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
                 if !keys.is_empty() {
                     unsupported!(
                         "LIKE/ILIKE not currently supported for more than one lookup key at a time"
@@ -982,7 +992,7 @@ impl NoriaConnector {
                     .position(|x| x.spec.column.name == col.name)
                     .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
                 let value = String::try_from(
-                    &key.remove(idx)
+                    key[idx]
                         .coerce_to(key_types.remove(idx))
                         .unwrap()
                         .into_owned(),
@@ -1019,9 +1029,9 @@ impl NoriaConnector {
             }
 
             keys.drain(..)
-                .map(|mut key| {
+                .map(|key| {
                     let k = key
-                        .drain(..)
+                        .iter()
                         .zip(&key_types)
                         .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
                         .collect::<ReadySetResult<Vec<DataType>>>()?;
@@ -1058,7 +1068,7 @@ impl NoriaConnector {
     async fn do_update(
         &mut self,
         q: Cow<'_, UpdateStatement>,
-        params: Option<Vec<DataType>>,
+        params: Option<&[DataType]>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self
@@ -1095,7 +1105,7 @@ impl NoriaConnector {
     async fn do_delete(
         &mut self,
         q: Cow<'_, DeleteStatement>,
-        params: Option<Vec<DataType>>,
+        params: Option<&[DataType]>,
     ) -> ReadySetResult<QueryResult<'_>> {
         trace!(table = %q.table.name, "delete::access mutator");
         let mutator = self
@@ -1155,7 +1165,7 @@ impl NoriaConnector {
             SchemaType::ProjectedSchema,
         )?;
 
-        let keys = processed.make_keys(vec![])?;
+        let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
         self.do_read(&qname, &query, keys, &key_column_indices, ticket)
@@ -1247,7 +1257,7 @@ impl NoriaConnector {
     pub(crate) async fn execute_prepared_select(
         &mut self,
         q_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'_>> {
         let prep: PreparedStatement = {

@@ -5,6 +5,7 @@ use nom_sql::{
 };
 use noria::{unsupported, ReadySetError, ReadySetResult};
 use std::{
+    borrow::Cow,
     cmp::max,
     convert::{TryFrom, TryInto},
     iter, mem,
@@ -33,7 +34,10 @@ pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<Proce
 }
 
 impl ProcessedQueryParams {
-    pub(crate) fn make_keys<T>(&self, params: Vec<T>) -> ReadySetResult<Vec<Vec<T>>>
+    pub(crate) fn make_keys<'param, T>(
+        &self,
+        params: &'param [T],
+    ) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
         T: Clone + TryFrom<Literal, Error = ReadySetError>,
     {
@@ -49,12 +53,16 @@ impl ProcessedQueryParams {
             .collect::<Result<Vec<_>, _>>()?;
 
         if self.rewritten_in_conditions.is_empty() {
-            return Ok(vec![splice_auto_parameters(params, auto_parameters)]);
+            return Ok(vec![splice_auto_parameters(params, &auto_parameters)]);
         }
 
-        explode_params(params, &self.rewritten_in_conditions)
-            .map(move |k| Ok(splice_auto_parameters(k?, auto_parameters.clone())))
-            .collect()
+        let mut result = Vec::new();
+        for k in explode_params(params, &self.rewritten_in_conditions) {
+            result.push(Cow::Owned(
+                splice_auto_parameters(&k, &auto_parameters).to_vec(),
+            ));
+        }
+        Ok(result)
     }
 }
 
@@ -199,20 +207,21 @@ fn collapse_where_in(query: &mut SelectStatement) -> ReadySetResult<Vec<Rewritte
     Ok(res)
 }
 
-/// Given a vector of parameters provided by the user and the list of [`RewrittenIn`] returned by
+/// Given a slice of parameters provided by the user and the list of [`RewrittenIn`] returned by
 /// [`collapse_where_in`] on a query, construct a vector of lookup keys for executing that query
-fn explode_params<'a, T>(
-    params: Vec<T>,
+fn explode_params<'param, 'a, T>(
+    params: &'param [T],
     rewritten_in_conditions: &'a [RewrittenIn],
-) -> impl Iterator<Item = ReadySetResult<Vec<T>>> + 'a
+) -> impl Iterator<Item = Cow<'param, [T]>> + 'a
 where
     T: Clone + 'a,
+    'param: 'a,
 {
     if rewritten_in_conditions.is_empty() {
         if params.is_empty() {
             return Either::Left(iter::empty());
         } else {
-            return Either::Right(Either::Left(iter::once(Ok(params))));
+            return Either::Right(Either::Left(iter::once(Cow::Borrowed(params))));
         };
     }
 
@@ -245,7 +254,7 @@ where
                     taken = max(taken, first_param_index + in_len);
                 }
                 res.extend(params.iter().skip(taken).cloned());
-                Ok(res)
+                Cow::Owned(res)
             }),
     ))
 }
@@ -362,19 +371,24 @@ fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> 
 ///
 /// `extracted_auto_params` must be sorted by the first index (this is the case with the return
 /// value of [`auto_parametrize_query`]).
-fn splice_auto_parameters<T>(mut params: Vec<T>, extracted_auto_params: Vec<(usize, T)>) -> Vec<T> {
+fn splice_auto_parameters<'param, 'a, T: Clone>(
+    mut params: &'param [T],
+    extracted_auto_params: &'a [(usize, T)],
+) -> Cow<'param, [T]> {
     if extracted_auto_params.is_empty() {
-        return params;
+        return Cow::Borrowed(params);
     }
 
     debug_assert!(extracted_auto_params.is_sorted_by_key(|(i, _)| *i));
     let mut res = Vec::with_capacity(params.len() + extracted_auto_params.len());
-    for (idx, extracted) in extracted_auto_params.into_iter() {
-        res.extend(params.drain(0..idx.saturating_sub(res.len())));
+    for (idx, extracted) in extracted_auto_params.iter().cloned() {
+        let split = params.split_at(idx.saturating_sub(res.len()));
+        res.extend(split.0.to_vec());
         res.push(extracted);
+        params = split.1;
     }
-    res.extend(params);
-    res
+    res.extend(params.to_vec());
+    Cow::Owned(res)
 }
 
 #[cfg(test)]
@@ -636,9 +650,7 @@ mod tests {
         #[test]
         fn no_in() {
             let params = vec![1u32, 2, 3];
-            let res = explode_params(params, &[])
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+            let res = explode_params(&params, &[]).collect::<Vec<_>>();
             assert_eq!(res, vec![vec![1, 2, 3]]);
         }
 
@@ -652,9 +664,7 @@ mod tests {
                 literals: vec![ItemPlaceholder::QuestionMark; 2],
             }];
             let params = vec![1u32, 2, 3, 4];
-            let res = explode_params(params, &rewritten_in_conditions)
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+            let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
             assert_eq!(res, vec![vec![1, 2, 4], vec![1, 3, 4]]);
         }
 
@@ -674,9 +684,7 @@ mod tests {
                 },
             ];
             let params = vec![1u32, 2, 3, 4, 5, 6, 7];
-            let res = explode_params(params, &rewritten_in_conditions)
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
+            let res = explode_params(&params, &rewritten_in_conditions).collect::<Vec<_>>();
             assert_eq!(
                 res,
                 vec![
@@ -805,7 +813,7 @@ mod tests {
         fn single_param() {
             let params = vec![];
             let extracted = vec![(0, 0)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0]);
         }
 
@@ -813,7 +821,7 @@ mod tests {
         fn consecutive_params() {
             let params = vec![];
             let extracted = vec![(0, 0), (1, 1)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0, 1]);
         }
 
@@ -821,7 +829,7 @@ mod tests {
         fn params_before() {
             let params = vec![0, 1];
             let extracted = vec![(2, 2), (3, 3)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0, 1, 2, 3]);
         }
 
@@ -829,7 +837,7 @@ mod tests {
         fn params_after() {
             let params = vec![2, 3];
             let extracted = vec![(0, 0), (1, 1)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0, 1, 2, 3]);
         }
 
@@ -837,7 +845,7 @@ mod tests {
         fn params_between() {
             let params = vec![1, 2];
             let extracted = vec![(0, 0), (3, 3)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0, 1, 2, 3]);
         }
 
@@ -845,7 +853,7 @@ mod tests {
         fn params_before_between_and_after() {
             let params = vec![0, 2];
             let extracted = vec![(1, 1), (3, 3)];
-            let res = splice_auto_parameters(params, extracted);
+            let res = splice_auto_parameters(&params, &extracted);
             assert_eq!(res, vec![0, 1, 2, 3]);
         }
     }
@@ -861,7 +869,15 @@ mod tests {
         ) -> (Vec<Vec<DataType>>, SelectStatement) {
             let mut query = parse_select_statement(query);
             let processed = process_query(&mut query).unwrap();
-            (processed.make_keys(params).unwrap(), query)
+            (
+                processed
+                    .make_keys(&params)
+                    .unwrap()
+                    .into_iter()
+                    .map(|c| c.to_vec())
+                    .collect(),
+                query,
+            )
         }
 
         #[test]

@@ -630,7 +630,7 @@ where
     async fn execute_upstream(
         &mut self,
         upstream_statement_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'static, DB>, DB::Error> {
         let upstream = self.upstream.as_mut().ok_or_else(|| {
@@ -651,14 +651,14 @@ where
     async fn execute_noria<'noria>(
         noria: &'noria mut NoriaConnector,
         noria_statement_id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
         statement: &SqlQuery,
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'noria, DB>> {
         let res = match statement {
             SqlQuery::Select(_) => {
                 let try_read = noria
-                    .execute_prepared_select(noria_statement_id, params.clone(), ticket)
+                    .execute_prepared_select(noria_statement_id, params, ticket)
                     .await;
                 match try_read {
                     Ok(read) => Ok(QueryResult::Noria(read)),
@@ -709,7 +709,7 @@ where
 
         let upstream_res = match prepared_statement.upstream {
             Some(upstream_statement_id) => Some(
-                self.execute_upstream(upstream_statement_id, params.to_vec(), event)
+                self.execute_upstream(upstream_statement_id, params, event)
                     .await,
             ),
             None => {
@@ -734,7 +734,7 @@ where
             match Self::execute_noria(
                 &mut self.noria,
                 noria_statement_id,
-                params.to_vec(),
+                params,
                 &statement,
                 self.ticket.clone(),
             )
@@ -987,7 +987,7 @@ where
     async fn cascade_execute(
         &mut self,
         id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
         prep: &SqlQuery,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
@@ -998,14 +998,8 @@ where
 
         let handle = event.start_timer();
         if let Some(id) = prepared_statement.noria {
-            let res = Self::execute_noria(
-                &mut self.noria,
-                id,
-                params.clone(),
-                prep,
-                self.ticket.clone(),
-            )
-            .await;
+            let res =
+                Self::execute_noria(&mut self.noria, id, params, prep, self.ticket.clone()).await;
 
             match res {
                 Ok(res) => {
@@ -1049,14 +1043,14 @@ where
     async fn execute_inner(
         &mut self,
         id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
 
         if self.mirror_reads {
-            if let Some(res) = self.mirror_execute(id, &params, event).await {
+            if let Some(res) = self.mirror_execute(id, params, event).await {
                 return res;
             }
         }
@@ -1178,7 +1172,7 @@ where
     pub async fn execute(
         &mut self,
         id: u32,
-        params: Vec<DataType>,
+        params: &[DataType],
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         // Requires clone as no references are allowed after self.execute_inner
         // due to borrow checker rules.
