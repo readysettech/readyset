@@ -61,12 +61,12 @@ pub(crate) struct StateEvicted {
 pub(crate) trait State: SizeOf + Send {
     /// Add an index of the given type, keyed by the given columns and replayed to by the given
     /// partial tags.
-    fn add_key(&mut self, index: &Index, tags: Option<Vec<Tag>>);
+    fn add_key(&mut self, index: Index, tags: Option<Vec<Tag>>);
 
     /// Add a new weak key index to this state.
     ///
     /// See [the section about weak keys](trait@State#weak-keys) for more information
-    fn add_weak_key(&mut self, index: &Index);
+    fn add_weak_key(&mut self, index: Index);
 
     /// Returns whether this state is currently keyed on anything. If not, then it cannot store any
     /// infromation and is thus "not useful".

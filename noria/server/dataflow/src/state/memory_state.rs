@@ -52,7 +52,7 @@ fn base_row_bytes(keys: &[DataType]) -> u64 {
 }
 
 impl State for MemoryState {
-    fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
+    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         let (i, exists) = if let Some(i) = self.state_for(&index.columns) {
             // already keyed by this key; just adding tags
             (i, true)
@@ -179,7 +179,7 @@ impl State for MemoryState {
         for state in self.state.iter() {
             // must be strictly less than, because otherwise it's either the same index, or
             // we'd have to magic up datatypes out of thin air
-            if state.key().len() < columns.len() {
+            if state.columns().len() < columns.len() {
                 // For each column in `columns`, find the corresponding column in `state.key()`,
                 // if there is one, and return (its position in state.key(), its value from `key`).
                 // FIXME(eta): this seems accidentally quadratic.
@@ -188,13 +188,13 @@ impl State for MemoryState {
                     .enumerate()
                     .filter_map(|(i, col_idx)| {
                         state
-                            .key()
+                            .columns()
                             .iter()
                             .position(|x| x == col_idx)
                             .map(|pos| (pos, key.get(i).expect("bogus key passed to lookup")))
                     })
                     .collect::<Vec<_>>();
-                if positions.len() == state.key().len() {
+                if positions.len() == state.columns().len() {
                     // the index only contains columns from `columns` (and none other).
                     // make a new lookup key
                     positions.sort_unstable_by_key(|(idx, _)| *idx);
@@ -229,7 +229,7 @@ impl State for MemoryState {
     }
 
     fn keys(&self) -> Vec<Vec<usize>> {
-        self.state.iter().map(|s| s.key().to_vec()).collect()
+        self.state.iter().map(|s| s.columns().to_vec()).collect()
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
@@ -280,7 +280,7 @@ impl State for MemoryState {
 
         self.mem_size = self.mem_size.saturating_sub(bytes_freed);
         return Some(StateEvicted {
-            key_columns: self.state[index].key().to_vec(),
+            key_columns: self.state[index].columns().to_vec(),
             keys_evicted,
             bytes_freed,
         });
@@ -312,7 +312,7 @@ impl State for MemoryState {
                 .sum::<u64>();
 
             self.mem_size = self.mem_size.saturating_sub(bytes + key_bytes);
-            (self.state[index].key(), bytes)
+            (self.state[index].columns(), bytes)
         })
     }
 
@@ -327,9 +327,9 @@ impl State for MemoryState {
         self.replication_offset.as_ref()
     }
 
-    fn add_weak_key(&mut self, index: &Index) {
-        self.weak_indices
-            .insert(index.columns.clone(), KeyedState::from(index));
+    fn add_weak_key(&mut self, index: Index) {
+        let state = KeyedState::from(&index);
+        self.weak_indices.insert(index.columns, state);
     }
 
     fn lookup_weak<'a>(&'a self, columns: &[usize], key: &KeyType) -> Option<RecordResult<'a>> {
@@ -341,7 +341,7 @@ impl MemoryState {
     /// Returns the index in `self.state` of the index keyed on `cols`, or None if no such index
     /// exists.
     fn state_for(&self, cols: &[usize]) -> Option<usize> {
-        self.state.iter().position(|s| s.key() == cols)
+        self.state.iter().position(|s| s.columns() == cols)
     }
 
     fn insert(&mut self, r: Vec<DataType>, partial_tag: Option<Tag>) -> bool {
@@ -423,7 +423,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
         state.process_records(&mut records[3].clone().into(), None, None);
 
@@ -448,9 +448,9 @@ mod tests {
     fn memory_state_old_records_new_index() {
         let mut state = MemoryState::default();
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
             LookupResult::Some(RecordResult::Borrowed(rows)) => {
@@ -473,7 +473,7 @@ mod tests {
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
                 let tag = Tag::new(1);
-                state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
+                state.add_key(Index::new(IndexType::BTreeMap, vec![0]), Some(vec![tag]));
                 state.mark_filled(
                     KeyComparison::from_range(
                         &(vec1![DataType::from(0)]..vec1![DataType::from(10)]),
@@ -509,7 +509,7 @@ mod tests {
 
             fn setup() -> MemoryState {
                 let mut state = MemoryState::default();
-                state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+                state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
                 state.process_records(
                     &mut (0..10)
                         .map(|n| Record::from(vec![n.into()]))
@@ -643,8 +643,8 @@ mod tests {
         fn setup() -> MemoryState {
             let mut state = MemoryState::default();
 
-            state.add_key(&Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
-            state.add_weak_key(&Index::hash_map(vec![1]));
+            state.add_key(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_weak_key(Index::hash_map(vec![1]));
 
             state
         }
