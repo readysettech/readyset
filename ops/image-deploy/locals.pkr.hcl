@@ -22,5 +22,5 @@ locals {
 
   ami_users = concat(local.internal_account_ids, local.customer_account_ids)
 
-  destination_regions = ["us-west-2"]
+  destination_regions = ["us-east-1", "us-east-2", "us-west-2"]
 }
