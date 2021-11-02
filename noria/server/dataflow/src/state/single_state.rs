@@ -367,9 +367,13 @@ impl SingleState {
 
     /// Return a reference to this state's Index, which contains the list of columns it's keyed on
     /// and the index type
-    #[allow(dead_code)] // TODO(grfn): Remove once used
     pub(super) fn index(&self) -> &Index {
         &self.index
+    }
+
+    /// Return this state's index type
+    pub(super) fn index_type(&self) -> IndexType {
+        self.index().index_type
     }
 
     /// Return a slice containing the indices of the columns that this index is keyed on
