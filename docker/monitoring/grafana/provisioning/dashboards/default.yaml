@@ -1,7 +1,12 @@
 apiVersion: 1
 
 providers:
-  - name: Query log
+  - name: Readyset Overview
     type: file
     options:
-      path: /var/lib/grafana/dashboards/query_log.json
+      path: /var/lib/grafana/dashboards/readyset_external.json
+
+  - name: Readyset Internal
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards/readyset_internal.json

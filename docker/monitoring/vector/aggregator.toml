@@ -1,17 +1,17 @@
 [sources.node-exporter]
 type = "prometheus_scrape"
 endpoints = [ "http://localhost:9100/metrics" ]
-scrape_interval_secs = 15
+scrape_interval_secs = 2
 
 [sources.prometheus-adapter]
 type = "prometheus_scrape"
 endpoints = [ "http://localhost:6034/prometheus" ]
-scrape_interval_secs = 15
+scrape_interval_secs = 2
 
 [sources.prometheus-server]
 type = "prometheus_scrape"
 endpoints = [ "http://localhost:6033/prometheus" ]
-scrape_interval_secs = 15
+scrape_interval_secs = 2
 
 [transforms.metrics]
 type = "remap"

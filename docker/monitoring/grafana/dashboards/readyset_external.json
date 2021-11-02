@@ -19,25 +19,12 @@
     ]
   },
   "editable": true,
-  "fiscalYearStartMonth": 0,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1635627037264,
+  "id": 3,
+  "iteration": 1636576707007,
   "links": [],
-  "liveNow": false,
   "panels": [
-    {
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "id": 13,
-      "title": "Row title",
-      "type": "row"
-    },
     {
       "datasource": "DS_PROMETHEUS",
       "description": "The number of queries per second executed against ReadySet split by the ReadySet and MySQL backends.",
@@ -67,7 +54,7 @@
         "h": 5,
         "w": 14,
         "x": 0,
-        "y": 1
+        "y": 0
       },
       "id": 2,
       "options": {
@@ -85,11 +72,11 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (database_type) (rate(query_log_execution_time_count[1m]))",
+          "expr": "sum by (database_type) (rate(query_log_execution_time_count{deployment=\"$Deployment\"}[1m]))",
           "interval": "",
           "legendFormat": "{{database_type}}",
           "queryType": "randomWalk",
@@ -127,7 +114,7 @@
         "h": 6,
         "w": 3,
         "x": 14,
-        "y": 1
+        "y": 0
       },
       "id": 9,
       "options": {
@@ -145,11 +132,11 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "count(node_memory_MemTotal_bytes{job=\"readyset-adapter\"}) or vector(0)",
+          "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-adapter\"}) or vector(0)",
           "instant": false,
           "interval": "",
           "legendFormat": "",
@@ -188,7 +175,7 @@
         "h": 6,
         "w": 3,
         "x": 17,
-        "y": 1
+        "y": 0
       },
       "id": 10,
       "options": {
@@ -206,11 +193,11 @@
         "text": {},
         "textMode": "auto"
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "count(node_memory_MemTotal_bytes{job=\"readyset-server\"}) or vector(0)",
+          "expr": "count(node_memory_MemTotal_bytes{deployment=\"$Deployment\",job=\"readyset-server\"}) or vector(0)",
           "instant": false,
           "interval": "",
           "legendFormat": "",
@@ -332,7 +319,7 @@
             "properties": [
               {
                 "id": "custom.width",
-                "value": 398
+                "value": null
               }
             ]
           },
@@ -366,7 +353,7 @@
         "h": 8,
         "w": 14,
         "x": 0,
-        "y": 6
+        "y": 5
       },
       "id": 4,
       "options": {
@@ -374,11 +361,11 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -388,18 +375,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.5\"}) *1000 ",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "B"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -410,18 +386,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.9\"}) *1000 ",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "D"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
+          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -429,17 +394,6 @@
           "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "E"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{database_type=\"mysql\",query!=\"\", quantile=\"0.99\"}) *1000",
-          "format": "table",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "",
-          "queryType": "randomWalk",
-          "refId": "F"
         }
       ],
       "title": "Query Log",
@@ -491,11 +445,35 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 74,
-            "lineWidth": 1
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "decimals": 0,
           "mappings": [],
@@ -519,52 +497,82 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 6,
         "x": 14,
-        "y": 7
+        "y": 6
       },
       "id": 16,
       "options": {
-        "colWidth": 0.9,
         "legend": {
-          "displayMode": "hidden",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom"
         },
-        "rowHeight": 0.94,
-        "showValue": "auto",
         "tooltip": {
           "mode": "single"
         }
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "expr": "100 - (avg by (job, instance) (rate(node_cpu_seconds_total{deployment=\"$Deployment\",mode=\"idle\"}[1m])) * 100)",
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "intervalFactor": 10,
+          "intervalFactor": 1,
           "legendFormat": "{{job}} ({{instance}})",
           "refId": "A"
         }
       ],
       "title": "System CPU Utilization",
       "transformations": [],
-      "type": "status-history"
+      "type": "timeseries"
     },
     {
       "datasource": "DS_PROMETHEUS",
+      "description": "This measures the query end-to-end latency from the time the request is received by ReadySet.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
           "mappings": [],
-          "max": 100,
-          "min": 0,
-          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -577,139 +585,273 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "ms"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
+        "h": 7,
         "w": 6,
         "x": 0,
-        "y": 14
+        "y": 13
       },
       "id": 17,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
         },
-        "text": {},
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "single"
+        }
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "max ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+          "expr": "query_log_execution_time{quantile=~\"0.5|0.9|0.99\",database_type=\"noria\",deployment=\"$Deployment\",query=\"${QueryFilter:raw}\"} * 1000",
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "intervalFactor": 10,
-          "legendFormat": "Max",
+          "legendFormat": "{{quantile}}",
+          "queryType": "randomWalk",
           "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "avg ((node_memory_MemTotal_bytes{job=\"readyset-server\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Avg",
-          "refId": "B"
         }
       ],
-      "title": "ReadySet Server Memory Utilization",
+      "title": "Query Latency",
       "transformations": [],
-      "type": "stat"
+      "type": "timeseries"
     },
     {
       "datasource": "DS_PROMETHEUS",
+      "description": "The cache hit rate observed at the first layer of ReadySet caches. In the absence of queries this graph shows a cache hit rate of 0%.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
           "mappings": [],
-          "max": 100,
+          "max": 1,
           "min": 0,
-          "noValue": "0",
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
               }
             ]
           },
-          "unit": "decbytes"
+          "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 6,
-        "w": 8,
+        "h": 7,
+        "w": 4,
         "x": 6,
-        "y": 14
+        "y": 13
       },
-      "id": 18,
+      "id": 19,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
         },
-        "text": {},
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "single"
+        }
       },
-      "pluginVersion": "8.2.2",
+      "pluginVersion": "8.0.6",
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum (domain_total_node_state_size_bytes)",
+          "expr": "sum(rate(server_view_query_result{deployment=\"$Deployment\",result=\"served_from_cache\"}[30s])) or vector(0) / sum(rate(server_view_query_result[30s]))",
           "format": "time_series",
-          "instant": true,
+          "instant": false,
           "interval": "",
-          "intervalFactor": 10,
-          "legendFormat": "Dataflow Usage",
+          "legendFormat": "",
+          "queryType": "randomWalk",
           "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "sum (node_memory_MemTotal_bytes{job=\"readyset-server\"} - node_memory_MemAvailable_bytes)",
-          "hide": false,
-          "instant": true,
-          "interval": "",
-          "legendFormat": "Server Total Usage",
-          "refId": "B"
         }
       ],
-      "title": "ReadySet State Size",
+      "title": "Cache Hit Rate",
       "transformations": [],
-      "type": "stat"
+      "type": "timeseries"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "description": "Cache eviction runs asynchronously in Noria, but can impact the performance of queries that miss at the first layer of caches. This tracks the percent of the last 30 seconds that we spent performing evictions in the cache, reported as the maximum across all caches.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": -1,
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 10,
+        "y": 13
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "max(increase(domain_eviction_time_us_sum{deployment=\"$Deployment\"}[30s])) / 3000000",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "Cache Eviction Time",
+      "transformations": [],
+      "type": "timeseries"
     },
     {
       "datasource": "DS_PROMETHEUS",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "custom": {
-            "fillOpacity": 74,
-            "lineWidth": 1
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "decimals": 0,
           "mappings": [],
@@ -733,20 +875,18 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 6,
         "x": 14,
-        "y": 15
+        "y": 13
       },
       "id": 15,
       "options": {
-        "colWidth": 0.9,
         "legend": {
-          "displayMode": "hidden",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom"
         },
-        "rowHeight": 0.94,
-        "showValue": "auto",
         "tooltip": {
           "mode": "single"
         }
@@ -756,36 +896,80 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
+          "expr": "sum by (instance, job) ((node_memory_MemTotal_bytes{deployment=\"$Deployment\"}-node_memory_MemAvailable_bytes)/node_memory_MemTotal_bytes*100)",
           "format": "time_series",
           "instant": false,
           "interval": "",
-          "intervalFactor": 10,
+          "intervalFactor": 1,
           "legendFormat": "{{job}} ({{instance}})",
           "refId": "A"
         }
       ],
       "title": "System Memory Utilization",
       "transformations": [],
-      "type": "status-history"
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 31,
+  "schemaVersion": 30,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": [
       {
+        "allValue": null,
+        "current": {
+          "selected": false,
+          "text": "test_deployment",
+          "value": "test_deployment"
+        },
         "datasource": "DS_PROMETHEUS",
+        "definition": "label_values(deployment)",
         "description": null,
         "error": null,
-        "filters": [],
         "hide": 0,
+        "includeAll": false,
         "label": null,
-        "name": "Filters",
+        "multi": false,
+        "name": "Deployment",
+        "options": [],
+        "query": {
+          "query": "label_values(deployment)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
         "skipUrlSync": false,
-        "type": "adhoc"
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "allValue": null,
+        "current": {
+          "isNone": true,
+          "selected": false,
+          "text": "None",
+          "value": ""
+        },
+        "datasource": "DS_PROMETHEUS",
+        "definition": "label_values(query)",
+        "description": null,
+        "error": null,
+        "hide": 0,
+        "includeAll": false,
+        "label": "Query Filter",
+        "multi": false,
+        "name": "QueryFilter",
+        "options": [],
+        "query": {
+          "query": "label_values(query)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
       }
     ]
   },
@@ -796,6 +980,6 @@
   "timepicker": {},
   "timezone": "",
   "title": "ReadySet Overview",
-  "uid": "DxveTjdnka",
-  "version": 1
+  "uid": "jAoEkfF7z",
+  "version": 2
 }

@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 3,
-  "iteration": 1636576707007,
+  "iteration": 1635889126080,
   "links": [],
   "panels": [
     {
@@ -646,7 +646,7 @@
               "tooltip": false,
               "viz": false
             },
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineStyle": {
               "fill": "solid"
             },
@@ -656,7 +656,7 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -667,7 +667,7 @@
           },
           "decimals": 0,
           "mappings": [],
-          "max": 1,
+          "max": 2,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -707,7 +707,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(server_view_query_result{deployment=\"$Deployment\",result=\"served_from_cache\"}[30s])) or vector(0) / sum(rate(server_view_query_result[30s]))",
+          "expr": "sum(rate(server_view_query_result{result=\"served_from_cache\"}[1m])) / sum(rate(server_view_query_result{result=~\"served_from_cache|replay\"}[1m]))",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -919,7 +919,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "test_deployment",
           "value": "test_deployment"
         },
@@ -946,10 +946,9 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "SELECT * FROM `invites_users` WHERE (`invites_users`.`invite_id` IN ('<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>') AND (`invites_users`.`user_id` = '<anonymized>'))",
+          "value": "SELECT * FROM `invites_users` WHERE (`invites_users`.`invite_id` IN ('<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>', '<anonymized>') AND (`invites_users`.`user_id` = '<anonymized>'))"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
@@ -974,7 +973,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-30m",
     "to": "now"
   },
   "timepicker": {},
