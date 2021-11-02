@@ -151,7 +151,6 @@ pub struct PreparedStatement {
 pub struct BackendBuilder {
     slowlog: bool,
     dialect: Dialect,
-    mirror_reads: bool,
     mirror_ddl: bool,
     users: HashMap<String, String>,
     require_authentication: bool,
@@ -170,7 +169,6 @@ impl Default for BackendBuilder {
         BackendBuilder {
             slowlog: false,
             dialect: Dialect::MySQL,
-            mirror_reads: false,
             mirror_ddl: false,
             users: Default::default(),
             require_authentication: true,
@@ -206,7 +204,6 @@ impl BackendBuilder {
             upstream,
             slowlog: self.slowlog,
             dialect: self.dialect,
-            mirror_reads: self.mirror_reads,
             mirror_ddl: self.mirror_ddl,
             users: self.users,
             require_authentication: self.require_authentication,
@@ -229,11 +226,6 @@ impl BackendBuilder {
 
     pub fn dialect(mut self, dialect: Dialect) -> Self {
         self.dialect = dialect;
-        self
-    }
-
-    pub fn mirror_reads(mut self, mirror_reads: bool) -> Self {
-        self.mirror_reads = mirror_reads;
         self
     }
 
@@ -302,9 +294,6 @@ pub struct Backend<DB, Handler> {
     slowlog: bool,
     /// SQL dialect to use when parsing queries from clients
     dialect: Dialect,
-    /// If set to true and a backend is configured for fallback, all reads will be performed
-    /// in both Noria and against upstream, with the upstream result always being returned.
-    mirror_reads: bool,
     /// Map from username to password for all users allowed to connect to the db
     pub users: HashMap<String, String>,
     pub require_authentication: bool,
@@ -548,42 +537,6 @@ where
         }
     }
 
-    /// Executes the given read against both noria and the upstream database, returning
-    /// the result from the upstream database regardless of outcome.
-    ///
-    /// If fallback is not configured, returns an error.
-    async fn mirror_read(
-        &mut self,
-        q: &nom_sql::SelectStatement,
-        query_str: &str,
-        ticket: Option<Timestamp>,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let connector = self
-            .upstream
-            .as_mut()
-            .ok_or_else(|| internal_err("mirror_read called without fallback configured"))?;
-
-        let mut handle = event.start_timer();
-        // TODO: Record upstream query duration on success.
-        let upstream_res = connector.query(query_str).await.map(|r| {
-            handle.set_upstream_duration();
-            QueryResult::Upstream(r)
-        });
-        handle = event.start_timer();
-        match self.noria.handle_select(q.clone(), ticket).await {
-            Ok(_) => {
-                handle.set_noria_duration();
-            }
-            Err(e) => {
-                event.set_noria_error(&e);
-                error!(error = %e, "Error received from noria during mirror_read()");
-            }
-        };
-
-        upstream_res
-    }
-
     /// Executes the given prepare select against both noria, and the upstream database, returning
     /// the result from the upstream database regardless of outcome.
     ///
@@ -687,68 +640,6 @@ where
         };
 
         res
-    }
-
-    /// Issues an execute against both upstream and noria.
-    ///
-    /// If fallback is not configured, returns an error.
-    ///
-    /// # Panics
-    ///
-    /// Panics if query coverage info is not enabled.
-    async fn mirror_execute(
-        &mut self,
-        id: u32,
-        params: &[DataType],
-        event: &mut QueryExecutionEvent,
-    ) -> Option<Result<QueryResult<'static, DB>, DB::Error>> {
-        let prepared_statement = match self.prepared_statements.get(&id).cloned() {
-            Some(v) => v,
-            None => return Some(Err(PreparedStatementMissing { statement_id: id }.into())),
-        };
-
-        let upstream_res = match prepared_statement.upstream {
-            Some(upstream_statement_id) => Some(
-                self.execute_upstream(upstream_statement_id, params, event)
-                    .await,
-            ),
-            None => {
-                error!("Mirror reads were enabled, and a client gave us a statement id for a noria prepared statement. This shouldn't be possible");
-                None
-            }
-        };
-
-        if let Some(noria_statement_id) = prepared_statement.noria {
-            let handle = event.start_timer();
-            let statement = match self.prepared_queries.get(&noria_statement_id).cloned() {
-                Some(v) => v,
-                None => {
-                    let e = PreparedStatementMissing {
-                        statement_id: noria_statement_id,
-                    };
-                    event.set_noria_error(&e);
-                    error!(error = %e, "Error received from noria during mirror_execute()");
-                    return upstream_res;
-                }
-            };
-            match Self::execute_noria(
-                &mut self.noria,
-                noria_statement_id,
-                params,
-                &statement,
-                self.ticket.clone(),
-            )
-            .await
-            {
-                Ok(_) => handle.set_noria_duration(),
-                Err(e) => {
-                    event.set_noria_error(&e);
-                    error!(error = %e, "Error received from noria during mirror_execute()");
-                }
-            };
-        }
-
-        upstream_res
     }
 
     /// Executes the given read against noria, and on failure sends the read to fallback instead.
@@ -949,21 +840,8 @@ where
             nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::RenameTable(..) => {
-                match self.upstream {
-                    Some(ref mut upstream) if self.mirror_reads => {
-                        // Mirror reads is enabled. That means that we can simply prepare against
-                        // upstream. All read results will always be returned from upstream in this
-                        // mode anyways.
-                        upstream.prepare(query).await.map(|r| {
-                            handle.set_upstream_duration();
-                            PrepareResult::Upstream(r)
-                        })
-                    }
-                    _ => {
-                        error!("unsupported query");
-                        unsupported!("query type unsupported");
-                    }
-                }
+                error!("unsupported query");
+                unsupported!("query type unsupported");
             }
         };
 
@@ -1048,12 +926,6 @@ where
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let span = span!(Level::TRACE, "execute", id);
         let _g = span.enter();
-
-        if self.mirror_reads {
-            if let Some(res) = self.mirror_execute(id, params, event).await {
-                return res;
-            }
-        }
 
         let prepared_statement = self
             .prepared_statements
@@ -1300,10 +1172,7 @@ where
                         event.query = Some(parsed_query.clone());
                     }
                     let execution_timer = Instant::now();
-                    let res = if self.mirror_reads {
-                        self.mirror_read(stmt, query, self.ticket.clone(), event)
-                            .await
-                    } else if live_qca_enabled {
+                    let res = if live_qca_enabled {
                         // The query status cache is guarenteed to exist if `live_qca` is enabled.
                         #[allow(clippy::unwrap_used)]
                         let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
@@ -1406,13 +1275,7 @@ where
                 nom_sql::SqlQuery::DropTable(_)
                 | nom_sql::SqlQuery::AlterTable(_)
                 | nom_sql::SqlQuery::RenameTable(_) => {
-                    if self.mirror_reads {
-                        let res = upstream.query(query).await;
-                        handle.set_upstream_duration();
-                        Ok(QueryResult::Upstream(res?))
-                    } else {
-                        unsupported!("{} not yet supported", parsed_query.query_type());
-                    }
+                    unsupported!("{} not yet supported", parsed_query.query_type());
                 }
                 nom_sql::SqlQuery::Set(_)
                 | nom_sql::SqlQuery::Show(_)
