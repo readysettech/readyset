@@ -318,10 +318,10 @@ pub mod test {
             let idx = self.graph[global].suggest_indexes(global);
             for (tbl, suggested_index) in idx {
                 if let Some(ref mut s) = self.states.get_mut(self.graph[tbl].local_addr()) {
-                    s.add_key(suggested_index.index(), None);
                     if suggested_index.is_weak() {
-                        s.add_weak_key(suggested_index.index())
+                        s.add_weak_key(suggested_index.index().clone())
                     }
+                    s.add_key(suggested_index.into_index(), None);
                 }
             }
             // and get rid of states we don't need
@@ -398,8 +398,8 @@ pub mod test {
             for (tbl, suggested_index) in idx {
                 if tbl == base.as_global() {
                     match suggested_index {
-                        SuggestedIndex::Strict(index) => state.add_key(&index, None),
-                        SuggestedIndex::Weak(index) => state.add_weak_key(&index),
+                        SuggestedIndex::Strict(index) => state.add_key(index, None),
+                        SuggestedIndex::Weak(index) => state.add_weak_key(index),
                     }
                 }
             }

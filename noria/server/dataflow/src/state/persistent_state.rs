@@ -286,7 +286,7 @@ impl State for PersistentState {
     }
 
     /// Panics if partial is Some
-    fn add_key(&mut self, index: &Index, partial: Option<Vec<Tag>>) {
+    fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         #[allow(clippy::panic)] // This should definitely never happen!
         {
             assert!(partial.is_none(), "Bases can't be partial");
@@ -401,7 +401,7 @@ impl State for PersistentState {
         unreachable!("can't clear PersistentState")
     }
 
-    fn add_weak_key(&mut self, index: &Index) {
+    fn add_weak_key(&mut self, index: Index) {
         self.add_key(index, None);
     }
 
@@ -966,7 +966,7 @@ mod tests {
 
     pub(self) fn setup_single_key(name: &str) -> PersistentState {
         let mut state = setup_persistent(name, None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         state
     }
 
@@ -999,17 +999,18 @@ mod tests {
     #[test]
     fn persistent_state_multi_key() {
         let mut state = setup_persistent("persistent_state_multi_key", None);
-        let index = Index::new(IndexType::BTreeMap, vec![0, 2]);
+        let cols = vec![0, 2];
+        let index = Index::new(IndexType::BTreeMap, cols.clone());
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap(), 20.into()];
-        state.add_key(&index, None);
+        state.add_key(index, None);
         insert(&mut state, row.clone());
 
-        match state.lookup(&index.columns, &KeyType::Double((1.into(), 2.into()))) {
+        match state.lookup(&cols, &KeyType::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 0),
             _ => unreachable!(),
         };
 
-        match state.lookup(&index.columns, &KeyType::Double((10.into(), 20.into()))) {
+        match state.lookup(&cols, &KeyType::Double((10.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows[0], row);
             }
@@ -1022,8 +1023,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap(), 1.into()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap(), 1.into()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1, 2]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1, 2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
@@ -1055,8 +1056,8 @@ mod tests {
             let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap(), 1.into()];
             let third: Vec<DataType> = vec![30.into(), "Dog".try_into().unwrap(), 1.into()];
             let fourth: Vec<DataType> = vec![40.into(), "Dog".try_into().unwrap(), 1.into()];
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![1, 2]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1, 2]), None);
             state.process_records(
                 &mut vec![first.clone(), second.clone(), third.clone(), fourth.clone()].into(),
                 None,
@@ -1126,19 +1127,20 @@ mod tests {
 
     #[test]
     fn persistent_state_primary_key() {
-        let pk = Index::new(IndexType::BTreeMap, vec![0, 1]);
+        let pk_cols = vec![0, 1];
+        let pk = Index::new(IndexType::BTreeMap, pk_cols.clone());
         let mut state = PersistentState::new(
             String::from("persistent_state_primary_key"),
-            Some(&pk.columns),
+            Some(&pk_cols),
             &PersistenceParameters::default(),
         );
         let first: Vec<DataType> = vec![1.into(), 2.into(), "Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![10.into(), 20.into(), "Cat".try_into().unwrap()];
-        state.add_key(&pk, None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![2]), None);
+        state.add_key(pk, None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![2]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
-        match state.lookup(&pk.columns, &KeyType::Double((1.into(), 2.into()))) {
+        match state.lookup(&pk_cols, &KeyType::Double((1.into(), 2.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &first);
@@ -1146,7 +1148,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&pk.columns, &KeyType::Double((10.into(), 20.into()))) {
+        match state.lookup(&pk_cols, &KeyType::Double((10.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(&rows[0], &second);
@@ -1154,7 +1156,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        match state.lookup(&pk.columns, &KeyType::Double((1.into(), 20.into()))) {
+        match state.lookup(&pk_cols, &KeyType::Double((1.into(), 20.into()))) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
                 assert_eq!(rows.len(), 0);
             }
@@ -1181,7 +1183,7 @@ mod tests {
         );
         let first: Vec<DataType> = vec![1.into(), 2.into()];
         let second: Vec<DataType> = vec![10.into(), 20.into()];
-        state.add_key(&pk, None);
+        state.add_key(pk, None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         match state.lookup(&[0], &KeyType::Single(&1.into())) {
             LookupResult::Some(RecordResult::Owned(rows)) => {
@@ -1213,8 +1215,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_multiple_indices", None);
         let first: Vec<DataType> = vec![0.into(), 0.into()];
         let second: Vec<DataType> = vec![0.into(), 1.into()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&0.into())) {
@@ -1240,8 +1242,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_different_indices", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Bob".try_into().unwrap()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         match state.lookup(&[0], &KeyType::Single(&10.into())) {
@@ -1270,8 +1272,8 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Bob".try_into().unwrap()];
         {
             let mut state = PersistentState::new(name.clone(), None, &params);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
             state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         }
 
@@ -1302,8 +1304,8 @@ mod tests {
         let second: Vec<DataType> = vec![20.into(), "Bob".try_into().unwrap()];
         {
             let mut state = PersistentState::new(name.clone(), Some(&[0]), &params);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
             state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
         }
 
@@ -1331,8 +1333,8 @@ mod tests {
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let duplicate: Vec<DataType> = vec![10.into(), "Other Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
         state.process_records(
             &mut vec![first.clone(), duplicate.clone(), second.clone()].into(),
             None,
@@ -1376,7 +1378,7 @@ mod tests {
     fn persistent_state_is_useful() {
         let mut state = setup_persistent("persistent_state_is_useful", None);
         assert!(!state.is_useful());
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         assert!(state.is_useful());
     }
 
@@ -1387,7 +1389,7 @@ mod tests {
         for i in 0..30 {
             let row = vec![DataType::from(i); 30];
             rows.push(row);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![i]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![i]), None);
         }
 
         for row in rows.iter().cloned() {
@@ -1421,10 +1423,10 @@ mod tests {
 
         {
             let mut state = PersistentState::new(name.clone(), None, &params);
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
             state.process_records(&mut rows.clone().into(), None, None);
             // Add a second index that we'll have to build in add_key:
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
             // Make sure we actually built the index:
             match state.lookup(&[1], &KeyType::Single(&0.into())) {
                 LookupResult::Some(RecordResult::Owned(rs)) => {
@@ -1445,7 +1447,7 @@ mod tests {
         let mut state = PersistentState::new(name, None, &params);
         assert_eq!(state.indices.len(), 1);
         // Now, re-add the second index which should trigger an index build:
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
         // And finally, make sure we actually pruned the index
         // (otherwise we'd get two rows from this .lookup):
         match state.lookup(&[1], &KeyType::Single(&0.into())) {
@@ -1466,7 +1468,7 @@ mod tests {
             rows.push(row);
             // Add a bunch of indices to make sure the sorting in all_rows()
             // correctly filters out non-primary indices:
-            state.add_key(&Index::new(IndexType::BTreeMap, vec![i]), None);
+            state.add_key(Index::new(IndexType::BTreeMap, vec![i]), None);
         }
 
         for row in rows.iter().cloned() {
@@ -1486,8 +1488,8 @@ mod tests {
         let mut state = setup_persistent("persistent_state_cloned_records", None);
         let first: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
         let second: Vec<DataType> = vec![20.into(), "Cat".try_into().unwrap()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
         state.process_records(&mut vec![first.clone(), second.clone()].into(), None, None);
 
         assert_eq!(state.cloned_records(), vec![first, second]);
@@ -1515,9 +1517,9 @@ mod tests {
     fn persistent_state_old_records_new_index() {
         let mut state = setup_persistent("persistent_state_old_records_new_index", None);
         let row: Vec<DataType> = vec![10.into(), "Cat".try_into().unwrap()];
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         insert(&mut state, row.clone());
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![1]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![1]), None);
 
         match state.lookup(&[1], &KeyType::Single(&row[1])) {
             LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(&rows[0], &row),
@@ -1536,7 +1538,7 @@ mod tests {
         ]
         .into();
 
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         state.process_records(&mut Vec::from(&records[..3]).into(), None, None);
         state.process_records(&mut records[3].clone().into(), None, None);
 
@@ -1558,7 +1560,7 @@ mod tests {
     #[test]
     fn replication_offset_roundtrip() {
         let mut state = setup_persistent("replication_offset_roundtrip", None);
-        state.add_key(&Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::HashMap, vec![0]), None);
         let mut records: Records = vec![(vec![1.into(), "A".try_into().unwrap()], true)].into();
         let replication_offset = ReplicationOffset {
             offset: 12,
@@ -1573,7 +1575,7 @@ mod tests {
     #[allow(clippy::op_ref)]
     fn persistent_state_prefix_transform() {
         let mut state = setup_persistent("persistent_state_prefix_transform", None);
-        state.add_key(&Index::new(IndexType::BTreeMap, vec![0]), None);
+        state.add_key(Index::new(IndexType::BTreeMap, vec![0]), None);
         let data = (DataType::from(1), DataType::from(10));
         let r = KeyType::Double(data.clone());
         let k = PersistentState::serialize_prefix(&r);

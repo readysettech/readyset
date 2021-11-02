@@ -1243,11 +1243,11 @@ impl Domain {
                                 tags = ?tags,
                                 "told to prepare partial state"
                             );
-                            state.add_key(&index, Some(tags));
+                            state.add_key(index, Some(tags));
                         }
 
                         for index in weak {
-                            state.add_weak_key(&index);
+                            state.add_weak_key(index);
                         }
                     }
                     InitialState::IndexedLocal { strict, weak } => {
@@ -1260,11 +1260,11 @@ impl Domain {
                                 key = ?index,
                                 "told to prepare full state"
                             );
-                            state.add_key(&index, None);
+                            state.add_key(index, None);
                         }
 
                         for index in weak {
-                            state.add_weak_key(&index);
+                            state.add_weak_key(index);
                         }
                     }
                     InitialState::PartialGlobal {
@@ -1721,7 +1721,7 @@ impl Domain {
                             _ => Box::new(MemoryState::default()),
                         }
                     };
-                    for idx in &index {
+                    for idx in index {
                         s.add_key(idx, None);
                     }
                     assert!(self.state.insert(node, s).is_none());
