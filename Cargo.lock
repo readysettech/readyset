@@ -3118,6 +3118,7 @@ dependencies = [
  "noria-client",
  "noria-client-metrics",
  "readyset-logging",
+ "reqwest",
  "stream-cancel",
  "tokio",
  "tokio-stream",
