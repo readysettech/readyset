@@ -7417,3 +7417,45 @@ async fn reroutes_count() {
         ]
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn multi_diamond_union() {
+    readyset_logging::init_test_logging();
+
+    let mut g = start_simple("double_diamond_union").await;
+    let create_table = "
+        # base tables
+        CREATE TABLE table_1 (column_1 INT);
+    ";
+    g.install_recipe(create_table).await.unwrap();
+
+    let mut table_1 = g.table("table_1").await.unwrap();
+
+    table_1
+        .insert_many(([0, 6]).map(|column_1_value| vec![DataType::from(column_1_value)]))
+        .await
+        .unwrap();
+
+    let create_query = "
+        # read query
+        QUERY multi_diamond_union: SELECT table_1.column_1 AS alias_1, table_1.column_1 AS alias_2, table_1.column_1 AS alias_3
+            FROM table_1 WHERE (
+                ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+                AND table_1.column_1 NOT BETWEEN 1 AND 5
+                AND ((table_1.column_1 IS NULL) OR (table_1.column_1 IS NOT NULL))
+                AND table_1.column_1 NOT BETWEEN 1 AND 5
+            );
+    ";
+
+    g.extend_recipe(create_query).await.unwrap();
+
+    let mut q = g.view("multi_diamond_union").await.unwrap();
+    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
+    let res = rows
+        .into_iter()
+        .map(|r| i32::try_from(&r[0]).unwrap())
+        .sorted()
+        .collect::<Vec<i32>>();
+    let expected = vec![0, 6];
+    assert_eq!(res, expected);
+}
