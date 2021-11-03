@@ -172,7 +172,7 @@ struct Reader {
 
 #[derive(Debug, Clone)]
 struct ReaderThreadUpdate {
-    /// Query end-to-end latency in ms.
+    /// Query end-to-end latency in 1/10th of a ms.
     queries: Vec<u128>,
 }
 
@@ -462,7 +462,7 @@ impl Reader {
             for query in finished {
                 reader_update
                     .queries
-                    .push((finish.duration_since(query.issued)).as_millis());
+                    .push((finish.duration_since(query.issued)).as_micros() / 100);
             }
         }
         Ok(())
@@ -512,10 +512,10 @@ impl Reader {
         }
         let qps = hist.len() as f64 / period.as_secs() as f64;
         let percentiles = vec![
-            ("p50", hist.value_at_quantile(0.5)),
-            ("p90", hist.value_at_quantile(0.9)),
-            ("p99", hist.value_at_quantile(0.99)),
-            ("p9999", hist.value_at_percentile(0.9999)),
+            ("p50", hist.value_at_quantile(0.5) as f64 / 10.0),
+            ("p90", hist.value_at_quantile(0.9) as f64 / 10.0),
+            ("p99", hist.value_at_quantile(0.99) as f64 / 10.0),
+            ("p9999", hist.value_at_quantile(0.9999) as f64 / 10.0),
         ];
 
         if let Some(influx_host) = &self.influx_host {
@@ -555,12 +555,12 @@ impl Reader {
             }
         } else {
             println!(
-                "qps: {:.0}\tp50: {} ms\tp90: {} ms\tp99: {} ms\tp99.99: {} ms",
+                "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
                 qps,
-                hist.value_at_quantile(0.5),
-                hist.value_at_quantile(0.9),
-                hist.value_at_quantile(0.99),
-                hist.value_at_quantile(0.9999)
+                hist.value_at_quantile(0.5) as f64 / 10.0,
+                hist.value_at_quantile(0.9) as f64 / 10.0,
+                hist.value_at_quantile(0.99) as f64 / 10.0,
+                hist.value_at_quantile(0.9999) as f64 / 10.0
             );
         }
         Ok(())
