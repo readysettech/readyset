@@ -5,10 +5,11 @@ authors = ["justin@readyset.io"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.8.1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.8.1", features = ["macros", "rt-multi-thread", "signal"] }
 anyhow = "1.0.38"
 nom = "5.1.2"
 mysql = "21.0.1"
+mysql_async = "0.28.0"
 rand = "0.8.3"
 futures = "0.3.15"
 vec1 = "1.8.0"
@@ -16,9 +17,12 @@ url = "2.2.2"
 hdrhistogram = "7.1"
 zipf = "7.0.0"
 structopt = "0.3.22"
-clap = "3.0.0-beta.2"
+clap = "3.0.0-beta.4"
 rinfluxdb = { version = "0.1.0" }
 reqwest = { version = "0.11" }
+chrono = "0.4"
+atomic-counter = "1.0.1"
+
 
 # local dependencies
 noria = { path = "../noria/noria/" }
@@ -29,36 +33,36 @@ noria-client = { path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }
 
 [lib]
-path = "./lib.rs"
+path = "src/lib.rs"
 
 [[bin]]
 name = "fastly_data_generator"
-path = "fastly/bin/fastly_data_generator.rs"
+path = "src/bin/fastly_data_generator.rs"
 
 [[bin]]
 name = "reader"
-path = "fastly/bin/reader.rs"
+path = "src/bin/reader.rs"
 
 [[bin]]
 name = "writer"
-path = "fastly/bin/writer.rs"
+path = "src/bin/writer.rs"
 
 [[bin]]
 name = "replicate"
-path = "fastly/bin/replicate.rs"
+path = "src/bin/replicate.rs"
 
 [[bin]]
 name = "extend_recipe"
-path = "fastly/bin/extend_recipe.rs"
+path = "src/bin/extend_recipe.rs"
 
 [[bin]]
 name = "extend_recipe_write_prop"
-path = "fastly/bin/extend_recipe_write_prop.rs"
+path = "src/bin/extend_recipe_write_prop.rs"
 
 [[bin]]
 name = "write_propagation"
-path = "fastly/bin/write_propagation.rs"
+path = "src/bin/write_propagation.rs"
 
 [[bin]]
 name = "weavegrid_data_generator"
-path = "weavegrid/bin/weavegrid_data_generator.rs"
+path = "src/bin/weavegrid_data_generator.rs"

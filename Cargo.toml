@@ -30,7 +30,6 @@ members = [
     "query_generator",
     "maths",
     "benchmarks",
-    "benchmarks/query-slammer",
     "demos/irl",
     "xtask",
     "ensure-ebs-volume",
