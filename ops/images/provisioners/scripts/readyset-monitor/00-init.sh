@@ -8,7 +8,7 @@ sudo install -o root -g root -m 755 \
 metrics-aggregator --help # ensure it runs
 
 sudo install -o root -g root -m 644 \
-  /tmp/metrics-aggregator/etc_systemd_system_metrics-aggregator.service \
+  /tmp/readyset-monitor/etc_systemd_system_metrics-aggregator.service \
   /etc/systemd/system/metrics-aggregator.service
 
 systemd-analyze verify metrics-aggregator.service

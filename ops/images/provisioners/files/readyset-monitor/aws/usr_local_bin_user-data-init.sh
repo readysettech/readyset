@@ -17,8 +17,6 @@ trap 'on_error' ERR
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 
-# TODO: This user-data script should be refactored to be in another package for
-# the readyset-monitor.
 cat > /etc/default/metrics-aggregator <<EOF
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}

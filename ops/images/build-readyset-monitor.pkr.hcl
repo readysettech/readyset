@@ -42,13 +42,13 @@ build {
   }
 
   provisioner "file" {
-    source      = "provisioners/files/metrics-aggregator"
-    destination = "/tmp/"
+    source      = "${local.binaries_path}/metrics-aggregator"
+    destination = "/tmp/metrics-aggregator-binary"
   }
 
   provisioner "file" {
-    source      = "${local.binaries_path}/metrics-aggregator"
-    destination = "/tmp/metrics-aggregator-binary"
+    source      = "provisioners/files/readyset-monitor"
+    destination = "/tmp/"
   }
 
   provisioner "shell" {
@@ -64,14 +64,14 @@ build {
       "provisioners/scripts/node_exporter/00-init.sh",
       "provisioners/scripts/setup-data-volume/00-init.sh",
       "provisioners/scripts/vector-aggregator/00-init.sh",
-      "provisioners/scripts/vector-aggregator/10-aws.sh",
       "provisioners/scripts/vector/00-init.sh",
       "provisioners/scripts/vector/10-aws.sh",
       "provisioners/scripts/prometheus/00-init.sh",
       "provisioners/scripts/prometheus/10-aws.sh",
       "provisioners/scripts/grafana/00-init.sh",
       "provisioners/scripts/grafana/10-aws.sh",
-      "provisioners/scripts/metrics-aggregator/00-init.sh",
+      "provisioners/scripts/readyset-monitor/00-init.sh",
+      "provisioners/scripts/readyset-monitor/10-aws.sh",
     ]
   }
 
