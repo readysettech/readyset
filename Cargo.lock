@@ -455,9 +455,11 @@ name = "benchmarks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "atomic-counter",
  "chrono",
  "clap 3.0.0-beta.5",
+ "enum_dispatch",
  "futures 0.3.17",
  "hdrhistogram",
  "mysql",
