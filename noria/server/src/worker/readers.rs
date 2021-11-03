@@ -87,27 +87,16 @@ pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: R
         let (mut tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
 
         let retries = READERS.scope(Default::default(), async move {
-            let mut pending = None::<(BlockingRead, Ack)>;
-            loop {
-                if let Some((ref mut blocking, _)) = pending {
-                    // we have a pending read — see if it can complete
-                    if let Poll::Ready(res) = blocking.check() {
-                        // it did! let's tell the caller.
-                        let (_, ack) = pending.take().expect("we matched on Some above");
-                        // if this errors, the client just went away
+            while let Some((mut pending, ack)) = rx.recv().await {
+                // A blocking read always comes immediately after a miss, so no reason to retry it right away
+                // better to wait a bit
+                tokio::time::sleep(RETRY_TIMEOUT / 4).await;
+                loop {
+                    if let Poll::Ready(res) = pending.check() {
                         let _ = ack.send(res);
-                    // the loop will take care of looking for the next request
-                    } else {
-                        tokio::time::sleep(RETRY_TIMEOUT).await;
-                    }
-                } else {
-                    // no point in waiting for a timer if we've got nothing to wait for
-                    // so let's get another request
-                    if let Some(read) = rx.recv().await {
-                        pending = Some(read);
-                    } else {
                         break;
                     }
+                    tokio::time::sleep(RETRY_TIMEOUT).await;
                 }
             }
         });
