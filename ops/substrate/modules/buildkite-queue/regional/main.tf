@@ -39,7 +39,8 @@ resource "aws_cloudformation_stack" "main" {
 
     "InstanceType" = var.instance_type
 
-    "ECRAccessPolicy" = "poweruser"
+    "ECRAccessPolicy"  = "poweruser"
+    "ManagedPolicyARN" = join(",", var.extra_iam_policy_arns)
 
     "MaxSize" = var.max_size
     "MinSize" = var.min_size

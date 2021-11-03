@@ -10,6 +10,8 @@ locals {
   secrets_bucket_arn         = "arn:aws:s3:::${local.secrets_bucket_name}"
   secrets_bucket_objects_arn = "${local.secrets_bucket_arn}/*"
 
+  metadata_bucket_name = "readysettech-${var.environment}-buildkite-pipeline-metadata-${local.region_name}"
+
   buildkite_agent_token_secret_name          = "buildkite/AGENT_TOKEN"
   buildkite_agent_token_parameter_store_path = "/aws/reference/secretsmanager/${local.buildkite_agent_token_secret_name}"
 }
@@ -50,6 +52,26 @@ resource "aws_s3_bucket" "artifacts" {
 
 resource "aws_s3_bucket_public_access_block" "artifacts" {
   bucket = aws_s3_bucket.artifacts.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+
+resource "aws_s3_bucket" "metadata" {
+  bucket = local.metadata_bucket_name
+  tags = {
+    Name = local.metadata_bucket_name
+  }
+  versioning {
+    enabled = false
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "metadata" {
+  bucket = aws_s3_bucket.metadata.bucket
 
   block_public_acls       = true
   block_public_policy     = true

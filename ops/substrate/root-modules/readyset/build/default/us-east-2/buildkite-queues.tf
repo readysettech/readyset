@@ -4,6 +4,11 @@ locals {
     "r5a.2xlarge",
     "c5a.4xlarge",
   ]
+
+  extra_iam_policy_arns = [
+    module.buildkite_queue_shared.packer_policy_arn,
+    module.buildkite_queue_shared.metadata_bucket_policy_arn,
+  ]
 }
 
 module "buildkite_queue_shared" {
@@ -30,6 +35,8 @@ module "buildkite_queue" {
 
   secrets_bucket   = module.buildkite_queue_shared.secrets_bucket
   artifacts_bucket = module.buildkite_queue_shared.artifacts_bucket
+
+  extra_iam_policy_arns = local.extra_iam_policy_arns
 
   instance_type = each.key
   max_size      = 3
@@ -84,6 +91,8 @@ module "buildkite_default_queue" {
 
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
 
+  extra_iam_policy_arns = local.extra_iam_policy_arns
+
   secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
   artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
 }
@@ -96,6 +105,8 @@ module "buildkite_ops_queue" {
   instance_type   = "t3.large"
 
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
+
+  extra_iam_policy_arns = local.extra_iam_policy_arns
 
   secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
   artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket

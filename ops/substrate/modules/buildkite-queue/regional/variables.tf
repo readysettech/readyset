@@ -56,3 +56,9 @@ variable "min_size" {
   description = "Maximum number of instances"
   default     = 0
 }
+
+variable "extra_iam_policy_arns" {
+  type        = set(string)
+  description = "List of ARNs for extra IAM policies to grant to the Role for the agent instances"
+  default     = []
+}
