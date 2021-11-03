@@ -54,6 +54,10 @@ pub struct Options {
     #[clap(long)]
     unsecured_adapters: bool,
 
+    /// A flag that if set will ensure that the metrics aggregator shows latencies from upstream.
+    #[clap(long)]
+    show_upstream_latencies: bool,
+
     /// Sets the query reconciler's loop interval in seconds.
     #[clap(long, env = "RECONCILE_INTERVAL", default_value = "20")]
     reconciler_loop_interval: u64,
@@ -103,6 +107,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         let cache_for_reconciler = cache.clone();
         let deployment = options.deployment.clone();
         let unsecured_adapters = options.unsecured_adapters;
+        let show_upstream_latencies = options.show_upstream_latencies;
         let fut = async move {
             let mut reconciler = MetricsReconciler::new(
                 consul,
@@ -112,6 +117,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 std::time::Duration::from_secs(loop_interval),
                 shutdown_recv,
                 unsecured_adapters,
+                show_upstream_latencies,
             );
             reconciler.run().await
         };
