@@ -8,37 +8,44 @@ attach the same Elastic Block Storage (EBS) volume on start. However, for
 ReadySet, we require persistent block storage in a clustering setup where
 server instances can go away and on restart be able to find a volume to use.
 
+ReadySet stores a copy of the data from the upstream database on the block
+storage devices using [RocksDB](https://rocksdb.org/). The copies are associated
+with a volume ID which can be used to find the data again even if they are
+attached to different instances.
+
 Some additional limitations to this from AWS is that EBS volumes may only be
 attached to a single server instance at a time and if they are in the same
 Availability Zone (AZ) as the instance. Each AWS region is split into 3 AZ and
 AutoScaling Groups (ASG) which we launch ReadySet into will try their best to
 keep the instances evenly balanced between the AZs.
 
-## Existing Algorithm
+This daemon also listens via SQS (Simple Queue Service) for notifications about
+scaling events which have been configured to be sent by the ASG.
 
-1. Find all the EBS volumes tagged for this inside the AZ for the instance this
-    is launched from.
-2. If the number of volumes availabe to be attached is 0, then create a new
-    volume and attach it.
-3. Otherwise, find one at random that is unattached and attach it.
+## Algorithm
 
-Issue with this algorithm: During a instance refresh, previous instances are
-terminated and are still holding onto the EBS volume as the new instance start.
-The new instance finds all the volumes attached and so creates a new blank
-volume.
+First, fetch all of the EBS volumes tagged for this deployment. Then depending
+on the results the instance takes one of a few different actions.
 
-## New Algorithm
+1. Filter the list of EBS volumes by the AZ and if the volume is available. If
+    at least one volume is in such a state, attach that volume.
+2. If total number of volumes is less than the total number of servers, create a
+    new volume in this availabilty zone and attach it.
+3. Otherwise, if no volumes are available in this AZ and the volumes have been
+    created, fetch the list of instances for this deployment in the AZ.
+4. If all the instances are up and healthy then this instance has been put into
+    an AZ that has more instances than volumes. At this point, the instance sets
+    itself to be unhealthy which will make AWS terminate it. This should allow
+    AWS to try again in another AZ as it attempts to keep the number of
+    instances per AZ constant.
+5. Otherwise, at least one of the volumes is attached to an instance in an
+    unhealthy/terminating state, which means the instance waits for the instance
+    that is currently terminating to release its volume which the instance then
+    takes for itself.
 
-1. Find all the EBS volumes currently tagged for this. If the number of volumes
-    is less than the number of passed in instances, then create a new volume
-    with the appropriate tags in the AZ this instance was launched in.
-2. Filter the list of EBS volumes by the AZ which this instance is in. If one
-    of them is unattached, attach that volume to the instance and finish
-    successfully.
-3. If all of the volumes in the AZ are attached and none of the instances those
-    volumes are attached to are in an unhealthy/terminating state, then this
-    instance started in a "full" AZ and needs to terminate itself.
-4. If at least one of the volumes is attached to an instance in an
-    unhealthy/terminating state, then report that this instance is healthy and
-    then wait for the instance that is currently going away to release its
-    volume to attach to this instance before continuing.
+At the end of this process, the instance has either set itself to unhealthy or
+has attached a volume.
+
+The process continues to watch the SQS queue for the ASG for a Termination
+message for the particular instance. This allows this process to unmount and
+detach the volume cleanly and then inform AWS that this instance be terminated.
