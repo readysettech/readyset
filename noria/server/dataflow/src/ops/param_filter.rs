@@ -101,7 +101,7 @@ impl Ingredient for ParamFilter {
         _executor: &mut dyn Executor,
         _from: LocalNodeIndex,
         _data: Records,
-        _replay_key_cols: Option<&[usize]>,
+        _replay: &ReplayContext,
         _domain: &DomainNodes,
         _states: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {

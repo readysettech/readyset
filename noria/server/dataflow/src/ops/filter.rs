@@ -46,7 +46,7 @@ impl Ingredient for Filter {
         _: &mut dyn Executor,
         _: LocalNodeIndex,
         rs: Records,
-        _: Option<&[usize]>,
+        _: &ReplayContext,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {

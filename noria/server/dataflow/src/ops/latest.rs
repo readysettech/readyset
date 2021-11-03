@@ -56,7 +56,7 @@ impl Ingredient for Latest {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        replay_key_cols: Option<&[usize]>,
+        replay: &ReplayContext,
         _: &DomainNodes,
         state: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
@@ -82,7 +82,7 @@ impl Ingredient for Latest {
 
                 match db.lookup(&[self.key], &KeyType::Single(&r[self.key])) {
                     LookupResult::Some(rs) => {
-                        if replay_key_cols.is_some() {
+                        if replay.is_partial() {
                             lookups.push(Lookup {
                                 on: *us,
                                 cols: vec![self.key],
@@ -97,13 +97,15 @@ impl Ingredient for Latest {
                         // we don't actively materialize holes unless requested by a read. this
                         // can't be a read, because reads cause replay, which fill holes with an
                         // empty set before processing!
-                        misses.push(Miss {
-                            on: *us,
-                            lookup_idx: vec![self.key],
-                            lookup_cols: vec![self.key],
-                            replay_cols: replay_key_cols.map(Vec::from),
-                            record: r.into_row().try_into().expect("Empty record"),
-                        });
+                        misses.push(
+                            Miss::builder()
+                                .on(*us)
+                                .lookup_idx(vec![self.key])
+                                .lookup_key(vec![self.key])
+                                .replay(replay)
+                                .record(r.into_row())
+                                .build(),
+                        );
                         None
                     }
                 }

@@ -149,20 +149,11 @@ impl Ingredient for NodeOperator {
         ex: &mut dyn Executor,
         from: LocalNodeIndex,
         data: Records,
-        replay_key_col: Option<&[usize]>,
+        replay: &ReplayContext,
         domain: &DomainNodes,
         states: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
-        impl_ingredient_fn_mut!(
-            self,
-            on_input,
-            ex,
-            from,
-            data,
-            replay_key_col,
-            domain,
-            states
-        )
+        impl_ingredient_fn_mut!(self, on_input, ex, from, data, replay, domain, states)
     }
     fn on_input_raw(
         &mut self,

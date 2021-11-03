@@ -3,6 +3,7 @@ use std::cell;
 use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::time;
 
 use ahash::RandomState;
 use futures_util::{future::FutureExt, stream::StreamExt};
+use launchpad::Indices;
 use metrics::{counter, gauge, histogram};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -125,7 +127,7 @@ impl ReplayDescriptor {
             idx: miss.on,
             tag,
             replay_key: miss.replay_key().unwrap(),
-            lookup_key: miss.lookup_key(),
+            lookup_key: miss.lookup_key().into_owned(),
             lookup_columns: miss.lookup_idx.clone(),
             unishard,
             requesting_shard,
@@ -954,13 +956,16 @@ impl Domain {
                     })
                     .collect();
 
-                let mut evictions = HashMap::new();
+                let mut evictions: HashMap<Tag, HashSet<KeyComparison>> = HashMap::new();
                 for miss in misses {
-                    for &(tag, ref keys) in &deps {
-                        evictions
-                            .entry(tag)
-                            .or_insert_with(HashSet::new)
-                            .insert(miss.record.project_key(keys));
+                    for (tag, cols) in &deps {
+                        evictions.entry(*tag).or_insert_with(HashSet::new).insert(
+                            miss.record
+                                .cloned_indices(cols.iter().copied())
+                                .unwrap()
+                                .try_into()
+                                .unwrap(),
+                        );
                     }
                 }
 

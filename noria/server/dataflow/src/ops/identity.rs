@@ -41,7 +41,7 @@ impl Ingredient for Identity {
         _: &mut dyn Executor,
         _: LocalNodeIndex,
         rs: Records,
-        _: Option<&[usize]>,
+        _: &ReplayContext<'_>,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {

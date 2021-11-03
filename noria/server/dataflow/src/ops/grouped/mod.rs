@@ -181,7 +181,7 @@ where
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        replay_key_cols: Option<&[usize]>,
+        replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
@@ -232,7 +232,7 @@ where
                 let rs = {
                     match db.lookup(&this.out_key[..], &KeyType::from(&group[..])) {
                         LookupResult::Some(rs) => {
-                            if replay_key_cols.is_some() {
+                            if replay.is_partial() {
                                 lookups.push(Lookup {
                                     on: *us,
                                     cols: this.out_key.clone(),
@@ -247,22 +247,15 @@ where
                             rs
                         }
                         LookupResult::Missing => {
-                            // TODO(eta): error handling impl adds overhead
-                            let rs = group_rs
-                                .map(|r| {
-                                    Ok(Miss {
-                                        on: *us,
-                                        lookup_idx: this.out_key.clone(),
-                                        lookup_cols: group_by.clone(),
-                                        replay_cols: replay_key_cols.map(Vec::from),
-                                        record: r
-                                            .into_row()
-                                            .try_into()
-                                            .map_err(|_| internal_err("Empty record"))?,
-                                    })
-                                })
-                                .collect::<ReadySetResult<Vec<_>>>()?;
-                            misses.extend(rs.into_iter());
+                            misses.extend(group_rs.map(|r| {
+                                Miss::builder()
+                                    .on(*us)
+                                    .lookup_idx(this.out_key.clone())
+                                    .lookup_key(group_by.clone())
+                                    .replay(replay)
+                                    .record(r.into_row())
+                                    .build()
+                            }));
                             return Ok(());
                         }
                     }
@@ -303,25 +296,19 @@ where
                                     // because if we miss, that means our child *can't* have this
                                     // key, so any update we'd emit would hit a hole anyway! See
                                     // also: https://readysettech.atlassian.net/browse/ENG-471
-                                    let rs = group_rs
-                                        .map(|r| {
-                                            Ok(Miss {
-                                                on: *this.src,
-                                                lookup_idx: group_by.clone(),
-                                                lookup_cols: group_by.clone(),
-                                                replay_cols: replay_key_cols.map(Vec::from),
-                                                record: r
-                                                    .into_row()
-                                                    .try_into()
-                                                    .map_err(|_| internal_err("Empty record"))?,
-                                            })
-                                        })
-                                        .collect::<ReadySetResult<Vec<_>>>()?;
-                                    misses.extend(rs.into_iter());
+                                    misses.extend(group_rs.map(|r| {
+                                        Miss::builder()
+                                            .on(*this.src)
+                                            .lookup_idx(group_by.clone())
+                                            .lookup_key(group_by.clone())
+                                            .replay(replay)
+                                            .record(r.into_row())
+                                            .build()
+                                    }));
                                     return Ok(());
                                 }
                                 IngredientLookupResult::Records(rs) => {
-                                    if replay_key_cols.is_some() {
+                                    if replay.is_partial() {
                                         lookups.push(Lookup {
                                             on: *this.src,
                                             cols: group_by.clone(),
