@@ -306,7 +306,7 @@ impl Ingredient for TopK {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        replay_key_cols: Option<&[usize]>,
+        replay: &ReplayContext,
         nodes: &DomainNodes,
         state: &'a StateMap,
     ) -> ReadySetResult<ProcessingResult> {
@@ -364,7 +364,7 @@ impl Ingredient for TopK {
                         state,
                         nodes,
                     )? {
-                        if replay_key_cols.is_some() {
+                        if replay.is_partial() {
                             lookups.push(lookup)
                         }
                     }
@@ -379,7 +379,7 @@ impl Ingredient for TopK {
                 // check out current state
                 match db.lookup(&self.group_by[..], &KeyType::from(&current_group_key[..])) {
                     LookupResult::Some(local_records) => {
-                        if replay_key_cols.is_some() {
+                        if replay.is_partial() {
                             lookups.push(Lookup {
                                 on: *us,
                                 cols: self.group_by.clone(),
@@ -402,13 +402,15 @@ impl Ingredient for TopK {
             }
 
             if missed {
-                misses.push(Miss {
-                    on: *us,
-                    lookup_idx: self.group_by.clone(),
-                    lookup_cols: self.group_by.clone(),
-                    replay_cols: replay_key_cols.map(Vec::from),
-                    record: r.row().clone().try_into().expect("Empty record"),
-                });
+                misses.push(
+                    Miss::builder()
+                        .on(*us)
+                        .lookup_idx(self.group_by.clone())
+                        .lookup_key(self.group_by.clone())
+                        .replay(replay)
+                        .record(r.row().clone())
+                        .build(),
+                );
             } else {
                 match r {
                     Record::Positive(r) => {
@@ -470,7 +472,7 @@ impl Ingredient for TopK {
                 state,
                 nodes,
             )? {
-                if replay_key_cols.is_some() {
+                if replay.is_partial() {
                     lookups.push(lookup)
                 }
             }

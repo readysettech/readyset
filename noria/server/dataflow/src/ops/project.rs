@@ -193,7 +193,7 @@ impl Ingredient for Project {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         mut rs: Records,
-        _: Option<&[usize]>,
+        _: &ReplayContext,
         _: &DomainNodes,
         _: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {

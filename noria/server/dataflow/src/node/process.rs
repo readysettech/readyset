@@ -2,12 +2,13 @@ use crate::node::special::base::{BaseWrite, SetSnapshotMode, SnapshotMode};
 use crate::node::NodeType;
 use crate::payload;
 use crate::prelude::*;
-use core::convert::TryInto;
+use crate::processing::{MissLookupKey, MissReplayKey};
 use noria::consistency::Timestamp;
 use noria::replication::ReplicationOffset;
 use noria::{KeyComparison, PacketData, ReadySetError};
 use noria_errors::ReadySetResult;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::mem;
 use tracing::debug_span;
 use tracing::trace;
@@ -31,25 +32,23 @@ struct MissSet<'a> {
     on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
     lookup_idx: Vec<usize>,
-    /// The columns of `record` we were using for the lookup.
-    /// Invariant: lookup_cols cannot contain a column index that exceeds record.len()
-    lookup_cols: Vec<usize>,
-    /// The columns of `record` that identify the replay key (if any).
-    /// Invariant: replay_cols cannot contain a column index that exceeds record.len()
-    replay_cols: Option<Vec<usize>>,
-    set: HashMap<&'a crate::processing::MissRecord, &'a Miss>,
+    /// The key that we useed to do the lookup that resulted in the miss
+    lookup_key: MissLookupKey,
+    /// The replay key that was being processed during the lookup (if any)
+    replay_key: Option<MissReplayKey>,
+    set: HashMap<&'a [DataType], &'a Miss>,
 }
 
 impl<'a> MissSet<'a> {
     /// Create a new [`MissSet`] from a [`Miss`]
     fn from_miss(miss: &'a Miss) -> Self {
         let mut set = HashMap::new();
-        set.insert(&miss.record, miss);
+        set.insert(miss.record.as_slice(), miss);
         MissSet {
             on: miss.on,
             lookup_idx: miss.lookup_idx.clone(),
-            lookup_cols: miss.lookup_cols.clone(),
-            replay_cols: miss.replay_cols.clone(),
+            lookup_key: miss.lookup_key.clone(),
+            replay_key: miss.replay_key.clone(),
             set,
         }
     }
@@ -57,9 +56,9 @@ impl<'a> MissSet<'a> {
     /// Adds a [`Miss`] to the set, returns `true` iff it belongs to the set
     fn add(&mut self, miss: &'a Miss) -> bool {
         if miss.on == self.on
-            && miss.lookup_cols == self.lookup_cols
             && miss.lookup_idx == self.lookup_idx
-            && miss.replay_cols == self.replay_cols
+            && miss.lookup_key == self.lookup_key
+            && miss.replay_key == self.replay_key
         {
             self.set.insert(&miss.record, miss);
             true
@@ -636,7 +635,6 @@ pub(crate) fn materialize(
 #[cfg(feature = "bench")]
 pub mod bench {
     use super::*;
-    use crate::processing::MissRecord::Point;
     use noria_data::DataType::Int;
 
     pub fn unique_misses(c: &mut criterion::Criterion) {
@@ -646,170 +644,170 @@ pub mod bench {
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(2652263)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(2652263)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(5851294)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(5851294)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(522983)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(522983)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(9807676)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(9807676)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(5210968)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(5210968)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(835640)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(835640)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(4751888)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(4751888)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(6806915)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(6806915)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(7730521)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(7730521)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(2474859)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(2474859)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(4017737)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(4017737)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(3197849)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(3197849)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(4035289)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(4035289)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(6857801)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(6857801)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(3937104)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(3937104)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(7490175)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(7490175)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(8095737)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(8095737)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(4484071)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(4484071)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(427605)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(427605)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(8613827)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(8613827)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(401022)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(401022)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(9310624)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(9310624)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(8671521)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(8671521)],
                     },
                     Miss {
                         on: LocalNodeIndex::make(4),
                         lookup_idx: [0].to_vec(),
-                        lookup_cols: [1].to_vec(),
-                        replay_cols: Some(vec![0]),
-                        record: Point(vec1![Int(30995), Int(9955358)]),
+                        lookup_key: MissLookupKey::RecordColumns(vec![1]),
+                        replay_key: Some(MissReplayKey::RecordColumns(vec![0])),
+                        record: vec![Int(30995), Int(9955358)],
                     },
                 ],
                 lookups: vec![],

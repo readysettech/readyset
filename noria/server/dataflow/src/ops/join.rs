@@ -308,7 +308,7 @@ impl Ingredient for Join {
         _: &mut dyn Executor,
         from: LocalNodeIndex,
         rs: Records,
-        replay_key_cols: Option<&[usize]>,
+        replay: &ReplayContext<'_>,
         nodes: &DomainNodes,
         state: &StateMap,
     ) -> ReadySetResult<ProcessingResult> {
@@ -333,10 +333,11 @@ impl Ingredient for Join {
             }
         }
 
-        let orkc = replay_key_cols;
+        let orkc = replay.key();
 
         let replay_key_cols: Result<Option<Vec<usize>>, ()> =
-            replay_key_cols
+            replay
+                .key()
                 .map(|cols| {
                     cols.iter()
                         .map(|&col| -> Result<usize, ()> {
@@ -533,21 +534,17 @@ impl Ingredient for Join {
                     .unwrap_or_else(|| rs.len());
 
                 // NOTE: we're stealing data here!
-                let mut records = (from..at)
-                    .map(|i| {
-                        mem::take(&mut *rs[i])
-                            .try_into()
-                            .map_err(|_| internal_err("empty record"))
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?
-                    .into_iter();
+                let mut records = (from..at).map(|i| mem::take(&mut *rs[i]));
 
-                misses.extend((from..at).map(|_| Miss {
-                    on: other,
-                    lookup_idx: other_key.clone(),
-                    lookup_cols: from_key.clone(),
-                    replay_cols: replay_key_cols.clone(),
-                    record: records.next().unwrap(),
+                misses.extend((from..at).map(|_| {
+                    Miss::builder()
+                        .on(other)
+                        .lookup_idx(other_key.clone())
+                        .lookup_key(from_key.clone())
+                        .replay(replay)
+                        .replay_key_cols(replay_key_cols.as_deref())
+                        .record(records.next().unwrap())
+                        .build()
                 }));
                 continue;
             }
@@ -610,21 +607,16 @@ impl Ingredient for Join {
                         .unwrap_or_else(|| rs.len());
 
                     // NOTE: we're stealing data here!
-                    let mut records = (start..at)
-                        .map(|i| {
-                            mem::take(&mut *rs[i])
-                                .try_into()
-                                .map_err(|_| internal_err("empty record"))
-                        })
-                        .collect::<ReadySetResult<Vec<_>>>()?
-                        .into_iter();
+                    let mut records = (start..at).map(|i| mem::take(&mut *rs[i]));
 
-                    misses.extend((start..at).map(|_| Miss {
-                        on: from,
-                        lookup_idx: self.on_right(),
-                        lookup_cols: from_key.clone(),
-                        replay_cols: replay_key_cols.clone(),
-                        record: records.next().unwrap(),
+                    misses.extend((start..at).map(|_| {
+                        Miss::builder()
+                            .on(from)
+                            .lookup_idx(self.on_right())
+                            .lookup_key(from_key.clone())
+                            .replay(replay)
+                            .record(records.next().unwrap())
+                            .build()
                     }));
                     continue;
                 }
