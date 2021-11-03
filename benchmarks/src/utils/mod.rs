@@ -5,6 +5,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 pub mod generate;
+pub mod multi_thread;
+pub mod random;
 pub mod spec;
 
 pub fn seconds_as_str_to_duration(input: &str) -> std::result::Result<Duration, ParseIntError> {

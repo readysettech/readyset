@@ -721,7 +721,7 @@ impl From<SqlType> for RandomGenerator {
 }
 
 impl RandomGenerator {
-    fn gen(&self) -> DataType {
+    pub fn gen(&self) -> DataType {
         random_value_of_type(&self.sql_type)
     }
 }

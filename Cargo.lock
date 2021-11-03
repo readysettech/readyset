@@ -476,6 +476,7 @@ dependencies = [
  "rinfluxdb",
  "structopt",
  "tokio",
+ "tracing",
  "url",
  "vec1",
  "zipf",
