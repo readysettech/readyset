@@ -25,6 +25,8 @@ steps:
   - wait: ~
 
   - label: ":partyparrot: Creating the pipeline"
+    agents:
+      queue: t3a-small
     plugins:
       - Zegocover/git-diff-conditional#v1.1.1:
           log_level: DEBUG
