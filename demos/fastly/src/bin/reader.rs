@@ -32,10 +32,6 @@ arg_enum! {
 
 #[derive(StructOpt, Clone)]
 struct NoriaClientOpts {
-    /// ReadySet's zookeeper connection string.
-    #[structopt(long, required_if("database-type", "noria"))]
-    zookeeper_url: Option<String>,
-
     #[structopt(
         short,
         long,
