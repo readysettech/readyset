@@ -55,9 +55,14 @@ pub struct MetricsReconciler {
     /// A flag indicating whether the adapters we're aggregating over are hosting insecure (http,
     /// as opposed to https) endpoints for their respective allow and deny lists.
     insecure_adapters: bool,
+
+    /// A flag indicating whether we should aggregate latencies from the upstream
+    /// database.
+    show_upstream_latencies: bool,
 }
 
 impl MetricsReconciler {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         consul: ConsulAuthority,
         prom_client: Client,
@@ -66,6 +71,7 @@ impl MetricsReconciler {
         min_poll_interval: std::time::Duration,
         shutdown_recv: tokio::sync::broadcast::Receiver<()>,
         insecure_adapters: bool,
+        show_upstream_latencies: bool,
     ) -> MetricsReconciler {
         MetricsReconciler {
             consul,
@@ -75,6 +81,7 @@ impl MetricsReconciler {
             min_poll_interval,
             shutdown_recv,
             insecure_adapters,
+            show_upstream_latencies,
         }
     }
 
@@ -141,7 +148,7 @@ impl MetricsReconciler {
             .prom_client
             .query(v, None, Some(PROM_QUERY_TIMEOUT))
             .await?;
-        let filled_allow_list = fill_allow_list(allow_list, res);
+        let filled_allow_list = fill_allow_list(allow_list, res, self.show_upstream_latencies);
 
         let mut cache = self.query_metrics_cache.lock().await;
         cache.deny_list = deny_list.into_iter().collect();
@@ -180,13 +187,19 @@ async fn reconcile_adapter_metrics(
 
 /// Adds query latency metric to builder if that's the kind of metric we actually got (from the
 /// supplied InstantVector response).
-fn add_metric_to_builder(builder: &mut QueryLatenciesBuilder, instant_vec: &InstantVector) {
+fn add_metric_to_builder(
+    builder: &mut QueryLatenciesBuilder,
+    instant_vec: &InstantVector,
+    show_upstream_latencies: bool,
+) {
     if let (Some(q), Some(db)) = (
         instant_vec.metric().get("quantile"),
         instant_vec.metric().get("database_type"),
     ) {
         let database = if db == "noria" {
             Database::Noria
+        } else if !show_upstream_latencies {
+            return;
         } else {
             Database::Upstream
         };
@@ -204,6 +217,7 @@ fn add_metric_to_builder(builder: &mut QueryLatenciesBuilder, instant_vec: &Inst
 fn fill_allow_list(
     allow_list: HashSet<String>,
     prom_res: QueryResultType,
+    show_upstream_latencies: bool,
 ) -> anyhow::Result<AllowList> {
     let mut builder_map: HashMap<String, QueryLatenciesBuilder> = allow_list
         .into_iter()
@@ -219,7 +233,9 @@ fn fill_allow_list(
                     continue;
                 };
                 match builder_map.get_mut(query) {
-                    Some(builder) => add_metric_to_builder(builder, &instant_vec),
+                    Some(builder) => {
+                        add_metric_to_builder(builder, &instant_vec, show_upstream_latencies)
+                    }
                     None => {
                         // Not in our allow list
                         continue;
