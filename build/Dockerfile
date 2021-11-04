@@ -1,45 +1,41 @@
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly
 
-RUN rustup toolchain install nightly-2021-03-01
+WORKDIR /tmp
 
-ADD https://github.com/mozilla/sccache/releases/download/v0.2.15/sccache-v0.2.15-x86_64-unknown-linux-musl.tar.gz \
-    sccache-v0.2.15-x86_64-unknown-linux-musl.tar.gz
+COPY rust-toolchain .
 
-RUN tar \
-    -xzf sccache-v0.2.15-x86_64-unknown-linux-musl.tar.gz \
-    --strip-components=1 \
-    -C /bin \
-    sccache-v0.2.15-x86_64-unknown-linux-musl/sccache
+RUN rustup toolchain install "$(cat rust-toolchain)"; rm rust-toolchain
 
-RUN chmod a+x /bin/sccache
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        llvm \
+        clang \
+        libclang-dev \
+        lld \
+        cmake \
+        libssl-dev \
+        liblz4-dev \
+        curl \
+        rsync; \
+    rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p ~/.cargo
-ENV RUSTC_WRAPPER /bin/sccache
-RUN printf '[build]\nrustc-wrapper=/bin/sccache\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ~/.cargo/config
+RUN set -eux; \
+    cargo install cargo-cache --version 0.6.3; \
+    cargo install --git https://github.com/paritytech/cachepot --rev 2c4b14f4164ae954a1e6241e14c13feada0f1758; \
+    cargo cache --remove-dir all,git-db; \
+    mkdir -p ~/.config/cachepot; touch ~/.config/cachepot/config # To clean up cachepot logs
 
-RUN apt-get update
-RUN apt-get install -y \
-    clang \
-    cmake \
-    libclang-dev \
-    libssl-dev \
-    liblz4-dev \
-    librdkafka-dev \
-    build-essential \
-    llvm \
-    rsync
+# CARGO_HOME is set by the nightly container to be /usr/local/cargo.
+# This is where it reads configs from for cargo and where cargo installs binaries.
+RUN printf '[build]\nrustc-wrapper="/usr/local/cargo/bin/cachepot"\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]' > ${CARGO_HOME}/config
 
-ENV CXX /bin/sccache c++
-
-RUN mkdir -p /root/.sccache
-
-ADD https://github.com/readysettech/flaky-finder/releases/download/v0.0.1/flaky-finder-v0.0.1-x86_64-linux.tar.gz \
-    flaky-finder-v0.0.1-x86_64-linux.tar.gz
-
-RUN tar \
-    -xf flaky-finder-v0.0.1-x86_64-linux.tar.gz \
-    -C /bin
-
-RUN chmod a+x /bin/flaky-finder
-
+RUN set -eux; \
+    curl -LO https://github.com/readysettech/flaky-finder/releases/download/v0.0.1/flaky-finder-v0.0.1-x86_64-linux.tar.gz; \
+    tar xf flaky-finder-v0.0.1-x86_64-linux.tar.gz -C /usr/local/bin; \
+    rm flaky-finder-v0.0.1-x86_64-linux.tar.gz; \
+    chmod a+x /usr/local/bin/flaky-finder; \
+    flaky-finder --version
 
