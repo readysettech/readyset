@@ -23,6 +23,6 @@ The MySQL adapter uses ZooKeeper to find the Noria server. To specify the
 ZooKeeper server location, pass the `-z` argument:
 
 ```console
-$ cargo run --release -- --deployment $NORIA_DEPLOYMENT_ID -z 172.16.0.19:2181
+$ cargo run --release -- --deployment $NORIA_DEPLOYMENT_ID --authority-address 172.16.0.19:2181
 ```
 ... for a ZooKeeper server listening on port `2181` at IP `172.16.0.19`.
