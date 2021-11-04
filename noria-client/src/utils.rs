@@ -7,9 +7,10 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, Literal,
     SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
-use noria::errors::unsupported_err;
-use noria::errors::{bad_request_err, ReadySetResult};
-use noria::{invariant, invariant_eq, unsupported, DataType, Modification, Operation};
+use noria::{DataType, Modification, Operation};
+use noria_errors::{
+    bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+};
 
 pub(crate) fn hash_select_query(q: &SelectStatement) -> u64 {
     use std::collections::hash_map::DefaultHasher;

@@ -1,7 +1,6 @@
 use nom_sql::{Column, Expression, FieldDefinitionExpression, FunctionExpression, SqlQuery, Table};
 
-use crate::errors::ReadySetResult;
-use crate::{internal, invariant};
+use noria_errors::{internal, invariant, ReadySetResult};
 use std::collections::HashMap;
 
 pub trait CountStarRewrite {

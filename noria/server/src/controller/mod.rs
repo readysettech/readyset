@@ -2,7 +2,6 @@ use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
 use crate::coordination::do_noria_rpc;
-use crate::errors::internal_err;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
 use anyhow::{format_err, Context};
@@ -12,14 +11,13 @@ use itertools::Itertools;
 use launchpad::select;
 use metrics::{counter, histogram};
 use nom_sql::SqlQuery;
-use noria::consensus::{AuthorityWorkerHeartbeatResponse, WorkerId};
-use noria::metrics::recorded;
-use noria::ControllerDescriptor;
-use noria::{
-    consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor},
-    ReplicationOffset,
+use noria::consensus::{
+    Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
+    WorkerDescriptor, WorkerId,
 };
-use noria::{internal, ReadySetError};
+use noria::metrics::recorded;
+use noria::{ControllerDescriptor, ReplicationOffset};
+use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

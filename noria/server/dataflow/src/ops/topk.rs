@@ -1,6 +1,7 @@
 use launchpad::Indices;
 use maplit::hashmap;
-use noria::{internal, invariant};
+use noria::internal;
+use noria_errors::{internal, invariant};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -15,7 +16,7 @@ use crate::prelude::*;
 use crate::processing::{ColumnSource, LookupMode};
 use crate::processing::{IngredientLookupResult, SuggestedIndex};
 use nom_sql::OrderType;
-use noria::errors::{internal_err, ReadySetResult};
+use noria_errors::{internal_err, ReadySetResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Order(Vec<(usize, OrderType)>);

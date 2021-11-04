@@ -3,7 +3,7 @@ use crate::controller::sql::query_graph::{JoinPredicate, JoinRef, QueryGraph, Qu
 use crate::ReadySetResult;
 use dataflow::ops::join::JoinType;
 use mir::MirNodeRef;
-use noria::invariant;
+use noria_errors::invariant;
 use std::collections::{HashMap, HashSet};
 
 struct JoinChain {

@@ -17,7 +17,6 @@ use crate::controller::{ControllerState, DomainPlacementRestriction, Migration, 
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::debug::info::{DomainKey, GraphInfo};
-use crate::errors::{bad_request_err, internal_err, ReadySetResult};
 use crate::worker::WorkerRequestKind;
 use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequest};
 use dataflow::prelude::*;
@@ -31,9 +30,11 @@ use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
 use noria::{
     consensus::{Authority, AuthorityControl},
     metrics::recorded,
-    RecipeSpec,
+    ActivationResult, RecipeSpec,
 };
-use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
+use noria_errors::{
+    bad_request_err, internal, internal_err, invariant_eq, ReadySetError, ReadySetResult,
+};
 use petgraph::visit::Bfs;
 use regex::Regex;
 use reqwest::Url;
@@ -997,7 +998,7 @@ impl Leader {
                 self.ingredients[r]
                     .as_reader()
                     .ok_or_else(|| ReadySetError::InvalidNodeType {
-                        node_index: self.ingredients[r].local_addr(),
+                        node_index: self.ingredients[r].local_addr().id(),
                         expected_type: NodeType::Reader,
                     })?;
             #[allow(clippy::indexing_slicing)] // `find_readers_for` returns valid indices
@@ -1065,7 +1066,7 @@ impl Leader {
         let reader = n
             .as_reader()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
-                node_index: n.local_addr(),
+                node_index: n.local_addr().id(),
                 expected_type: NodeType::Reader,
             })?;
         let returned_cols = reader
@@ -1114,7 +1115,7 @@ impl Leader {
         let mut key = node
             .get_base()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
-                node_index: node.local_addr(),
+                node_index: node.local_addr().id(),
                 expected_type: NodeType::Base,
             })?
             .key()
@@ -1377,7 +1378,7 @@ impl Leader {
                         .await
                         .is_err()
                     {
-                        noria::internal!("failed to persist recipe extension");
+                        internal!("failed to persist recipe extension");
                     }
                     Ok(x)
                 }
@@ -1434,7 +1435,7 @@ impl Leader {
                             .await;
 
                         if let Err(e) = install_result {
-                            noria::internal!("failed to persist recipe installation, {}", e)
+                            internal!("failed to persist recipe installation, {}", e)
                         }
                         Ok(x)
                     }
@@ -1446,7 +1447,7 @@ impl Leader {
             }
             Err(error) => {
                 error!(%error, "failed to parse recipe");
-                noria::internal!("failed to parse recipe: {}", error);
+                internal!("failed to parse recipe: {}", error);
             }
         }
     }

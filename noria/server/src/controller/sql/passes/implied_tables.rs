@@ -3,8 +3,7 @@ use nom_sql::{
     InValue, JoinClause, JoinRightSide, SelectStatement, SqlQuery, Table,
 };
 
-use crate::errors::ReadySetResult;
-use crate::internal;
+use noria_errors::{internal, ReadySetResult};
 use std::collections::HashMap;
 use std::mem;
 

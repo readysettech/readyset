@@ -1,6 +1,6 @@
 use crate::metrics::MetricsDump;
-use crate::rpc_err;
-use crate::{ControllerHandle, ReadySetError, ReadySetResult};
+use crate::ControllerHandle;
+use noria_errors::{rpc_err, ReadySetError, ReadySetResult};
 use url::Url;
 
 /// A metrics dump tagged with the address it was received from.

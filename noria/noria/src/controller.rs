@@ -1,6 +1,5 @@
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
-use crate::errors::{internal_err, rpc_err_no_downcast, ReadySetError};
 use crate::metrics::MetricsDump;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
@@ -10,12 +9,15 @@ use crate::{
     RecipeSpec,
 };
 use crate::{
-    internal, rpc_err, ActivationResult, ReaderReplicationResult, ReaderReplicationSpec,
-    ReadySetResult, ReplicationOffset, ViewFilter, ViewRequest,
+    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
+    ViewFilter, ViewRequest,
 };
 use futures_util::future;
 use futures_util::future::Either;
 use hyper::client::HttpConnector;
+use noria_errors::{
+    internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
+};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

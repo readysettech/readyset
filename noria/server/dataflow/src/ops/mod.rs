@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use crate::prelude::*;
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 
 pub mod filter;
 pub mod grouped;

@@ -21,6 +21,7 @@ petgraph = { version = "0.5", features = ["serde-1"] }
 itertools = "0.10.0"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 noria = { path = "../../noria" }
+noria-errors = { path = "../../errors" }
 
 # local deps
 common = { path = "../common", package = "noria-common" }

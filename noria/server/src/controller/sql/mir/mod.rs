@@ -27,9 +27,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::vec::Vec;
 
-use crate::errors::internal_err;
 use crate::ReadySetResult;
-use noria::{internal, invariant, invariant_eq, unsupported, DataType, ReadySetError};
+use noria::DataType;
+use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
 
 use super::query_graph::JoinPredicate;
 

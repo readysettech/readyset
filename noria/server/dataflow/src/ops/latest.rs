@@ -7,7 +7,7 @@ use vec1::vec1;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, SuggestedIndex};
-use noria::errors::{internal_err, ReadySetResult};
+use noria_errors::{internal_err, ReadySetResult};
 
 /// Latest provides an operator that will maintain the last record for every group.
 ///

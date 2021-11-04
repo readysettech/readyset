@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 pub use nom_sql::{BinaryOperator, Literal, SqlType};
-use noria::{invariant, ReadySetResult};
+use noria_errors::{invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 
 /// Supported aggregation operators.

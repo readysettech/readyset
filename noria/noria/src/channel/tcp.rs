@@ -10,6 +10,7 @@ use bufstream::BufStream;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_util::ready;
 use futures_util::{sink::Sink, stream::Stream};
+use noria_errors::ReadySetError;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -38,6 +39,14 @@ impl From<bincode::Error> for SendError {
 impl From<io::Error> for SendError {
     fn from(e: io::Error) -> Self {
         SendError::IoError(e)
+    }
+}
+
+/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
+/// and deserialized.
+impl From<SendError> for ReadySetError {
+    fn from(e: SendError) -> ReadySetError {
+        ReadySetError::TcpSendError(e.to_string())
     }
 }
 

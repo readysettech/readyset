@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 
 use nom_sql::SqlType;
-use noria::unsupported;
 use noria_client::backend as cl;
+use noria_errors::unsupported;
 use psql_srv as ps;
 use tokio_postgres as pgsql;
 

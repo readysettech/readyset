@@ -1,7 +1,7 @@
 #![warn(clippy::panic)]
 
 use nom_sql::{self, ColumnConstraint, SqlType};
-use noria::{unsupported, ReadySetResult};
+use noria_errors::{unsupported, ReadySetResult};
 
 /// Checks if `c1` is a subtype of `c2`.
 pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> bool {

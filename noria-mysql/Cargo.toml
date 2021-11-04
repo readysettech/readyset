@@ -15,6 +15,7 @@ mysql = "21.0.1"
 mysql_async = "0.28"
 
 noria = { path = "../noria/noria" }
+noria-errors = { path = "../noria/errors" }
 noria-client = { path = "../noria-client" }
 noria-client-adapter = { path = "../noria-client/adapter" }
 nom-sql = { path = "../nom-sql" }

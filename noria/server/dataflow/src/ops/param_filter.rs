@@ -8,7 +8,7 @@ use std::fmt::Display;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 use std::convert::TryInto;
 
 /// The operator we're comparing on for a [`ParamFilter`]

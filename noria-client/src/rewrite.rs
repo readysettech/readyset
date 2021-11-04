@@ -3,7 +3,7 @@ use nom_sql::{
     analysis::visit::{self, Visitor},
     BinaryOperator, Expression, InValue, ItemPlaceholder, Literal, SelectStatement,
 };
-use noria::{unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{unsupported, ReadySetError, ReadySetResult};
 use std::{
     borrow::Cow,
     cmp::max,

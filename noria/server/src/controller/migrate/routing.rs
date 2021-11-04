@@ -7,11 +7,11 @@
 //!  - Egress nodes that gain new children must gain channels to facilitate forwarding
 
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::errors::internal_err;
-use crate::ReadySetResult;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
-use noria::{internal, invariant, invariant_eq, ReadySetError};
+use noria_errors::{
+    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
+};
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, HashSet};
 use tracing::trace;

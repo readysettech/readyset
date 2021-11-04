@@ -7,12 +7,10 @@
 
 use crate::controller::migrate::DomainMigrationPlan;
 use crate::controller::{inner::graphviz, keys};
-use crate::errors::internal_err;
-use crate::ReadySetResult;
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use maplit::hashmap;
-use noria::{internal, invariant, ReadySetError};
+use noria_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

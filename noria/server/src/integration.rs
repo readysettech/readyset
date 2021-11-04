@@ -28,8 +28,8 @@ use noria::{
     ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
 
-use crate::errors::ReadySetError::MigrationPlanFailed;
 use chrono::NaiveDate;
+use noria_errors::ReadySetError::MigrationPlanFailed;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
@@ -3418,7 +3418,7 @@ async fn remove_query() {
 
     match qb.lookup(&[0.into()], true).await.unwrap_err() {
         // FIXME(eta): this sucks and should be looking for ViewNotYetAvailable.
-        noria::errors::ReadySetError::ViewError { .. } => {}
+        noria_errors::ReadySetError::ViewError { .. } => {}
         e => unreachable!("{:?}", e),
     }
 }

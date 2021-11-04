@@ -1,7 +1,5 @@
 //! Error handling, definitions, and utilities
 
-use crate::channel::tcp::SendError;
-use crate::internal::LocalNodeIndex;
 use derive_more::Display;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -352,7 +350,7 @@ pub enum ReadySetError {
     #[error("Node with local index {node} does not have an index for {columns:?}")]
     IndexNotFound {
         /// The node that the lookup was performed into
-        node: LocalNodeIndex,
+        node: usize,
         /// The set of columns for the index
         columns: Vec<usize>,
     },
@@ -393,14 +391,14 @@ pub enum ReadySetError {
     },
 
     /// A request referencing a node was sent to a domain not responsible for that node.
-    #[error("Node {0:?} not found in domain")]
-    NoSuchNode(LocalNodeIndex),
+    #[error("Node {0} not found in domain")]
+    NoSuchNode(usize),
 
     /// An operation that is valid on only one type of node was made on a node that is not that type
-    #[error("Node {node_index:?} is not of type {expected_type}")]
+    #[error("Node {node_index} is not of type {expected_type}")]
     InvalidNodeType {
         /// The index of the node in question
-        node_index: LocalNodeIndex,
+        node_index: usize,
         /// The type of node that the operation is supported on
         expected_type: NodeType,
     },
@@ -605,7 +603,7 @@ macro_rules! internal {
         internal!("entered unreachable code")
     };
     ($($tt:tt)*) => {
-        return Err($crate::errors::internal_err(format!(
+        return Err($crate::internal_err(format!(
             "{}{}",
             $crate::__location_info!("in {}: "),
             format_args!($($tt)*)
@@ -627,7 +625,7 @@ macro_rules! unsupported {
         unsupported!("operation not implemented yet")
     };
     ($($tt:tt)*) => {
-        return Err($crate::errors::unsupported_err(format!(
+        return Err($crate::unsupported_err(format!(
             "{}{}",
             format_args!($($tt)*),
             $crate::__location_info!()
@@ -776,7 +774,7 @@ pub fn table_err<A: Into<String>, B: Into<ReadySetError>>(name: A, err: B) -> Re
 #[macro_export]
 macro_rules! rpc_err {
     ($during:expr) => {
-        |e| $crate::errors::rpc_err(format!("{}{}", $during, $crate::__location_info!()), e)
+        |e| $crate::rpc_err(format!("{}{}", $during, $crate::__location_info!()), e)
     };
 }
 
@@ -793,14 +791,6 @@ impl From<serde_json::error::Error> for ReadySetError {
 impl From<bincode::Error> for ReadySetError {
     fn from(e: bincode::Error) -> ReadySetError {
         ReadySetError::SerializationFailed(e.to_string())
-    }
-}
-
-/// HACK(eta): this From impl just stringifies the error, so that `ReadySetError` can be serialized
-/// and deserialized.
-impl From<SendError> for ReadySetError {
-    fn from(e: SendError) -> ReadySetError {
-        ReadySetError::TcpSendError(e.to_string())
     }
 }
 
@@ -847,7 +837,7 @@ mod test {
     use crate::{internal, ReadySetResult};
 
     #[test]
-    #[should_panic(expected = "errors.rs")]
+    #[should_panic(expected = "errors/src/lib.rs")]
     fn it_reports_location_info() {
         fn example() -> ReadySetResult<()> {
             internal!("honk")

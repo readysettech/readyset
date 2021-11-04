@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0"
 noria = { path = "../noria/noria/" }
+noria-errors = { path = "../noria/errors/" }
 timestamp_service = {path= "../noria/timestamp_service/"}
 futures-executor = "0.3.14"
 futures-util = "0.3.14"

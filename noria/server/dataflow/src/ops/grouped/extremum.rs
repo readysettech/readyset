@@ -3,7 +3,7 @@ use crate::ops::grouped::GroupedOperator;
 use serde::{Deserialize, Serialize};
 
 use crate::prelude::*;
-use noria::{invariant, ReadySetResult};
+use noria_errors::{invariant, ReadySetResult};
 
 /// Supported kinds of extremum operators.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]

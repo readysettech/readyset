@@ -2980,6 +2980,7 @@ dependencies = [
  "mysql_common",
  "net2",
  "nom-sql",
+ "noria-errors",
  "petgraph",
  "pin-project 0.4.28",
  "proptest",
@@ -3059,6 +3060,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-client-metrics",
+ "noria-errors",
  "noria-server",
  "readyset-logging",
  "regex",
@@ -3150,6 +3152,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-common",
+ "noria-errors",
  "petgraph",
  "pretty_assertions",
  "proptest",
@@ -3171,6 +3174,23 @@ dependencies = [
  "unbounded-interval-tree",
  "vec1",
  "vec_map",
+]
+
+[[package]]
+name = "noria-errors"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "derive_more",
+ "mysql_async",
+ "petgraph",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio-postgres",
+ "url",
+ "vec1",
 ]
 
 [[package]]
@@ -3228,6 +3248,7 @@ dependencies = [
  "noria",
  "noria-common",
  "noria-dataflow",
+ "noria-errors",
  "petgraph",
  "regex",
  "tracing",
@@ -3253,6 +3274,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
+ "noria-errors",
  "paste",
  "proptest",
  "serial_test",
@@ -3281,6 +3303,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
+ "noria-errors",
  "noria-server",
  "postgres 0.19.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "postgres-native-tls",
@@ -3335,6 +3358,7 @@ dependencies = [
  "noria",
  "noria-common",
  "noria-dataflow",
+ "noria-errors",
  "noria-mir",
  "parking_lot",
  "petgraph",
