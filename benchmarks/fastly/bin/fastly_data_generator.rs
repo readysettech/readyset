@@ -1,6 +1,6 @@
 use benchmarks::utils::generate::load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use noria::DataType;
 use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 use std::env;
 use std::path::PathBuf;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "data_generator")]
 struct DataGenerator {
     /// The number of rows to generate for the article table.

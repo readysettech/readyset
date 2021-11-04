@@ -17,7 +17,7 @@ use aws_sdk_ec2::model::{
 use aws_sdk_sqs as sqs;
 use aws_types::config::Config;
 use aws_types::region::Region;
-use clap::Clap;
+use clap::Parser;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ use tracing_subscriber::EnvFilter;
 
 const WAIT_TIMER: Duration = Duration::from_secs(1);
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 /// This utility will ensure that a persistent EBS volume is attached to the instance on which it
 /// is running.  This includes creating a volume if one does not exist, attaching it to the
 /// instance, formatting it, and mounting it.

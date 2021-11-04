@@ -62,7 +62,7 @@
 
 use anyhow::anyhow;
 use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
-use clap::Clap;
+use clap::Parser;
 use derive_more::{Display, From, Into};
 use itertools::{Either, Itertools};
 use lazy_static::lazy_static;
@@ -2523,7 +2523,7 @@ where
     }
 }
 
-#[derive(Clap, Clone)]
+#[derive(Parser, Clone)]
 pub struct GenerateOpts {
     /// Comma-separated list of query operations to generate top-level queries with
     ///

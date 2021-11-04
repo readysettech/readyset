@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Result};
 use buildkite_pipeline::{BuildAttributes, CommandStep, Pipeline, Plugin, Step, TriggerStep};
-use clap::Clap;
+use clap::Parser;
 use maplit::hashmap;
 use reqwest::blocking as http;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -47,19 +47,19 @@ impl FromStr for BuildkiteJobState {
 
 type Commit = String;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub(crate) struct BisectCommand {
     #[clap(subcommand)]
     subcommand: Subcommand,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum Subcommand {
     Start(Opts),
     Step(Opts),
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub(crate) struct Opts {
     #[clap(long, env = "BUILDKITE_ORGANIZATION_SLUG")]
     organization_slug: String,

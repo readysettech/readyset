@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use clap::Clap;
+use clap::Parser;
 use humantime::format_duration;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
@@ -166,7 +166,7 @@ fn write_results(results: &[QueryBenchmarkResult], format: OutputFormat) -> std:
     Ok(())
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct Benchmark {
     #[clap(flatten)]
     options: GenerateOpts,

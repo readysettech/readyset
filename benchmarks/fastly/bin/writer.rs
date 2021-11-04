@@ -6,7 +6,7 @@
 
 use benchmarks::utils::generate::load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use clap::{Clap, ValueHint};
+use clap::{Parser, ValueHint};
 use noria::DataType;
 use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "writer")]
 struct Writer {
     /// The number of users in the system.

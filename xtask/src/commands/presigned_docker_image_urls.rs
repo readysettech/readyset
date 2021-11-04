@@ -5,9 +5,9 @@ use tokio::process::Command;
 use aws_sdk_s3::{Client, Region};
 
 use anyhow::{anyhow, Result};
-use clap::Clap;
+use clap::Parser;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub(crate) struct Opts {
     release_name: String,
 }

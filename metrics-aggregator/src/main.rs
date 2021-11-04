@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser;
 
 use metrics_aggregator::run;
 use metrics_aggregator::Options;

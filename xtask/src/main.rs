@@ -4,12 +4,12 @@ use std::{
 };
 
 use anyhow::Result;
-use clap::{AppSettings, Clap};
+use clap::{AppSettings, Parser};
 use tracing_subscriber::EnvFilter;
 
 mod commands;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum Subcommand {
     PreCache,
     InstallDockerCredentialECRLogin,
@@ -22,7 +22,7 @@ enum Subcommand {
     Bisect(Box<commands::bisect::BisectCommand>),
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(setting=AppSettings::SubcommandRequired)]
 struct Opts {
     #[clap(subcommand)]

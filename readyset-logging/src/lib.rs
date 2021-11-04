@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use clap::Clap;
+use clap::Parser;
 use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
@@ -38,7 +38,7 @@ impl FromStr for LogFormat {
     }
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct Options {
     /// Format to use when emitting log events
     #[clap(

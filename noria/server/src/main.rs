@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use clap::Clap;
+use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 
@@ -55,7 +55,7 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "noria-server")]
 struct Opts {
     /// IP address to listen on

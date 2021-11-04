@@ -1,10 +1,10 @@
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::{Authority, ZookeeperAuthority};
 use noria::ControllerHandle;
 use std::sync::Arc;
 use url::Url;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "replicate")]
 struct Replicate {
     /// ReadySet's zookeeper connection string.

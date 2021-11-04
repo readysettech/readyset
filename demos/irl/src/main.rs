@@ -28,7 +28,7 @@ use crate::definitions::user_group::UserGroup;
 use crate::definitions::user_id_inner_join_users_groups::UserIdInnerJoinUsersGroups;
 use crate::definitions::users_inner_join_users_friends::UserInnerJoinUsersFriends;
 use crate::definitions::users_inner_join_users_groups::UserInnerJoinUsersGroups;
-use clap::Clap;
+use clap::Parser;
 use mysql::prelude::{FromRow, Queryable};
 use mysql::{Conn, Params};
 use std::env;
@@ -41,7 +41,7 @@ use tracing_subscriber::EnvFilter;
 /// This script will not panic, and it will report
 /// how many queries succeeded and how many failed in the logs.
 /// The failed queries will be showed along the error message.
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct IrlQueryTest {
     /// The URL to the MySQL database.
     #[clap(default_value = "mysql://127.0.0.1:3307")]

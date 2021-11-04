@@ -1,6 +1,6 @@
 #![warn(clippy::dbg_macro)]
 use anyhow::Result;
-use clap::{AppSettings, Clap};
+use clap::{AppSettings, Parser};
 use tracing_subscriber::EnvFilter;
 
 use substrate::RootModule;
@@ -9,7 +9,7 @@ mod gerrit;
 mod substrate;
 mod terraform;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum Subcommand {
     TerraformValidate { root_module: RootModule },
     TerraformPlan { root_module: RootModule },
@@ -25,7 +25,7 @@ enum Subcommand {
     BuildkiteTerraformUploadPlanAllPipeline,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(setting=AppSettings::SubcommandRequired)]
 struct Opts {
     #[clap(subcommand)]

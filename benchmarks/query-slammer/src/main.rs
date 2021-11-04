@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use atomic_counter::{AtomicCounter, RelaxedCounter};
 use chrono::Utc;
-use clap::Clap;
+use clap::Parser;
 use futures::future::select_all;
 use mysql_async::prelude::*;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct Opts {
     /// MySQL endpoint to connect to; you probably want a noria-mysql adapter
     #[clap(long, env = "DATABASE_URL")]

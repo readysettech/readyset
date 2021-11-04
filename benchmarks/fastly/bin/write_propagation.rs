@@ -14,7 +14,7 @@
 
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
-use clap::{ArgGroup, Clap, ValueHint};
+use clap::{ArgGroup, Parser, ValueHint};
 use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;
@@ -38,7 +38,7 @@ use vec1::Vec1;
 
 static REPORTING_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "writer", group = ArgGroup::new("influx").requires_all(&["influx-host", "influx-database", "influx-user", "influx-password"]).multiple(true))]
 struct Writer {
     /// The number of rows already in the articles table. This

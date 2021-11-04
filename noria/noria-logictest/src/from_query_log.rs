@@ -5,7 +5,7 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncWriteExt, BufReader};
 
 use anyhow::anyhow;
-use clap::Clap;
+use clap::Parser;
 use itertools::Itertools;
 
 use nom_sql::{
@@ -19,7 +19,7 @@ mod querylog;
 use querylog::{Command, Entry, Session, Stream};
 
 /// Convert a MySQL query log to a set of test scripts.
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct FromQueryLog {
     /// URL of a reference database to connect to, execute queries frmo the log, and record the
     /// results.  Currently supports `mysql://` URLs, but may be expanded in the future.

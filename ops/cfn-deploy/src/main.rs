@@ -5,16 +5,16 @@ use std::io::BufReader;
 use std::path::Path;
 
 use anyhow::{bail, Result};
-use clap::{AppSettings, Clap};
+use clap::{AppSettings, Parser};
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum Subcommand {
     BuildCfnTemplate,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 #[clap(setting=AppSettings::SubcommandRequired)]
 struct Opts {
     #[clap(subcommand)]
