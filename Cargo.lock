@@ -459,7 +459,7 @@ dependencies = [
  "futures 0.3.17",
  "hdrhistogram",
  "mysql",
- "nom",
+ "nom 5.1.2",
  "nom-sql",
  "noria",
  "noria-client",
@@ -499,31 +499,12 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd4865004a46a0aafb2a0a5eb19d3c9fc46ee5f063a6cfc605c69ac9ecf5263d"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "peeking_take_while",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex 0.1.1",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.58.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f8523b410d7187a43085e7e064416ea32ded16bd0a4e6fc025e21616d01258f"
 dependencies = [
  "bitflags",
- "cexpr",
+ "cexpr 0.4.0",
  "clang-sys",
  "clap 2.33.3",
  "env_logger 0.8.4",
@@ -535,8 +516,26 @@ dependencies = [
  "quote",
  "regex",
  "rustc-hash",
- "shlex 1.1.0",
+ "shlex",
  "which 3.1.1",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.59.1"
+source = "git+https://github.com/rust-lang/rust-bindgen.git?branch=master#2aed6b0216805e27228ed39988ffe1a1ffd7e940"
+dependencies = [
+ "bitflags",
+ "cexpr 0.6.0",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
 ]
 
 [[package]]
@@ -741,7 +740,16 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
 dependencies = [
- "nom",
+ "nom 5.1.2",
+]
+
+[[package]]
+name = "cexpr"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
+dependencies = [
+ "nom 7.0.0",
 ]
 
 [[package]]
@@ -1888,7 +1896,7 @@ dependencies = [
  "byteorder",
  "crossbeam-channel 0.4.4",
  "flate2",
- "nom",
+ "nom 5.1.2",
  "num-traits",
 ]
 
@@ -2300,10 +2308,11 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "6.17.3"
-source = "git+https://github.com/rust-rocksdb/rust-rocksdb.git?rev=a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5#a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5"
+version = "6.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c309a9d2470844aceb9a4a098cf5286154d20596868b75a6b36357d2bb9ca25d"
 dependencies = [
- "bindgen 0.57.0",
+ "bindgen 0.59.1",
  "cc",
  "glob",
  "libc",
@@ -2464,7 +2473,7 @@ dependencies = [
  "lazy_static",
  "maplit",
  "metrics",
- "nom",
+ "nom 5.1.2",
  "nom-sql",
  "noria",
  "prometheus-http-query",
@@ -2544,6 +2553,12 @@ name = "mime"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
+
+[[package]]
+name = "minimal-lexical"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c64630dcdd71f1a64c435f54885086a0de5d6a12d104d69b165fb7d5286d677"
 
 [[package]]
 name = "miniz_oxide"
@@ -2633,7 +2648,7 @@ dependencies = [
  "mysql-time",
  "mysql_async 0.28.0",
  "mysql_common 0.27.5",
- "nom",
+ "nom 5.1.2",
  "postgres 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sha-1 0.9.8",
  "slab",
@@ -2686,7 +2701,7 @@ dependencies = [
  "chrono",
  "launchpad",
  "mysql_common 0.27.5",
- "nom",
+ "nom 5.1.2",
  "proptest",
  "regex",
  "serde",
@@ -2965,6 +2980,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nom"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ffd9d26838a953b4af82cbeb9f1592c6798916983959be223a7124e992742c1"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
+ "version_check",
+]
+
+[[package]]
 name = "nom-sql"
 version = "0.0.11"
 dependencies = [
@@ -2977,7 +3003,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "maplit",
- "nom",
+ "nom 5.1.2",
  "pratt",
  "pretty_assertions",
  "proptest",
@@ -3098,7 +3124,7 @@ dependencies = [
  "maplit",
  "metrics",
  "metrics-exporter-prometheus",
- "nom",
+ "nom 5.1.2",
  "nom-sql",
  "noria",
  "noria-client-metrics",
@@ -3242,7 +3268,7 @@ dependencies = [
  "mysql-time",
  "mysql_async 0.28.0",
  "native-tls",
- "nom",
+ "nom 5.1.2",
  "nom-sql",
  "noria",
  "noria-client",
@@ -3372,7 +3398,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "mysql",
- "nom",
+ "nom 5.1.2",
  "nom-sql",
  "noria",
  "noria-common",
@@ -4584,8 +4610,9 @@ dependencies = [
 
 [[package]]
 name = "rocksdb"
-version = "0.16.0"
-source = "git+https://github.com/rust-rocksdb/rust-rocksdb.git?rev=a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5#a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a62eca5cacf2c8261128631bed9f045598d40bfbe4b29f5163f0f802f8f44a7"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -4998,12 +5025,6 @@ checksum = "740223c51853f3145fe7c90360d2d4232f2b62e3449489c207eccde818979982"
 dependencies = [
  "lazy_static",
 ]
-
-[[package]]
-name = "shlex"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
 
 [[package]]
 name = "shlex"
