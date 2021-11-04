@@ -142,6 +142,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic-counter"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62f447d68cfa5a9ab0c1c862a703da2a65b5ed1b7ce1153c9eb0169506d56019"
+
+[[package]]
 name = "atomic-shim"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2662,6 +2668,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mysql-test"
+version = "0.1.0"
+dependencies = [
+ "atomic-counter",
+ "chrono",
+ "clap 3.0.0-beta.4",
+ "futures 0.3.17",
+ "mysql_async 0.28.1",
+ "tokio",
+]
+
+[[package]]
 name = "mysql-time"
 version = "0.1.0"
 dependencies = [
@@ -2710,6 +2728,37 @@ dependencies = [
 name = "mysql_async"
 version = "0.28.0"
 source = "git+https://github.com/readysettech/mysql_async?branch=sync-with-upstream#07d52e0893ba75786fbcddbd4cd753e53f195922"
+dependencies = [
+ "bytes 1.1.0",
+ "flate2",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "lazy_static",
+ "lru",
+ "mio 0.7.13",
+ "mysql_common 0.27.5",
+ "native-tls",
+ "once_cell",
+ "pem",
+ "percent-encoding",
+ "pin-project 1.0.8",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "twox-hash",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "mysql_async"
+version = "0.28.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583ffeecb619dfe9645ce1bba7406ad174e0012ee47a5302cf59e3e01cc7f6b2"
 dependencies = [
  "bytes 1.1.0",
  "flate2",
@@ -5860,8 +5909,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.4",
  "static_assertions",
 ]
 

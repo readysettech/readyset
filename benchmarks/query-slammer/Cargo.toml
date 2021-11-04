@@ -1,0 +1,14 @@
+[package]
+name = "mysql-test"
+version = "0.1.0"
+authors = ["Mike Cronce <mc@planetscale.com>", "Peter Farr <peter@prismaphonic.com>"]
+edition = "2018"
+
+[dependencies]
+chrono = "0.4"
+clap = "3.0.0-beta.4"
+futures = "0.3"
+mysql_async = "0.28"
+tokio = {version = "1", features = ["macros", "rt-multi-thread", "signal"]}
+atomic-counter = "1.0.1"
+
