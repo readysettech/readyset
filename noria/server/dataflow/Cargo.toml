@@ -47,12 +47,7 @@ criterion = { version = "0.3", features=['real_blackbox'], optional = true }
 petgraph = { version = "0.5", features = ["serde-1"] }
 serde = { version = "1.0.8", features = ["rc"] }
 timekeeper = { version = "0.3.2", default-features = false }
-rocksdb = { git = "https://github.com/rust-rocksdb/rust-rocksdb.git", rev = "a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5", default-features = false, features = ["lz4"] }
-# Ideally we would use rocksdb version 0.17, but it creates a build conflict,
-# and version 0.16 has a segmentation fault bug when using `multi_get`,
-# so we have to use the fix from the commit directly
-# https://github.com/rust-rocksdb/rust-rocksdb/commit/a0ad4fdcfea52f0a1b10d019c54c494e3f9488a5
-# rocksdb = {version = "0.16", default-features = false, features = ["lz4"] }
+rocksdb = { version = "0.17", default-features = false, features = ["lz4"] }
 
 
 # local deps
