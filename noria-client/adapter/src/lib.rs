@@ -87,12 +87,7 @@ pub struct Options {
 
     /// Authority connection string.
     // TODO(justin): The default_value should depend on the value of authority.
-    #[clap(
-        long,
-        short = 'z',
-        env = "AUTHORITY_ADDRESS",
-        default_value = "127.0.0.1:2181"
-    )]
+    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:2181")]
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul.
@@ -628,7 +623,7 @@ mod tests {
             "test",
             "--address",
             "0.0.0.0:3306",
-            "-z",
+            "--authority-address",
             "zookeeper:2181",
             "--allow-unauthenticated-connections",
             "--upstream-db-url",
