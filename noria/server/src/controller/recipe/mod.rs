@@ -3,12 +3,12 @@ use crate::controller::Migration;
 use crate::{ReadySetResult, ReuseConfigType};
 
 use nom_sql::{parser as sql_parser, Dialect, SqlQuery};
-use noria::{internal, ActivationResult, ReadySetError};
+use noria::ActivationResult;
 use petgraph::graph::NodeIndex;
 use tracing::{debug, error, warn};
 
-use crate::errors::internal_err;
 use nom_sql::CreateTableStatement;
+use noria_errors::{internal, internal_err, ReadySetError};
 use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;

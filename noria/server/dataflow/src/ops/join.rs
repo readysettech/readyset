@@ -12,8 +12,8 @@ use crate::prelude::*;
 use crate::processing::{
     ColumnMiss, ColumnRef, ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex,
 };
-use noria::errors::{internal_err, ReadySetResult};
-use noria::{internal, KeyComparison};
+use noria::KeyComparison;
+use noria_errors::{internal_err, ReadySetResult};
 
 /// Kind of join
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

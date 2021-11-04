@@ -4,7 +4,7 @@ pub use nom_sql::analysis::{contains_aggregate, is_aggregate};
 use nom_sql::{
     BinaryOperator, Column, Expression, FunctionExpression, InValue, LimitClause, Literal,
 };
-use noria::{unsupported, ReadySetResult};
+use noria_errors::{unsupported, ReadySetResult};
 
 #[must_use]
 pub(crate) fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, String)> {

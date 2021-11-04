@@ -1,9 +1,8 @@
 use crate::node::special::packet_filter::PacketFilter;
 use crate::prelude::*;
 use metrics::counter;
-use noria::errors::{internal_err, ReadySetResult};
-use noria::invariant;
 use noria::metrics::recorded;
+use noria_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

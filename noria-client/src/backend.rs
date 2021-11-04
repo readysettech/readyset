@@ -16,11 +16,14 @@ use tracing::{error, instrument, span, trace, warn, Level};
 
 use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consistency::Timestamp;
-use noria::errors::internal_err;
-use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria::{internal, unsupported, ColumnSchema, DataType, ReadySetError, ReadySetResult};
+use noria::{ColumnSchema, DataType};
 use noria_client_metrics::recorded::SqlQueryType;
 use noria_client_metrics::{EventType, QueryExecutionEvent};
+use noria_errors::{
+    internal, internal_err, unsupported,
+    ReadySetError::{self, PreparedStatementMissing},
+    ReadySetResult,
+};
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::query_status_cache::{AdmitStatus, QueryStatusCache};

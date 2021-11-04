@@ -1,5 +1,4 @@
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
-use crate::errors::internal_err;
 use crate::worker::replica::WrappedDomainRequest;
 use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
@@ -9,6 +8,7 @@ use metrics::{counter, gauge, histogram};
 use noria::internal::DomainIndex;
 use noria::metrics::recorded;
 use noria::{channel, ReadySetError};
+use noria_errors::internal_err;
 use replica::ReplicaAddr;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry::{Occupied, Vacant};

@@ -10,7 +10,7 @@ use nom_sql::SqlType;
 
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
-use noria::errors::{internal_err, ReadySetResult};
+use noria_errors::{internal_err, ReadySetResult};
 
 // pub mod latest;
 pub mod aggregate;

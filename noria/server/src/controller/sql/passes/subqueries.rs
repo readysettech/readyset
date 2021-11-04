@@ -2,7 +2,7 @@ use std::iter;
 
 use itertools::Either;
 use nom_sql::{Expression, FunctionExpression, InValue, JoinRightSide, SqlQuery};
-use noria::{unsupported, ReadySetResult};
+use noria_errors::{unsupported, ReadySetResult};
 
 #[derive(Debug, PartialEq)]
 pub enum SubqueryPosition<'a> {

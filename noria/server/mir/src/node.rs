@@ -11,8 +11,7 @@ use std::rc::Rc;
 
 use crate::column::Column;
 use crate::{FlowNode, MirNodeRef};
-use noria::errors::internal_err;
-use noria::{internal, ReadySetResult};
+use noria_errors::{internal, internal_err, ReadySetResult};
 
 pub mod node_inner;
 

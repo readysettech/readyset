@@ -6,7 +6,7 @@ use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 use common::DataType;
 use launchpad::Indices;
-use noria::invariant_eq;
+use noria_errors::invariant_eq;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;

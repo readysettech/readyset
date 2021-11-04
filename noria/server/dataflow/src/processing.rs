@@ -10,7 +10,7 @@ use vec1::Vec1;
 
 use crate::ops;
 use crate::prelude::*;
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 
 // TODO: make a Key type that is an ArrayVec<DataType>
 
@@ -609,7 +609,7 @@ where
                     n.query_through(columns, key, nodes, states, mode)
                 } else {
                     Err(ReadySetError::IndexNotFound {
-                        node: parent_index,
+                        node: parent_index.id(),
                         columns: columns.to_vec(),
                     })
                 }

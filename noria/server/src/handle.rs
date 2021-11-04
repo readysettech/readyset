@@ -1,12 +1,11 @@
 use crate::controller::migrate::Migration;
 use crate::controller::HandleRequest;
-use crate::errors::bad_request_err;
 use crate::ControllerDescriptor;
 use anyhow::format_err;
 use dataflow::prelude::*;
 use noria::consensus::Authority;
-use noria::internal;
 use noria::prelude::*;
+use noria_errors::bad_request_err;
 use reqwest::Url;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};

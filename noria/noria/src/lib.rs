@@ -212,7 +212,6 @@ mod controller;
 mod data;
 mod data_serde;
 mod data_text_types;
-pub mod errors;
 mod map;
 pub mod metrics;
 mod table;
@@ -235,8 +234,8 @@ pub use nom_sql::ColumnConstraint;
 
 pub use crate::consensus::ZookeeperAuthority;
 // FIXME(eta): get rid of these
-pub use crate::errors::{ReadySetError, ReadySetResult};
 use crate::internal::*;
+pub use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;

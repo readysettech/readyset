@@ -22,9 +22,9 @@ use crate::utils;
 
 use crate::backend::SelectSchema;
 use itertools::Itertools;
-use noria::errors::ReadySetError::PreparedStatementMissing;
-use noria::errors::{internal_err, table_err, unsupported_err};
-use noria::{internal, invariant_eq, unsupported, ColumnSchema};
+use noria::ColumnSchema;
+use noria_errors::ReadySetError::PreparedStatementMissing;
+use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use std::fmt;
 use tracing::{error, info, trace};
 

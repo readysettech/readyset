@@ -1,5 +1,4 @@
 use nom_sql::SqlType;
-use noria::internal;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -8,7 +7,7 @@ use tracing::error;
 use crate::prelude::*;
 use crate::processing::{ColumnSource, IngredientLookupResult, LookupMode, SuggestedIndex};
 use dataflow_expression::Expression;
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 use std::convert::TryInto;
 
 /// Permutes or omits columns from its source node, or adds additional columns whose values are

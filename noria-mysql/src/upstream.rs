@@ -8,9 +8,9 @@ use std::convert::TryInto;
 use std::sync::Arc;
 use tracing::{debug, error};
 
-use noria::errors::internal_err;
 use noria::{ColumnSchema, DataType, ReadySetError};
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
+use noria_errors::internal_err;
 
 use crate::schema::{convert_column, is_subtype};
 use crate::Error;

@@ -20,8 +20,8 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor,
 };
-use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
+use noria_errors::internal_err;
 
 pub const WORKER_PREFIX: &str = "workers/";
 /// Path to the leader key.

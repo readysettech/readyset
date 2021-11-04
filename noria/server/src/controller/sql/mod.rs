@@ -15,12 +15,11 @@ use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
-use noria::{internal, unsupported, ReadySetError};
+use noria_errors::{internal, internal_err, invariant, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, trace, warn};
 
 use crate::controller::Migration;
-use crate::errors::internal_err;
-use crate::{invariant, ReadySetResult, ReuseConfigType};
+use crate::ReuseConfigType;
 
 use super::mir_to_flow::mir_query_to_flow_parts;
 use super::recipe::CANONICAL_DIALECT;

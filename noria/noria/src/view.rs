@@ -1,8 +1,7 @@
 use crate::consistency::Timestamp;
 use crate::data::*;
-use crate::errors::{internal_err, view_err, ReadySetError, ReadySetResult};
 use crate::util::like::CaseSensitivityMode;
-use crate::{rpc_err, Tagged, Tagger};
+use crate::{Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
@@ -11,6 +10,7 @@ use futures_util::{
 use launchpad::intervals::BoundPair;
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use nom_sql::{Column, SqlType};
+use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};

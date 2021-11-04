@@ -6,8 +6,7 @@ use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, JoinConstraint, JoinRightSide,
     SelectStatement, SqlQuery, Table,
 };
-use noria::errors::{internal_err, unsupported_err};
-use noria::{unsupported, ReadySetResult};
+use noria_errors::{internal_err, unsupported, unsupported_err, ReadySetResult};
 
 pub trait DetectProblematicSelfJoins: Sized {
     /// Detect and return an unsupported error for any joins where both sides of the join key are

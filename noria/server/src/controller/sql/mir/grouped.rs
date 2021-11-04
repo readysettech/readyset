@@ -2,11 +2,11 @@ use crate::controller::sql::mir::{join::make_joins_for_aggregates, SqlToMirConve
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
-use crate::{internal, invariant, unsupported};
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{self, Expression, FunctionExpression, FunctionExpression::*};
+use noria_errors::{internal, invariant, unsupported};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 

@@ -6,7 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
-use noria::{internal, ReadySetResult};
+use noria_errors::{internal, ReadySetResult};
 use std::fmt::{self, Debug, Formatter};
 
 pub enum MirNodeInner {

@@ -5,8 +5,9 @@ use itertools::{Either, Itertools};
 use serde::{Deserialize, Serialize};
 use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
-use crate::{internal, ReadySetError, ReadySetResult, Text, TinyText};
+use crate::{Text, TinyText};
 use nom_sql::{Double, Float, Literal, SqlType};
+use noria_errors::{internal, ReadySetError, ReadySetResult};
 
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;

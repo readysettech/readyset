@@ -55,6 +55,7 @@ common = { path = "../common", package = "noria-common" }
 noria = { path = "../../noria" }
 unbounded-interval-tree = { path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
+noria-errors = { path = "../../errors" }
 thiserror = "1.0.26"
 test-strategy = "0.1.1"
 

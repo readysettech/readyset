@@ -5,9 +5,10 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use noria::{unsupported, ColumnSchema, DataType, ReadySetError};
+use noria::{ColumnSchema, DataType};
 use noria_client::upstream_database::NoriaCompare;
 use noria_client::{UpstreamDatabase, UpstreamPrepare};
+use noria_errors::{unsupported, ReadySetError};
 use pgsql::config::Host;
 use pgsql::types::Type;
 use pgsql::{Config, GenericResult, Row};

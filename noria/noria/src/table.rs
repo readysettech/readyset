@@ -1,11 +1,10 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
-use crate::errors::{table_err, ReadySetError, ReadySetResult};
-use crate::internal;
 use crate::internal::*;
-use crate::{consistency, rpc_err, unsupported, LocalOrNot, Tagged, Tagger};
+use crate::{consistency, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
+use noria_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 

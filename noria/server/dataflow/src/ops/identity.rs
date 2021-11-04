@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::prelude::*;
 use crate::processing::ColumnSource;
 use crate::processing::SuggestedIndex;
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 

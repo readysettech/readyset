@@ -23,11 +23,11 @@ use super::{
     AdapterId, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor, WorkerId,
 };
-use crate::errors::internal_err;
 use crate::{ReadySetError, ReadySetResult};
 use backoff::backoff::Backoff;
 use backoff::exponential::ExponentialBackoff;
 use backoff::SystemClock;
+use noria_errors::internal_err;
 
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";

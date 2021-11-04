@@ -1,13 +1,12 @@
+use crate::controller::sql::query_utils::LogicalOp;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, JoinConstraint,
     JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
 };
 use nom_sql::{OrderType, SelectStatement};
+use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
 
-use crate::controller::sql::query_utils::LogicalOp;
-use crate::ReadySetResult;
-use noria::{internal, invariant, invariant_eq, unsupported};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;

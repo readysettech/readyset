@@ -17,9 +17,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use crate::controller::Migration;
-use crate::errors::internal_err;
 use crate::manual::ops::grouped::aggregate::Aggregation;
-use crate::{internal, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult};
 use common::DataType;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
@@ -30,6 +28,9 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::{MirQuery, QueryFlowParts};
 use mir::{Column, FlowNode, MirNodeRef};
+use noria_errors::{
+    internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError, ReadySetResult,
+};
 
 use dataflow::ops::grouped::concat::GroupConcat;
 use petgraph::graph::NodeIndex;

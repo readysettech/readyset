@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use launchpad::hash::hash;
-use noria::{invariant, KeyComparison};
+use noria::KeyComparison;
+use noria_errors::invariant;
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
@@ -9,7 +10,7 @@ use vec1::Vec1;
 
 use crate::prelude::*;
 use crate::processing::{ColumnRef, ColumnSource, SuggestedIndex};
-use noria::errors::ReadySetResult;
+use noria_errors::ReadySetResult;
 
 use super::Side;
 

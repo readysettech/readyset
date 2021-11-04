@@ -21,9 +21,9 @@ use vec1::Vec1;
 
 pub use internal::DomainIndex as Index;
 use noria::channel;
-use noria::errors::{internal_err, ReadySetResult};
 use noria::metrics::recorded;
 use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
+use noria_errors::{internal, internal_err, ReadySetResult};
 
 use crate::node::NodeProcessingResult;
 use crate::payload::{ReplayPieceContext, SourceSelection};
@@ -817,7 +817,7 @@ impl Domain {
         let me = m.dst();
 
         if !self.nodes.contains_key(me) {
-            return Err(ReadySetError::NoSuchNode(me));
+            return Err(ReadySetError::NoSuchNode(me.id()));
         }
 
         match self.mode {
@@ -911,7 +911,7 @@ impl Domain {
                 let from = self
                     .nodes
                     .get(src)
-                    .ok_or(ReadySetError::NoSuchNode(src))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(src.id()))?
                     .borrow()
                     .global_addr();
                 // TODO: this is a linear walk of replay paths -- we should make that not linear
@@ -1038,7 +1038,7 @@ impl Domain {
             let mut n = self
                 .nodes
                 .get(me)
-                .ok_or(ReadySetError::NoSuchNode(me))?
+                .ok_or_else(|| ReadySetError::NoSuchNode(me.id()))?
                 .borrow_mut();
             n.process_timestamp(message, executor)?
         };
@@ -1109,7 +1109,7 @@ impl Domain {
                 for &node in &nodes {
                     self.nodes
                         .get(node)
-                        .ok_or(ReadySetError::NoSuchNode(node))?
+                        .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                         .borrow_mut()
                         .remove();
                     self.state.remove(node);
@@ -1140,7 +1140,7 @@ impl Domain {
                 let mut n = self
                     .nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
                 n.add_column(&field);
                 if let Some(b) = n.get_base_mut() {
@@ -1160,7 +1160,7 @@ impl Domain {
                 let mut n = self
                     .nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
                 n.get_base_mut()
                     .ok_or_else(|| internal_err("told to drop base column from non-base node"))?
@@ -1175,11 +1175,11 @@ impl Domain {
                 let mut n = self
                     .nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
 
                 let e = n.as_mut_egress().ok_or(ReadySetError::InvalidNodeType {
-                    node_index: node,
+                    node_index: node.id(),
                     expected_type: NodeType::Egress,
                 })?;
 
@@ -1199,12 +1199,12 @@ impl Domain {
                 let mut n = self
                     .nodes
                     .get(egress_node)
-                    .ok_or(ReadySetError::NoSuchNode(egress_node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(egress_node.id()))?
                     .borrow_mut();
 
                 n.as_mut_egress()
                     .ok_or(ReadySetError::InvalidNodeType {
-                        node_index: egress_node,
+                        node_index: egress_node.id(),
                         expected_type: NodeType::Egress,
                     })?
                     .add_for_filtering(target_node);
@@ -1213,11 +1213,11 @@ impl Domain {
             DomainRequest::UpdateSharder { node, new_txs } => {
                 self.nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut()
                     .as_mut_sharder()
                     .ok_or(ReadySetError::InvalidNodeType {
-                        node_index: node,
+                        node_index: node.id(),
                         expected_type: NodeType::Sharder,
                     })?
                     .add_sharded_child(new_txs.0, new_txs.1);
@@ -1278,12 +1278,12 @@ impl Domain {
                         if !self
                             .nodes
                             .get(node)
-                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                             .borrow()
                             .is_reader()
                         {
                             return Err(ReadySetError::InvalidNodeType {
-                                node_index: node,
+                                node_index: node.id(),
                                 expected_type: NodeType::Reader,
                             });
                         }
@@ -1385,12 +1385,12 @@ impl Domain {
                         if !self
                             .nodes
                             .get(node)
-                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                             .borrow()
                             .is_reader()
                         {
                             return Err(ReadySetError::InvalidNodeType {
-                                node_index: node,
+                                node_index: node.id(),
                                 expected_type: NodeType::Reader,
                             });
                         }
@@ -1398,7 +1398,7 @@ impl Domain {
                         let mut n = self
                             .nodes
                             .get(node)
-                            .ok_or(ReadySetError::NoSuchNode(node))?
+                            .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                             .borrow_mut();
 
                         tokio::task::block_in_place(|| {
@@ -1559,7 +1559,7 @@ impl Domain {
                         let n = self
                             .nodes
                             .get(from)
-                            .ok_or(ReadySetError::NoSuchNode(from))?
+                            .ok_or_else(|| ReadySetError::NoSuchNode(from.id()))?
                             .borrow();
                         let mut default = None;
                         if let Some(b) = n.get_base() {
@@ -1690,7 +1690,7 @@ impl Domain {
                 let node_ref = self
                     .nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?;
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?;
 
                 node_ref.borrow_mut().purge = purge;
 
@@ -1946,11 +1946,11 @@ impl Domain {
                 let mut n = self
                     .nodes
                     .get(node)
-                    .ok_or(ReadySetError::NoSuchNode(node))?
+                    .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                     .borrow_mut();
 
                 let r = n.as_mut_reader().ok_or(ReadySetError::InvalidNodeType {
-                    node_index: node,
+                    node_index: node.id(),
                     expected_type: NodeType::Reader,
                 })?;
 
@@ -2123,7 +2123,7 @@ impl Domain {
         let n = self
             .nodes
             .get(source)
-            .ok_or(ReadySetError::NoSuchNode(source))?
+            .ok_or_else(|| ReadySetError::NoSuchNode(source.id()))?
             .borrow();
         if let Some(b) = n.get_base() {
             let mut row = row.into_owned();
@@ -2431,7 +2431,7 @@ impl Domain {
                     let dst_is_target = !self
                         .nodes
                         .get(dst)
-                        .ok_or(ReadySetError::NoSuchNode(dst))?
+                        .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
                         .borrow()
                         .is_sender();
                     let mut holes_for_remap = vec![];
@@ -3103,7 +3103,7 @@ impl Domain {
                                 if self
                                     .nodes
                                     .get(dst)
-                                    .ok_or(ReadySetError::NoSuchNode(dst))?
+                                    .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?
                                     .borrow()
                                     .beyond_mat_frontier()
                                 {
@@ -3663,7 +3663,7 @@ impl Domain {
                 let i = path
                     .iter()
                     .position(|ps| ps.node == dst)
-                    .ok_or(ReadySetError::NoSuchNode(dst))?;
+                    .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
                 #[allow(clippy::indexing_slicing)]
                 // i is definitely in bounds, since it came from a call to position
                 walk_path(&path[i..], &mut keys, tag, self.shard, &self.nodes, ex)?;
