@@ -2,18 +2,18 @@
 //! A command-line interface to query_generator
 
 use anyhow::bail;
-use clap::Clap;
+use clap::Parser;
 use query_generator::GenerateOpts;
 
 mod benchmark;
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Opts {
     #[clap(subcommand)]
     subcommand: Command,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 enum Command {
     Generate(Generate),
     Benchmark(benchmark::Benchmark),
@@ -28,7 +28,7 @@ impl Command {
     }
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Generate {
     #[clap(flatten)]
     options: GenerateOpts,

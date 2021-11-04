@@ -3,11 +3,11 @@
 //! creates a table in Noria and creates a view for the SELECT
 //! * query for that table. It then performs a lookup of the
 //! view.
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "query_installer")]
 struct QueryInstaller {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]

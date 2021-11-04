@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::{env, io, process};
 
 use anyhow::{anyhow, bail, Context};
-use clap::Clap;
+use clap::Parser;
 use colored::Colorize;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
@@ -37,13 +37,13 @@ use crate::permute::Permute;
 use crate::runner::{NoriaOptions, RunOptions, TestScript};
 use crate::upstream::{DatabaseType, DatabaseURL};
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Opts {
     #[clap(subcommand)]
     subcommand: Command,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[allow(clippy::large_enum_variant)]
 enum Command {
     Parse(Parse),
@@ -73,7 +73,7 @@ impl Command {
     }
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct InputFileOptions {
     /// Files or directories containing test scripts to run. If `-`, will read from standard input
     ///
@@ -191,7 +191,7 @@ impl IntoIterator for InputFiles {
 }
 
 /// Test the parser on one or more sqllogictest files
-#[derive(Clap)]
+#[derive(Parser)]
 struct Parse {
     #[clap(flatten)]
     input_opts: InputFileOptions,
@@ -226,7 +226,7 @@ impl Parse {
 
 /// Run a test script, or all test scripts in a directory, against either Noria or a reference MySQL
 /// database
-#[derive(Clap)]
+#[derive(Parser)]
 struct Verify {
     #[clap(flatten)]
     input_opts: InputFileOptions,
@@ -523,7 +523,7 @@ impl FromStr for Seed {
 
 /// Fuzz-test noria by randomly generating queries and seed data, and ensuring that both Noria and a
 /// reference database return the same results
-#[derive(Clap, Debug, Clone)]
+#[derive(Parser, Debug, Clone)]
 pub struct Fuzz {
     /// Number of test cases to generate
     ///

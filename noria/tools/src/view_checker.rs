@@ -1,9 +1,9 @@
 #![warn(clippy::panic)]
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "view_checker")]
 struct ViewChecker {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]

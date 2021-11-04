@@ -1,12 +1,12 @@
 #![warn(clippy::panic)]
 
 use anyhow::anyhow;
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 use std::str::FromStr;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "controller_request")]
 struct ControllerRequest {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]

@@ -7,7 +7,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::ConsulAuthority;
 use prometheus_http_query::{Client, Scheme};
 use stream_cancel::Valve;
@@ -22,7 +22,7 @@ pub mod metrics_reconciler;
 use cache::QueryMetricsCache;
 use metrics_reconciler::MetricsReconciler;
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct Options {
     /// IP:PORT to listen on.
     #[clap(

@@ -2,12 +2,12 @@
 //! Tool to retrieve a metrics dump for the current leader in a
 //! deployment.
 
-use clap::Clap;
+use clap::Parser;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(name = "metrics_dump")]
 struct MetricsDump {
     #[clap(short, long, env("AUTHORITY_ADDRESS"), default_value("127.0.0.1:2181"))]

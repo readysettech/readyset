@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser;
 use readyset_logging::Options;
 use tracing::{debug, error, info, span, trace, warn, Level};
 

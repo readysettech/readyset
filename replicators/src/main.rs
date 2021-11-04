@@ -4,14 +4,14 @@ pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
 
-use clap::Clap;
+use clap::Parser;
 use mysql_async as mysql;
 use noria::consensus::AuthorityType;
 use noria_adapter::{AdapterOpts, NoriaAdapter};
 use tokio_postgres as pgsql;
 
 /// A replication connector from an existing database to Noria
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0")]
 struct Opts {
     /// Noria deployment ID to attach to.
@@ -29,7 +29,7 @@ struct Opts {
     logging: readyset_logging::Options,
 }
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 enum DbOpts {
     Url(UrlOpts),
     Mysql(MySqlOpts),
@@ -37,14 +37,14 @@ enum DbOpts {
 }
 
 /// Use a connection URL
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct UrlOpts {
     #[clap(parse(try_from_str))]
     url: AdapterOpts,
 }
 
 /// Use MySQL for replication
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct MySqlOpts {
     /// IP or Hostname for MySQL.
     #[clap(short, long, env("MYSQL_SERVER"), default_value("127.0.0.1"))]
@@ -64,7 +64,7 @@ struct MySqlOpts {
 }
 
 /// Use PostgreSQL for replication
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 struct PostgresOpts {
     /// IP or Hostname for PostgreSQL.
     #[clap(short, long, env("PGHOST"), default_value("127.0.0.1"))]

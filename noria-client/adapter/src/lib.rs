@@ -10,7 +10,7 @@ use std::{io, net::IpAddr};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clap::Clap;
+use clap::Parser;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
@@ -75,7 +75,7 @@ pub struct NoriaAdapter<H> {
     pub mirror_ddl: bool,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct Options {
     /// IP:PORT to listen on
     #[clap(long, short = 'a', env = "LISTEN_ADDRESS", parse(try_from_str))]

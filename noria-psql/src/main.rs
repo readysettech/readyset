@@ -3,7 +3,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;
-use clap::Clap;
+use clap::Parser;
 use nom_sql::Dialect;
 use tokio::net;
 
@@ -34,7 +34,7 @@ impl ConnectionHandler for PsqlHandler {
     }
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct Options {
     #[clap(flatten)]
     adapter_options: noria_client_adapter::Options,

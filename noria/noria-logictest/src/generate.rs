@@ -6,7 +6,7 @@ use std::mem;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context};
-use clap::Clap;
+use clap::Parser;
 use colored::Colorize;
 use itertools::Itertools;
 
@@ -400,7 +400,7 @@ impl Seed {
 
 // shared options for generating tests
 // (not a doc-comment due to https://github.com/clap-rs/clap/issues/2527)
-#[derive(Clap, Debug, Clone)]
+#[derive(Parser, Debug, Clone)]
 pub struct GenerateOpts {
     /// URL of a reference database to compare to. Currently supports `mysql://` URLs, but may be
     /// expanded in the future
@@ -439,7 +439,7 @@ pub struct GenerateOpts {
 /// database and saving the results
 ///
 /// [0]: GenerateOpts
-#[derive(Clap)]
+#[derive(Parser)]
 pub struct Generate {
     /// Test script to use as a seed. Seed scripts should contain DDL and queries, but no data.
     #[clap(parse(from_str))]

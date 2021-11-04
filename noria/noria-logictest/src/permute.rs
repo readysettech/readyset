@@ -2,7 +2,7 @@ use std::iter;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use clap::Clap;
+use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::{Either, Itertools};
 use noria_logictest::generate::{Generate, GenerateOpts};
@@ -40,7 +40,7 @@ const SMALL_OPERATIONS: &[&str] = &[
 
 /// Generate exhaustive suites of logictests by permuting all combinations of operators up to a
 /// certain depth
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
 pub struct Permute {
     /// Only generate scripts with these operations
     #[clap(long)]
