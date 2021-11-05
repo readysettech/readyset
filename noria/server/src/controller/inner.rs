@@ -1041,7 +1041,7 @@ impl Leader {
                 .collect::<ReadySetResult<Vec<_>>>()?;
             replicas.push(ViewReplica {
                 node: r,
-                columns,
+                columns: columns.into(),
                 schema,
                 shards,
             });
