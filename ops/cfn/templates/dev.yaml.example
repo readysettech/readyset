@@ -6,14 +6,14 @@ Resources:
     Properties:
       Parameters:
         AccessCIDR: <CIDR including machine to SSH from>
+        KeyPairName: <Key pair to ssh with>
         AvailabilityZones: !Join [",", [us-east-2a, us-east-2b, us-east-2c]]
         DatabaseAllocatedStorage: "20"
         DatabaseName: devtestdb
         DatabasePassword: testnoria
         DatabaseUsername: root
-        DeploymentName: devdeployment
-        KeyPairName: <Key pair to ssh with>
-        ReadysetAdapterNodes: 1
-        ReadysetS3BucketName: <s3 bucket with templates>
-        ReadysetServerNodes: 1
+        ReadySetDeploymentName: <deployment name>
+        ReadySetAdapterNodes: 1
+        ReadySetS3BucketName: <s3 bucket with templates>
+        ReadySetServerNodes: 1
       TemplateURL: "https://<s3 bucket with templates>.s3.<s3 bucket region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml"
