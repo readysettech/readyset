@@ -134,7 +134,7 @@ impl Writer {
             .enable_ryw(true)
             .build(noria, upstream);
 
-        let mut view = if let Some(region) = self.target_region.clone() {
+        let mut view = if let Some(region) = self.target_region.as_deref() {
             ch.view_from_region("w", region).await.unwrap()
         } else {
             ch.view("w").await.unwrap()

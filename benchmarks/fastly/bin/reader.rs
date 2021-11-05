@@ -314,7 +314,7 @@ impl NoriaExecutor {
         // `self.target_region` if it is specified.
         let view = match &opts.target_region {
             None => handle.view("w").await.unwrap(),
-            Some(r) => handle.view_from_region("w", r.clone()).await.unwrap(),
+            Some(r) => handle.view_from_region("w", r).await.unwrap(),
         };
 
         Self {

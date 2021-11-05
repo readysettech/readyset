@@ -32,27 +32,30 @@ type StatementID = u32;
 
 #[derive(Clone)]
 pub(crate) enum PreparedStatement {
-    Select {
-        name: String,
-        statement: nom_sql::SelectStatement,
-        key_column_indices: Vec<usize>,
-        processed_query_params: ProcessedQueryParams,
-        /// Parameter columns ignored by noria server
-        /// The adapter assumes that all LIMIT/OFFSET parameters are ignored by the
-        /// server. (If the server cannot ignore them, it will fail to install the query).
-        ignored_columns: Vec<ColumnSchema>,
-    },
+    Select(PreparedSelectStatement),
     Insert(nom_sql::InsertStatement),
     Update(nom_sql::UpdateStatement),
     Delete(DeleteStatement),
 }
 
+#[derive(Clone)]
+pub(crate) struct PreparedSelectStatement {
+    name: String,
+    statement: nom_sql::SelectStatement,
+    key_column_indices: Vec<usize>,
+    processed_query_params: ProcessedQueryParams,
+    /// Parameter columns ignored by noria server
+    /// The adapter assumes that all LIMIT/OFFSET parameters are ignored by the
+    /// server. (If the server cannot ignore them, it will fail to install the query).
+    ignored_columns: Vec<ColumnSchema>,
+}
+
 impl fmt::Debug for PreparedStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         match self {
-            PreparedStatement::Select {
+            PreparedStatement::Select(PreparedSelectStatement {
                 name, statement, ..
-            } => write!(f, "{}: {}", name, statement),
+            }) => write!(f, "{}: {}", name, statement),
             PreparedStatement::Insert(s) => write!(f, "{}", s),
             PreparedStatement::Update(s) => write!(f, "{}", s),
             PreparedStatement::Delete(s) => write!(f, "{}", s),
@@ -135,7 +138,7 @@ impl NoriaBackendInner {
     async fn ensure_getter(
         &mut self,
         view: &str,
-        region: Option<String>,
+        region: Option<&str>,
     ) -> ReadySetResult<&mut View> {
         self.get_or_make_getter(view, region).await
     }
@@ -151,7 +154,7 @@ impl NoriaBackendInner {
     async fn get_or_make_getter(
         &mut self,
         view: &str,
-        region: Option<String>,
+        region: Option<&str>,
     ) -> ReadySetResult<&mut View> {
         if !self.outputs.contains_key(view) {
             let vh = match region {
@@ -286,6 +289,22 @@ fn pop_limit_offset_params<'param>(
     (offset, row_count, params)
 }
 
+/// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
+/// with an execute statement will result in an empty resultset
+async fn short_circuit_empty_resultset(getter: &mut View) -> ReadySetResult<QueryResult<'_>> {
+    let getter_schema = getter
+        .schema()
+        .ok_or_else(|| internal_err("No schema for view"))?;
+    Ok(QueryResult::Select {
+        data: vec![],
+        select_schema: SelectSchema {
+            use_bogo: false,
+            schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
+            columns: Cow::Borrowed(getter.columns()),
+        },
+    })
+}
+
 impl Clone for NoriaConnector {
     fn clone(&self) -> Self {
         Self {
@@ -323,30 +342,6 @@ impl NoriaConnector {
         }
     }
 
-    /// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
-    /// with an execute statement will result in an empty resultset
-    async fn short_circuit_empty_resultset(
-        &mut self,
-        query_name: &str,
-    ) -> ReadySetResult<QueryResult<'_>> {
-        let getter = self
-            .inner
-            .get_mut()
-            .await?
-            .ensure_getter(query_name, self.region.clone())
-            .await?;
-        let getter_schema = getter
-            .schema()
-            .ok_or_else(|| internal_err("No schema for view"))?;
-        Ok(QueryResult::Select {
-            data: vec![],
-            select_schema: SelectSchema {
-                use_bogo: false,
-                schema: Cow::Borrowed(getter_schema.schema(SchemaType::ReturnedSchema)),
-                columns: Cow::Borrowed(getter.columns()),
-            },
-        })
-    }
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {
@@ -944,127 +939,6 @@ impl NoriaConnector {
         })
     }
 
-    async fn do_read(
-        &mut self,
-        qname: &str,
-        q: &nom_sql::SelectStatement,
-        mut keys: Vec<Cow<'_, [DataType]>>,
-        key_column_indices: &[usize],
-        ticket: Option<Timestamp>,
-    ) -> ReadySetResult<QueryResult<'_>> {
-        // create a getter if we don't have one for this query already
-        // TODO(malte): may need to make one anyway if the query has changed w.r.t. an
-        // earlier one of the same name
-        trace!("select::access view");
-        let getter = self
-            .inner
-            .get_mut()
-            .await?
-            .ensure_getter(qname, self.region.clone())
-            .await?;
-        let getter_schema = getter
-            .schema()
-            .ok_or_else(|| internal_err("No schema for view"))?;
-        let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
-        let mut key_types =
-            getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
-        trace!("select::lookup");
-        let bogo = vec![vec1![DataType::from(0i32)].into()];
-        let mut binops = utils::get_select_statement_binops(q);
-        let mut filter_op_idx = None;
-        let filter = binops
-            .iter()
-            .enumerate()
-            .find_map(|(i, (col, binop))| {
-                ViewQueryOperator::try_from(*binop)
-                    .ok()
-                    .map(|op| (i, col, op))
-            })
-            .map(|(idx, col, operator)| -> ReadySetResult<_> {
-                let key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
-                if !keys.is_empty() {
-                    unsupported!(
-                        "LIKE/ILIKE not currently supported for more than one lookup key at a time"
-                    );
-                }
-                let column = projected_schema
-                    .iter()
-                    .position(|x| x.spec.column.name == col.name)
-                    .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
-                let value = String::try_from(
-                    key[idx]
-                        .coerce_to(key_types.remove(idx))
-                        .unwrap()
-                        .into_owned(),
-                )?;
-                if !key.is_empty() {
-                    // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
-                    keys.push(key);
-                }
-
-                filter_op_idx = Some(idx);
-
-                Ok(ViewQueryFilter {
-                    column,
-                    operator,
-                    value,
-                })
-            })
-            .transpose()?;
-
-        if let Some(filter_op_idx) = filter_op_idx {
-            // if we're using a column for a post-lookup filter, remove it from our list of binops
-            // so we can use the remaining list for our keys
-            binops.remove(filter_op_idx);
-        }
-
-        let use_bogo = keys.is_empty();
-        let keys = if use_bogo {
-            bogo
-        } else {
-            let mut binops = binops.into_iter().map(|(_, b)| b).unique();
-            let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
-            if let Some(other) = binops.next() {
-                unsupported!("attempted to execute statement with conflicting binary operators {:?} and {:?}", binop_to_use, other);
-            }
-
-            keys.drain(..)
-                .map(|key| {
-                    let k = key
-                        .iter()
-                        .zip(&key_types)
-                        .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
-                        .collect::<ReadySetResult<Vec<DataType>>>()?;
-
-                    (k, binop_to_use)
-                        .try_into()
-                        .map_err(|_| ReadySetError::EmptyKey)
-                })
-                .collect::<ReadySetResult<Vec<_>>>()?
-        };
-
-        let vq = ViewQuery {
-            key_comparisons: keys,
-            block: true,
-            filter,
-            // TODO(andrew): Add a timestamp to views when RYW consistency
-            // is specified.
-            timestamp: ticket,
-        };
-
-        let data = getter.raw_lookup(vq).await?;
-        trace!("select::complete");
-
-        Ok(QueryResult::Select {
-            data,
-            select_schema: SelectSchema {
-                use_bogo,
-                schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), // Safe because we already unwrapped above
-                columns: Cow::Borrowed(getter.columns()),
-            },
-        })
-    }
-
     async fn do_update(
         &mut self,
         q: Cow<'_, UpdateStatement>,
@@ -1151,12 +1025,14 @@ impl NoriaConnector {
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
-        let getter_schema = self
+        let getter = self
             .inner
             .get_mut()
             .await?
-            .ensure_getter(&qname, self.region.clone())
-            .await?
+            .ensure_getter(&qname, self.region.as_deref())
+            .await?;
+
+        let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
@@ -1168,8 +1044,7 @@ impl NoriaConnector {
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        self.do_read(&qname, &query, keys, &key_column_indices, ticket)
-            .await
+        do_read(getter, &query, keys, &key_column_indices, ticket).await
     }
 
     pub(crate) async fn prepare_select(
@@ -1218,7 +1093,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_getter(&qname, self.region.clone())
+            .ensure_getter(&qname, self.region.as_deref())
             .await?
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
@@ -1237,14 +1112,15 @@ impl NoriaConnector {
             .indices_for_cols(noria_param_columns.iter(), SchemaType::ProjectedSchema)?;
 
         trace!(id = statement_id, "select::registered");
-        let ps = PreparedStatement::Select {
+        let ps = PreparedSelectStatement {
             name: qname,
             statement,
             key_column_indices,
             processed_query_params,
             ignored_columns: limit_columns.clone(),
         };
-        self.prepared_statement_cache.insert(statement_id, ps);
+        self.prepared_statement_cache
+            .insert(statement_id, PreparedStatement::Select(ps));
 
         params.extend(limit_columns);
         Ok(PrepareResult::Select {
@@ -1260,45 +1136,52 @@ impl NoriaConnector {
         params: &[DataType],
         ticket: Option<Timestamp>,
     ) -> ReadySetResult<QueryResult<'_>> {
-        let prep: PreparedStatement = {
-            match self.prepared_statement_cache.get(&q_id) {
-                Some(e) => e.clone(),
+        let NoriaConnector {
+            prepared_statement_cache,
+            inner: noria,
+            region,
+            ..
+        } = self;
+
+        let PreparedSelectStatement {
+            name,
+            statement,
+            key_column_indices,
+            processed_query_params,
+            ignored_columns,
+        } = {
+            match prepared_statement_cache.get(&q_id) {
+                Some(PreparedStatement::Select(ps)) => ps,
+                Some(_) => internal!(),
                 None => return Err(PreparedStatementMissing { statement_id: q_id }),
             }
         };
 
-        match &prep {
-            PreparedStatement::Select {
-                name,
-                statement: q,
-                key_column_indices,
-                processed_query_params,
-                ignored_columns,
-            } => {
-                trace!("apply where-in rewrites");
-                // ignore LIMIT and OFFSET params (and return empty resultset according to value)
-                let (offset, limit, params) = pop_limit_offset_params(params, ignored_columns);
-                // TODO(DAN): These should have been passed as UnsignedBigInt
-                if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
-                    || matches!(limit, Some(DataType::BigInt(0)))
-                {
-                    return self.short_circuit_empty_resultset(name).await;
-                }
+        trace!("apply where-in rewrites");
+        // ignore LIMIT and OFFSET params (and return empty resultset according to value)
+        let (offset, limit, params) = pop_limit_offset_params(params, ignored_columns);
 
-                return self
-                    .do_read(
-                        name,
-                        q,
-                        processed_query_params.make_keys(params)?,
-                        key_column_indices,
-                        ticket,
-                    )
-                    .await;
-            }
-            _ => {
-                internal!()
-            }
-        };
+        let getter = noria
+            .get_mut()
+            .await?
+            .ensure_getter(name, region.as_deref())
+            .await?;
+
+        // TODO(DAN): These should have been passed as UnsignedBigInt
+        if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
+            || matches!(limit, Some(DataType::BigInt(0)))
+        {
+            short_circuit_empty_resultset(getter).await
+        } else {
+            do_read(
+                getter,
+                statement,
+                processed_query_params.make_keys(params)?,
+                key_column_indices,
+                ticket,
+            )
+            .await
+        }
     }
 
     pub(crate) async fn handle_create_view(
@@ -1321,4 +1204,121 @@ impl NoriaConnector {
 
         Ok(QueryResult::Empty)
     }
+}
+
+/// Run the supplied [`SelectStatement`] on the supplied [`View`]
+/// Assumption: the [`View`] was created for that specific [`SelectStatement`]
+#[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
+async fn do_read<'a>(
+    getter: &'a mut View,
+    q: &nom_sql::SelectStatement,
+    mut keys: Vec<Cow<'_, [DataType]>>,
+    key_column_indices: &[usize],
+    ticket: Option<Timestamp>,
+) -> ReadySetResult<QueryResult<'a>> {
+    trace!("select::access view");
+    let getter_schema = getter
+        .schema()
+        .ok_or_else(|| internal_err("No schema for view"))?;
+    let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
+    let mut key_types = getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
+    trace!("select::lookup");
+    let bogo = vec![vec1![DataType::from(0i32)].into()];
+    let mut binops = utils::get_select_statement_binops(q);
+    let mut filter_op_idx = None;
+    let filter = binops
+        .iter()
+        .enumerate()
+        .find_map(|(i, (col, binop))| {
+            ViewQueryOperator::try_from(*binop)
+                .ok()
+                .map(|op| (i, col, op))
+        })
+        .map(|(idx, col, operator)| -> ReadySetResult<_> {
+            let key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
+            if !keys.is_empty() {
+                unsupported!(
+                    "LIKE/ILIKE not currently supported for more than one lookup key at a time"
+                );
+            }
+            let column = projected_schema
+                .iter()
+                .position(|x| x.spec.column.name == col.name)
+                .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
+            let value = String::try_from(
+                key[idx]
+                    .coerce_to(key_types.remove(idx))
+                    .unwrap()
+                    .into_owned(),
+            )?;
+            if !key.is_empty() {
+                // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
+                keys.push(key);
+            }
+
+            filter_op_idx = Some(idx);
+
+            Ok(ViewQueryFilter {
+                column,
+                operator,
+                value,
+            })
+        })
+        .transpose()?;
+
+    if let Some(filter_op_idx) = filter_op_idx {
+        // if we're using a column for a post-lookup filter, remove it from our list of binops
+        // so we can use the remaining list for our keys
+        binops.remove(filter_op_idx);
+    }
+
+    let use_bogo = keys.is_empty();
+    let keys = if use_bogo {
+        bogo
+    } else {
+        let mut binops = binops.into_iter().map(|(_, b)| b).unique();
+        let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
+        if let Some(other) = binops.next() {
+            unsupported!(
+                "attempted to execute statement with conflicting binary operators {:?} and {:?}",
+                binop_to_use,
+                other
+            );
+        }
+
+        keys.drain(..)
+            .map(|key| {
+                let k = key
+                    .iter()
+                    .zip(&key_types)
+                    .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
+                    .collect::<ReadySetResult<Vec<DataType>>>()?;
+
+                (k, binop_to_use)
+                    .try_into()
+                    .map_err(|_| ReadySetError::EmptyKey)
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?
+    };
+
+    let vq = ViewQuery {
+        key_comparisons: keys,
+        block: true,
+        filter,
+        // TODO(andrew): Add a timestamp to views when RYW consistency
+        // is specified.
+        timestamp: ticket,
+    };
+
+    let data = getter.raw_lookup(vq).await?;
+    trace!("select::complete");
+
+    Ok(QueryResult::Select {
+        data,
+        select_schema: SelectSchema {
+            use_bogo,
+            schema: Cow::Borrowed(getter.schema().unwrap().schema(SchemaType::ReturnedSchema)), // Safe because we already unwrapped above
+            columns: Cow::Borrowed(getter.columns()),
+        },
+    })
 }
