@@ -524,7 +524,7 @@ pub enum ColumnGenerationSpec {
 }
 
 impl ColumnGenerationSpec {
-    fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
+    pub fn generator_for_col(&self, col_type: SqlType) -> ColumnGenerator {
         match self {
             ColumnGenerationSpec::Unique => ColumnGenerator::Unique(col_type.into()),
             ColumnGenerationSpec::UniqueFrom(index) => {
@@ -572,6 +572,18 @@ pub enum ColumnGenerator {
     Random(RandomGenerator),
     /// Returns a random string from a regex
     RandomString(RandomStringGenerator),
+}
+
+impl ColumnGenerator {
+    pub fn gen(&mut self) -> DataType {
+        match self {
+            ColumnGenerator::Constant(g) => g.gen(),
+            ColumnGenerator::Unique(g) => g.gen(),
+            ColumnGenerator::Uniform(g) => g.gen(),
+            ColumnGenerator::Random(g) => g.gen(),
+            ColumnGenerator::RandomString(g) => g.gen(),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
