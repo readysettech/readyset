@@ -14,7 +14,6 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
-/usr/local/bin/configure-vector.sh
 
 NORIA_MEMORY_BYTES=$((${NORIA_MEMORY_LIMIT_GB}<<30))
 
@@ -38,6 +37,8 @@ NORIA_DEPLOYMENT=${DEPLOYMENT}
 NORIA_TYPE="readyset-server"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
+
+/usr/local/bin/configure-vector.sh
 
 cat > /etc/default/ensure-ebs-volume <<EOF
 AWS_CLOUDFORMATION_STACK=${AWS_CLOUDFORMATION_STACK}

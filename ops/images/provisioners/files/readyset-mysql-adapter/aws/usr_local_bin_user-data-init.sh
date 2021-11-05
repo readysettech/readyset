@@ -14,7 +14,6 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
-/usr/local/bin/configure-vector.sh
 
 cat > /etc/default/readyset-mysql-adapter <<EOF
 UPSTREAM_DB_URL=${UPSTREAM_DB_URL}
@@ -32,6 +31,8 @@ NORIA_DEPLOYMENT=${DEPLOYMENT}
 NORIA_TYPE="readyset-adapter"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
+
+/usr/local/bin/configure-vector.sh
 
 systemctl reset-failed
 systemctl enable readyset-mysql-adapter

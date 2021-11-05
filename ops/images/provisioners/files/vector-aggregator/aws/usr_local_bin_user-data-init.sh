@@ -14,10 +14,6 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
-
-# Drop errors from vector which can flakily fail to start
-# if vector fails to open a prometheus scrape endpoint.
-/usr/local/bin/configure-vector.sh || true
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
 
@@ -75,6 +71,10 @@ type = "prometheus_exporter"
 inputs = ["in", "metrics"]
 address = "0.0.0.0:9090"
 EOF
+
+# Drop errors from vector which can flakily fail to start
+# if vector fails to open a prometheus scrape endpoint.
+/usr/local/bin/configure-vector.sh || true
 
 systemctl reset-failed
 systemctl enable metrics-aggregator
