@@ -256,10 +256,9 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -281,10 +280,9 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -306,10 +304,9 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -330,10 +327,9 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -355,10 +351,9 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
           - 'cargo-registry:/usr/local/cargo/registry'
-          - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true

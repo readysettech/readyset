@@ -89,8 +89,8 @@ steps:
           volumes:
           - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -105,8 +105,8 @@ steps:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -123,8 +123,8 @@ steps:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -142,8 +142,8 @@ steps:
           volumes:
           - 'target:/workdir/target'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -164,10 +164,9 @@ steps:
           image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
           volumes:
             - "cargo-registry:/usr/local/cargo/registry"
-            - "cargo-registry:/usr/local/cargo/registry"
           environment:
-            - SCCACHE_BUCKET=readyset-sccache-e1
-            - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+            - CACHEPOT_REGION=us-east-2
             - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
@@ -208,8 +207,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           config:
             - docker-compose.yml
@@ -219,8 +218,6 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
-    env:
-      SCCACHE_BUCKET: readyset-sccache
     agents:
       queue: c5a-4xlarge
 
@@ -236,8 +233,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           config:
             - docker-compose.yml
@@ -246,8 +243,6 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
-    env:
-      SCCACHE_BUCKET: readyset-sccache
 
   - label: 'Run logictest with MySQL replication'
     key: logictest-binlog
@@ -263,8 +258,8 @@ steps:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           run: app
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           config:
             - docker-compose.yml
@@ -288,8 +283,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/se    curity-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - BINARY_PATH=/workdir/target/release
           - MYSQL_ROOT_PASSWORD=noria
@@ -319,8 +314,8 @@ steps:
           - 'target:/workdir/target'
           - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           mount-ssh-agent: true
       - ecr#v2.5.0:
@@ -499,8 +494,8 @@ steps:
       - docker-compose#v3.7.0:
           run: test-deploy
           environment:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - BUILDKITE_COMMIT
           - NIGHTLY=false

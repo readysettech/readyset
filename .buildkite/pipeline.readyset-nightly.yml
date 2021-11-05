@@ -19,8 +19,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           config:
             - docker-compose.yml
@@ -29,8 +29,6 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
-    env:
-      SCCACHE_BUCKET: readyset-sccache
     agents:
       queue: r5a-2xlarge
 
@@ -43,8 +41,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - PROPTEST_CASES=1000
           config:
@@ -68,8 +66,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           config:
             - docker-compose.yml
@@ -77,8 +75,6 @@ steps:
           pull-retries: 3
       - ecr#v2.2.0:
           login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
     agents:
       queue: r5a-2xlarge
 
@@ -97,8 +93,8 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
           - BINARY_PATH=/workdir/target/release
           - MYSQL_ROOT_PASSWORD=noria
@@ -111,7 +107,5 @@ steps:
           pull-retries: 3
       - ecr#v2.2.0:
           login: true
-    env:
-      SCCACHE_BUCKET: readyset-sccache
     agents:
       queue: r5a-2xlarge

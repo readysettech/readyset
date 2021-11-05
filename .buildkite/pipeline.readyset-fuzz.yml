@@ -20,15 +20,13 @@ steps:
       - docker-compose#v3.7.0:
           run: app
           env:
-          - SCCACHE_BUCKET=readyset-sccache-e1
-          - AWS_IAM_CREDENTIALS_URL=http://169.254.169.254/latest/meta-data/iam/security-credentials/buildkite-Role
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
+          - PROPTEST_MAX_SHRINK_ITERS=1000
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
       - ecr#v2.5.0:
           login: true
           retries: 3
-    env:
-      SCCACHE_BUCKET: readyset-sccache
-      PROPTEST_MAX_SHRINK_ITERS: 1000
