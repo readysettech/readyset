@@ -189,21 +189,6 @@ impl ViewSchema {
             .collect()
     }
 
-    /// Convert the schema to a `Vec` of [`ColumnSchema`], for the speicified indices
-    pub fn to_cols_with_indices<'a>(
-        &'a self,
-        indices: &[usize],
-        schema_type: SchemaType,
-    ) -> ReadySetResult<Vec<&'a ColumnSchema>> {
-        let schema = self.schema(schema_type);
-
-        indices
-            .iter()
-            .map(|i| schema.get(*i))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| internal_err("Schema expects valid column indices"))
-    }
-
     /// Get the indices of the columns in the schema that correspond to the list of provided
     /// [`nom_sql::Column`]. The columns match if either the column name matches (the alias)
     /// or the real base name

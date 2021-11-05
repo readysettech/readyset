@@ -324,12 +324,12 @@ impl ControllerHandle {
     pub fn view_from_region<'a>(
         &'a mut self,
         name: &str,
-        region: String,
+        region: &str,
     ) -> impl Future<Output = ReadySetResult<View>> + 'a {
         let name = name.to_string();
         let request = ViewRequest {
             name,
-            filter: Some(ViewFilter::Region(region)),
+            filter: Some(ViewFilter::Region(region.to_string())),
         };
         self.request_view(request)
     }

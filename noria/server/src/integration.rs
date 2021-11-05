@@ -4963,7 +4963,7 @@ async fn test_view_includes_replicas() {
     assert!(r2_node.is_some());
 
     // Verify this selects reader nodes with the correct region.
-    let result = w1.view_from_region("q", "r2".to_string()).await;
+    let result = w1.view_from_region("q", "r2").await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().node().index(), r2_node.unwrap().index());
 }
