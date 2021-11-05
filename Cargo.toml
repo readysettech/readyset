@@ -1,6 +1,7 @@
 [patch.crates-io]
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 bindgen = { git = "https://github.com/rust-lang/rust-bindgen.git", branch = "master" }
+mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
 
 [workspace]
 members = [
