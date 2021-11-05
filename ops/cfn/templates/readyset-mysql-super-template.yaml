@@ -159,6 +159,8 @@ Parameters:
     Type: String
     Description: The EC2 instance type to use for server instances.
     Default: c5.large
+    AllowedPattern: '^(\w)5.*'
+    ConstraintDescription: Instance type must be 5th generation.
   ReadySetServerNodes:
     Type: String
     Description: Number of server nodes to create

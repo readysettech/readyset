@@ -33,7 +33,7 @@ Parameters:
     Type: String
   VPCPrivateSubnetIds:
     Description: Comma-delimited list of private VPC subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
-    Type: List<AWS::EC2::Subnet::Id>
+    Type: CommaDelimitedList
   DatabaseStorageType:
     Description: Database storage type
     Type: String
@@ -52,9 +52,9 @@ Parameters:
     Description: Enables Multi-AZ on the database instance. Recommended for production.
     Type: String
     AllowedValues:
-      - true
-      - false
-    Default: "false"
+      - 'true'
+      - 'false'
+    Default: 'false'
   DatabaseName:
     Description: Database name
     Type: String

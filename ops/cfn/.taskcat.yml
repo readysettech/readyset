@@ -4,8 +4,8 @@ project:
 tests:
   readyset-mysql-with-vpc:
     parameters:
-      ReadysetAdapterNodes: 3
-      ReadysetServerNodes: 3
+      ReadySetAdapterNodes: 3
+      ReadySetServerNodes: 3
       AvailabilityZones: $[taskcat_genaz_3]
       DatabaseUsername: readyset
       DatabasePassword: readyset
@@ -13,3 +13,14 @@ tests:
       DatabaseStorageType: gp2
       DatabaseAllocatedStorage: 20
     template: templates/readyset-mysql-super-template.yaml
+  readyset-postgres-with-vpc:
+    parameters:
+      ReadySetAdapterNodes: 3
+      ReadySetServerNodes: 3
+      AvailabilityZones: $[taskcat_genaz_3]
+      DatabaseUsername: readyset
+      DatabasePassword: readyset
+      DatabaseName: readyset
+      DatabaseStorageType: gp2
+      DatabaseAllocatedStorage: 20
+    template: templates/readyset-postgresql-super-template.yaml
