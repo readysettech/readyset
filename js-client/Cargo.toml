@@ -9,7 +9,8 @@ exclude = ["index.node"]
 crate-type = ["cdylib"]
 
 [dependencies]
-mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
+mysql_async = "0.28"
+
 msql-srv = { path = "../msql-srv" }
 noria-client = { path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }

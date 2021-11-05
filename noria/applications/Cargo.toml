@@ -14,7 +14,7 @@ futures-util = "0.3.0"
 hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec and funty:
                       # https://github.com/nucypher/rust-umbral/issues/34
 itertools = "0.9"
-mysql_async = "0.27.1"
+mysql_async = "0.28"
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../server", package = "noria-server" }
 readyset-logging = { path = "../../readyset-logging" }

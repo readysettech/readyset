@@ -13,7 +13,8 @@ categories = ["api-bindings", "network-programming", "database-implementations"]
 
 [dependencies]
 nom = "5.0.1"
-mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
+mysql_async = "0.28"
+
 mysql_common = "0.27.5"
 byteorder = "1"
 chrono = "0.4"
@@ -28,6 +29,7 @@ mysql-time = { path = "../mysql-time" }
 [dev-dependencies]
 postgres = "0.19.1"
 mysql = "21.0.1"
-mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "sync-with-upstream" }
+mysql_async = "0.28"
+
 slab = "0.4.2"
 futures = "0.1.26"

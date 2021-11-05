@@ -123,7 +123,7 @@ async fn main() {
     let database = std::env::var("RS_DATABASE").unwrap();
     let url = format!("mysql://{}@{}:{}/{}", &auth, &host, port, &database);
     println!("+++ URL: {}\n", &url);
-    let pool = Pool::new(url);
+    let pool = Pool::new(url.as_str());
     let mut conn = pool.get_conn().await.unwrap();
 
     let query = "DROP TABLE IF EXISTS payment";
