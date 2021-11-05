@@ -11,6 +11,26 @@ locals {
   ]
 }
 
+resource "aws_s3_bucket" "sccache" {
+  bucket = "readysettech-build-sccache-us-east-2"
+  tags = {
+    Name = "readysettech-build-sccache-us-east-2"
+  }
+
+  # No versioning as this is a cache. Probably should also have a lifecycle
+  # policy at some point.
+}
+
+resource "aws_s3_bucket_public_access_block" "sccache" {
+  bucket = aws_s3_bucket.sccache.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+
 module "buildkite_queue_shared" {
   source           = "../../../../../modules/buildkite-queue-shared/regional"
   environment      = "build"
@@ -22,7 +42,6 @@ module "buildkite_queue_shared" {
     flatten(values(module.buildkite_queue)[*].iam_roles),
   )
 }
-
 module "buildkite_queue" {
   for_each = toset(local.instance_types)
 
