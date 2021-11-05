@@ -559,7 +559,7 @@ pub struct ViewBuilder {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewReplica {
     pub node: NodeIndex,
-    pub columns: Vec<String>,
+    pub columns: Arc<[String]>,
     pub schema: Option<ViewSchema>,
     pub shards: Vec<ReplicaShard>,
 }
@@ -672,7 +672,7 @@ impl ViewBuilder {
 #[derive(Clone)]
 pub struct View {
     node: NodeIndex,
-    columns: Vec<String>,
+    columns: Arc<[String]>,
     schema: Option<ViewSchema>,
 
     shards: Vec1<ViewRpc>,
@@ -807,7 +807,7 @@ impl Service<ViewQuery> for View {
             None
         };
 
-        let columns = Arc::from(&self.columns[..]);
+        let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
                 target: (self.node, 0),
