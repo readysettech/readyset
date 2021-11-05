@@ -1,0 +1,242 @@
+//! Utilities for working with parameterized queries. Benchmarks that
+//! execute arbitrary parameterized queries may benefit from these
+//! definitions and these utilities.
+//!
+//! The core of these utilities is the PreparedStatement struct. This
+//! packages a parameterized prepared statement we intend to execute
+//! for a benchmark, with "how" to generate the parameters for this
+//! statement. Each parameter in a prepared statement is generated
+//! based on a ParameterAnnotation.
+
+use anyhow::bail;
+use clap::Parser;
+use mysql::consts::ColumnType;
+use mysql_async::prelude::Queryable;
+use mysql_async::Statement;
+use mysql_async::Value;
+use nom_sql::SqlType;
+use noria::DataType;
+use query_generator::ColumnGenerationSpec;
+use std::convert::TryFrom;
+use std::convert::TryInto;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::utils::random::random_value_for_sql_type;
+
+#[derive(Parser, Clone)]
+pub struct ArbitraryQueryParameters {
+    /// A path to the query that we are benchmarking.
+    #[clap(long)]
+    query: PathBuf,
+
+    /// A annotation spec for each of the parameters in query. See
+    /// `ParameterAnnotations` for the format of the file.
+    #[clap(long)]
+    query_spec_file: Option<PathBuf>,
+
+    /// An query spec passed in as a comma separated list. See
+    /// `ParameterAnnotation` for the format for each parameters annotation.
+    #[clap(long, conflicts_with = "query-spec-file")]
+    query_spec: Option<String>,
+}
+
+impl ArbitraryQueryParameters {
+    pub async fn prepared_statement(
+        &self,
+        conn: &mut mysql_async::Conn,
+    ) -> anyhow::Result<PreparedStatement> {
+        // Mapping against two different parameters.
+        #[allow(clippy::manual_map)]
+        let spec = if let Some(f) = &self.query_spec_file {
+            Some(ParameterAnnotations::try_from(f.as_path()).unwrap())
+        } else if let Some(s) = &self.query_spec {
+            Some(ParameterAnnotations::try_from(s.clone()).unwrap())
+        } else {
+            None
+        };
+        let query = fs::read_to_string(&self.query).unwrap();
+        let stmt = conn.prep(query.clone()).await?;
+
+        Ok(match spec {
+            None => PreparedStatement::new(query, stmt),
+            Some(s) => PreparedStatement::new_with_annotation(query, stmt, s),
+        })
+    }
+}
+
+/// An annotation for how to generate a parameter's value for a query. A
+/// parameter annotation takes the following form:
+///   <annotation type> <annotation type parameters>.
+///
+/// The annotation type indicates a general way of generating the parameter,
+/// for example, `uniform` is a annotation type that may be used to generate
+/// uniformly random values over a minimum and maximum value that can
+/// be specified via the parameters, i.e. `uniform 4 100`.
+pub struct ParameterAnnotation {
+    pub spec: ColumnGenerationSpec,
+}
+
+impl TryFrom<&str> for ParameterAnnotation {
+    type Error = anyhow::Error;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let mut chunks = s.split_ascii_whitespace();
+
+        let spec = match chunks.next().unwrap() {
+            "uniform" => {
+                let from: i32 = chunks.next().unwrap().parse().unwrap();
+                let to: i32 = chunks.next().unwrap().parse().unwrap();
+                ColumnGenerationSpec::Uniform(DataType::Int(from), DataType::Int(to))
+            }
+            "regex" => {
+                let regex = chunks.next().unwrap().trim_matches('"');
+                ColumnGenerationSpec::RandomString(regex.to_owned())
+            }
+            _ => bail!("Unrecognized annotation"),
+        };
+
+        Ok(Self { spec })
+    }
+}
+
+/// Utility wrapper around Vec<ParameterAnnotation>. A list of ParameterAnnotation
+/// delimited by a comma ',' or newline '\n' can be converted from a String
+/// through ParameterAnnotations::try_from. A wrapper to convert from a file
+/// including ParameterAnnotations is also provided.
+pub struct ParameterAnnotations(Vec<ParameterAnnotation>);
+
+impl TryFrom<String> for ParameterAnnotations {
+    type Error = anyhow::Error;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Ok(ParameterAnnotations(
+            s.split(&[',', '\n'][..])
+                .filter_map(|m| {
+                    if m.trim().is_empty() {
+                        return None;
+                    }
+                    Some(ParameterAnnotation::try_from(m))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
+    }
+}
+
+impl TryFrom<&Path> for ParameterAnnotations {
+    type Error = anyhow::Error;
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
+        ParameterAnnotations::try_from(std::fs::read_to_string(path)?)
+    }
+}
+
+/// Converts from a MySQL column type to a nom_sql::SqlType. Most ReadySet
+/// internal utilities use SqlTypes so this utility enables using them for
+/// MySQL types.
+pub(crate) fn column_to_sqltype(c: &ColumnType) -> SqlType {
+    use mysql_async::consts::ColumnType::*;
+    match c {
+        // TODO(justin): Abstract random value generation to utilities crate
+        // TODO(justin): These columns may have fixed sizes.
+        MYSQL_TYPE_VAR_STRING => SqlType::Varchar(None),
+        MYSQL_TYPE_BLOB => SqlType::Text,
+        MYSQL_TYPE_TINY => SqlType::Tinyint(None),
+        MYSQL_TYPE_SHORT => SqlType::Smallint(None),
+        MYSQL_TYPE_BIT => SqlType::Bool,
+        MYSQL_TYPE_FLOAT => SqlType::Float,
+        MYSQL_TYPE_STRING => SqlType::Char(None),
+        MYSQL_TYPE_LONGLONG | MYSQL_TYPE_LONG => SqlType::UnsignedInt(None),
+        MYSQL_TYPE_DATETIME => SqlType::DateTime(None),
+        MYSQL_TYPE_DATE => SqlType::Date,
+        MYSQL_TYPE_TIMESTAMP => SqlType::Timestamp,
+        MYSQL_TYPE_TIME => SqlType::Time,
+        MYSQL_TYPE_JSON => SqlType::Json,
+        t => unimplemented!("Unsupported type: {:?}", t),
+    }
+}
+
+pub struct ParameterGenerationSpec {
+    pub column_type: SqlType,
+    pub annotation: Option<ParameterAnnotation>,
+}
+
+/// A query prepared against MySQL and the corresponding specification for
+/// parameters in the prepared statement.
+pub struct PreparedStatement {
+    pub query: String,
+    pub params: Vec<ParameterGenerationSpec>,
+}
+
+impl PreparedStatement {
+    pub fn new(query: String, stmt: Statement) -> Self {
+        Self {
+            query,
+            params: stmt
+                .params()
+                .iter()
+                .map(|c| ParameterGenerationSpec {
+                    column_type: column_to_sqltype(&c.column_type()),
+                    annotation: None,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn new_with_annotation(query: String, stmt: Statement, spec: ParameterAnnotations) -> Self {
+        let params = stmt
+            .params()
+            .iter()
+            .zip(spec.0.into_iter())
+            .map(|(column, annotation)| ParameterGenerationSpec {
+                column_type: column_to_sqltype(&column.column_type()),
+                annotation: Some(annotation),
+            })
+            .collect();
+
+        Self { query, params }
+    }
+
+    /// Returns the query text and a set of parameters that can be used to
+    /// execute this prepared statement.
+    pub fn generate_query(&self) -> (String, Vec<Value>) {
+        (
+            self.query.clone(),
+            self.params
+                .iter()
+                .map(|t| match &t.annotation {
+                    None => random_value_for_sql_type(&t.column_type),
+                    Some(annotation) => annotation
+                        .spec
+                        .generator_for_col(t.column_type.clone())
+                        .gen()
+                        .try_into()
+                        .unwrap(),
+                })
+                .collect(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_uniform_annotation_spec() {
+        let q = "uniform 4 100";
+        let s = ParameterAnnotation::try_from(q).unwrap();
+        assert!(matches!(
+            s.spec,
+            ColumnGenerationSpec::Uniform(DataType::Int(4), DataType::Int(100))
+        ));
+    }
+
+    #[test]
+    fn parse_annotation_specs() {
+        let q = "
+            uniform 4 100
+            uniform 5 101"
+            .to_string();
+        let s = ParameterAnnotations::try_from(q).unwrap();
+        assert_eq!(s.0.len(), 2);
+    }
+}

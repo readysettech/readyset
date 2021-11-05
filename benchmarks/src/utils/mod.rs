@@ -6,6 +6,7 @@ use std::time::Duration;
 
 pub mod generate;
 pub mod multi_thread;
+pub mod query;
 pub mod random;
 pub mod spec;
 

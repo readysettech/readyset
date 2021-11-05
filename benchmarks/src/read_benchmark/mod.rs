@@ -1,19 +1,20 @@
+//! A ReadySet read benchmark that supports arbitrary parameterized queries.
+//! This is a multi-threaded benchmark that runs a single query with
+//! randomly generated parameters across several threads. It can be used to
+//! evaluate a ReadySet deployment at various loads and request patterns.
 use std::convert::TryFrom;
-use std::fs;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
-use mysql::consts::ColumnType;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Row, Value};
+use mysql_async::Row;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
-use crate::utils::random::random_value_for_sql_type;
+use crate::utils::query::ArbitraryQueryParameters;
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -22,6 +23,10 @@ pub struct ReadBenchmarkParams {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
     common: BenchmarkParameters,
+
+    /// Parameters to handle generating parameters for arbitrary queries.
+    #[clap(flatten)]
+    query: ArbitraryQueryParameters,
 
     /// The target rate to issue queries at if attainable on this
     /// machine with up to `threads`.
@@ -35,12 +40,6 @@ pub struct ReadBenchmarkParams {
     /// The connection string of a database that accepts MySQL queries.
     #[clap(long)]
     mysql_conn_str: String,
-
-    /// A path to the query that we are benchmarking. We will prepare
-    /// this query once to retrieve the column type for each of the
-    /// parameters.
-    #[clap(long)]
-    query: PathBuf,
 }
 
 #[derive(Parser, Clone)]
@@ -74,25 +73,6 @@ impl ReadBenchmarkResultBatch {
         Self {
             queries: Vec::new(),
         }
-    }
-}
-
-struct PreparedStatement {
-    query: String,
-    param_types: Vec<ColumnType>,
-}
-
-impl PreparedStatement {
-    /// Returns the query text and a set of parameters that can be used to
-    /// execute this prepared statement.
-    fn random_exec(&self) -> (String, Vec<Value>) {
-        (
-            self.query.clone(),
-            self.param_types
-                .iter()
-                .map(|t| random_value_for_sql_type(t))
-                .collect(),
-        )
     }
 }
 
@@ -134,13 +114,7 @@ impl MultithreadBenchmark for ReadBenchmark {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-
-        let query = fs::read_to_string(&params.query).unwrap();
-        let stmt = conn.prep(query.clone()).await?;
-        let prepared_statement = PreparedStatement {
-            query,
-            param_types: stmt.params().iter().map(|c| c.column_type()).collect(),
-        };
+        let prepared_statement = params.query.prepared_statement(&mut conn).await?;
 
         // Each thread should execute qps/num_threads every second.
         let mut throttle_interval = params.target_qps.as_ref().map(|qps| {
@@ -161,7 +135,7 @@ impl MultithreadBenchmark for ReadBenchmark {
                 interval.tick().await;
             }
 
-            let (query, params) = prepared_statement.random_exec();
+            let (query, params) = prepared_statement.generate_query();
             let start = Instant::now();
             let _: Vec<Row> = conn.exec(query, params).await?;
             result_batch.queries.push(start.elapsed().as_micros());

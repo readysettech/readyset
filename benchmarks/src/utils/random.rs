@@ -1,19 +1,12 @@
-use mysql_async::consts::ColumnType;
 use mysql_async::Value;
 use nom_sql::SqlType;
 use query_generator::RandomGenerator;
 use std::convert::TryInto;
 
-pub(crate) fn random_value_for_sql_type(sql_type: &ColumnType) -> Value {
-    use ColumnType::*;
-    let t = match sql_type {
-        // TODO(justin): Abstract random value generation to utilities crate
-        MYSQL_TYPE_LONGLONG => SqlType::UnsignedInt(None),
-        MYSQL_TYPE_DATETIME => SqlType::DateTime(None),
-        t => unimplemented!("Unsupported type: {:?}", t),
-    };
-
-    let random = RandomGenerator::from(t);
-
+/// Uses a random generator that uses the bounds of the SqlType to determine the
+/// range to generate random values in. This is unlikely to randomly generate
+/// values within the range of base tables.
+pub(crate) fn random_value_for_sql_type(sql_type: &SqlType) -> Value {
+    let random = RandomGenerator::from(sql_type.clone());
     random.gen().try_into().unwrap()
 }
