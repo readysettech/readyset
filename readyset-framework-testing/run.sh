@@ -14,20 +14,30 @@ function contains() {
 }
 
 function cleanup_tables() {
-  mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL' 2>/dev/null | while read -r table key; do
-    echo "ALTER TABLE \`${table}\` DROP FOREIGN KEY \`${key}\`;";
-  done | mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" 2>/dev/null;
+  if [[ "${RS_DIALECT}" =~ ^mysql ]]; then
+    mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SELECT DISTINCT TABLE_NAME, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL' 2>/dev/null | while read -r table key; do
+      echo "ALTER TABLE \`${table}\` DROP FOREIGN KEY \`${key}\`;";
+    done | mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" 2>/dev/null;
 
-  tables="$(mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SHOW TABLES' 2>/dev/null | sed 's/^\|$/`/g' | xargs echo | sed 's/ /,/g')";
-  if [[ "${tables}" != '' ]]; then
-    mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne "DROP TABLE ${tables}" 2>/dev/null;
-  fi
-
-  mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SHOW VSCHEMA TABLES' 2>/dev/null | while read -r table; do
-    if [[ "$table" != "dual" ]]; then
-      echo "ALTER VSCHEMA DROP TABLE \`${table}\`;"
+    tables="$(mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SHOW TABLES' 2>/dev/null | sed 's/^\|$/`/g' | xargs echo | sed 's/ /,/g')";
+    if [[ "${tables}" != '' ]]; then
+      mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne "DROP TABLE ${tables}" 2>/dev/null;
     fi
-  done | mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" 2>/dev/null;
+
+    mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" -Ne 'SHOW VSCHEMA TABLES' 2>/dev/null | while read -r table; do
+      if [[ "$table" != "dual" ]]; then
+        echo "ALTER VSCHEMA DROP TABLE \`${table}\`;"
+      fi
+    done | mysql --host "${RS_HOST}" --port "${RS_PORT}" --user "${RS_USERNAME}" "-p${RS_PASSWORD}" "${RS_DATABASE}" 2>/dev/null;
+  elif [[ "${RS_DIALECT}" =~ ^postgres ]]; then
+    tables="$(echo '\dt' | PGPASSWORD="${RS_PASSWORD}" psql -h"${RS_HOST}" -p"${RS_PORT}" -U"${RS_USERNAME}" "${RS_DATABASE}" | grep '^ public' | awk '{print $3}')"
+    for table in ${tables}; do
+      echo "DROP TABLE \"${table}\" CASCADE;"
+    done | PGPASSWORD="${RS_PASSWORD}" psql -h"${RS_HOST}" -p"${RS_PORT}" -U"${RS_USERNAME}" "${RS_DATABASE}"
+  else
+    echo "!!! Unknown dialect ${RS_DIALECT}, only mysql* and postgres* are understood by cleanup_tables"
+    exit 1
+  fi
 }
 
 # usage: generate_image_name "$dialect" "$language/$framework"
