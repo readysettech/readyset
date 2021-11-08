@@ -1077,3 +1077,56 @@ fn reusing_params_is_unsupported() {
         .get(0);
     assert_eq!(name, String::from("Bob"));
 }
+
+#[test]
+fn placeholder_numbering_does_not_break_postgres() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (1, 2, 'Alice')")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (2, 1, 'Bob')")
+        .unwrap();
+    sleep();
+
+    let name: String = conn
+        .query_one(
+            "SELECT Cats.name FROM Cats WHERE Cats.val = 1 AND Cats.id IN ($1, $2)",
+            &[&1, &2],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(name, String::from("Bob"));
+}
+
+#[test]
+#[ignore] // remove ignore when ENG-929 is fixed
+fn placeholder_numbering_does_not_break_postgres_ignore() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (1, 2, 'Alice')")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (2, 1, 'Bob')")
+        .unwrap();
+    sleep();
+
+    let name: String = conn
+        .query_one(
+            "SELECT Cats.name FROM Cats WHERE Cats.id = $2 AND Cats.val = $1",
+            &[&1, &2],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(name, String::from("Bob"));
+}
