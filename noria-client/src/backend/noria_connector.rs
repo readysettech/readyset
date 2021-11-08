@@ -325,7 +325,13 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch).await;
+        let backend: ReadySetResult<NoriaBackendInner> = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            NoriaBackendInner::new(ch),
+        )
+        .await
+        .map_err(|_| internal_err("a timeout occur while trying to connect to Noria"))
+        .and_then(|r| r);
         if let Err(e) = &backend {
             error!(%e, "Error creating a noria backend");
         }
