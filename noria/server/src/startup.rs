@@ -69,7 +69,7 @@ use noria::{ControllerDescriptor, WorkerDescriptor};
 use crate::controller::Controller;
 use crate::handle::Handle;
 use crate::http_router::NoriaServerHttpRouter;
-use crate::worker::Worker;
+use crate::worker::{MemoryTracker, Worker};
 use crate::{Config, VolumeId};
 
 /// Start up a new instance and return a handle to it. Dropping the handle will stop the
@@ -149,6 +149,7 @@ pub(super) async fn start_instance(
         readers,
         valve: valve.clone(),
         domains: Default::default(),
+        memory: MemoryTracker::new()?,
     };
 
     tokio::spawn(maybe_abort_on_panic!(worker.run()));

@@ -30,6 +30,7 @@ use noria::{
 
 use chrono::NaiveDate;
 use noria_errors::ReadySetError::MigrationPlanFailed;
+use rusty_fork::rusty_fork_test;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
@@ -7047,9 +7048,7 @@ async fn partial_join_on_one_parent() {
     assert_eq!(res2.len(), 20);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn aggressive_eviction() {
-    // This test is based on the Fastly demo
+async fn aggressive_eviction_impl() {
     let mut g = build(
         "aggressive_eviction",
         None,
@@ -7130,6 +7129,18 @@ async fn aggressive_eviction() {
 
         let r = view.raw_lookup(vq).await.unwrap();
         assert_eq!(r.len(), keys.len());
+    }
+}
+
+rusty_fork_test! {
+    #[test]
+    fn aggressive_eviction() {
+        // #[tokio::test] doesn't play well with rusty_fork_test, so have to do this manually
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(aggressive_eviction_impl());
     }
 }
 

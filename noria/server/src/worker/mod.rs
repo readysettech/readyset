@@ -3,6 +3,8 @@ use crate::worker::replica::WrappedDomainRequest;
 use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
+use jemalloc_ctl::stats::allocated_mib;
+use jemalloc_ctl::{epoch, epoch_mib, stats};
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
 use noria::internal::DomainIndex;
@@ -11,6 +13,7 @@ use noria::{channel, ReadySetError};
 use noria_errors::internal_err;
 use replica::ReplicaAddr;
 use serde::{Deserialize, Serialize};
+use std::cmp;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
@@ -95,6 +98,31 @@ pub struct DomainHandle {
     join_handle: JoinHandle<Result<(), anyhow::Error>>,
 }
 
+/// Long-lived struct for tracking the currently allocated heap memory used by the current process
+/// by querying [`jemalloc_ctl`]
+#[derive(Clone, Copy)]
+pub struct MemoryTracker {
+    epoch: epoch_mib,
+    allocated: allocated_mib,
+}
+
+impl MemoryTracker {
+    /// Construct a new [`MemoryTracker`]
+    pub fn new() -> ReadySetResult<Self> {
+        Ok(Self {
+            epoch: epoch::mib()?,
+            allocated: stats::allocated::mib()?,
+        })
+    }
+
+    /// Query jemalloc for the currently allocated heap memory used by the current process, in
+    /// bytes.
+    pub fn allocated_bytes(self) -> ReadySetResult<usize> {
+        self.epoch.advance()?;
+        Ok(self.allocated.read()?)
+    }
+}
+
 /// A Noria worker, responsible for executing some domains.
 pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
@@ -122,6 +150,8 @@ pub struct Worker {
     ///
     /// These are indexed by (domain index, shard).
     pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
+
+    pub(crate) memory: MemoryTracker,
 }
 
 impl Worker {
@@ -129,7 +159,8 @@ impl Worker {
         tokio::spawn(do_eviction(
             self.memory_limit,
             self.coord.clone(),
-            self.state_sizes.clone(),
+            self.memory,
+            Arc::clone(&self.state_sizes),
         ));
     }
 
@@ -341,53 +372,65 @@ impl Worker {
     }
 }
 
+/// Calculate the total memory used by the process (by querying [`jemalloc_ctl`]), then perform an
+/// eviction if that's over the configured `memory_limit`.
+///
+/// There is a *significant* proportional discrepancy - about 8x - between the memory size reported
+/// by individual node states and the actual number of bytes allocated by the application - rather
+/// than trying to make the estimation accurate, we instead use the [`jemalloc_ctl`] API to query
+/// the global allocator directly for the amount of memory we use and use that to decide *when* to
+/// evict, but use the state sizes of individual nodes to decide *where* to evict. This is
+/// imperfect, and should likely be improved in the future, but is a good way to avoid running fully
+/// out of memory and getting OOM-killed before we ever realise it's time to evict.
 #[allow(clippy::type_complexity)]
 async fn do_eviction(
     memory_limit: Option<usize>,
     coord: Arc<ChannelCoordinator>,
+    memory_tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
 ) -> ReadySetResult<()> {
     let span = info_span!("evicting");
-    let mut domain_senders = HashMap::new();
-
-    use std::cmp;
-
     let start = std::time::Instant::now();
 
-    // 2. add current state sizes (could be out of date, as packet sent below is not
-    //    necessarily received immediately)
-    let mut sizes: Vec<((DomainIndex, usize), usize)> = tokio::task::block_in_place(|| {
-        let state_sizes = state_sizes.lock().unwrap();
-        state_sizes
-            .iter()
-            .map(|(ds, sa)| {
-                let size = sa.load(Ordering::Acquire);
-                span.in_scope(|| {
-                    trace!(
-                        "domain {}.{} state size is {} bytes",
-                        ds.0.index(),
-                        ds.1,
-                        size
-                    )
-                });
-                (*ds, size)
-            })
-            .collect()
-    });
-
-    // 3. are we above the limit?
-    let total: usize = sizes.iter().map(|&(_, s)| s).sum();
-    gauge!(
-        recorded::EVICTION_WORKER_PARTIAL_MEMORY_BYTES_USED,
-        total as f64
-    );
+    let used: usize = memory_tracker.allocated_bytes()?;
+    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES, used as f64);
+    // Are we over the limit?
     match memory_limit {
         None => Ok(()),
         Some(limit) => {
-            if total >= limit {
-                let mut over = total - limit;
-
+            if used >= limit {
                 // we are! time to evict.
+                // add current state sizes (could be out of date, as packet sent below is not necessarily
+                // received immediately)
+                let (mut sizes, total_reported) = tokio::task::block_in_place(|| {
+                    let state_sizes = state_sizes.lock().unwrap();
+                    let mut total_reported = 0;
+                    let sizes = state_sizes
+                        .iter()
+                        .map(|(ds, sa)| {
+                            let size = sa.load(Ordering::Acquire);
+                            span.in_scope(|| {
+                                trace!(
+                                    "domain {}.{} state size is {} bytes",
+                                    ds.0.index(),
+                                    ds.1,
+                                    size
+                                )
+                            });
+                            total_reported += size;
+                            (*ds, size)
+                        })
+                        .collect::<Vec<_>>();
+                    (sizes, total_reported)
+                });
+
+                // state sizes are under actual memory usage, but roughly proportional to actual
+                // memory usage - let's figure out proportionally how much *reported* memory we
+                // should evict
+                let actual_over = used - limit;
+                let mut proportional_over =
+                    ((total_reported as f64 / used as f64) * actual_over as f64).round() as usize;
+
                 // here's how we're going to proceed.
                 // we don't want to _empty_ any views if we can avoid it.
                 // and we also need to be aware that evicting something from one place may cause a
@@ -408,24 +451,25 @@ async fn do_eviction(
 
                 // starting with the smallest of the n domains
                 let mut n = sizes.len();
+                let mut domain_senders = HashMap::new();
                 for &(target, size) in sizes.iter().rev() {
                     // TODO: should this be evenly divided, or weighted by the size of the domains?
-                    let share = (over + n - 1) / n;
+                    let share = (proportional_over + n - 1) / n;
                     // we're only willing to evict at most half the state in each domain
                     // unless this is the only domain left to evict from
                     let evict = if n > 1 {
                         cmp::min(size / 2, share)
                     } else {
-                        assert_eq!(share, over);
+                        assert_eq!(share, proportional_over);
                         share
                     };
-                    over -= evict;
+                    proportional_over -= evict;
                     n -= 1;
 
                     span.in_scope(|| {
                         debug!(
                             "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
-                            total,
+                            used,
                             limit,
                             target.0.index(),
                         )

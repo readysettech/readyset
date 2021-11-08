@@ -2200,6 +2200,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 
 [[package]]
+name = "jemalloc-ctl"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c502a5ff9dd2924f1ed32ba96e3b65735d837b4bfd978d3161b1702e66aca4b7"
+dependencies = [
+ "jemalloc-sys",
+ "libc",
+ "paste 0.1.18",
+]
+
+[[package]]
 name = "jemalloc-sys"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,6 +3210,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "derive_more",
+ "jemalloc-ctl",
  "mysql_async",
  "petgraph",
  "serde",
@@ -3291,7 +3303,7 @@ dependencies = [
  "noria-client",
  "noria-client-adapter",
  "noria-errors",
- "paste",
+ "paste 1.0.6",
  "proptest",
  "serial_test",
  "test-strategy",
@@ -3360,6 +3372,7 @@ dependencies = [
  "hyper",
  "include_dir",
  "itertools 0.10.1",
+ "jemalloc-ctl",
  "jemallocator",
  "launchpad",
  "lazy_static",
@@ -3386,6 +3399,7 @@ dependencies = [
  "regex",
  "replicators",
  "reqwest",
+ "rusty-fork",
  "serde",
  "serde_json",
  "serde_with",
@@ -3689,9 +3703,28 @@ dependencies = [
 
 [[package]]
 name = "paste"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45ca20c77d80be666aef2b45486da86238fabe33e38306bd3118fe4af33fa880"
+dependencies = [
+ "paste-impl",
+ "proc-macro-hack",
+]
+
+[[package]]
+name = "paste"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0744126afe1a6dd7f394cb50a716dbe086cb06e255e53d8d0185d82828358fb5"
+
+[[package]]
+name = "paste-impl"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d95a7db200b97ef370c8e6de0088252f7e0dfff7d047a28528e47456c0fc98b6"
+dependencies = [
+ "proc-macro-hack",
+]
 
 [[package]]
 name = "peeking_take_while"
