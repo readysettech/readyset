@@ -504,6 +504,10 @@ pub enum ReadySetError {
         /// The node the column was looked up in.
         node: String,
     },
+
+    /// Error when calling a [`jemalloc_ctl`] API
+    #[error("Error from jemalloc_ctl: {0}")]
+    JemallocCtlError(String),
 }
 
 impl ReadySetError {
@@ -829,6 +833,12 @@ impl From<io::Error> for ReadySetError {
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {
         ReadySetError::Size0Error
+    }
+}
+
+impl From<jemalloc_ctl::Error> for ReadySetError {
+    fn from(err: jemalloc_ctl::Error) -> Self {
+        Self::JemallocCtlError(err.to_string())
     }
 }
 

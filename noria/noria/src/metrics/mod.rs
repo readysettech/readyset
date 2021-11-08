@@ -238,10 +238,8 @@ pub mod recorded {
     /// | domain | The domain that the eviction is performed in. |
     pub const EVICTION_WORKER_EVICTIONS_REQUESTED: &str = "eviction_worker.evictions_requested";
 
-    /// Gauge: The amount of bytes the eviction worker is using for the current
-    /// state sizes.
-    pub const EVICTION_WORKER_PARTIAL_MEMORY_BYTES_USED: &str =
-        "eviction_worker.partial_memory_used_bytes";
+    /// Gauge: The amount of memory allocated in the heap of the full server process
+    pub const EVICTION_WORKER_HEAP_ALLOCATED_BYTES: &str = "eviction_worker.heap_allocated_bytes";
 
     /// Histogram: The amount of time that the eviction worker spends making an eviction
     /// decision and sending packets.
