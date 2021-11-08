@@ -27,6 +27,7 @@ pub(crate) struct ProcessedQueryParams {
 pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
+    number_placeholders(query);
     Ok(ProcessedQueryParams {
         rewritten_in_conditions,
         auto_parameters,
@@ -257,6 +258,26 @@ where
                 Cow::Owned(res)
             }),
     ))
+}
+
+struct NumberPlaceholdersVisitor(u32);
+impl<'ast> Visitor<'ast> for NumberPlaceholdersVisitor {
+    type Error = !;
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if let Literal::Placeholder(item) = literal {
+            if matches!(item, ItemPlaceholder::QuestionMark) {
+                *item = ItemPlaceholder::DollarNumber(self.0);
+                self.0 += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn number_placeholders(query: &mut SelectStatement) {
+    let mut visitor = NumberPlaceholdersVisitor(1);
+    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
+    visitor.visit_select_statement(query).unwrap();
 }
 
 struct AnonymizeLiteralsVisitor;
@@ -1020,7 +1041,7 @@ mod tests {
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT x, y FROM test WHERE x = ?")
+                parse_select_statement("SELECT x, y FROM test WHERE x = $1")
             );
 
             assert_eq!(keys, vec![vec![4.into()]]);
@@ -1036,7 +1057,7 @@ mod tests {
             assert_eq!(
                 query,
                 parse_select_statement(
-                    "SELECT * FROM users WHERE x = ? AND y = ? AND z = ? AND w = ? AND q = ?",
+                    "SELECT * FROM users WHERE x = $1 AND y = $2 AND z = $3 AND w = $4 AND q = $5",
                 )
             );
 
@@ -1059,7 +1080,7 @@ mod tests {
 
             assert_eq!(
                 query,
-                parse_select_statement("SELECT * FROM users WHERE x = ? AND y = ? AND z = ?")
+                parse_select_statement("SELECT * FROM users WHERE x = $1 AND y = $2 AND z = $3")
             );
 
             assert_eq!(
