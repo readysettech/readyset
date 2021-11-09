@@ -13,7 +13,7 @@ sudo install -o root -g root -m 755 \
   node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64/node_exporter \
   /usr/local/bin/node_exporter
 
-sudo useradd --system --shell /usr/sbin/nologin node_exporter
+sudo useradd --system --user-group --shell /usr/sbin/nologin node_exporter
 
 sudo install -o root -g root -m 644 \
   /tmp/node_exporter/etc_systemd_system_node_exporter.service \
