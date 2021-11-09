@@ -78,6 +78,10 @@ struct MySqlOpts {
     /// The path to the parameterized query.
     #[structopt(long, required_if("database-type", "mysql"))]
     query: Option<PathBuf>,
+
+    /// Number of parameters to generate for a parameterized query.
+    #[structopt(long, required_if("database-type", "mysql"))]
+    nparams: Option<usize>,
 }
 
 arg_enum! {
@@ -176,9 +180,9 @@ struct ReaderThreadUpdate {
     queries: Vec<u128>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct BatchedQuery {
-    key: u64,
+    key: Vec<u32>,
     issued: Instant,
 }
 
@@ -187,6 +191,7 @@ struct QueryFactory<T, D> {
     distribution: D,
     offset: u64,
     rng: rand::rngs::SmallRng,
+    nparams: usize,
     _t: std::marker::PhantomData<T>,
 }
 
@@ -200,11 +205,12 @@ where
     <T as TryInto<u64>>::Error: std::fmt::Debug,
     D: Distribution<T>,
 {
-    fn new(distribution: D, offset: u64) -> Self {
+    fn new(distribution: D, offset: u64, nparams: usize) -> Self {
         QueryFactory {
             distribution,
             offset,
             rng: rand::rngs::SmallRng::from_entropy(),
+            nparams,
             _t: Default::default(),
         }
     }
@@ -218,7 +224,9 @@ where
         } = self;
 
         BatchedQuery {
-            key: distribution.sample(rng).try_into().unwrap() + *offset,
+            key: (0..self.nparams)
+                .map(|_| (distribution.sample(rng).try_into().unwrap() + *offset) as u32)
+                .collect(),
             issued: Instant::now(),
         }
     }
@@ -338,7 +346,7 @@ impl NoriaExecutor {
             // for each query from the query start times.
             let keys: Vec<_> = batch
                 .iter()
-                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key as i32))))
+                .map(|k| KeyComparison::Equal(Vec1::new(DataType::Int(k.key[0] as i32))))
                 .collect();
 
             let vq = ViewQuery {
@@ -363,7 +371,7 @@ impl NoriaExecutor {
 /// Executes queries directly to Noria through the `View` API.
 struct MySqlExecutor {
     conn: DatabaseConnection,
-    query: String,
+    query: &'static str,
 }
 
 impl MySqlExecutor {
@@ -371,7 +379,11 @@ impl MySqlExecutor {
         let fastly_query_file = opts.query.clone().unwrap_or_else(|| {
             PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap() + "/fastly_read_query.sql")
         });
-        let query = fs::read_to_string(fastly_query_file).unwrap();
+        let query = Box::leak(
+            fs::read_to_string(fastly_query_file)
+                .unwrap()
+                .into_boxed_str(),
+        );
         Self {
             conn: opts.database_url.unwrap().connect().await.unwrap(),
             query,
@@ -379,11 +391,7 @@ impl MySqlExecutor {
     }
 
     async fn on_query(&mut self, q: BatchedQuery) -> Result<Vec<BatchedQuery>> {
-        let _ = self
-            .conn
-            .execute(self.query.clone(), vec![q.key as u32])
-            .await
-            .unwrap();
+        let _ = self.conn.execute(&self.query, &q.key).await.unwrap();
         Ok(vec![q])
     }
 }
@@ -592,10 +600,12 @@ impl Reader {
                     Dist::Uniform => Box::new(QueryFactory::new(
                         Uniform::new(0, self.user_table_rows as u64),
                         self.user_offset,
+                        self.mysql_opts.nparams.unwrap_or(1),
                     )),
                     Dist::Zipf => Box::new(QueryFactory::new(
                         zipf::ZipfDistribution::new(self.user_table_rows - 1, self.alpha).unwrap(),
                         self.user_offset,
+                        self.mysql_opts.nparams.unwrap_or(1),
                     )),
                 };
 
