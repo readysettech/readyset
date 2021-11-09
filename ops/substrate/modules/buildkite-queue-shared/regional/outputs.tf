@@ -21,3 +21,7 @@ output "packer_policy_arn" {
 output "metadata_bucket_policy_arn" {
   value = aws_iam_policy.metadata_bucket_policy.arn
 }
+
+output "cache_buckets_policy_arn" {
+  value = aws_iam_policy.cache_buckets_policy.arn
+}

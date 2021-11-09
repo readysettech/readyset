@@ -1,3 +1,7 @@
+data "aws_s3_bucket" "sccache" {
+  bucket = "readysettech-build-sccache-us-east-2"
+}
+
 resource "aws_iam_policy" "packer_policy" {
   name        = "PackerPolicy"
   description = "Allow running packer builds"
@@ -64,6 +68,29 @@ resource "aws_iam_policy" "metadata_bucket_policy" {
         Resource = [
           "${aws_s3_bucket.metadata.arn}/*",
           aws_s3_bucket.metadata.arn
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_policy" "cache_buckets_policy" {
+  name        = "CacheBucketsPolicy"
+  description = "Allow reads and writes to/from the cache buckets"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:Get*",
+          "s3:List*"
+        ],
+        Resource = [
+          "${data.aws_s3_bucket.sccache.arn}/*",
+          "${data.aws_s3_bucket.sccache.arn}"
         ]
       },
     ]

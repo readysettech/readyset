@@ -8,6 +8,7 @@ locals {
   extra_iam_policy_arns = [
     module.buildkite_queue_shared.packer_policy_arn,
     module.buildkite_queue_shared.metadata_bucket_policy_arn,
+    module.buildkite_queue_shared.cache_buckets_policy_arn,
   ]
 }
 
