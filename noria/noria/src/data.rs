@@ -415,8 +415,8 @@ impl DataType {
             }
             // Per https://dev.mysql.com/doc/refman/8.0/en/numeric-type-syntax.html, the "number"
             // argument to integer types only controls the display width, not the max length
-            (_, Some(Int(_)), Int(_))
-            | (_, Some(Bigint(_)), Bigint(_))
+            (_, Some(Int(_)), Int(_) | Serial)
+            | (_, Some(Bigint(_)), Bigint(_) | BigSerial)
             | (_, Some(UnsignedInt(_)), UnsignedInt(_))
             | (_, Some(UnsignedBigint(_)), UnsignedBigint(_)) => Ok(Cow::Borrowed(self)),
             (_, Some(Int(_)), Tinyint(_)) => convert_numeric!(self, i32, i8),
@@ -428,7 +428,7 @@ impl DataType {
             (_, Some(Bigint(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
             (_, Some(Bigint(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
             (_, Some(Bigint(_)), UnsignedSmallint(_)) => convert_numeric!(self, i64, u16),
-            (_, Some(Bigint(_)), Int(_)) => convert_numeric!(self, i64, i32),
+            (_, Some(Bigint(_)), Int(_) | Serial) => convert_numeric!(self, i64, i32),
             (_, Some(Bigint(_)), UnsignedInt(_)) => convert_numeric!(self, i64, u32),
             (_, Some(Bigint(_)), UnsignedBigint(_)) => convert_numeric!(self, i64, u64),
             (Self::Int(n), _, Bool) => convert_boolean!(*n),
@@ -548,11 +548,11 @@ impl DataType {
             (Self::TimestampTz(ref ts), Some(Timestamp), Time) => {
                 Ok(Cow::Owned(Self::Time(Arc::new(ts.time().into()))))
             }
-            (_, Some(Int(_)), Bigint(_)) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
+            (_, Some(Int(_)), Bigint(_) | BigSerial) => Ok(Cow::Owned(DataType::BigInt(i64::try_from(self)?))),
             (Self::Float(f, _), Some(Float), Tinyint(_) | Smallint(_) | Int(_)) => {
                 Ok(Cow::Owned(DataType::Int(f.round() as i32)))
             }
-            (Self::Float(f, _), Some(_), Bigint(_)) => {
+            (Self::Float(f, _), Some(_), Bigint(_) | BigSerial) => {
                 Ok(Cow::Owned(DataType::BigInt(f.round() as i64)))
             }
             (Self::Float(f, prec), Some(_), Double) => {
@@ -576,7 +576,7 @@ impl DataType {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?,
             ))),
-            (Self::Double(f, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_)) => Ok(Cow::Owned(
+            (Self::Double(f, _), Some(Real), Tinyint(_) | Smallint(_) | Int(_) | Serial) => Ok(Cow::Owned(
                 DataType::Int(i32::try_from(f.round() as i64).map_err(|e| {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
@@ -602,7 +602,7 @@ impl DataType {
                     None,
                 ))
                 .map(|d| Cow::Owned(DataType::from(d))),
-            (Self::Double(f, _), Some(_), Bigint(_)) => {
+            (Self::Double(f, _), Some(_), Bigint(_) | BigSerial) => {
                 Ok(Cow::Owned(DataType::BigInt(f.round() as i64)))
             }
             (
@@ -619,7 +619,7 @@ impl DataType {
                     mk_err("Could not convert numeric types".to_owned(), Some(e.into()))
                 })?),
             )),
-            (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_)) => d
+            (Self::Numeric(d), Some(Numeric(_)), Tinyint(_) | Smallint(_) | Int(_) | Serial) => d
                 .to_i32()
                 .ok_or_else(|| mk_err(
                     format!(
@@ -648,7 +648,7 @@ impl DataType {
                     None,
                 ))
                 .map(|f| Cow::Owned(DataType::Double(f, u8::MAX))),
-            (Self::Numeric(d), Some(_), Bigint(_)) => d
+            (Self::Numeric(d), Some(_), Bigint(_) | BigSerial) => d
                 .to_i64()
                 .ok_or_else(|| mk_err(
                     format!(
@@ -698,11 +698,11 @@ impl DataType {
                         mk_err("Could not parse value as number".to_owned(), Some(e.into()))
                     })
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_)) => <&str>::try_from(self)?
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Int(_) | Serial) => <&str>::try_from(self)?
                 .parse::<i32>()
                 .map(|x| (Cow::Owned(DataType::from(x))))
                 .map_err(|e| mk_err("Could not parse value as number".to_owned(), Some(e.into()))),
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_)) => {
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Bigint(_) | BigSerial) => {
                 <&str>::try_from(self)?
                     .parse::<i64>()
                     .map(|x| (Cow::Owned(DataType::from(x))))
@@ -4004,6 +4004,7 @@ mod tests {
             UnsignedSmallint(None)
         );
         int_conversion!(bigint_to_int, i64, i32, Int(None));
+        int_conversion!(bigint_to_serial, i64, i32, Serial);
         int_conversion!(bigint_to_unsigned_bigint, i64, u64, UnsignedBigint(None));
 
         macro_rules! real_conversion {

@@ -130,8 +130,8 @@ fn value_of_type(typ: &SqlType) -> DataType {
         }
         SqlType::Int(_) => 1i32.into(),
         SqlType::Bigint(_) => 1i64.into(),
-        SqlType::UnsignedInt(_) => 1u32.into(),
-        SqlType::UnsignedBigint(_) => 1u64.into(),
+        SqlType::UnsignedInt(_) | SqlType::Serial => 1u32.into(),
+        SqlType::UnsignedBigint(_) | SqlType::BigSerial => 1u64.into(),
         SqlType::Tinyint(_) => 1i8.into(),
         SqlType::UnsignedTinyint(_) => 1u8.into(),
         SqlType::Smallint(_) => 1i16.into(),
@@ -288,6 +288,8 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
                     .collect::<Vec<bool>>(),
             ))
         }
+        SqlType::Serial => (rng.gen::<u32>() + 1).into(),
+        SqlType::BigSerial => (rng.gen::<u64>() + 1).into(),
     }
 }
 
@@ -391,6 +393,8 @@ fn unique_value_of_type(typ: &SqlType, idx: u32) -> DataType {
             bytes[3] = (idx & 0xff) as u8;
             DataType::from(BitVec::from_bytes(&bytes[..]))
         }
+        SqlType::Serial => (idx + 1).into(),
+        SqlType::BigSerial => ((idx + 1) as u64).into(),
     }
 }
 

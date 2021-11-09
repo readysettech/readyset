@@ -105,5 +105,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Uuid => Ok(Type::UUID),
         SqlType::Bit(_) => Ok(Type::BIT),
         SqlType::Varbit(_) => Ok(Type::VARBIT),
+        SqlType::Serial => Ok(Type::INT4),
+        SqlType::BigSerial => Ok(Type::INT8),
     }
 }
