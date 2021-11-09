@@ -83,6 +83,8 @@ pub enum SqlType {
     Uuid,
     Bit(Option<u16>),
     Varbit(Option<u16>),
+    Serial,
+    BigSerial,
 }
 
 impl SqlType {
@@ -180,6 +182,8 @@ impl fmt::Display for SqlType {
                 Ok(())
             }
             SqlType::Varbit(n) => write_with_len(f, "VARBIT", n),
+            SqlType::Serial => write!(f, "SERIAL"),
+            SqlType::BigSerial => write!(f, "BIGSERIAL"),
         }
     }
 }
@@ -441,6 +445,8 @@ impl Literal {
                     .prop_map(|bits| Self::BitVector(bits.to_bytes()))
                     .boxed()
             }
+            SqlType::Serial => any::<i32>().prop_map(Self::from).boxed(),
+            SqlType::BigSerial => any::<i64>().prop_map(Self::from).boxed(),
         }
     }
 }
@@ -1021,6 +1027,8 @@ fn type_identifier_second_half(i: &[u8]) -> IResult<&[u8], SqlType> {
         map(tuple((tag_no_case("bit"), opt(delim_u16))), |t| {
             SqlType::Bit(t.1)
         }),
+        map(tag_no_case("serial"), |_| SqlType::Serial),
+        map(tag_no_case("bigserial"), |_| SqlType::BigSerial),
     ))(i)
 }
 
@@ -1882,6 +1890,18 @@ mod tests {
                 b"timestamp (5)    with time zone"
             );
             assert_eq!(res, SqlType::TimestampTz);
+        }
+
+        #[test]
+        fn serial_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"serial");
+            assert_eq!(res, SqlType::Serial);
+        }
+
+        #[test]
+        fn bigserial_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bigserial");
+            assert_eq!(res, SqlType::BigSerial);
         }
     }
 }

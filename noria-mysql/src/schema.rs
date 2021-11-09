@@ -116,6 +116,8 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
             }
         }
         SqlType::Varbit(_) => unimplemented!("MySQL does not support the bit varying type"),
+        SqlType::Serial => MYSQL_TYPE_LONG,
+        SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
     };
 
     for c in &col.constraints {
