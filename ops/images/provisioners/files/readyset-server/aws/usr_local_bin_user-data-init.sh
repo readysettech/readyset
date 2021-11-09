@@ -38,7 +38,7 @@ NORIA_TYPE="readyset-server"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
 
-/usr/local/bin/configure-vector.sh
+/usr/local/bin/configure-vector.sh || true
 
 cat > /etc/default/ensure-ebs-volume <<EOF
 AWS_CLOUDFORMATION_STACK=${AWS_CLOUDFORMATION_STACK}
