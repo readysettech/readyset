@@ -1,4 +1,7 @@
+#![warn(clippy::panic)]
+
 use nom_sql::{self, ColumnConstraint, SqlType};
+use noria::{unsupported, ReadySetResult};
 
 /// Checks if `c1` is a subtype of `c2`.
 pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> bool {
@@ -25,7 +28,9 @@ pub(crate) fn is_subtype(c1: msql_srv::ColumnType, c2: msql_srv::ColumnType) -> 
     )
 }
 
-pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Column {
+pub(crate) fn convert_column(
+    col: &nom_sql::ColumnSpecification,
+) -> ReadySetResult<msql_srv::Column> {
     let mut colflags = msql_srv::ColumnFlags::empty();
     use msql_srv::ColumnType::*;
 
@@ -78,12 +83,12 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
             // TODO(grfn): How does the mysql binary protocol handle
             // tinytext? is it just an alias for tinyblob or is there a flag
             // we need?
-            unimplemented!()
+            unsupported!()
         }
         SqlType::Date => MYSQL_TYPE_DATE,
         SqlType::Timestamp => MYSQL_TYPE_TIMESTAMP,
         SqlType::TimestampTz => {
-            unimplemented!("MySQL does not support the timestamp with time zone type")
+            unsupported!("MySQL does not support the timestamp with time zone type")
         }
         SqlType::Binary(_) => {
             // TODO(grfn): I don't know if this is right
@@ -104,18 +109,18 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         SqlType::Json => MYSQL_TYPE_JSON,
         SqlType::ByteArray => MYSQL_TYPE_BLOB,
         SqlType::Numeric(_) => MYSQL_TYPE_DECIMAL,
-        SqlType::MacAddr => unimplemented!("MySQL does not support the MACADDR type"),
-        SqlType::Uuid => unimplemented!("MySQL does not support the UUID type"),
-        SqlType::Jsonb => unimplemented!("MySQL does not support the JSONB type"),
+        SqlType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
+        SqlType::Uuid => unsupported!("MySQL does not support the UUID type"),
+        SqlType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
         SqlType::Bit(size_opt) => {
             let size = size_opt.unwrap_or(1);
             if size < 64 {
                 MYSQL_TYPE_BIT
             } else {
-                unimplemented!("MySQL bit type cannot have a size bigger than 64")
+                unsupported!("MySQL bit type cannot have a size bigger than 64")
             }
         }
-        SqlType::Varbit(_) => unimplemented!("MySQL does not support the bit varying type"),
+        SqlType::Varbit(_) => unsupported!("MySQL does not support the bit varying type"),
         SqlType::Serial => MYSQL_TYPE_LONG,
         SqlType::BigSerial => MYSQL_TYPE_LONGLONG,
     };
@@ -138,12 +143,12 @@ pub(crate) fn convert_column(col: &nom_sql::ColumnSpecification) -> msql_srv::Co
         }
     }
 
-    msql_srv::Column {
+    Ok(msql_srv::Column {
         table: col.column.table.clone().unwrap_or_default(),
         column: col.column.name.clone(),
         coltype,
         colflags,
-    }
+    })
 }
 
 #[cfg(test)]

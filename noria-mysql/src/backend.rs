@@ -151,6 +151,26 @@ struct CachedSchema {
     preencoded_schema: Vec<u8>,
 }
 
+macro_rules! convert_columns {
+    ($columns: expr, $results: expr) => {{
+        match $columns
+            .into_iter()
+            .map(|c| convert_column(&c.spec))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(res) => res,
+            Err(e) => {
+                return $results
+                    .error(
+                        msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
+                        e.to_string().as_bytes(),
+                    )
+                    .await;
+            }
+        }
+    }};
+}
+
 #[async_trait]
 impl<W> MysqlShim<W> for Backend
 where
@@ -179,21 +199,12 @@ where
                 },
             )) => {
                 self.schema_cache.remove(&statement_id);
-                let params = params
-                    .into_iter()
-                    .map(|c| convert_column(&c.spec))
-                    .collect::<Vec<_>>();
-                let schema = schema
-                    .into_iter()
-                    .map(|c| convert_column(&c.spec))
-                    .collect::<Vec<_>>();
+                let params = convert_columns!(params, info);
+                let schema = convert_columns!(schema, info);
                 info.reply(statement_id, &params, &schema).await
             }
             Ok(SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
-                let params = params
-                    .into_iter()
-                    .map(|c| convert_column(&c.spec))
-                    .collect::<Vec<_>>();
+                let params = convert_columns!(params, info);
                 info.reply(self.prepared_count(), &params, &[]).await
             }
             Ok(SinglePrepareResult::Upstream(UpstreamPrepare {
@@ -286,12 +297,7 @@ where
                     // Unwrap here is ok because we know the map contains that key
                     self.schema_cache.get(&id).unwrap()
                 } else {
-                    let mysql_schema = select_schema
-                        .schema
-                        .iter()
-                        .map(|cs| convert_column(&cs.spec))
-                        .collect::<Vec<_>>();
-
+                    let mysql_schema = convert_columns!(select_schema.schema, results);
                     let preencoded_schema = msql_srv::prepare_column_definitions(&mysql_schema);
 
                     // Now append the right position too
@@ -479,11 +485,7 @@ where
                 data,
                 select_schema,
             })) => {
-                let schema = select_schema
-                    .schema
-                    .iter()
-                    .map(|cs| convert_column(&cs.spec))
-                    .collect::<Vec<_>>();
+                let schema = convert_columns!(select_schema.schema, results);
                 let mut rw = results.start(&schema).await?;
                 for resultsets in data {
                     for r in resultsets {
