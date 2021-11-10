@@ -38,6 +38,8 @@ Metadata:
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
           - MySQLDatabaseURL
+          - ReadySetMySQLAdapterUsername
+          - ReadySetMySQLAdapterPassword
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
@@ -136,6 +138,13 @@ Parameters:
     Type: String
     NoEcho: True
     Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
+  ReadySetMySQLAdapterUsername:
+    Type: String
+    Description: Username to use to authenticate to the readyset adapter
+  ReadySetMySQLAdapterPassword:
+    Type: String
+    NoEcho: true
+    Description: Password to use to authenticate to the readyset adapter
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
@@ -203,6 +212,8 @@ Resources:
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export UPSTREAM_DB_URL="${MySQLDatabaseURL}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
+            export USERNAME="${ReadySetMySQLAdapterUsername}"
+            export PASSWORD="${ReadySetMySQLAdapterPassword}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}

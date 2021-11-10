@@ -19,6 +19,8 @@ cat > /etc/default/readyset-mysql-adapter <<EOF
 UPSTREAM_DB_URL=${UPSTREAM_DB_URL}
 NORIA_DEPLOYMENT=${DEPLOYMENT}
 AUTHORITY_ADDRESS=${AUTHORITY_ADDRESS:-127.0.0.1:8500}
+USERNAME=${USERNAME}
+ALLOWED_PASSWORD=${PASSWORD}
 EOF
 chmod 600 /etc/default/readyset-mysql-adapter
 
