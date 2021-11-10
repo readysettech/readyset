@@ -130,6 +130,10 @@ struct Opts {
     #[clap(long = "nopartial")]
     no_partial: bool,
 
+    /// Forbid the creation of fully materialized nodes
+    #[clap(long, env = "FORBID_FULL_MATERIALIZATION")]
+    forbid_full_materialization: bool,
+
     /// Enable packet filters in egresses before readers
     #[clap(long)]
     enable_packet_filters: bool,
@@ -222,6 +226,9 @@ fn main() -> anyhow::Result<()> {
     builder.set_quorum(opts.quorum);
     if opts.no_partial {
         builder.disable_partial();
+    }
+    if opts.forbid_full_materialization {
+        builder.forbid_full_materialization();
     }
     if opts.enable_packet_filters {
         builder.enable_packet_filters();
