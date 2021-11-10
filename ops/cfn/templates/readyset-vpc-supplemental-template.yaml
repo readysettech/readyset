@@ -231,8 +231,32 @@ Resources:
             Action:
               - ec2:DescribeInstances
               - ec2:DescribeTags
+              - ec2:CreateVolume
+              - ec2:DescribeVolumes
+              - ec2:CreateTags
             Resource:
               - '*'
+          - Effect: Allow
+            Principal: '*'
+            Action:
+            - ec2:AttachVolume
+            - ec2:DetachVolume
+            Resource:
+            - !Sub "arn:aws:ec2:${AWS::Region}:*:volume/*"
+            Condition:
+              'Null':
+                'aws:ResourceTag/ReadySet:ServerVolume': 'false'
+          - Effect: Allow
+            Principal: '*'
+            Action:
+            - ec2:AttachVolume
+            - ec2:DetachVolume
+            - ec2:TerminateInstances
+            Resource:
+            - !Sub "arn:aws:ec2:${AWS::Region}:*:instance/*"
+            Condition:
+              'Null':
+                'aws:ResourceTag/ReadySet:ServerInstance': 'false'
       SubnetIds: !Ref VPCPrivateSubnetIds
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2'
       SecurityGroupIds:
