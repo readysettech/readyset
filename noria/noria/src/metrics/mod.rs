@@ -226,6 +226,10 @@ pub mod recorded {
     /// the `commit` call.
     pub const CONTROLLER_MIGRATION_TIME: &str = "controller.migration_time_us";
 
+    /// Gauge: Migration in progress indicator. Set to 1 when a migration
+    /// is in progress, 0 otherwise.
+    pub const CONTROLLER_MIGRATION_IN_PROGRESS: &str = "controller.migration_in_progress";
+
     /// Counter: The number of evicitons performed at a worker. Incremented each
     /// time `do_eviction` is called at the worker.
     ///
@@ -371,6 +375,36 @@ pub mod recorded {
     /// | domain | The index of the domain. |
     /// | packet_type | The type of packet |
     pub const DOMAIN_PACKET_SENT: &str = "domain.packet_sent";
+
+    /// Histogram: The time a snapshot takes to be performed.
+    pub const REPLICATOR_SNAPSHOT_DURATION: &str = "replicator.snapshot_duration_us";
+
+    /// How the replicator handled a snapshot.
+    pub enum SnapshotStatusTag {
+        /// A snapshot was started by the replicator.
+        Started,
+        /// A snapshot succeeded at the replicator.
+        Successful,
+        /// A snapshot failed at the replicator.
+        Failed,
+    }
+    impl SnapshotStatusTag {
+        /// Returns the enum tag as a &str for use in metrics labels.
+        pub fn value(&self) -> &str {
+            match self {
+                SnapshotStatusTag::Started => "started",
+                SnapshotStatusTag::Successful => "successful",
+                SnapshotStatusTag::Failed => "failed",
+            }
+        }
+    }
+
+    /// Counter: Number of snapshots started at this node. Incremented by 1 when a
+    /// snapshot begins.
+    ///
+    /// | Tag | Description |
+    /// | status | SnapshotStatusTag |
+    pub const REPLICATOR_SNAPSHOT_STATUS: &str = "replicator.snapshot_status";
 }
 
 /// A dumped metric's kind.
