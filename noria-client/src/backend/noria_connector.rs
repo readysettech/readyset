@@ -747,10 +747,11 @@ impl NoriaConnector {
 }
 
 impl NoriaConnector {
-    async fn get_or_create_view(
+    async fn get_view(
         &mut self,
         q: &nom_sql::SelectStatement,
         prepared: bool,
+        create_if_not_exist: bool,
     ) -> ReadySetResult<String> {
         let qname = match self.tl_cached.get(q) {
             None => {
@@ -766,20 +767,29 @@ impl NoriaConnector {
                         let qname = format!("q_{:x}", qh);
 
                         // add the query to Noria
-                        if prepared {
-                            info!(query = %q, name = %qname, "adding parameterized query");
-                        } else {
-                            info!(query = %q, name = %qname, "adding ad-hoc query");
-                        }
-                        if let Err(e) = noria_await!(
+                        if create_if_not_exist {
+                            if prepared {
+                                info!(query = %q, name = %qname, "adding parameterized query");
+                            } else {
+                                info!(query = %q, name = %qname, "adding ad-hoc query");
+                            }
+
+                            if let Err(e) = noria_await!(
+                                self.inner.get_mut().await?,
+                                self.inner
+                                    .get_mut()
+                                    .await?
+                                    .noria
+                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                            ) {
+                                error!(error = %e, "add query failed");
+                                return Err(e);
+                            }
+                        } else if let Err(e) = noria_await!(
                             self.inner.get_mut().await?,
-                            self.inner
-                                .get_mut()
-                                .await?
-                                .noria
-                                .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                            self.inner.get_mut().await?.noria.view(&qname)
                         ) {
-                            error!(error = %e, "add query failed");
+                            error!(error = %e, "getting view from noria failed");
                             return Err(e);
                         }
 
@@ -1043,11 +1053,12 @@ impl NoriaConnector {
         // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
         mut query: nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
+        create_if_not_exist: bool,
     ) -> ReadySetResult<QueryResult<'_>> {
         let processed = rewrite::process_query(&mut query)?;
 
         trace!("query::select::access view");
-        let qname = self.get_or_create_view(&query, false).await?;
+        let qname = self.get_view(&query, false, create_if_not_exist).await?;
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
@@ -1077,6 +1088,7 @@ impl NoriaConnector {
         &mut self,
         mut statement: nom_sql::SelectStatement,
         statement_id: u32,
+        create_if_not_exist: bool,
     ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns *for the client*
         // note that we have to do this *before* processing the query, otherwise the
@@ -1111,7 +1123,7 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self.get_or_create_view(&statement, true).await?;
+        let qname = self.get_view(&statement, true, create_if_not_exist).await?;
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");

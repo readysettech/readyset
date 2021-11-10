@@ -546,6 +546,7 @@ where
         q: nom_sql::SelectStatement,
         query: &str,
         event: &mut QueryExecutionEvent,
+        create_view_in_noria: bool,
     ) -> Result<PrepareResult<DB>, DB::Error> {
         let connector = self.upstream.as_mut().ok_or_else(|| {
             ReadySetError::Internal("This case requires an upstream connector".to_string())
@@ -555,7 +556,8 @@ where
         // greater of the two times.
         let handle = event.start_timer();
         let (noria_res, upstream_res) = tokio::join!(
-            self.noria.prepare_select(q, self.prepared_count),
+            self.noria
+                .prepare_select(q, self.prepared_count, create_view_in_noria),
             connector.prepare(query),
         );
         handle.set_noria_duration();
@@ -655,7 +657,7 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let t = event.start_timer();
-        let noria_result = self.noria.handle_select(q, ticket).await;
+        let noria_result = self.noria.handle_select(q, ticket, true).await;
         t.set_noria_duration();
 
         match noria_result {
@@ -768,17 +770,17 @@ where
                                 // Prepare allowed queries on both noria and fallback so that
                                 // if there are errors during execute we can still fallback
                                 // correctly.
-                                self.mirror_prepare(stmt.clone(), query, event).await
+                                self.mirror_prepare(stmt.clone(), query, event, false).await
                             }
                         };
 
                         result
                     } else {
-                        self.mirror_prepare(stmt.clone(), query, event).await
+                        self.mirror_prepare(stmt.clone(), query, event, true).await
                     }
                 } else {
                     self.noria
-                        .prepare_select(stmt.clone(), self.prepared_count)
+                        .prepare_select(stmt.clone(), self.prepared_count, true)
                         .await
                         .map(PrepareResult::Noria)
                         .map_err(|e| e.into())
@@ -968,7 +970,7 @@ where
                                         // prepared statements in a thread-local cache.
                                         let res = self
                                             .noria
-                                            .prepare_select(stmt.clone(), id)
+                                            .prepare_select(stmt.clone(), id, false)
                                             .await
                                             .map(PrepareResult::Noria);
 
@@ -1209,7 +1211,8 @@ where
                         // If we are validating the schema, explicitely compare the
                         // prepare results for this select before we proceed.
                         if self.query_validate {
-                            self.mirror_prepare(stmt.clone(), query, event).await?;
+                            self.mirror_prepare(stmt.clone(), query, event, true)
+                                .await?;
                         }
 
                         self.cascade_read(stmt.clone(), query, self.ticket.clone(), event)
@@ -1324,7 +1327,7 @@ where
                 SqlQuery::Select(q) => {
                     execution_timer = Some((Instant::now(), SqlQueryType::Read));
                     self.noria
-                        .handle_select(q.clone(), self.ticket.clone())
+                        .handle_select(q.clone(), self.ticket.clone(), true)
                         .await
                 }
                 SqlQuery::Insert(q) => {
