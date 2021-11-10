@@ -838,6 +838,29 @@ fn ad_hoc_unparametrized_select() {
 }
 
 #[test]
+fn ad_hoc_unparametrized_where_in() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (1, 3)")
+        .unwrap();
+    conn.query_drop("INSERT INTO test (x, y) VALUES (2, 4)")
+        .unwrap();
+    sleep();
+
+    let rows: Vec<(i32, i32)> = conn
+        .query("SELECT x, y FROM test WHERE x IN (1, 2)")
+        .unwrap();
+    assert_eq!(rows, vec![(1, 3), (2, 4)]);
+
+    let rows: Vec<(i32, i32)> = conn.query("SELECT x, y FROM test WHERE x = 4").unwrap();
+    assert_eq!(rows, vec![(4, 2)]);
+}
+
+#[test]
 fn prepared_unparametrized_select() {
     let mut conn = mysql::Conn::new(setup(true)).unwrap();
     conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
