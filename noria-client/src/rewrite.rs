@@ -25,8 +25,8 @@ pub(crate) struct ProcessedQueryParams {
 }
 
 pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
-    let rewritten_in_conditions = collapse_where_in(query)?;
     let auto_parameters = auto_parametrize_query(query);
+    let rewritten_in_conditions = collapse_where_in(query)?;
     Ok(ProcessedQueryParams {
         rewritten_in_conditions,
         auto_parameters,
@@ -39,7 +39,7 @@ impl ProcessedQueryParams {
         params: &'param [T],
     ) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
-        T: Clone + TryFrom<Literal, Error = ReadySetError>,
+        T: Clone + TryFrom<Literal, Error = ReadySetError> + std::fmt::Debug,
     {
         if params.is_empty() && self.auto_parameters.is_empty() {
             return Ok(vec![]);
@@ -52,17 +52,17 @@ impl ProcessedQueryParams {
             .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into()?)) })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let params = splice_auto_parameters(params, &auto_parameters);
+
         if self.rewritten_in_conditions.is_empty() {
-            return Ok(vec![splice_auto_parameters(params, &auto_parameters)]);
+            return Ok(vec![params]);
         }
 
-        let mut result = Vec::new();
-        for k in explode_params(params, &self.rewritten_in_conditions) {
-            result.push(Cow::Owned(
-                splice_auto_parameters(&k, &auto_parameters).to_vec(),
-            ));
-        }
-        Ok(result)
+        Ok(
+            explode_params(params.as_ref(), &self.rewritten_in_conditions)
+                .map(|k| Cow::Owned(k.into_owned()))
+                .collect(),
+        )
     }
 }
 
@@ -278,6 +278,7 @@ pub fn anonymize_literals(query: &mut SelectStatement) {
 #[derive(Default)]
 struct AutoParametrizeVisitor {
     out: Vec<(usize, Literal)>,
+    has_aggregates: bool,
     in_supported_position: bool,
     param_index: usize,
     query_depth: u8,
@@ -332,6 +333,39 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     self.param_index += 1;
                     return Ok(());
                 }
+                Expression::In {
+                    lhs: box Expression::Column(_),
+                    rhs: InValue::List(exprs),
+                    negated: false,
+                } if exprs.iter().all(|e| {
+                    matches!(
+                        e,
+                        Expression::Literal(lit) if !matches!(lit, Literal::Placeholder(_))
+                    )
+                }) && !self.has_aggregates =>
+                {
+                    let exprs = mem::replace(
+                        exprs,
+                        iter::repeat(Expression::Literal(Literal::Placeholder(
+                            ItemPlaceholder::QuestionMark,
+                        )))
+                        .take(exprs.len())
+                        .collect(),
+                    );
+                    let num_exprs = exprs.len();
+                    let start_index = self.param_index;
+                    self.out
+                        .extend(exprs.into_iter().enumerate().filter_map(
+                            move |(i, expr)| match expr {
+                                Expression::Literal(lit) => Some((i + start_index, lit)),
+                                // unreachable since we checked everything in the list is a literal
+                                // above, but best not to panic regardless
+                                _ => None,
+                            },
+                        ));
+                    self.param_index += num_exprs;
+                    return Ok(());
+                }
                 Expression::BinaryOp {
                     lhs,
                     op: BinaryOperator::And,
@@ -357,7 +391,10 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
 fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
-    let mut visitor = AutoParametrizeVisitor::default();
+    let mut visitor = AutoParametrizeVisitor {
+        has_aggregates: query.contains_aggregate_select(),
+        ..Default::default()
+    };
     #[allow(clippy::unwrap_used)] // error is !, which can never be returned
     visitor.visit_select_statement(query).unwrap();
     visitor.out
@@ -804,6 +841,47 @@ mod tests {
                 vec![(0, 1.into())],
             )
         }
+
+        #[test]
+        fn literal_in_in_rhs() {
+            test_auto_parametrize(
+                "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (10,20,31)",
+                "select hashtags.*, from hashtags inner join invites_hashtags on hashtags.id = invites_hashtags.hashtag_id where invites_hashtags.invite_id in (?,?,?)",
+                    vec![(0, 10.into()), (1, 20.into()), (2, 31.into())],
+            );
+        }
+
+        #[test]
+        fn mixed_in_with_equality() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE id in (1, 2) AND name = 'bob'",
+                "SELECT id FROM users WHERE id in (?, ?) AND name = ?",
+                vec![(0, 1.into()), (1, 2.into()), (2, "bob".into())],
+            );
+        }
+
+        #[test]
+        fn equal_in_equal() {
+            test_auto_parametrize(
+                "SELECT id FROM users WHERE x = 'foo' AND id in (1, 2) AND name = 'bob'",
+                "SELECT id FROM users WHERE x = ? AND id in (?, ?) AND name = ?",
+                vec![
+                    (0, "foo".into()),
+                    (1, 1.into()),
+                    (2, 2.into()),
+                    (3, "bob".into()),
+                ],
+            );
+        }
+
+        #[test]
+        fn in_with_aggregates() {
+            test_auto_parametrize(
+                "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
+                "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
+                vec![(0, 1.into())],
+            );
+        }
     }
 
     mod splice_auto_parameters {
@@ -919,6 +997,28 @@ mod tests {
                     vec![0.into(), 1.into(), 4.into(), 5.into(), 6.into()],
                     vec![0.into(), 2.into(), 4.into(), 5.into(), 6.into()],
                     vec![0.into(), 3.into(), 4.into(), 5.into(), 6.into()],
+                ]
+            );
+        }
+
+        #[test]
+        fn auto_parametrized_in() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM users WHERE x = 1 AND y IN (1, 2, 3) AND z = ?",
+                vec![1.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM users WHERE x = ? AND y = ? AND z = ?")
+            );
+
+            assert_eq!(
+                keys,
+                vec![
+                    vec![1.into(), 1.into(), 1.into()],
+                    vec![1.into(), 2.into(), 1.into()],
+                    vec![1.into(), 3.into(), 1.into()],
                 ]
             );
         }
