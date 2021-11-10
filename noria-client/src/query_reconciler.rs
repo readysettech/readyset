@@ -77,7 +77,7 @@ where
     async fn reconcile_query(&mut self, stmt: &SelectStatement) {
         // Issues a prepare statement in both noria and mysql and verifies that
         // the resulting schemas are equivalent.
-        match self.mirror_prepare(stmt.clone()).await {
+        match self.cascade_prepare(stmt.clone()).await {
             Ok(PrepareResult::Both(noria_result, upstream_result)) => {
                 if cfg!(feature = "reconciler-schema-check") {
                     if let noria_connector::PrepareResult::Select {
@@ -100,30 +100,29 @@ where
             }
             // The query failed in Noria
             Ok(PrepareResult::Upstream(_)) => {}
-            Ok(PrepareResult::Noria(_)) => error!(
-                "Query failed in upstream but succeeded in noria: {}",
-                stmt.to_string()
-            ),
             Err(e) => {
                 // TODO(justin): Consider removing this query from the cache so we never
                 // retry it again. It likely is not a valid query.
                 error!(%e, "Prepare failed in both noria and upstream: {}", stmt.to_string())
             }
+            _ => {
+                warn!("Query succeeded in noria but failed in upstream. This should have been impossible.")
+            }
         }
     }
 
-    async fn mirror_prepare(&mut self, stmt: SelectStatement) -> ReadySetResult<PrepareResult<DB>> {
-        let noria_res = self.noria.prepare_select(stmt.clone(), 0).await;
-        let upstream_res = self.upstream.prepare(stmt.to_string()).await;
+    async fn cascade_prepare(
+        &mut self,
+        stmt: SelectStatement,
+    ) -> ReadySetResult<PrepareResult<DB>> {
+        let u = self.upstream.prepare(stmt.to_string()).await.map_err(|_| {
+            ReadySetError::Internal("Query failed to be prepared against upstream".to_string())
+        })?;
 
         // Convert from results into a `PrepareResult`.
-        match (noria_res, upstream_res) {
-            (Ok(n), Ok(u)) => Ok(PrepareResult::Both(n, u)),
-            (Err(_), Ok(u)) => Ok(PrepareResult::Upstream(u)),
-            (Ok(n), Err(_)) => Ok(PrepareResult::Noria(n)),
-            (Err(_), Err(_)) => Err(ReadySetError::Internal(
-                "Query failed in both noria and upstream".to_string(),
-            )),
+        match self.noria.prepare_select(stmt, 0).await {
+            Ok(n) => Ok(PrepareResult::Both(n, u)),
+            Err(_) => Ok(PrepareResult::Upstream(u)),
         }
     }
 
