@@ -6,15 +6,13 @@ Metadata:
       - Label:
           default: "VPC Network Configuration"
         Parameters:
-          - VPCID
-          - VPCCIDR
           - PrivateSubnet1ID
           - PrivateSubnet2ID
           - PrivateSubnet3ID
+          - ConsulServerSecurityGroupID
       - Label:
           default: "SSH Access Configuration"
         Parameters:
-          - BastionSecurityGroupID
           - KeyPairName
       - Label:
           default: "Consul Configuration"
@@ -23,9 +21,7 @@ Metadata:
           - ConsulEc2RetryJoinTagValue
           - ConsulServerNodes
 Parameters:
-  BastionSecurityGroupID:
-    Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
-    Type: "AWS::EC2::SecurityGroup::Id"
+  # Consul Server
   ConsulInstanceType:
     Type: String
     Description: The EC2 instance type for the Consul instances.
@@ -45,10 +41,23 @@ Parameters:
     Type: String
     Default: "Server"
     ConstraintDescription: Must match EC2 Tag Name requirements.
+  ConsulServerNodes:
+    Type: String
+    Description: The number of Consul server nodes that will be created. You can choose 3, 5, or 7 nodes.
+    AllowedValues:
+      - "3"
+      - "5"
+      - "7"
+    Default: "3"
+  ConsulServerSecurityGroupID:
+    Type: "AWS::EC2::SecurityGroup::Id"
+    Description: ID of the security group to apply to ReadySet Consul Server instances.
+  # SSH
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: "AWS::EC2::KeyPair::KeyName"
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  # Networking
   PrivateSubnet1ID:
     Description: "ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)"
     Type: "AWS::EC2::Subnet::Id"
@@ -58,48 +67,12 @@ Parameters:
   PrivateSubnet3ID:
     Description: "ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)"
     Type: "AWS::EC2::Subnet::Id"
-  VPCID:
-    Description: VPC ID
-    Type: "AWS::EC2::VPC::Id"
-  VPCCIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Description: CIDR block for the VPC
-    Type: String
-  ConsulServerNodes:
-    Type: String
-    Description: The number of Consul server nodes that will be created. You can choose 3, 5, or 7 nodes.
-    AllowedValues:
-      - "3"
-      - "5"
-      - "7"
-    Default: "3"
 # Update this with the latest AMI
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
       READYSETAUTHORITYCONSUL: ami-0bc5a6a247c2a5455
 Resources:
-  ConsulSecurityGroup:
-    Type: "AWS::EC2::SecurityGroup"
-    Properties:
-      GroupDescription: Enables SSH access.
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          SourceSecurityGroupId: !Ref BastionSecurityGroupID
-        - IpProtocol: tcp
-          FromPort: 0
-          ToPort: 65535
-          CidrIp: !Ref VPCCIDR
-      Tags:
-        - Key: Name
-          Value: !Join
-            - "-"
-            - - !Ref "AWS::StackName"
-              - ConsulSecGroup
   ConsulJoinManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -136,7 +109,7 @@ Resources:
       InstanceType: !Ref ConsulInstanceType
       AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ConsulSecurityGroup
+        - !Ref ConsulServerSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap

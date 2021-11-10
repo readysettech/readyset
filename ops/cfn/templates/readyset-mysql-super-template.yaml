@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: ReadySet created in a new VPC with a new database
+Description: ReadySet created in a new VPC with a new MySQL RDS instance
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -12,6 +12,7 @@ Metadata:
           default: "VPC Network Configuration"
         Parameters:
           - VPCCIDR
+          - VPCCreateNATGateways
           - PublicSubnet1CIDR
           - PublicSubnet2CIDR
           - PublicSubnet3CIDR
@@ -123,6 +124,13 @@ Parameters:
     Default: 10.0.0.0/16
     Description: CIDR block for the VPC
     Type: String
+  VPCCreateNATGateways:
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+    Description: Set to false when creating only private subnets or when running in airgapped mode.
+    Type: String
   KeyPairName:
     Description: >-
       Public/private key pairs allow you to securely connect to your instance
@@ -218,6 +226,7 @@ Parameters:
     MinValue: 32
     Default: 32
 Resources:
+  # Base VPC to deploy resources into
   VPCStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -235,6 +244,9 @@ Resources:
         PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
         PublicSubnet3CIDR: !Ref PublicSubnet3CIDR
         VPCCIDR: !Ref VPCCIDR
+        CreateNATGateways: !Ref VPCCreateNATGateways
+
+  # Bastion stack for secure access
   BastionStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -255,15 +267,34 @@ Resources:
           - VPCStack
           - Outputs.VPCID
         EnableTCPForwarding: true
+
+  # Supplemental VPC resources
+  VPCSupplementalStack:
+    Type: 'AWS::CloudFormation::Stack'
+    Properties:
+      TemplateURL: !Sub >-
+        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-vpc-supplemental-template.yaml
+      Parameters:
+        VPCPrivateSubnetIds: !Join [ ',', [
+          !GetAtt 'VPCStack.Outputs.PrivateSubnet1AID',
+          !GetAtt 'VPCStack.Outputs.PrivateSubnet2AID',
+          !GetAtt 'VPCStack.Outputs.PrivateSubnet3AID'
+        ] ]
+        VPCID: !GetAtt
+          - VPCStack
+          - Outputs.VPCID
+        VPCCIDR: !Ref VPCCIDR
+        BastionSecurityGroupID: !GetAtt
+          - BastionStack
+          - Outputs.BastionSecurityGroupID
+
+  # Consul Cluster
   ReadySetConsulStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
       Parameters:
-        BastionSecurityGroupID: !GetAtt
-          - BastionStack
-          - Outputs.BastionSecurityGroupID
         KeyPairName: !Ref KeyPairName
         PrivateSubnet1ID: !GetAtt
           - VPCStack
@@ -274,12 +305,14 @@ Resources:
         PrivateSubnet3ID: !GetAtt
           - VPCStack
           - Outputs.PrivateSubnet3AID
-        VPCID: !GetAtt
-          - VPCStack
-          - Outputs.VPCID
-        VPCCIDR: !Ref VPCCIDR
         ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
+        # Security Groups
+        ConsulServerSecurityGroupID: !GetAtt
+          - VPCSupplementalStack
+          - Outputs.ConsulServerSecurityGroupID
+
+  # RDS MySQL Cluster
   ReadySetRDSMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -305,6 +338,8 @@ Resources:
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
         DatabasePassword: !Ref DatabasePassword
+
+  # ReadySet for MySQL
   ReadySetMySQLStack:
     Type: 'AWS::CloudFormation::Stack'
     Properties:
@@ -348,9 +383,39 @@ Resources:
         ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName
+        # Networking Inputs
+        ReadySetServerSecurityGroupID: !GetAtt
+          - VPCSupplementalStack
+          - Outputs.ReadySetServerSecurityGroupID
+        ReadySetAdapterSecurityGroupID: !GetAtt
+          - VPCSupplementalStack
+          - Outputs.ReadySetAdapterSecurityGroupID
+        ReadySetMonitoringSecurityGroupID: !GetAtt
+          - VPCSupplementalStack
+          - Outputs.ReadySetMonitoringSecurityGroupID
 Outputs:
   ReadySetMySQLVPCEndpointService:
     Value: !GetAtt
       - ReadySetMySQLStack
       - Outputs.ReadySetMySQLVPCEndpointService
-    Description: VPC Endpoint to connect to to access ReadySet
+    Description: S3 VPC Endpoint to connect to to access ReadySet.
+  ReadySetServerSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Server instances.
+    Value: !GetAtt
+      - VPCSupplementalStack
+      - Outputs.ReadySetServerSecurityGroupID
+  ReadySetAdapterSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Adapter instances.
+    Value: !GetAtt
+      - VPCSupplementalStack
+      - Outputs.ReadySetAdapterSecurityGroupID
+  ReadySetMonitoringSecurityGroupID:
+    Description: ID of VPC security group designated for ReadySet Monitoring instance(s).
+    Value: !GetAtt
+      - VPCSupplementalStack
+      - Outputs.ReadySetMonitoringSecurityGroupID
+  ReadySetDBSecurityGroup:
+    Value: !GetAtt
+      - VPCSupplementalStack
+      - Outputs.ReadySetDBSecurityGroupID
+    Description: Attach this Security Group to your RDS instance.

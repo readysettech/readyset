@@ -12,6 +12,9 @@ Metadata:
           - PrivateSubnet1ID
           - PrivateSubnet2ID
           - PrivateSubnet3ID
+          - ReadySetServerSecurityGroupID
+          - ReadySetAdapterSecurityGroupID
+          - ReadySetMonitoringSecurityGroupID
       - Label:
           default: "SSH Access Configuration"
         Parameters:
@@ -69,6 +72,15 @@ Parameters:
     AllowedPattern: >-
       ^\d+$
     Description: Number of Server nodes to create.
+  ReadySetServerSecurityGroupID:
+    Type: "AWS::EC2::SecurityGroup::Id"
+    Description: ID of the security group to apply to ReadySet Server instances.
+  ReadySetAdapterSecurityGroupID:
+    Type: "AWS::EC2::SecurityGroup::Id"
+    Description: ID of the security group to apply to ReadySet Adapter instances.
+  ReadySetMonitoringSecurityGroupID:
+    Type: "AWS::EC2::SecurityGroup::Id"
+    Description: ID of the security group to apply to ReadySet Monitoring instances.
   ReadySetServerVolumeSizeGB:
     Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances.
@@ -129,9 +141,9 @@ Mappings:
   AWSAMIRegionMap:
     us-east-2:
       # short commit id associated with AMIs: 209c959
-      READYSETMYSQLADAPTER: ami-046e4471d38dc542e
-      READYSETSERVER: ami-021f5b4a1ef4eff47
-      READYSETMONITOR: ami-06732b8cf5f88d9ea
+      READYSETMYSQLADAPTER: ami-04368d88269c4366e
+      READYSETSERVER: ami-06d085b6441cce99a
+      READYSETMONITOR: ami-0d58bd90ec29a80a0
 Resources:
   # --- START MYSQL ADAPTER --- #
   ReadySetMySQLAdapterRole:
@@ -152,34 +164,6 @@ Resources:
       Path: /
       Roles:
         - !Ref ReadySetMySQLAdapterRole
-  ReadySetMySQLAdapterSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to the adapter and SSH from inside the VPC
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          SourceSecurityGroupId: !Ref BastionSecurityGroupID
-        - IpProtocol: tcp
-          FromPort: 6034
-          ToPort: 6034
-          CidrIp: !Ref VPCCIDR
-          Description: Adapter HTTP server port, required for health checks.
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
   ReadySetMySQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -196,7 +180,7 @@ Resources:
       AssociatePublicIpAddress: false
       EbsOptimized: true
       SecurityGroups:
-        - !Ref ReadySetMySQLAdapterSecurityGroup
+        - !Ref ReadySetAdapterSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
@@ -341,62 +325,7 @@ Resources:
       Path: /
       Roles:
         - !Ref ReadySetServerRole
-  ReadySetServerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to and between servers and SSH from inside the VPC
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          SourceSecurityGroupId: !Ref BastionSecurityGroupID
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 6033
-          ToPort: 6033
-          SourceSecurityGroupId:
-            Fn::GetAtt:
-            - ReadySetMySQLAdapterSecurityGroup
-            - GroupId
-        - IpProtocol: tcp
-          FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
-          ToPort: 61000
-          SourceSecurityGroupId:
-            Fn::GetAtt:
-            - ReadySetMySQLAdapterSecurityGroup
-            - GroupId
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
-  # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
-  ReadySetServerSecurityGroupIngressControllerRule:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ReadySetServerSecurityGroup
-      IpProtocol: tcp
-      FromPort: 6033
-      ToPort: 6033
-      SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
-  ReadySetServerSecurityGroupIngressWorkerRule:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId:
-        Fn::GetAtt:
-        - ReadySetServerSecurityGroup
-        - GroupId
-      IpProtocol: tcp
-      FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
-      ToPort: 61000
-      SourceSecurityGroupId:
-        Fn::GetAtt:
-          - ReadySetServerSecurityGroup
-          - GroupId
+
   ReadySetServerLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -404,7 +333,7 @@ Resources:
       EbsOptimized: true
       AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ReadySetServerSecurityGroup
+        - !Ref ReadySetServerSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
@@ -470,20 +399,7 @@ Resources:
         Count: !Ref ReadySetServerNodes
         Timeout: PT20M
   # --- END SERVER --- #
-  ReadySetDBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections from ReadySet to RDS
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadySetMySQLAdapterSecurityGroup
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+
   # --- START LOGS AGGREGATOR --- #
   ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -519,44 +435,6 @@ Resources:
       Path: /
       Roles:
         - !Ref ReadySetMonitorRole
-  ReadySetMonitorSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to and from the aggregator within the VPC.
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 9000
-          ToPort: 9000
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 9090
-          ToPort: 9091
-          CidrIp: !Ref VPCCIDR
-          Description: Allow connections to a prometheus scrape endpoint and server within the VPC.
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: !Ref VPCCIDR
-          Description: Allow connections to the grafana server within the VPC.
-        - IpProtocol: tcp
-          FromPort: 6035
-          ToPort: 6035
-          CidrIp: !Ref VPCCIDR
-          Description: Allow connections to the metrics aggregator within the VPC
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
   ReadySetMonitorInstance:
     Type: AWS::EC2::Instance
     CreationPolicy:
@@ -567,7 +445,7 @@ Resources:
       InstanceType: !Ref ReadySetMonitorInstanceType
       SubnetId: !Ref PrivateSubnet1ID
       SecurityGroupIds:
-        - !Ref ReadySetMonitorSecurityGroup
+        - !Ref ReadySetMonitoringSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
           - AWSAMIRegionMap
@@ -597,9 +475,6 @@ Resources:
           - {}
   # --- END LOGS AGGREGATOR --- #
 Outputs:
-  ReadySetDBSecurityGroup:
-    Value: !Ref ReadySetDBSecurityGroup
-    Description: Attach this Security Group to your RDS instance.
   ReadySetAdapterNLBDNSName:
     Value: !GetAtt
       - ReadySetMySQLAdapterNLB

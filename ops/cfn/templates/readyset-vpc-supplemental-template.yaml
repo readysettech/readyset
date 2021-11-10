@@ -1,0 +1,307 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Supplemental VPC resources to support ReadySet components
+Parameters:
+  VPCID:
+    Type: "AWS::EC2::VPC::Id"
+    Description: ID of the VPC to deploy resources within.
+  VPCCIDR:
+    Type: String
+    Description: CIDR block for the VPC.
+    AllowedPattern: >-
+      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+  VPCPrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: Comma-delimited list of private subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
+  # Bastion SG
+  BastionSecurityGroupID:
+    Type: "AWS::EC2::SecurityGroup::Id"
+    Description: ID of security group designated for Bastion hosts.
+Resources:
+  ConsulServerSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enables SSH access from ReadySet bastion host.
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: !Ref VPCCIDR
+      Tags:
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref "AWS::StackName"
+              - ConsulSecGroup
+  ReadySetAdapterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to the adapter and SSH from inside the VPC
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
+        - IpProtocol: tcp
+          FromPort: 6034
+          ToPort: 6034
+          CidrIp: !Ref VPCCIDR
+          Description: Adapter HTTP server port, required for health checks.
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VPCCIDR
+          Description: Allow inbound MySQL queries from inside VPC.
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref VPCCIDR
+          Description: Allow inbound PostgreSQL queries from inside VPC.
+        # In future, we should allow operators to pass in CIDR of another VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  ReadySetServerSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow connections to and between servers and SSH from inside the VPC
+        VpcId: !Ref VPCID
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            SourceSecurityGroupId: !Ref BastionSecurityGroupID
+          - IpProtocol: tcp
+            FromPort: 8300
+            ToPort: 8301
+            CidrIp: !Ref VPCCIDR
+          - IpProtocol: tcp
+            FromPort: 6033
+            ToPort: 6033
+            SourceSecurityGroupId:
+              Fn::GetAtt:
+              - ReadySetAdapterSecurityGroup
+              - GroupId
+          - IpProtocol: tcp
+            FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
+            ToPort: 61000
+            SourceSecurityGroupId:
+              Fn::GetAtt:
+              - ReadySetAdapterSecurityGroup
+              - GroupId
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            FromPort: 0
+            ToPort: 0
+            CidrIp: 0.0.0.0/0
+
+  # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
+  ReadySetServerSecurityGroupIngressControllerRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ReadySetServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6033
+      ToPort: 6033
+      SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+
+  ReadySetServerSecurityGroupIngressWorkerRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::GetAtt:
+        - ReadySetServerSecurityGroup
+        - GroupId
+      IpProtocol: tcp
+      FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
+      ToPort: 61000
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - ReadySetServerSecurityGroup
+          - GroupId
+  # VPC security group applied to RDS instances
+  ReadySetDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections from ReadySet to RDS
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        # MySQL
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ReadySetAdapterSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+        # Postgres
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ReadySetAdapterSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+
+  ReadySetMonitoringSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow connections to and from the aggregator within the VPC.
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          CidrIp: !Ref VPCCIDR
+        - IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9091
+          CidrIp: !Ref VPCCIDR
+          Description: Allow connections to a prometheus scrape endpoint and server within the VPC.
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref VPCCIDR
+          Description: Allow connections to the grafana server within the VPC.
+        - IpProtocol: tcp
+          FromPort: 6035
+          ToPort: 6035
+          CidrIp: !Ref VPCCIDR
+          Description: Allow connections to the metrics aggregator within the VPC
+        - IpProtocol: tcp
+          FromPort: 8300
+          ToPort: 8301
+          CidrIp: !Ref VPCCIDR
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+  # VPC endpoints
+  VPCEInterfaceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enables access to VPCE APIs within the VPC.
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ReadySetAdapterSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ReadySetMonitoringSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ConsulServerSecurityGroup
+
+  # EC2 VPC endpoint
+  EC2VPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeTags
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: 'true'
+      VpcId: !Ref VPCID
+  # Autoscaling VPC endpoint
+  AutoscalingVPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - autoscaling:CompleteLifecycleAction
+              - autoscaling:DescribeAutoScalingGroups
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.autoscaling'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: 'true'
+      VpcId: !Ref VPCID
+  # SQS VPC endpoint
+  SQSVPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 'sqs:ReceiveMessage'
+              - 'sqs:DeleteMessage'
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sqs'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: 'true'
+      VpcId: !Ref VPCID
+  # CloudFormation VPC endpoint
+  CloudFormationVPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.cloudformation'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: 'true'
+      VpcId: !Ref VPCID
+Outputs:
+  ReadySetServerSecurityGroupID:
+    Value: !Ref ReadySetServerSecurityGroup
+  ReadySetAdapterSecurityGroupID:
+    Value: !Ref ReadySetAdapterSecurityGroup
+  ReadySetMonitoringSecurityGroupID:
+    Value: !Ref ReadySetMonitoringSecurityGroup
+  ConsulServerSecurityGroupID:
+    Value: !Ref ConsulServerSecurityGroup
+  ReadySetDBSecurityGroupID:
+    Value: !Ref ReadySetDBSecurityGroup
+    Description: Attach this Security Group to your RDS instance.
