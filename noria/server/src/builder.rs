@@ -74,6 +74,16 @@ impl Builder {
         self.config.materialization_config.frontier_strategy = f;
     }
 
+    /// Forbid the creation of all fully materialized nodes.
+    ///
+    /// After this is called, any migrations that add fully materialized nodes will return
+    /// [`ReadySetError::Unsupported`]
+    pub fn forbid_full_materialization(&mut self) {
+        self.config
+            .materialization_config
+            .allow_full_materialization = false;
+    }
+
     /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
     pub fn set_sharding(&mut self, shards: Option<usize>) {
         self.config.sharding = shards.filter(|s| *s > 1);

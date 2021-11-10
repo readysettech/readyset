@@ -7470,3 +7470,26 @@ async fn multi_diamond_union() {
     let expected = vec![0, 6];
     assert_eq!(res, expected);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forbid_full_materialization() {
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("forbid_full_materialization"));
+        builder.forbid_full_materialization();
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+    g.install_recipe("CREATE TABLE t (col INT)").await.unwrap();
+    let res = g.extend_recipe("QUERY q: SELECT * FROM t").await;
+    assert!(res.is_err());
+    let err = res.err().unwrap();
+    assert!(err
+        .to_string()
+        .contains("Creation of fully materialized query is forbidden"));
+}

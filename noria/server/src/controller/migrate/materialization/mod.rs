@@ -77,6 +77,14 @@ pub struct Config {
     /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
     pub packet_filters_enabled: bool,
 
+    /// Whether queries that require full materialization are allowed.
+    ///
+    /// If this is set to false, migrations that add queries that require full materialization will
+    /// return [`ReadySetError::Unsupported`].
+    ///
+    /// Defaults to true
+    pub allow_full_materialization: bool,
+
     /// Strategy for determining which (partial) materializations should be placed beyond the
     /// materialization frontier.
     ///
@@ -93,6 +101,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             packet_filters_enabled: false,
+            allow_full_materialization: true,
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
         }
@@ -547,8 +556,10 @@ impl Materializations {
                         m.insert(index);
                     }
                 }
+            } else if !graph[ni].is_base() && !self.config.allow_full_materialization {
+                unsupported!("Creation of fully materialized query is forbidden");
             } else {
-                assert!(
+                invariant!(
                     !graph[ni].purge,
                     "full materialization placed beyond materialization frontier"
                 );
