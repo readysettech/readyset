@@ -2515,6 +2515,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "irl_minimal"
+version = "0.1.0"
+dependencies = [
+ "clap 3.0.0-beta.5",
+ "futures 0.3.17",
+ "futures-util",
+ "mysql",
+ "time 0.2.27",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "itertools"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

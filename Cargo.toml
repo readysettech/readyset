@@ -34,6 +34,7 @@ members = [
     "maths",
     "benchmarks",
     "demos/irl",
+    "demos/irl-minimal",
     "xtask",
     "ensure-ebs-volume",
     "metrics-aggregator",
