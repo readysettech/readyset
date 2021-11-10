@@ -1,9 +1,9 @@
-use crate::backend::{noria_connector, NoriaConnector, PrepareResult};
+use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::NoriaCompare;
 use crate::{UpstreamDatabase, UpstreamPrepare};
 use metrics::counter;
-use noria::{ReadySetError, ReadySetResult};
+use noria::ReadySetResult;
 use noria_client_metrics::recorded;
 use tokio::select;
 use tracing::{error, info, instrument, warn};
@@ -75,54 +75,49 @@ where
     }
 
     async fn reconcile_query(&mut self, stmt: &SelectStatement) {
-        // Issues a prepare statement in both noria and mysql and verifies that
-        // the resulting schemas are equivalent.
-        match self.cascade_prepare(stmt.clone()).await {
-            Ok(PrepareResult::Both(noria_result, upstream_result)) => {
+        let upstream_result = self.upstream.prepare(stmt.to_string()).await;
+
+        if let Err(u) = upstream_result {
+            error!(
+                error = %u,
+                query = %stmt,
+                "Query failed to be prepared against upstream",
+            );
+            return;
+        }
+
+        // Check if we can successfully prepare against noria as well.
+        match self.noria.prepare_select(stmt.clone(), 0).await {
+            Ok(n) => {
                 if cfg!(feature = "reconciler-schema-check") {
                     if let noria_connector::PrepareResult::Select {
                         ref schema,
                         ref params,
                         ..
-                    } = noria_result
+                    } = n
                     {
-                        // If the wrong schema type is passed treat as a failure.
-                        if let Err(e) = upstream_result.meta.compare(schema, params) {
-                            warn!("Query compare failed: {}", e);
+                        // Upstream is an Ok value as we check for the error above.
+                        #[allow(clippy::unwrap_used)]
+                        if let Err(e) = upstream_result.unwrap().meta.compare(schema, params) {
+                            warn!(error = %e, query = %stmt, "Query compare failed");
                             return;
                         }
                     } else {
                         return;
                     }
+                    counter!(recorded::RECONCILER_ALLOWED, 1);
+                    self.query_status_cache.set_successful_migration(stmt).await;
                 }
-                counter!(recorded::RECONCILER_ALLOWED, 1);
-                self.query_status_cache.set_successful_migration(stmt).await
             }
-            // The query failed in Noria
-            Ok(PrepareResult::Upstream(_)) => {}
-            Err(e) => {
-                // TODO(justin): Consider removing this query from the cache so we never
-                // retry it again. It likely is not a valid query.
-                error!(%e, "Prepare failed in both noria and upstream: {}", stmt.to_string())
+            Err(e) if e.caused_by_unsupported() => {
+                error!(error = %e,
+                        query = %stmt,
+                        "Select query is unsupported in ReadySet");
+                self.query_status_cache.set_unsupported_query(stmt).await;
             }
-            _ => {
-                warn!("Query succeeded in noria but failed in upstream. This should have been impossible.")
-            }
-        }
-    }
-
-    async fn cascade_prepare(
-        &mut self,
-        stmt: SelectStatement,
-    ) -> ReadySetResult<PrepareResult<DB>> {
-        let u = self.upstream.prepare(stmt.to_string()).await.map_err(|_| {
-            ReadySetError::Internal("Query failed to be prepared against upstream".to_string())
-        })?;
-
-        // Convert from results into a `PrepareResult`.
-        match self.noria.prepare_select(stmt, 0).await {
-            Ok(n) => Ok(PrepareResult::Both(n, u)),
-            Err(_) => Ok(PrepareResult::Upstream(u)),
+            // Errors that were not caused by unsupported may be transient, do nothing
+            // so we may retry query reconciliation on this query.
+            _ => {}
         }
     }
 

@@ -136,7 +136,7 @@ pub struct Options {
     #[clap(
         long,
         env = "RECONCILE_INTERVAL",
-        default_value = "1000",
+        default_value = "20000",
         requires("upstream-db-url")
     )]
     reconciler_loop_interval: u64,
