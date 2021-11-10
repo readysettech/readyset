@@ -135,8 +135,7 @@ impl Recipe {
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
-    // crate viz for tests
-    pub(crate) fn blank() -> Recipe {
+    fn blank() -> Recipe {
         Recipe {
             expressions: HashMap::default(),
             expression_order: Vec::default(),
@@ -147,15 +146,55 @@ impl Recipe {
         }
     }
 
-    pub(super) fn with_version(version: usize) -> Recipe {
-        Recipe {
-            version,
-            ..Self::blank()
-        }
+    /// Creates a new blank recipe with the given SQL configuration and MIR configuration
+    pub(crate) fn with_config(sql_config: sql::Config, mir_config: sql::mir::Config) -> Self {
+        let mut res = Recipe::blank();
+        res.set_sql_config(sql_config);
+        res.set_mir_config(mir_config);
+        res
     }
 
+    /// Creates a blank recipe with config taken from `other`
+    pub(crate) fn blank_with_config_from(other: &Recipe) -> Recipe {
+        let mut res = Recipe::blank();
+        res.clone_config_from(other);
+        res
+    }
+
+    /// Creates a blank recipe with the given `version`, and config taken from `other`
+    pub(super) fn with_version_and_config_from(version: usize, other: &Recipe) -> Recipe {
+        let mut res = Recipe {
+            version,
+            ..Self::blank()
+        };
+        res.clone_config_from(other);
+        res
+    }
+
+    /// Clone the MIR and SQL configuration from `other` into `self`
+    pub(crate) fn clone_config_from(&mut self, other: &Recipe) {
+        self.set_sql_config(other.sql_config().clone());
+        self.set_mir_config(other.mir_config().clone());
+    }
+
+    /// Set the MIR configuration for this recipe
     pub(crate) fn set_mir_config(&mut self, mir_config: sql::mir::Config) {
         self.inc.as_mut().unwrap().set_mir_config(mir_config)
+    }
+
+    /// Get a shared reference to this recipe's MIR configuration
+    pub(crate) fn mir_config(&self) -> &sql::mir::Config {
+        self.inc.as_ref().unwrap().mir_config()
+    }
+
+    /// Set the SQL configuration for this recipe
+    pub(crate) fn set_sql_config(&mut self, sql_config: sql::Config) {
+        self.inc.as_mut().unwrap().config = sql_config;
+    }
+
+    /// Get a shared reference to this recipe's SQL configuration
+    pub(crate) fn sql_config(&self) -> &sql::Config {
+        &self.inc.as_ref().unwrap().config
     }
 
     /// Disable node reuse.
@@ -622,7 +661,7 @@ impl Recipe {
         if let Some(prior) = self.prior {
             *prior
         } else {
-            Recipe::blank()
+            Recipe::blank_with_config_from(&self)
         }
     }
 

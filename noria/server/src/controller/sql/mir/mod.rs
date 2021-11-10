@@ -151,6 +151,10 @@ impl Default for SqlToMirConverter {
 }
 
 impl SqlToMirConverter {
+    pub(crate) fn config(&self) -> &Config {
+        &self.config
+    }
+
     /// Set the [`Config`]
     pub(crate) fn set_config(&mut self, config: Config) {
         self.config = config;
