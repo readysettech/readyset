@@ -373,6 +373,8 @@ Resources:
           - Outputs.DatabaseURL
         ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
         ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
+        ReadySetMySQLAdapterUsername: !Ref DatabaseUsername
+        ReadySetMySQLAdapterPassword: !Ref DatabasePassword
         ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
         ReadySetServerNodes: !Ref ReadySetServerNodes
         ReadySetServerVolumeSizeGB: !Ref ReadySetServerVolumeSizeGB
