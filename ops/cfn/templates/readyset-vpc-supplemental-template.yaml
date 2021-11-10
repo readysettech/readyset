@@ -317,6 +317,53 @@ Resources:
       VpcEndpointType: Interface
       PrivateDnsEnabled: 'true'
       VpcId: !Ref VPCID
+
+  # CloudWatch VPC endpoint
+
+  CloudWatchLogsVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:CreateLogGroup
+              - logs:PutLogEvents
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: "true"
+      VpcId: !Ref VPCID
+
+  CloudWatchMonitoringVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - cloudwatch:PutMetricData
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.monitoring'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: "true"
+      VpcId: !Ref VPCID
+
 Outputs:
   ReadySetServerSecurityGroupID:
     Value: !Ref ReadySetServerSecurityGroup
