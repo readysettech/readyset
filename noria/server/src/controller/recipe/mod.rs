@@ -316,56 +316,55 @@ impl Recipe {
     pub(crate) fn from_str(recipe_text: &str) -> ReadySetResult<Recipe> {
         // parse and compute differences to current recipe
         let parsed_queries = Recipe::parse(recipe_text)?;
-        Ok(Recipe::from_queries(parsed_queries))
+        Recipe::from_queries(parsed_queries)
     }
 
     /// Creates a recipe from a set of pre-parsed `SqlQuery` structures.
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
-    fn from_queries(qs: Vec<(Option<String>, SqlQuery, bool)>) -> Recipe {
+    fn from_queries(qs: Vec<(Option<String>, SqlQuery, bool)>) -> ReadySetResult<Recipe> {
         let mut aliases = HashMap::default();
         let mut expression_order = Vec::new();
         let mut duplicates = 0;
-        let expressions = qs
-            .into_iter()
-            .map(|(mut n, q, mut is_leaf)| {
-                let qid = hash_query(&q);
-                if !expression_order.contains(&qid) {
-                    expression_order.push(qid);
-                } else {
-                    duplicates += 1;
-                }
+        let mut expressions = HashMap::new();
+        for (mut n, q, mut is_leaf) in qs.into_iter() {
+            let qid = hash_query(&q);
+            if !expression_order.contains(&qid) {
+                expression_order.push(qid);
+            } else {
+                duplicates += 1;
+            }
 
-                // Treat views created using CREATE VIEW as leaf views too
-                if let (None, SqlQuery::CreateView(query)) = (&n, &q) {
-                    n = Some(query.name.clone());
-                    is_leaf = true;
-                }
+            // Treat views created using CREATE VIEW as leaf views too
+            if let (None, SqlQuery::CreateView(query)) = (&n, &q) {
+                n = Some(query.name.clone());
+                is_leaf = true;
+            }
 
-                if let Some(ref name) = n {
-                    assert!(
-                        !aliases.contains_key(name) || aliases[name] == qid,
+            if let Some(ref name) = n {
+                if aliases.contains_key(name) && aliases[name] != qid {
+                    return Err(ReadySetError::RecipeInvariantViolated(format!(
                         "Query name exists but existing query is different: {}",
                         name
-                    );
-                    aliases.insert(name.clone(), qid);
+                    )));
                 }
-                (qid, (n, q, is_leaf))
-            })
-            .collect::<HashMap<_, _>>();
+                aliases.insert(name.clone(), qid);
+            }
+            expressions.insert(qid, (n, q, is_leaf));
+        }
 
         let inc = SqlIncorporator::new();
 
         debug!(duplicate_queries = duplicates, version = 0);
 
-        Recipe {
+        Ok(Recipe {
             expressions,
             expression_order,
             aliases,
             version: 0,
             prior: None,
             inc: Some(inc),
-        }
+        })
     }
 
     /// Activate the recipe by migrating the Soup data-flow graph wrapped in `mig` to the recipe.
@@ -527,8 +526,7 @@ impl Recipe {
             aliases: self.aliases.clone(),
             version: self.version + 1,
             inc: prior_inc,
-            // retain the old recipe for future reference
-            prior: Some(Box::new(self)),
+            prior: None,
         };
 
         // apply changes
@@ -539,13 +537,21 @@ impl Recipe {
         }
 
         for (n, qid) in &add_rp.aliases {
-            assert!(
-                !new.aliases.contains_key(n) || new.aliases[n] == *qid,
-                "Query name exists but existing query is different: {}",
-                n
-            );
+            if new.aliases.contains_key(n) && new.aliases[n] != *qid {
+                // new.prior is set in `new` when constructed above.
+                #[allow(clippy::unwrap_used)]
+                return Err((
+                    self,
+                    ReadySetError::RecipeInvariantViolated(format!(
+                        "Query name exists but existing query is different: {}",
+                        n
+                    )),
+                ));
+            }
         }
         new.aliases.extend(add_rp.aliases);
+        // retain the old recipe for future reference
+        new.prior = Some(Box::new(self));
 
         // return new recipe as replacement for self
         Ok(new)
@@ -737,7 +743,7 @@ mod tests {
         let q1_id = hash_query(&q1);
 
         let pq_a = vec![(None, q0.clone(), true), (None, q1, true)];
-        let r1 = Recipe::from_queries(pq_a);
+        let r1 = Recipe::from_queries(pq_a).unwrap();
 
         // delta from empty recipe
         let (added, removed) = r1.compute_delta(&r0);
@@ -755,7 +761,7 @@ mod tests {
         let q2 = sql_parser::parse_query(Dialect::MySQL, "SELECT c FROM b;").unwrap();
         let q2_id = hash_query(&q2);
         let pq_b = vec![(None, q0, true), (None, q2, true)];
-        let r2 = Recipe::from_queries(pq_b);
+        let r2 = Recipe::from_queries(pq_b).unwrap();
 
         // delta should show addition and removal
         let (added, removed) = r2.compute_delta(&r1);

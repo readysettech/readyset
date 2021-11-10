@@ -100,6 +100,10 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
+    /// Failures during recipe creation which may indicate Noria is in an invalid state.
+    #[error("Unable to create recipe from received DDL: {0}")]
+    RecipeInvariantViolated(String),
+
     /// A domain couldn't be booted on the remote worker.
     #[error("Failed to boot domain {domain_index}.{shard} on worker '{worker_uri}': {source}")]
     DomainCreationFailed {

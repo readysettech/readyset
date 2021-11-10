@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use stream_cancel::Valve;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
 use tracing_futures::Instrument;
@@ -140,6 +140,24 @@ impl Worker {
 /// Type alias for "a worker's URI" (as reported in a `RegisterPayload`).
 type WorkerIdentifier = Url;
 
+/// Channel that can be used to pass errors from the leader back to the controller so that we can
+/// gracefully kill the controller loop.
+pub struct ReplicationErrorChannel {
+    sender: UnboundedSender<ReadySetError>,
+    receiver: UnboundedReceiver<ReadySetError>,
+}
+
+impl ReplicationErrorChannel {
+    fn new() -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        Self { sender, receiver }
+    }
+
+    fn sender(&self) -> UnboundedSender<ReadySetError> {
+        self.sender.clone()
+    }
+}
+
 /// An update on the leader election and failure detection.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -223,6 +241,11 @@ pub struct Controller {
     /// A notify to be passed to leader's when created, used to notify the Controller that the
     /// leader is ready to handle requests.
     leader_ready_notification: Arc<Notify>,
+
+    /// Channel that the replication task, if it exists, can use to propagate updates back to
+    /// the parent controller.
+    replication_error_channel: ReplicationErrorChannel,
+
     /// Indicates if state should be reset to only reflect DDL changes, and erase all Noria
     /// specific recipes. Also flattens all DDL changes into a single recipe.
     should_reset_state: bool,
@@ -252,6 +275,7 @@ impl Controller {
             config,
             leader_ready: false,
             leader_ready_notification: Arc::new(Notify::new()),
+            replication_error_channel: ReplicationErrorChannel::new(),
             authority_task: None,
             should_reset_state,
         }
@@ -383,7 +407,12 @@ impl Controller {
                     self.config.replication_url.clone(),
                     self.config.replication_server_id,
                 );
-                leader.start(self.leader_ready_notification.clone()).await;
+                leader
+                    .start(
+                        self.leader_ready_notification.clone(),
+                        self.replication_error_channel.sender(),
+                    )
+                    .await;
                 self.leader_ready = false;
 
                 self.inner = Some(leader);
@@ -464,6 +493,13 @@ impl Controller {
                         // still, good to be doubly sure
                         _ => internal!("leadership sender dropped without being elected"),
                     }
+                }
+                req = self.replication_error_channel.receiver.recv() => {
+                    match req {
+                        Some(e) => return Err(e),
+                        _ => internal!("leader status invalid or channel dropped, leader failed")
+                    }
+
                 }
                 _ = self.leader_ready_notification.notified() => {
                     self.leader_ready = true;
