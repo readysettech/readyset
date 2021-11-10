@@ -89,6 +89,7 @@ pub enum QueryState {
     NeedsProcessing,
     SuccessfulMigration,
     FailedExecute(u32),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +160,13 @@ impl QueryStatusCache {
         });
     }
 
+    pub async fn set_unsupported_query(&self, query: &Query) {
+        self.inner.write().await.get_mut(query).map(|s| {
+            s.state = QueryState::Unsupported;
+            s
+        });
+    }
+
     /// Sets the provided query to have a QueryState of FailedExecute.
     /// If the query is not found this is a no-op.
     pub async fn set_failed_execute(&self, query: &Query) {
@@ -211,7 +219,7 @@ impl QueryStatusCache {
             .await
             .iter()
             .filter(|(_, status)| {
-                (matches!(status.state, QueryState::NeedsProcessing) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES)
+                (matches!(status.state, QueryState::NeedsProcessing) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES) || matches!(status.state, QueryState::Unsupported)
            })
             .map(|(q, _)| q.clone())
             .collect::<Vec<Query>>()
