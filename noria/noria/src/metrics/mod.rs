@@ -405,6 +405,19 @@ pub mod recorded {
     /// | Tag | Description |
     /// | status | SnapshotStatusTag |
     pub const REPLICATOR_SNAPSHOT_STATUS: &str = "replicator.snapshot_status";
+
+    /// Counter: The total amount of time spent servicing controller RPCs.
+    ///
+    /// | Tag | Description |
+    /// | path | The http path associated with the rpc request. |
+    pub const CONTROLLER_RPC_OVERALL_TIME: &str = "controller.rpc_overall_time";
+
+    /// Histogram: The distribution of time spent servicing controller RPCs
+    /// for each request.
+    ///
+    /// | Tag | Description |
+    /// | path | The http path associated with the rpc request. |
+    pub const CONTROLLER_RPC_REQUEST_TIME: &str = "controller.rpc_request_time";
 }
 
 /// A dumped metric's kind.
