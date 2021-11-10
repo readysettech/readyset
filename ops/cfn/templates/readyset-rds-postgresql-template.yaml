@@ -1,17 +1,18 @@
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: New RDS Postgres instance configured for ReadySet
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "VPC Network Configurations"
+          default: VPC Network Configurations
         Parameters:
           - VPCID
           - VPCCIDR
           - VPCPrivateSubnetIds
       - Label:
-          default: "Database Cluster Configurations"
+          default: Database Cluster Configurations
         Parameters:
           - DatabaseStorageType
           - DatabaseInstanceClass
@@ -21,62 +22,73 @@ Metadata:
           - DatabaseUsername
           - DatabasePassword
           - DatabasePort
+
 Parameters:
   VPCID:
     Description: ID of the VPC to deploy resources in.
     Type: AWS::EC2::VPC::Id
     AllowedPattern: (^vpc-\w+)
+
   VPCCIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
     Description: CIDR block for the VPC
     Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   VPCPrivateSubnetIds:
     Description: Comma-delimited list of private VPC subnet IDs within the target VPC (e.g. subnet-1234,subnet-4567,subnet-8910).
     Type: CommaDelimitedList
+
   DatabaseStorageType:
     Description: Database storage type
     Type: String
     Default: gp2
+
   DatabaseInstanceClass:
     Description: Database instance class
     Type: String
     Default: db.m5.large
+
   DatabaseAllocatedStorage:
     Description: Storage size for the DB instance, in gigabytes. Remember that IOPS scales with storage size for gp2.
     Type: Number
+    Default: 20
     MinValue: 20
     MaxValue: 65536
-    Default: 20
+
   DatabaseInstanceMultiAZ:
     Description: Enables Multi-AZ on the database instance. Recommended for production.
     Type: String
     AllowedValues:
-      - 'true'
-      - 'false'
-    Default: 'false'
+      - "true"
+      - "false"
+    Default: "false"
+
   DatabaseName:
     Description: Database name
     Type: String
     MinLength: 1
     MaxLength: 64
-    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
   DatabaseUsername:
     Description: Username to log into the PostgreSQL Database
     Type: String
     MinLength: 1
     MaxLength: 16
+
   DatabasePassword:
+    Description: Password to log into the PostgreSQL Database
     Type: String
     NoEcho: true
-    Description: Password to log into the PostgreSQL Database
     MinLength: 8
     MaxLength: 63
+
   DatabasePort:
     Description: TCP port for the RDS instance to serve traffic on
     Type: Number
     Default: 5432
+
 Resources:
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -93,18 +105,21 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+
   DatabaseSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: "DB subnet group for VPC access."
+      DBSubnetGroupDescription: DB subnet group for VPC access.
       SubnetIds: !Ref VPCPrivateSubnetIds
+
   DatabaseParameterGroup:
     Type: AWS::RDS::DBParameterGroup
     Properties:
-      Description: "ReadySet RDS Postgres Parameter Group"
+      Description: ReadySet RDS Postgres Parameter Group
       Family: postgres13
       Parameters:
         rds.logical_replication: 1
+
   DatabaseInstance:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -121,14 +136,11 @@ Resources:
       VPCSecurityGroups:
         - !Ref DatabaseSecurityGroup
       DBParameterGroupName: !Ref DatabaseParameterGroup
+
 Outputs:
   DatabaseURL:
     Description: Database connection URL for RDS instance
     Value: !Sub
       - postgres://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
-      - EndpointAddress: !GetAtt
-          - DatabaseInstance
-          - Endpoint.Address
-        EndpointPort: !GetAtt
-          - DatabaseInstance
-          - Endpoint.Port
+      - EndpointAddress: !GetAtt DatabaseInstance.Endpoint.Address
+        EndpointPort: !GetAtt DatabaseInstance.Endpoint.Port

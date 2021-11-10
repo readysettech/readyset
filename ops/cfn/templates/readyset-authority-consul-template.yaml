@@ -1,77 +1,88 @@
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "VPC Network Configuration"
+          default: VPC Network Configuration
         Parameters:
           - PrivateSubnet1ID
           - PrivateSubnet2ID
           - PrivateSubnet3ID
           - ConsulServerSecurityGroupID
       - Label:
-          default: "SSH Access Configuration"
+          default: SSH Access Configuration
         Parameters:
           - KeyPairName
       - Label:
-          default: "Consul Configuration"
+          default: Consul Configuration
         Parameters:
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
           - ConsulServerNodes
+
 Parameters:
   # Consul Server
+
   ConsulInstanceType:
-    Type: String
     Description: The EC2 instance type for the Consul instances.
-    ConstraintDescription: Choose an instance type.
+    Type: String
     Default: m5.large
+    ConstraintDescription: Choose an instance type.
+
   ConsulEc2RetryJoinTagKey:
-    Description:
-      The EC2 instance tag key to filter on when joining to other Consul
-      nodes.
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: "ReadysetConsulNodeType"
+    Default: ReadysetConsulNodeType
     ConstraintDescription: Must match EC2 Tag Name requirements.
+
   ConsulEc2RetryJoinTagValue:
-    Description:
-      The EC2 instance tag value to filter on when joining to other Consul
-      nodes.
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
-    Default: "Server"
+    Default: Server
     ConstraintDescription: Must match EC2 Tag Name requirements.
+
   ConsulServerNodes:
-    Type: String
     Description: The number of Consul server nodes that will be created. You can choose 3, 5, or 7 nodes.
+    Type: String
     AllowedValues:
       - "3"
       - "5"
       - "7"
     Default: "3"
+
   ConsulServerSecurityGroupID:
-    Type: "AWS::EC2::SecurityGroup::Id"
     Description: ID of the security group to apply to ReadySet Consul Server instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
   # SSH
+
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
-    Type: "AWS::EC2::KeyPair::KeyName"
+    Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
   # Networking
+
   PrivateSubnet1ID:
-    Description: "ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)"
-    Type: "AWS::EC2::Subnet::Id"
+    Description: ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)
+    Type: AWS::EC2::Subnet::Id
+
   PrivateSubnet2ID:
-    Description: "ID of the private subnet 2 in Availability Zone 2 (e.g., subnet-xxxxxxxx)"
-    Type: "AWS::EC2::Subnet::Id"
+    Description: ID of the private subnet 2 in Availability Zone 2 (e.g., subnet-xxxxxxxx)
+    Type: AWS::EC2::Subnet::Id
+
   PrivateSubnet3ID:
-    Description: "ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)"
-    Type: "AWS::EC2::Subnet::Id"
+    Description: ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)
+    Type: AWS::EC2::Subnet::Id
+
 # Update this with the latest AMI
+
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
       READYSETAUTHORITYCONSUL: ami-0bc5a6a247c2a5455
+
 Resources:
   ConsulJoinManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -81,10 +92,11 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - "ec2:DescribeInstances"
-              - "ec2:DescribeTags"
-              - "autoscaling:DescribeAutoScalingGroups"
-            Resource: "*"
+              - ec2:DescribeInstances
+              - ec2:DescribeTags
+              - autoscaling:DescribeAutoScalingGroups
+            Resource: '*'
+
   ConsulServerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -92,17 +104,19 @@ Resources:
         - !Ref ConsulJoinManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ConsulServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ConsulServerRole
+
   ConsulServerLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -116,8 +130,8 @@ Resources:
         - !Ref "AWS::Region"
         - READYSETAUTHORITYCONSUL
       IamInstanceProfile: !Ref ConsulServerProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -134,8 +148,13 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
+
   ConsulServerASG:
-    Type: "AWS::AutoScaling::AutoScalingGroup"
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ConsulServerNodes
+        Timeout: PT20M
+    Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ConsulServerLC
       MinSize: !Ref ConsulServerNodes
@@ -148,24 +167,23 @@ Resources:
       Tags:
         - Key: Name
           Value: !Join
-            - "-"
+            - '-'
             - - !Ref "AWS::StackName"
               - ConsulServer
           PropagateAtLaunch: true
         - Key: !Ref ConsulEc2RetryJoinTagKey
           Value: !Ref ConsulEc2RetryJoinTagValue
           PropagateAtLaunch: true
-    CreationPolicy:
-      ResourceSignal:
-        Count: !Ref ConsulServerNodes
-        Timeout: PT20M
+
 Outputs:
   ConsulJoinManagedPolicyArn:
-    Value: !Ref ConsulJoinManagedPolicy
     Description: IAM Policy that allows an instance to find the Consul server nodes.
+    Value: !Ref ConsulJoinManagedPolicy
+
   ConsulEc2RetryJoinTagKey:
-    Value: !Ref ConsulEc2RetryJoinTagKey
     Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Value: !Ref ConsulEc2RetryJoinTagKey
+
   ConsulEc2RetryJoinTagValue:
-    Value: !Ref ConsulEc2RetryJoinTagValue
     Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Value: !Ref ConsulEc2RetryJoinTagValue

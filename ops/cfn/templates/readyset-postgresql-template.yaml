@@ -1,28 +1,29 @@
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: ReadySet for PostgreSQL
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "VPC Network Configuration"
+          default: VPC Network Configuration
         Parameters:
           - VPCID
           - VPCCIDR
           - VPCPrivateSubnetIds
       - Label:
-          default: "SSH Access Configuration"
+          default: SSH Access Configuration
         Parameters:
           - BastionSecurityGroupID
           - KeyPairName
       - Label:
-          default: "Consul Configuration"
+          default: Consul Configuration
         Parameters:
           - ConsulJoinManagedPolicyArn
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
       - Label:
-          default: "ReadySet Configuration"
+          default: ReadySet Configuration
         Parameters:
           - ReadySetAdapterInstanceType
           - ReadySetAdapterNodes
@@ -33,86 +34,100 @@ Metadata:
           - PostgresDatabaseURL
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
+
 Parameters:
   BastionSecurityGroupID:
     Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
     Type: AWS::EC2::SecurityGroup::Id
+
   ReadySetAdapterInstanceType:
-    Type: String
     Description: The EC2 instance type to use for ReadySet Adapter instances.
+    Type: String
     Default: m5.large
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation.
+
   ReadySetServerInstanceType:
-    Type: String
     Description: The EC2 instance type to use for ReadySet Server instances.
+    Type: String
     Default: c5.4xlarge
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation
+
   ReadySetMonitorInstanceType:
-    Type: String
     Description: The EC2 instance type to use for the ReadySet monitoring instance.
+    Type: String
     Default: t3.small
+
   ReadySetAdapterNodes:
-    Type: String
     Description: Number of ReadySet Adapter nodes to create.
-  ReadySetServerNodes:
     Type: String
+
+  ReadySetServerNodes:
     Description: Number of ReadySet Server nodes to create.
+    Type: String
+
   ReadySetServerVolumeSizeGB:
-    Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances. This should match EBS volume size of RDS instance.
-    MinValue: 32
+    Type: Number
     Default: 32
+    MinValue: 32
+
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
   VPCPrivateSubnetIds:
     Description: List of private VPC subnet IDs within the target VPC.
     Type: List<AWS::EC2::Subnet::Id>
+
   VPCID:
     Description: ID of the VPC to deploy resources in.
     Type: AWS::EC2::VPC::Id
     AllowedPattern: (^vpc-\w+)
+
   VPCCIDR:
     Description: CIDR block for the VPC.
     Type: String
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   ConsulJoinManagedPolicyArn:
     Description: ARN of an managed IAM policy that the permissions to find Consul Servers
     Type: String
+
   ConsulEc2RetryJoinTagKey:
-    Description:
-      The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: "ReadySetConsulNodeType"
+    Default: ReadySetConsulNodeType
     ConstraintDescription: Must match EC2 Tag Name requirements.
+
   ConsulEc2RetryJoinTagValue:
-    Description:
-      The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
-    Default: "Server"
+    Default: Server
     ConstraintDescription: Must match EC2 Tag Value requirements.
+
   PostgresDatabaseURL:
+    Description: Existing Database URL connection string, e.g. postgresql://username:password@localhost:5432/mydatabase
     Type: String
     NoEcho: True
-    Description: Existing Database URL connection string, e.g. postgresql://username:password@localhost:5432/mydatabase
+
   ReadySetMemoryLimitGB:
-    Type: Number
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Type: Number
     Default: 0
     MinValue: 0
+
   ReadySetDeploymentName:
-    Description:
-      A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+    Description: A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
     Type: String
     MinLength: 1
-    AllowedPattern: >-
-      ^[^/ ]+$
+    AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
 # Update this with the latest AMI
+
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
@@ -120,6 +135,7 @@ Mappings:
       READYSETPOSTGRESQLADAPTER: ami-04368d88269c4366e
       READYSETSERVER: ami-06d085b6441cce99a
       READYSETMONITOR: ami-0d58bd90ec29a80a0
+
 Resources:
   ReadySetPostgreSQLAdapterRole:
     Type: AWS::IAM::Role
@@ -128,17 +144,19 @@ Resources:
         - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetPostgreSQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ReadySetPostgreSQLAdapterRole
+
   ReadySetPostgreSQLAdapterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -166,6 +184,7 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+
   ReadySetPostgreSQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -175,6 +194,7 @@ Resources:
       Port: 5432
       Protocol: TCP
       VpcId: !Ref VPCID
+
   ReadySetPostgreSQLAdapterLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -189,8 +209,8 @@ Resources:
         - !Ref "AWS::Region"
         - READYSETPOSTGRESQLADAPTER
       IamInstanceProfile: !Ref ReadySetPostgreSQLAdapterProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -208,7 +228,12 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
+
   ReadySetPostgreSQLAdapterASG:
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadySetAdapterNodes
+        Timeout: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetPostgreSQLAdapterLC
@@ -219,20 +244,17 @@ Resources:
       VPCZoneIdentifier: !Ref VPCPrivateSubnetIds
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-PostgreSQLAdapter"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", ReadySet-PostgreSQLAdapter]]
           PropagateAtLaunch: true
 
-    CreationPolicy:
-      ResourceSignal:
-        Count: !Ref ReadySetAdapterNodes
-        Timeout: PT20M
   ReadySetPostgreSQLAdapterNLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Type: "network"
-      Scheme: "internal"
-      IpAddressType: "ipv4"
+      Type: network
+      Scheme: internal
+      IpAddressType: ipv4
       Subnets: !Ref VPCPrivateSubnetIds
+
   ReadySetPostgreSQLAdapterListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -242,17 +264,23 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref ReadySetPostgreSQLAdapterTargetGroup
       LoadBalancerArn: !Ref ReadySetPostgreSQLAdapterNLB
+
   ReadySetPostgreSQLAdapterVPCEndpointService:
     Type: AWS::EC2::VPCEndpointService
     Properties:
       NetworkLoadBalancerArns:
         - !Ref ReadySetPostgreSQLAdapterNLB
+
   # --- END PostgreSQL ADAPTER --- #
+
+
   # --- START SERVER --- #
+
   ReadySetServerASGLifecycleTerminateSQS:
     Type: AWS::SQS::Queue
     Properties:
       VisibilityTimeout: 0
+
   ReadySetServerASGRole:
     Type: AWS::IAM::Role
     Properties:
@@ -260,11 +288,12 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AutoScalingNotificationAccessRole
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: autoscaling.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetServerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -272,7 +301,7 @@ Resources:
         - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
@@ -284,45 +313,47 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                - ec2:CreateVolume
-                - ec2:DescribeVolumes
-                - ec2:CreateTags
+                  - ec2:CreateVolume
+                  - ec2:DescribeVolumes
+                  - ec2:CreateTags
                 Resource: '*'
               - Effect: Allow
                 Action:
-                - ec2:AttachVolume
-                - ec2:DetachVolume
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
                 Resource:
-                - "arn:aws:ec2:*:*:volume/*"
+                  - arn:aws:ec2:*:*:volume/*
                 Condition:
-                  'Null':
-                    'aws:ResourceTag/ReadySet:ServerVolume': 'false'
+                  "Null":
+                    aws:ResourceTag/ReadySet:ServerVolume: "false"
               - Effect: Allow
                 Action:
-                - ec2:AttachVolume
-                - ec2:DetachVolume
-                - ec2:TerminateInstances
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:TerminateInstances
                 Resource:
-                - "arn:aws:ec2:*:*:instance/*"
+                  - arn:aws:ec2:*:*:instance/*
                 Condition:
-                  'Null':
-                    'aws:ResourceTag/ReadySet:ServerInstance': 'false'
+                  "Null":
+                    aws:ResourceTag/ReadySet:ServerInstance: "false"
               - Effect: Allow
                 Action:
-                - sqs:ReceiveMessage
-                - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
                 Resource:
-                - !GetAtt [ ReadySetServerASGLifecycleTerminateSQS, Arn ]
+                  - !GetAtt ReadySetServerASGLifecycleTerminateSQS.Arn
               - Effect: Allow
                 Action:
-                - autoscaling:CompleteLifecycleAction
+                  - autoscaling:CompleteLifecycleAction
                 Resource: '*'
+
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ReadySetServerRole
+
   ReadySetServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -340,23 +371,19 @@ Resources:
         - IpProtocol: tcp
           FromPort: 6033
           ToPort: 6033
-          SourceSecurityGroupId:
-            Fn::GetAtt:
-            - ReadySetPostgreSQLAdapterSecurityGroup
-            - GroupId
+          SourceSecurityGroupId: !GetAtt ReadySetPostgreSQLAdapterSecurityGroup.GroupId
         - IpProtocol: tcp
           FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
           ToPort: 61000
-          SourceSecurityGroupId:
-            Fn::GetAtt:
-            - ReadySetPostgreSQLAdapterSecurityGroup
-            - GroupId
+          SourceSecurityGroupId: !GetAtt ReadySetPostgreSQLAdapterSecurityGroup.GroupId
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+
   # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
+
   ReadySetServerSecurityGroupIngressControllerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -365,20 +392,16 @@ Resources:
       FromPort: 6033
       ToPort: 6033
       SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+
   ReadySetServerSecurityGroupIngressWorkerRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId:
-        Fn::GetAtt:
-        - ReadySetServerSecurityGroup
-        - GroupId
+      GroupId: !GetAtt ReadySetServerSecurityGroup.GroupId
       IpProtocol: tcp
       FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
       ToPort: 61000
-      SourceSecurityGroupId:
-        Fn::GetAtt:
-          - ReadySetServerSecurityGroup
-          - GroupId
+      SourceSecurityGroupId: !GetAtt ReadySetServerSecurityGroup.GroupId
+
   ReadySetServerLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -393,8 +416,8 @@ Resources:
         - !Ref "AWS::Region"
         - READYSETSERVER
       IamInstanceProfile: !Ref ReadySetServerProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -419,7 +442,12 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
+
   ReadySetServerASG:
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadySetServerNodes
+        Timeout: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
@@ -430,24 +458,18 @@ Resources:
         - LifecycleHookName: ReadySetServerASGTerminateSNS
           LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
           HeartbeatTimeout: 1800
-          NotificationTargetARN: !GetAtt
-            - ReadySetServerASGLifecycleTerminateSQS
-            - Arn
-          RoleARN: !GetAtt
-            - ReadySetServerASGRole
-            - Arn
+          NotificationTargetARN: !GetAtt ReadySetServerASGLifecycleTerminateSQS.Arn
+          RoleARN: !GetAtt ReadySetServerASGRole.Arn
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-Server"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", ReadySet-Server]]
           PropagateAtLaunch: true
         - Key: ReadySet:ServerInstance
           Value: !Ref ReadySetDeploymentName
           PropagateAtLaunch: true
-    CreationPolicy:
-      ResourceSignal:
-        Count: !Ref ReadySetServerNodes
-        Timeout: PT20M
+
   # --- END SERVER --- #
+
   ReadySetDBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -462,7 +484,9 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
+
   # --- START LOGS AGGREGATOR --- #
+
   ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -471,13 +495,14 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - "logs:CreateLogStream"
-              - "logs:DescribeLogGroups"
-              - "logs:DescribeLogStreams"
-              - "logs:CreateLogGroup"
-              - "logs:PutLogEvents"
-              - "cloudwatch:PutMetricData"
-            Resource: "*"
+              - logs:CreateLogStream
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:CreateLogGroup
+              - logs:PutLogEvents
+              - cloudwatch:PutMetricData
+            Resource: '*'
+
   ReadySetMonitorRole:
     Type: AWS::IAM::Role
     Properties:
@@ -486,17 +511,19 @@ Resources:
         - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetMonitorProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ReadySetMonitorRole
+
   ReadySetMonitorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -530,24 +557,25 @@ Resources:
           FromPort: 0
           ToPort: 0
           CidrIp: 0.0.0.0/0
+
   ReadySetMonitorInstance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref ReadySetMonitorInstanceType
-      SubnetId: !Select [ 0, !Ref VPCPrivateSubnetIds ]
+      SubnetId: !Select [0, !Ref VPCPrivateSubnetIds]
       SecurityGroupIds:
         - !Ref ReadySetMonitorSecurityGroup
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
-          - AWSAMIRegionMap
-          - !Ref "AWS::Region"
-          - READYSETMONITOR
+        - AWSAMIRegionMap
+        - !Ref "AWS::Region"
+        - READYSETMONITOR
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "Monitor"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", Monitor]]
       IamInstanceProfile: !Ref ReadySetMonitorProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -564,16 +592,17 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-  # --- END LOGS AGGREGATOR --- #
+          # --- END LOGS AGGREGATOR --- #
+
 Outputs:
   ReadySetDBSecurityGroup:
-    Value: !Ref ReadySetDBSecurityGroup
     Description: Attach this Security Group to your RDS instance.
+    Value: !Ref ReadySetDBSecurityGroup
+
   ReadySetAdapterNLBDNSName:
-    Value: !GetAtt
-      - ReadySetPostgreSQLAdapterNLB
-      - DNSName
     Description: Host for ReadySet connection string.
+    Value: !GetAtt ReadySetPostgreSQLAdapterNLB.DNSName
+
   ReadySetPostgreSQLVPCEndpointService:
-    Value: !Ref ReadySetPostgreSQLAdapterVPCEndpointService
     Description: VPC Endpoint Service to allow connections from outside the VPC.
+    Value: !Ref ReadySetPostgreSQLAdapterVPCEndpointService

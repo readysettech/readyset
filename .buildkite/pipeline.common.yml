@@ -445,6 +445,7 @@ steps:
     - "echo '{\"general\": {\"regions\": [\"us-east-2\"]}}' > ~/.taskcat.yml"
     - cd /workdir/ops/cfn
     - taskcat lint --strict
+    - rain fmt --verify templates/*
     plugins:
     - docker#v3.8.0:
         image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops-cfn:${BUILDKITE_COMMIT}

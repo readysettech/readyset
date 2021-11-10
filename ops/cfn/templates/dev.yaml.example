@@ -2,12 +2,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 
 Resources:
   ReadysetStack:
-    Type: "AWS::CloudFormation::Stack"
+    Type: AWS::CloudFormation::Stack
     Properties:
       Parameters:
         AccessCIDR: <CIDR including machine to SSH from>
         KeyPairName: <Key pair to ssh with>
-        AvailabilityZones: !Join [",", [us-east-2a, us-east-2b, us-east-2c]]
+        AvailabilityZones: !Join [',', [us-east-2a, us-east-2b, us-east-2c]]
         DatabaseAllocatedStorage: "20"
         DatabaseName: devtestdb
         DatabasePassword: testnoria
@@ -16,4 +16,4 @@ Resources:
         ReadySetAdapterNodes: 1
         ReadySetS3BucketName: <s3 bucket with templates>
         ReadySetServerNodes: 1
-      TemplateURL: "https://<s3 bucket with templates>.s3.<s3 bucket region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml"
+      TemplateURL: https://<s3 bucket with templates>.s3.<s3 bucket region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml

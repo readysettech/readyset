@@ -1,11 +1,12 @@
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: ReadySet MySQL Cluster
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "VPC Network Configuration"
+          default: VPC Network Configuration
         Parameters:
           - VPCID
           - PrivateSubnet1ID
@@ -15,17 +16,17 @@ Metadata:
           - ReadySetAdapterSecurityGroupID
           - ReadySetMonitoringSecurityGroupID
       - Label:
-          default: "SSH Access Configuration"
+          default: SSH Access Configuration
         Parameters:
           - KeyPairName
       - Label:
-          default: "Consul Configuration"
+          default: Consul Configuration
         Parameters:
           - ConsulJoinManagedPolicyArn
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
       - Label:
-          default: "ReadySet Configuration"
+          default: ReadySet Configuration
         Parameters:
           - ReadySetAdapterInstanceType
           - ReadySetAdapterNodes
@@ -38,104 +39,122 @@ Metadata:
           - MySQLDatabaseURL
           - ReadySetMySQLAdapterUsername
           - ReadySetMySQLAdapterPassword
+
 Parameters:
   ReadySetAdapterInstanceType:
-    Type: String
     Description: The EC2 instance type to use for ReadySet Adapter instances.
+    Type: String
     Default: m5.large
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation
+
   ReadySetServerInstanceType:
-    Type: String
     Description: The EC2 instance type to use for ReadySet Server instances.
+    Type: String
     Default: c5.4xlarge
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation
+
   ReadySetMonitorInstanceType:
-    Type: String
     Description: The EC2 instance type to use for the ReadySet monitoring instance.
+    Type: String
     Default: c5.large
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation
+
   ReadySetAdapterNodes:
-    Type: String
-    Default: 3
-    AllowedPattern: >-
-      ^\d+$
     Description: Number of Adapter nodes to create.
-  ReadySetServerNodes:
     Type: String
     Default: 3
-    AllowedPattern: >-
-      ^\d+$
+    AllowedPattern: ^\d+$
+
+  ReadySetServerNodes:
     Description: Number of Server nodes to create.
+    Type: String
+    Default: 3
+    AllowedPattern: ^\d+$
+
   ReadySetServerSecurityGroupID:
-    Type: "AWS::EC2::SecurityGroup::Id"
     Description: ID of the security group to apply to ReadySet Server instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
   ReadySetAdapterSecurityGroupID:
-    Type: "AWS::EC2::SecurityGroup::Id"
     Description: ID of the security group to apply to ReadySet Adapter instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
   ReadySetMonitoringSecurityGroupID:
-    Type: "AWS::EC2::SecurityGroup::Id"
     Description: ID of the security group to apply to ReadySet Monitoring instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
   ReadySetServerVolumeSizeGB:
-    Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances.
-    MinValue: 32
-    Default: 32
-  ReadySetMemoryLimitGB:
     Type: Number
+    Default: 32
+    MinValue: 32
+
+  ReadySetMemoryLimitGB:
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Type: Number
     Default: 0
     MinValue: 0
+
   ReadySetDeploymentName:
-    Description:
-      A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+    Description: A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
     Type: String
     MinLength: 1
-    AllowedPattern: >-
-      ^[^/ ]+$
+    AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
-    Type: "AWS::EC2::KeyPair::KeyName"
+    Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
   PrivateSubnet1ID:
     Type: AWS::EC2::Subnet::Id
+
   PrivateSubnet2ID:
     Type: AWS::EC2::Subnet::Id
+
   PrivateSubnet3ID:
     Type: AWS::EC2::Subnet::Id
+
   VPCID:
     Description: VPC ID
-    Type: "AWS::EC2::VPC::Id"
+    Type: AWS::EC2::VPC::Id
+
   ConsulJoinManagedPolicyArn:
     Description: ARN of an managed IAM policy that the permissions to find Consul Servers
     Type: String
+
   ConsulEc2RetryJoinTagKey:
-    Description:
-      The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: "ReadysetConsulNodeType"
+    Default: ReadysetConsulNodeType
     ConstraintDescription: Must match EC2 Tag Name requirements.
+
   ConsulEc2RetryJoinTagValue:
-    Description:
-      The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
-    Default: "Server"
+    Default: Server
     ConstraintDescription: Must match EC2 Tag Value requirements.
+
   MySQLDatabaseURL:
+    Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
     Type: String
     NoEcho: True
-    Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
+
   ReadySetMySQLAdapterUsername:
-    Type: String
     Description: Username to use to authenticate to the readyset adapter
+    Type: String
+
   ReadySetMySQLAdapterPassword:
+    Description: Password to use to authenticate to the readyset adapter
     Type: String
     NoEcho: true
-    Description: Password to use to authenticate to the readyset adapter
+
 # Update this with the latest AMI
+
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
@@ -143,8 +162,10 @@ Mappings:
       READYSETMYSQLADAPTER: ami-04368d88269c4366e
       READYSETSERVER: ami-06d085b6441cce99a
       READYSETMONITOR: ami-0d58bd90ec29a80a0
+
 Resources:
   # --- START MYSQL ADAPTER --- #
+
   ReadySetMySQLAdapterRole:
     Type: AWS::IAM::Role
     Properties:
@@ -152,17 +173,19 @@ Resources:
         - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetMySQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ReadySetMySQLAdapterRole
+
   ReadySetMySQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -172,6 +195,7 @@ Resources:
       Port: 3306
       Protocol: TCP
       VpcId: !Ref VPCID
+
   ReadySetMySQLAdapterLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -186,8 +210,8 @@ Resources:
         - !Ref "AWS::Region"
         - READYSETMYSQLADAPTER
       IamInstanceProfile: !Ref ReadySetMySQLAdapterProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -207,7 +231,12 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
+
   ReadySetMySQLAdapterASG:
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadySetAdapterNodes
+        Timeout: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetMySQLAdapterLC
@@ -221,21 +250,19 @@ Resources:
         - !Ref PrivateSubnet3ID
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "Readyset-MySQLAdapter"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", Readyset-MySQLAdapter]]
           PropagateAtLaunch: true
-    CreationPolicy:
-      ResourceSignal:
-        Count: !Ref ReadySetAdapterNodes
-        Timeout: PT20M
+
   ReadySetMySQLAdapterNLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Type: "network"
-      Scheme: "internal"
+      Type: network
+      Scheme: internal
       Subnets:
         - !Ref PrivateSubnet1ID
         - !Ref PrivateSubnet2ID
         - !Ref PrivateSubnet3ID
+
   ReadySetMySQLAdapterListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -245,17 +272,23 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref ReadySetMySQLAdapterTargetGroup
       LoadBalancerArn: !Ref ReadySetMySQLAdapterNLB
+
   ReadySetMySQLAdapterVPCEndpointService:
     Type: AWS::EC2::VPCEndpointService
     Properties:
       NetworkLoadBalancerArns:
         - !Ref ReadySetMySQLAdapterNLB
+
   # --- END MYSQL ADAPTER --- #
+
+
   # --- START SERVER --- #
+
   ReadySetServerASGLifecycleTerminateSQS:
     Type: AWS::SQS::Queue
     Properties:
       VisibilityTimeout: 0
+
   ReadySetServerASGRole:
     Type: AWS::IAM::Role
     Properties:
@@ -263,11 +296,12 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AutoScalingNotificationAccessRole
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: autoscaling.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetServerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -275,7 +309,7 @@ Resources:
         - !Ref ConsulJoinManagedPolicyArn
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
@@ -287,39 +321,40 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                - ec2:CreateVolume
-                - ec2:DescribeVolumes
-                - ec2:CreateTags
+                  - ec2:CreateVolume
+                  - ec2:DescribeVolumes
+                  - ec2:CreateTags
                 Resource: '*'
               - Effect: Allow
                 Action:
-                - ec2:AttachVolume
-                - ec2:DetachVolume
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
                 Resource:
-                - "arn:aws:ec2:*:*:volume/*"
+                  - arn:aws:ec2:*:*:volume/*
                 Condition:
-                  'Null':
-                    'aws:ResourceTag/ReadySet:ServerVolume': 'false'
+                  "Null":
+                    aws:ResourceTag/ReadySet:ServerVolume: "false"
               - Effect: Allow
                 Action:
-                - ec2:AttachVolume
-                - ec2:DetachVolume
-                - ec2:TerminateInstances
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:TerminateInstances
                 Resource:
-                - "arn:aws:ec2:*:*:instance/*"
+                  - arn:aws:ec2:*:*:instance/*
                 Condition:
-                  'Null':
-                    'aws:ResourceTag/ReadySet:ServerInstance': 'false'
+                  "Null":
+                    aws:ResourceTag/ReadySet:ServerInstance: "false"
               - Effect: Allow
                 Action:
-                - sqs:ReceiveMessage
-                - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
                 Resource:
-                - !GetAtt [ ReadySetServerASGLifecycleTerminateSQS, Arn ]
+                  - !GetAtt ReadySetServerASGLifecycleTerminateSQS.Arn
               - Effect: Allow
                 Action:
-                - autoscaling:CompleteLifecycleAction
+                  - autoscaling:CompleteLifecycleAction
                 Resource: '*'
+
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -341,8 +376,8 @@ Resources:
         - !Ref "AWS::Region"
         - READYSETSERVER
       IamInstanceProfile: !Ref ReadySetServerProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -367,7 +402,12 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
+
   ReadySetServerASG:
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ReadySetServerNodes
+        Timeout: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
@@ -381,26 +421,21 @@ Resources:
         - LifecycleHookName: ReadySetServerASGTerminateSNS
           LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
           HeartbeatTimeout: 1800
-          NotificationTargetARN: !GetAtt
-            - ReadySetServerASGLifecycleTerminateSQS
-            - Arn
-          RoleARN: !GetAtt
-            - ReadySetServerASGRole
-            - Arn
+          NotificationTargetARN: !GetAtt ReadySetServerASGLifecycleTerminateSQS.Arn
+          RoleARN: !GetAtt ReadySetServerASGRole.Arn
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "ReadySet-Server"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", ReadySet-Server]]
           PropagateAtLaunch: true
         - Key: ReadySet:ServerInstance
           Value: !Ref ReadySetDeploymentName
           PropagateAtLaunch: true
-    CreationPolicy:
-      ResourceSignal:
-        Count: !Ref ReadySetServerNodes
-        Timeout: PT20M
+
   # --- END SERVER --- #
 
+
   # --- START LOGS AGGREGATOR --- #
+
   ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -409,13 +444,14 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - "logs:CreateLogStream"
-              - "logs:DescribeLogGroups"
-              - "logs:DescribeLogStreams"
-              - "logs:CreateLogGroup"
-              - "logs:PutLogEvents"
-              - "cloudwatch:PutMetricData"
-            Resource: "*"
+              - logs:CreateLogStream
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:CreateLogGroup
+              - logs:PutLogEvents
+              - cloudwatch:PutMetricData
+            Resource: '*'
+
   ReadySetMonitorRole:
     Type: AWS::IAM::Role
     Properties:
@@ -424,23 +460,25 @@ Resources:
         - !Ref ReadySetAggregatorCloudWatchLogsManagedPolicy
       AssumeRolePolicyDocument:
         Statement:
-          - Action: "sts:AssumeRole"
+          - Action: sts:AssumeRole
             Principal:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+
   ReadySetMonitorProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Path: /
       Roles:
         - !Ref ReadySetMonitorRole
+
   ReadySetMonitorInstance:
-    Type: AWS::EC2::Instance
     CreationPolicy:
       ResourceSignal:
         Count: 1
         Timeout: PT20M
+    Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref ReadySetMonitorInstanceType
       SubnetId: !Ref PrivateSubnet1ID
@@ -448,15 +486,15 @@ Resources:
         - !Ref ReadySetMonitoringSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
-          - AWSAMIRegionMap
-          - !Ref "AWS::Region"
-          - READYSETMONITOR
+        - AWSAMIRegionMap
+        - !Ref "AWS::Region"
+        - READYSETMONITOR
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref "AWS::StackName", "Monitor"]]
+          Value: !Join ['-', [!Ref "AWS::StackName", Monitor]]
       IamInstanceProfile: !Ref ReadySetMonitorProfile
-      UserData:
-        Fn::Base64: !Sub
+      UserData: !Base64
+        Fn::Sub:
           - |
             Content-Type: multipart/mixed; boundary="==BOUNDARY=="
             MIME-Version: 1.0
@@ -473,13 +511,13 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-  # --- END LOGS AGGREGATOR --- #
+          # --- END LOGS AGGREGATOR --- #
+
 Outputs:
   ReadySetAdapterNLBDNSName:
-    Value: !GetAtt
-      - ReadySetMySQLAdapterNLB
-      - DNSName
     Description: Host for ReadySet connection string.
+    Value: !GetAtt ReadySetMySQLAdapterNLB.DNSName
+
   ReadySetMySQLVPCEndpointService:
-    Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Description: VPC Endpoint Service to allow connections from outside the VPC.
+    Value: !Ref ReadySetMySQLAdapterVPCEndpointService

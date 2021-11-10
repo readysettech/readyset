@@ -1,5 +1,23 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
+FROM ubuntu:20.04
+# TODO: Mirror ubuntu
 
 RUN set -eux; \
-    apk add --no-cache gcc musl-dev; \
-    pip install --no-cache-dir taskcat cfn-lint pydot
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv unzip curl; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    python3 -m venv /opt/awspy; \
+    /opt/awspy/bin/pip install --no-cache-dir taskcat cfn-lint pydot; \
+    ln -s /opt/awspy/bin/cfn-lint /usr/local/bin/cfn-lint; \
+    ln -s /opt/awspy/bin/taskcat /usr/local/bin/taskcat; \
+    cfn-lint --version; \
+    taskcat --version
+
+run set -eux; \
+    curl -LO https://github.com/aws-cloudformation/rain/releases/download/v1.2.0/rain-v1.2.0_linux-amd64-nocgo.zip; \
+    unzip rain-v1.2.0_linux-amd64-nocgo.zip; \
+    cp rain-v1.2.0_linux-amd64-nocgo/rain /usr/local/bin; \
+    chmod a+x /usr/local/bin/rain; \
+    rain --version

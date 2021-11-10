@@ -1,11 +1,12 @@
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: ReadySet created in a new VPC with a new RDS PostgreSQL database
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "VPC Network Configuration"
+          default: VPC Network Configuration
         Parameters:
           - VPCCIDR
           - PublicSubnet1CIDR
@@ -16,17 +17,17 @@ Metadata:
           - PrivateSubnet3CIDR
           - AvailabilityZones
       - Label:
-          default: "SSH Access Configuration"
+          default: SSH Access Configuration
         Parameters:
           - KeyPairName
           - AccessCIDR
       - Label:
-          default: "Consul Configuration"
+          default: Consul Configuration
         Parameters:
           - ConsulEc2RetryJoinTagKey
           - ConsulEc2RetryJoinTagValue
       - Label:
-          default: "Database Configuration"
+          default: Database Configuration
         Parameters:
           - DatabaseStorageType
           - DatabaseInstanceClass
@@ -35,7 +36,7 @@ Metadata:
           - DatabaseUsername
           - DatabasePassword
       - Label:
-          default: "ReadySet Configuration"
+          default: ReadySet Configuration
         Parameters:
           - ReadySetS3BucketName
           - ReadySetAdapterInstanceType
@@ -50,175 +51,177 @@ Metadata:
           default: AWS Quick Start Configuration
         Parameters:
           - QSS3BucketName
+
 Parameters:
   AvailabilityZones:
-    Description: >-
-      List of Availability Zones to use for the subnets in the VPC.
-      Note: The logical order is preserved. Requires 3.
+    Description: 'List of Availability Zones to use for the subnets in the VPC. Note: The logical order is preserved. Requires 3.'
     Type: List<AWS::EC2::AvailabilityZone::Name>
+
   QSS3BucketName:
-    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
-    ConstraintDescription: >-
-      Quick Start bucket name can include numbers, lowercase letters, uppercase
-      letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Description: S3 bucket name for the Quick Start assets. Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+    Type: String
     Default: aws-quickstart
-    Description: >-
-      S3 bucket name for the Quick Start assets. Quick Start bucket name can
-      include numbers, lowercase letters, uppercase letters, and hyphens (-). It
-      cannot start or end with a hyphen (-).
-    Type: String
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
+    ConstraintDescription: Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+
   ReadySetS3BucketName:
-    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
-    ConstraintDescription: >-
-      ReadySet bucket name can include numbers, lowercase letters, uppercase
-      letters, and hyphens (-). It cannot start or end with a hyphen (-).
     # Default: tbd
-    Description: >-
-      S3 bucket name for the ReadySet assets. ReadySet bucket name can
-      include numbers, lowercase letters, uppercase letters, and hyphens (-). It
-      cannot start or end with a hyphen (-).
+    Description: S3 bucket name for the ReadySet assets. ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
     Type: String
+    AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
+    ConstraintDescription: ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+
   PrivateSubnet1CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.0.0/19
     Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
     Type: String
+    Default: 10.0.0.0/19
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   PrivateSubnet2CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.32.0/19
     Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
     Type: String
+    Default: 10.0.32.0/19
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   PrivateSubnet3CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.64.0/19
     Description: Please enter the IP range (CIDR notation) for the private subnet in the third Availability Zone
     Type: String
+    Default: 10.0.64.0/19
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   PublicSubnet1CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.128.0/20
     Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
     Type: String
+    Default: 10.0.128.0/20
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   PublicSubnet2CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.144.0/20
     Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
     Type: String
+    Default: 10.0.144.0/20
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   PublicSubnet3CIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.160.0/20
     Description: Please enter the IP range (CIDR notation) for the public subnet in the third Availability Zone
     Type: String
+    Default: 10.0.160.0/20
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   VPCCIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Default: 10.0.0.0/16
     Description: Please enter the IP range (CIDR notation) for this VPC
     Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   KeyPairName:
-    Description: >-
-      Public/private key pairs allow you to securely connect to your instance
-      after it launches
-    Type: 'AWS::EC2::KeyPair::KeyName'
+    Description: Public/private key pairs allow you to securely connect to your instance after it launches
+    Type: AWS::EC2::KeyPair::KeyName
+
   AccessCIDR:
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-    Description: >-
-      The CIDR IP range that is permitted to access this new VPC containing ReadySet resources.
-      Note: a value of 0.0.0.0/0 will allow access from ANY IP address
+    Description: 'The CIDR IP range that is permitted to access this new VPC containing ReadySet resources. Note: a value of 0.0.0.0/0 will allow access from ANY IP address'
     Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
   ConsulEc2RetryJoinTagKey:
-    Description:
-      The EC2 instance tag key to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: "ReadySetConsulNodeType"
+    Default: ReadySetConsulNodeType
     ConstraintDescription: Must match EC2 Tag Name requirements.
+
   ConsulEc2RetryJoinTagValue:
-    Description:
-      The EC2 instance tag value to filter on when joining to other Consul nodes.
+    Description: The EC2 instance tag value to filter on when joining to other Consul nodes.
     Type: String
-    Default: "Server"
+    Default: Server
     ConstraintDescription: Must match EC2 Tag Value requirements.
+
   ReadySetAdapterInstanceType:
-    Type: String
     Description: The EC2 instance type to use for the ReadySet adapter instances.
+    Type: String
     Default: c5.large
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation
+
   ReadySetAdapterNodes:
-    Type: String
     Description: Number of adapter nodes to create
+    Type: String
     Default: 3
+
   ReadySetServerInstanceType:
-    Type: String
     Description: The EC2 instance type to use for ReadySet server instances.
+    Type: String
     Default: c5.large
-    AllowedPattern: '^(\w)5.*'
+    AllowedPattern: ^(\w)5.*
     ConstraintDescription: Instance type must be 5th generation.
+
   ReadySetServerNodes:
-    Type: String
     Description: Number of server nodes to create
-    Default: 3
-  ReadySetMonitorInstanceType:
     Type: String
+    Default: 3
+
+  ReadySetMonitorInstanceType:
     Description: The EC2 instance type to use for the logs aggregation instance.
+    Type: String
     Default: c5.large
+
   DatabaseStorageType:
     Description: Database storage type
     Type: String
     Default: gp2
+
   DatabaseInstanceClass:
     Description: Database instance class
     Type: String
     Default: db.t3.medium
+
   DatabaseAllocatedStorage:
     Description: The size of the database (GiB)
     Type: Number
+    Default: 20
     MinValue: 20
     MaxValue: 65536
-    Default: 20
+
   DatabaseName:
     Description: Database name
     Type: String
     MinLength: 1
     MaxLength: 64
-    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
   DatabaseUsername:
     Description: Username to log into the PostgreSQL Database
     Type: String
     MinLength: 1
     MaxLength: 16
+
   DatabasePassword:
+    Description: Password to log into the PostgreSQL Database
     Type: String
     NoEcho: true
-    Description: Password to log into the PostgreSQL Database
     MinLength: 8
     MaxLength: 41
+
   ReadySetMemoryLimitGB:
-    Type: Number
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Type: Number
     Default: 0
     MinValue: 0
+
   ReadySetDeploymentName:
     Type: String
     MinLength: 1
-    AllowedPattern: >-
-      ^[^/ ]+$
+    AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
   ReadySetServerVolumeSizeGB:
-    Type: Number
     Description: Volume size, in gigabytes, to provision for Server instances.
-    MinValue: 32
+    Type: Number
     Default: 32
+    MinValue: 32
+
 Resources:
   VPCStack:
-    Type: 'AWS::CloudFormation::Stack'
+    Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
         https://${QSS3BucketName}.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml
@@ -226,7 +229,7 @@ Resources:
         AvailabilityZones: !Join
           - ','
           - !Ref AvailabilityZones
-        NumberOfAZs: '3'
+        NumberOfAZs: "3"
         PrivateSubnet1ACIDR: !Ref PrivateSubnet1CIDR
         PrivateSubnet2ACIDR: !Ref PrivateSubnet2CIDR
         PrivateSubnet3ACIDR: !Ref PrivateSubnet3CIDR
@@ -234,65 +237,46 @@ Resources:
         PublicSubnet2CIDR: !Ref PublicSubnet2CIDR
         PublicSubnet3CIDR: !Ref PublicSubnet3CIDR
         VPCCIDR: !Ref VPCCIDR
+
   BastionStack:
-    Type: 'AWS::CloudFormation::Stack'
+    Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
         https://${QSS3BucketName}.s3.amazonaws.com/quickstart-linux-bastion/templates/linux-bastion.template
       Parameters:
         BastionAMIOS: Ubuntu-Server-20.04-LTS-HVM
-        BastionInstanceType: 't3.medium'
+        BastionInstanceType: t3.medium
         KeyPairName: !Ref KeyPairName
-        PublicSubnet1ID: !GetAtt
-          - VPCStack
-          - Outputs.PublicSubnet1ID
-        PublicSubnet2ID: !GetAtt
-          - VPCStack
-          - Outputs.PublicSubnet2ID
+        PublicSubnet1ID: !GetAtt VPCStack.Outputs.PublicSubnet1ID
+        PublicSubnet2ID: !GetAtt VPCStack.Outputs.PublicSubnet2ID
         RemoteAccessCIDR: !Ref AccessCIDR
-        VPCID: !GetAtt
-          - VPCStack
-          - Outputs.VPCID
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
         EnableTCPForwarding: true
+
   ReadySetConsulStack:
-    Type: 'AWS::CloudFormation::Stack'
+    Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
       Parameters:
-        BastionSecurityGroupID: !GetAtt
-          - BastionStack
-          - Outputs.BastionSecurityGroupID
+        BastionSecurityGroupID: !GetAtt BastionStack.Outputs.BastionSecurityGroupID
         KeyPairName: !Ref KeyPairName
-        PrivateSubnet1ID: !GetAtt
-          - VPCStack
-          - Outputs.PrivateSubnet1AID
-        PrivateSubnet2ID: !GetAtt
-          - VPCStack
-          - Outputs.PrivateSubnet2AID
-        PrivateSubnet3ID: !GetAtt
-          - VPCStack
-          - Outputs.PrivateSubnet3AID
-        VPCID: !GetAtt
-          - VPCStack
-          - Outputs.VPCID
+        PrivateSubnet1ID: !GetAtt VPCStack.Outputs.PrivateSubnet1AID
+        PrivateSubnet2ID: !GetAtt VPCStack.Outputs.PrivateSubnet2AID
+        PrivateSubnet3ID: !GetAtt VPCStack.Outputs.PrivateSubnet3AID
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
         ConsulEc2RetryJoinTagKey: !Ref ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !Ref ConsulEc2RetryJoinTagValue
+
   ReadySetRDSPostgreSQLStack:
-    Type: 'AWS::CloudFormation::Stack'
+    Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-rds-postgresql-template.yaml
       Parameters:
-        VPCPrivateSubnetIds: !Join [ ',', [
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet1AID',
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet2AID',
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet3AID'
-        ] ]
-        VPCID: !GetAtt
-          - VPCStack
-          - Outputs.VPCID
+        VPCPrivateSubnetIds: !Join [',', [!GetAtt VPCStack.Outputs.PrivateSubnet1AID, !GetAtt VPCStack.Outputs.PrivateSubnet2AID, !GetAtt VPCStack.Outputs.PrivateSubnet3AID]]
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
         DatabaseStorageType: !Ref DatabaseStorageType
         DatabaseInstanceClass: !Ref DatabaseInstanceClass
@@ -300,37 +284,22 @@ Resources:
         DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
         DatabasePassword: !Ref DatabasePassword
+
   ReadySetPostgreSQLStack:
-    Type: 'AWS::CloudFormation::Stack'
+    Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-postgresql-template.yaml
       Parameters:
-        BastionSecurityGroupID: !GetAtt
-          - BastionStack
-          - Outputs.BastionSecurityGroupID
-        ConsulJoinManagedPolicyArn: !GetAtt
-          - ReadySetConsulStack
-          - Outputs.ConsulJoinManagedPolicyArn
-        VPCPrivateSubnetIds:  !Join [ ',', [
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet1AID',
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet2AID',
-          !GetAtt 'VPCStack.Outputs.PrivateSubnet3AID'
-        ] ]
-        VPCID: !GetAtt
-          - VPCStack
-          - Outputs.VPCID
+        BastionSecurityGroupID: !GetAtt BastionStack.Outputs.BastionSecurityGroupID
+        ConsulJoinManagedPolicyArn: !GetAtt ReadySetConsulStack.Outputs.ConsulJoinManagedPolicyArn
+        VPCPrivateSubnetIds: !Join [',', [!GetAtt VPCStack.Outputs.PrivateSubnet1AID, !GetAtt VPCStack.Outputs.PrivateSubnet2AID, !GetAtt VPCStack.Outputs.PrivateSubnet3AID]]
+        VPCID: !GetAtt VPCStack.Outputs.VPCID
         VPCCIDR: !Ref VPCCIDR
-        ConsulEc2RetryJoinTagKey: !GetAtt
-          - ReadySetConsulStack
-          - Outputs.ConsulEc2RetryJoinTagKey
-        ConsulEc2RetryJoinTagValue: !GetAtt
-          - ReadySetConsulStack
-          - Outputs.ConsulEc2RetryJoinTagValue
+        ConsulEc2RetryJoinTagKey: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagKey
+        ConsulEc2RetryJoinTagValue: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagValue
         KeyPairName: !Ref KeyPairName
-        PostgresDatabaseURL: !GetAtt
-          - ReadySetRDSPostgreSQLStack
-          - Outputs.DatabaseURL
+        PostgresDatabaseURL: !GetAtt ReadySetRDSPostgreSQLStack.Outputs.DatabaseURL
         ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
         ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
         ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
@@ -339,9 +308,8 @@ Resources:
         ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName
+
 Outputs:
   ReadySetPostgreSQLVPCEndpointService:
-    Value: !GetAtt
-      - ReadySetPostgreSQLStack
-      - Outputs.ReadySetPostgreSQLVPCEndpointService
     Description: VPC Endpoint to connect to to access ReadySet
+    Value: !GetAtt ReadySetPostgreSQLStack.Outputs.ReadySetPostgreSQLVPCEndpointService
