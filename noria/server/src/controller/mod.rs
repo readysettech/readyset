@@ -10,8 +10,10 @@ use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use itertools::Itertools;
 use launchpad::select;
+use metrics::{counter, histogram};
 use nom_sql::SqlQuery;
 use noria::consensus::{AuthorityWorkerHeartbeatResponse, WorkerId};
+use noria::metrics::recorded;
 use noria::ControllerDescriptor;
 use noria::{
     consensus::{Authority, AuthorityControl, GetLeaderResult, WorkerDescriptor},
@@ -22,7 +24,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Notify;
@@ -275,6 +277,7 @@ impl Controller {
             reply_tx,
         } = req;
 
+        let request_start = Instant::now();
         let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
             let resp = self
                 .with_controller_blocking(|ctrl, auth| {
@@ -292,6 +295,18 @@ impl Controller {
                 Err(e) => Ok(Err(bincode::serialize(&e)?)),
             }
         };
+
+        counter!(
+            recorded::CONTROLLER_RPC_OVERALL_TIME,
+            request_start.elapsed().as_micros() as u64,
+            "path" => path.clone()
+        );
+
+        histogram!(
+            recorded::CONTROLLER_RPC_REQUEST_TIME,
+            request_start.elapsed().as_micros() as f64,
+            "path" => path
+        );
 
         if reply_tx.send(ret).is_err() {
             warn!("client hung up");
