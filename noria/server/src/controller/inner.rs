@@ -25,10 +25,12 @@ use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest
 use futures::stream::{self, StreamExt, TryStreamExt};
 use hyper::Method;
 use lazy_static::lazy_static;
+use metrics::gauge;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
 use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
 use noria::{
     consensus::{Authority, AuthorityControl},
+    metrics::recorded,
     RecipeSpec,
 };
 use noria::{internal, invariant_eq, ActivationResult, ReadySetError};
@@ -861,6 +863,7 @@ impl Leader {
         F: FnOnce(&mut Migration) -> T,
     {
         info!("starting migration");
+        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
         let ingredients = self.ingredients.clone();
         let mut m = Migration {
             ingredients,
@@ -875,6 +878,7 @@ impl Leader {
         let r = f(&mut m);
         m.commit(self).await?;
         info!("finished migration");
+        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)
     }
 

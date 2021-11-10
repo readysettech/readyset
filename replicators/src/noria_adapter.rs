@@ -5,14 +5,17 @@ use crate::postgres_connector::{
 use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
+use metrics::{counter, histogram};
 use mysql_async as mysql;
 use noria::consistency::Timestamp;
+use noria::metrics::recorded::{self, SnapshotStatusTag};
 use noria::{consensus::Authority, ReplicationOffset, TableOperation};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Notify;
 use tokio_postgres as pgsql;
 use tracing::{debug, error, info, info_span, warn, Instrument};
@@ -157,12 +160,36 @@ impl NoriaAdapter {
                 let pool = mysql::Pool::new(replicator_options);
                 let replicator = MySqlReplicator { pool, tables: None };
 
+                let snapshot_start = Instant::now();
+                counter!(
+                    recorded::REPLICATOR_SNAPSHOT_STATUS,
+                    1u64,
+                    "status" => SnapshotStatusTag::Started.value(),
+                );
                 span.in_scope(|| info!("Starting snapshot"));
-                let pos = replicator
+                let res = replicator
                     .replicate_to_noria(&mut noria, true)
                     .instrument(span.clone())
-                    .await?;
+                    .await;
+
+                let status = if res.is_err() {
+                    SnapshotStatusTag::Failed.value()
+                } else {
+                    SnapshotStatusTag::Successful.value()
+                };
+
+                counter!(
+                    recorded::REPLICATOR_SNAPSHOT_STATUS,
+                    1u64,
+                    "status" => status
+                );
+
+                let pos = res?;
                 span.in_scope(|| info!("Snapshot finished"));
+                histogram!(
+                    recorded::REPLICATOR_SNAPSHOT_DURATION,
+                    snapshot_start.elapsed().as_micros() as f64
+                );
                 pos
             }
             Some(pos) => pos,
