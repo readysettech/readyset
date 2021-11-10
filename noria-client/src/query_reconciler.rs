@@ -87,7 +87,7 @@ where
         }
 
         // Check if we can successfully prepare against noria as well.
-        match self.noria.prepare_select(stmt.clone(), 0).await {
+        match self.noria.prepare_select(stmt.clone(), 0, true).await {
             Ok(n) => {
                 if cfg!(feature = "reconciler-schema-check") {
                     if let noria_connector::PrepareResult::Select {
