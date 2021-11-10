@@ -356,8 +356,11 @@ impl NoriaAdapter {
 
             debug!(?action);
 
-            if let Err(err) = self.handle_action(action, pos).await {
-                error!(error = %err);
+            match self.handle_action(action, pos).await {
+                // ReadySet likely entered an invalid state fail the replicator.
+                Err(e @ ReadySetError::RecipeInvariantViolated(_)) => return Err(e),
+                Err(err) => error!(error = %err),
+                _ => {}
             }
         }
     }

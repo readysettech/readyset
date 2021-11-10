@@ -45,6 +45,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{cell, time};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::Notify;
 use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::Vec1;
@@ -176,10 +177,15 @@ impl Leader {
     /// Run all tasks required to be the leader. This may spawn tasks that
     /// may become ready asyncronously. Use the notification to indicate
     /// to the Controller that the leader is ready to handle requests.
-    pub(super) async fn start(&mut self, ready_notification: Arc<Notify>) {
+    pub(super) async fn start(
+        &mut self,
+        ready_notification: Arc<Notify>,
+        replication_error: UnboundedSender<ReadySetError>,
+    ) {
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(ready_notification).await;
+        self.start_replication_task(ready_notification, replication_error)
+            .await;
     }
 
     pub(super) async fn stop(&mut self) {
@@ -199,7 +205,11 @@ impl Leader {
     /// connect again, and catch up from the binlog
     ///
     /// TODO: how to handle the case where we need a full new replica
-    async fn start_replication_task(&mut self, ready_notification: Arc<Notify>) {
+    async fn start_replication_task(
+        &mut self,
+        ready_notification: Arc<Notify>,
+        replication_error: UnboundedSender<ReadySetError>,
+    ) {
         let url = match &self.replicator_url {
             Some(url) => url.to_string(),
             None => {
@@ -216,7 +226,7 @@ impl Leader {
                 let noria: noria::ControllerHandle =
                     noria::ControllerHandle::new(Arc::clone(&authority)).await;
 
-                if let Err(err) = replicators::NoriaAdapter::start_with_url(
+                match replicators::NoriaAdapter::start_with_url(
                     &url,
                     noria,
                     server_id,
@@ -224,9 +234,19 @@ impl Leader {
                 )
                 .await
                 {
-                    // On each replication error we wait for 30 seconds and then try again
-                    tracing::error!(error = %err, "replication error");
-                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    Ok(_) => {}
+                    // Unrecoverable errors, propagate the error the controller and kill the loop.
+                    Err(err @ ReadySetError::RecipeInvariantViolated(_)) => {
+                        if let Err(e) = replication_error.send(err) {
+                            error!(error = %e, "Could not notify controller of critical error. The system may be in an invalid state");
+                        }
+                        break;
+                    }
+                    Err(err) => {
+                        // On each replication error we wait for 30 seconds and then try again
+                        tracing::error!(error = %err, "replication error");
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
                 }
             }
         }));
