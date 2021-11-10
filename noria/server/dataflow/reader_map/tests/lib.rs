@@ -438,7 +438,7 @@ fn empty_random() {
     w.insert(2, "c");
 
     let mut rng = rand::thread_rng();
-    let removed: Vec<_> = w.empty_random(&mut rng, 1).map(|(&k, _)| k).collect();
+    let removed: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
     w.publish();
 
     // should only have one value set left
@@ -450,7 +450,7 @@ fn empty_random() {
     assert!(r.contains_key(&kept));
 
     // remove the other one
-    let removed: Vec<_> = w.empty_random(&mut rng, 100).map(|(&k, _)| k).collect();
+    let removed: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
     w.publish();
 
     assert_eq!(removed.len(), 1);
@@ -466,8 +466,8 @@ fn empty_random_multiple() {
     w.insert(2, "c");
 
     let mut rng = rand::thread_rng();
-    let removed1: Vec<_> = w.empty_random(&mut rng, 1).map(|(&k, _)| k).collect();
-    let removed2: Vec<_> = w.empty_random(&mut rng, 1).map(|(&k, _)| k).collect();
+    let removed1: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
+    let removed2: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
     w.publish();
 
     assert_eq!(removed1.len(), 1);

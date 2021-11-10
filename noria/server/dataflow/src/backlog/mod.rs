@@ -332,7 +332,9 @@ impl WriteHandle {
                 self.mem_size
             );
 
-            bytes_to_be_freed += self.handle.empty_random(rng, bytes);
+            bytes_to_be_freed += self
+                .handle
+                .empty_random(rng, bytes as f64 / self.mem_size as f64);
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
