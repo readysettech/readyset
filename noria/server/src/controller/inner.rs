@@ -436,7 +436,10 @@ impl Leader {
                 }
 
                 info!("Restoring graph configuration");
-                self.recipe = Recipe::with_version(recipe_version + 1 - recipes.len());
+                self.recipe = Recipe::with_version_and_config_from(
+                    recipe_version + 1 - recipes.len(),
+                    &self.recipe,
+                );
                 for r in recipes {
                     let recipe = self.recipe.clone().extend(&r).map_err(|(_, e)| e)?;
                     self.apply_recipe(recipe).await?;
@@ -654,12 +657,13 @@ impl Leader {
             None
         };
 
-        let mut recipe = Recipe::blank();
-        match state.config.reuse {
-            Some(reuse) => recipe.enable_reuse(reuse),
-            None => recipe.disable_reuse(),
-        }
-        recipe.set_mir_config(state.config.mir_config);
+        let recipe = Recipe::with_config(
+            crate::sql::Config {
+                reuse_type: state.config.reuse,
+                ..Default::default()
+            },
+            state.config.mir_config,
+        );
 
         Leader {
             ingredients: g,
@@ -1267,6 +1271,7 @@ impl Leader {
     }
 
     async fn apply_recipe(&mut self, mut new: Recipe) -> Result<ActivationResult, ReadySetError> {
+        new.clone_config_from(&self.recipe);
         // TODO(eta): if this fails, apply the old one?
         let r = self.migrate(|mig| new.activate(mig)).await?;
 
@@ -1327,7 +1332,8 @@ impl Leader {
             Err(ref e) => {
                 error!(error = %e, "failed to apply recipe");
                 // TODO(malte): a little yucky, since we don't really need the blank recipe
-                let recipe = mem::replace(&mut self.recipe, Recipe::blank());
+                let blank = Recipe::blank_with_config_from(&self.recipe);
+                let recipe = mem::replace(&mut self.recipe, blank);
                 self.recipe = recipe.revert();
             }
         }
@@ -1342,7 +1348,8 @@ impl Leader {
     ) -> Result<ActivationResult, ReadySetError> {
         let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
-        let new = mem::replace(&mut self.recipe, Recipe::blank());
+        let blank = Recipe::blank_with_config_from(&self.recipe);
+        let new = mem::replace(&mut self.recipe, blank);
         let add_txt = add_txt_spec.recipe;
 
         match new.extend(add_txt) {
@@ -1400,7 +1407,7 @@ impl Leader {
         match Recipe::from_str(r_txt) {
             Ok(r) => {
                 let _old = self.recipe.clone();
-                let old = mem::replace(&mut self.recipe, Recipe::blank());
+                let old = mem::replace(&mut self.recipe, Recipe::blank_with_config_from(&_old));
                 let new = old
                     .replace(r)
                     .map_err(|e| internal_err(format!("recipe replace failed: {}", e)))?;

@@ -3179,7 +3179,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
 
     // move needed for some funny lifetime reason
     g.migrate(move |mig| {
-        let mut r = Recipe::blank();
+        let mut r = Recipe::with_config(Default::default(), Default::default());
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }
@@ -7233,7 +7233,7 @@ async fn reroutes_two_children_at_once() {
         create table t2 (c int, d int);
         ";
     g.install_recipe(sql).await.unwrap();
-    let sql1 = " 
+    let sql1 = "
         QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
         ";
     g.extend_recipe(sql1).await.unwrap();
@@ -7241,7 +7241,7 @@ async fn reroutes_two_children_at_once() {
 
     let sql2 = "
         QUERY q2: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
-        QUERY q3: SELECT t1.a, t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c; 
+        QUERY q3: SELECT t1.a, t1.b, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c;
         ";
     g.extend_recipe(sql2).await.unwrap();
     eprintln!("{}", g.graphviz().await.unwrap());
@@ -7346,7 +7346,7 @@ async fn reroutes_dependent_children() {
         create table t2 (c int, d int);
         ";
     g.install_recipe(sql).await.unwrap();
-    let sql1 = " 
+    let sql1 = "
         QUERY q1: SELECT t1.a, t1.b, t2.c, t2.d FROM t1 INNER JOIN t2 ON t1.a = t2.c WHERE t1.b = ?;
         ";
     g.extend_recipe(sql1).await.unwrap();

@@ -48,11 +48,26 @@ enum QueryGraphReuse<'a> {
     None,
 }
 
+/// Configuration for converting SQL to dataflow
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub(crate) struct Config {
+    pub(crate) reuse_type: Option<ReuseConfigType>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            reuse_type: Some(ReuseConfigType::Finkelstein),
+        }
+    }
+}
+
 /// Long-lived struct that holds information about the SQL queries that have been incorporated into
 /// the dataflow graph `graph`.
 ///
 /// The incorporator shares the lifetime of the dataflow graph it is associated with.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 // crate viz for tests
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
@@ -69,29 +84,7 @@ pub(crate) struct SqlIncorporator {
 
     schema_version: usize,
 
-    reuse_type: Option<ReuseConfigType>,
-}
-
-impl Default for SqlIncorporator {
-    fn default() -> Self {
-        SqlIncorporator {
-            mir_converter: SqlToMirConverter::default(),
-            leaf_addresses: HashMap::default(),
-
-            named_queries: HashMap::default(),
-            query_graphs: HashMap::default(),
-            base_mir_queries: HashMap::default(),
-            mir_queries: HashMap::default(),
-            num_queries: 0,
-
-            base_schemas: HashMap::default(),
-            view_schemas: HashMap::default(),
-
-            schema_version: 0,
-
-            reuse_type: Some(ReuseConfigType::Finkelstein),
-        }
-    }
+    pub(crate) config: Config,
 }
 
 impl SqlIncorporator {
@@ -105,16 +98,20 @@ impl SqlIncorporator {
         self.mir_converter.set_config(mir_config);
     }
 
+    pub(crate) fn mir_config(&self) -> &mir::Config {
+        self.mir_converter.config()
+    }
+
     /// Disable node reuse for future migrations.
     #[allow(unused)]
     pub(crate) fn disable_reuse(&mut self) {
-        self.reuse_type = None;
+        self.config.reuse_type = None;
     }
 
     /// Disable node reuse for future migrations.
     #[allow(unused)]
     pub(crate) fn enable_reuse(&mut self, reuse_type: ReuseConfigType) {
-        self.reuse_type = Some(reuse_type);
+        self.config.reuse_type = Some(reuse_type);
     }
 
     /// Incorporates a single query into via the flow graph migration in `mig`. The `query`
@@ -202,7 +199,7 @@ impl SqlIncorporator {
 
         trace!(%query_name, ?qg);
 
-        let reuse_config = if let Some(reuse_type) = self.reuse_type {
+        let reuse_config = if let Some(reuse_type) = self.config.reuse_type {
             ReuseConfig::new(reuse_type)
         } else {
             // if reuse is disabled, we're done
