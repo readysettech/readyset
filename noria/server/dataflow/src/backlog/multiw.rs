@@ -101,9 +101,9 @@ impl Handle {
         }
     }
 
-    /// Evict `bytes` by randomly selecting keys from state, and return the number of bytes
-    /// freed.
-    pub fn empty_random(&mut self, rng: &mut impl rand::Rng, bytes: usize) -> u64 {
+    /// Evict randomly selected keys from state, and return the number of bytes
+    /// freed. The amount of keys evicted will be ceil(len() * ratio)
+    pub fn empty_random(&mut self, rng: &mut impl rand::Rng, ratio: f64) -> u64 {
         let mut mem_freed = 0u64;
 
         // Each row's state is composed of: The key, the bytes required to hold the Row
@@ -111,7 +111,7 @@ impl Handle {
         match *self {
             Handle::Single(ref mut h) => {
                 let base_value_size = h.base_value_size() as u64;
-                h.empty_random(rng, bytes).for_each(|r| {
+                h.empty_random(rng, ratio).for_each(|r| {
                     mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
                         + r.0.deep_size_of()
                         + base_value_size;
@@ -119,7 +119,7 @@ impl Handle {
             }
             Handle::Double(ref mut h) => {
                 let base_value_size = h.base_value_size() as u64;
-                h.empty_random(rng, bytes).for_each(|r| {
+                h.empty_random(rng, ratio).for_each(|r| {
                     mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
                         + r.0 .0.deep_size_of()
                         + r.0 .1.deep_size_of()
@@ -128,7 +128,7 @@ impl Handle {
             }
             Handle::Many(ref mut h) => {
                 let base_value_size = h.base_value_size() as u64;
-                h.empty_random(rng, bytes).for_each(|r| {
+                h.empty_random(rng, ratio).for_each(|r| {
                     mem_freed += r.1.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
                         + r.0.iter().map(|r| r.deep_size_of() as u64).sum::<u64>()
                         + base_value_size
