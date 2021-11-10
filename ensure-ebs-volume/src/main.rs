@@ -166,6 +166,11 @@ impl Instance {
         })
     }
 
+    /// Returns whether this instance matches the id of another instance.
+    fn matches(&self, id: &str) -> bool {
+        self.id == id
+    }
+
     /// Whether or not the state matches a list that we consider running and healthy
     fn is_up_and_healthy(&self) -> bool {
         !matches!(
@@ -565,7 +570,7 @@ impl Opts {
                         let instances = self.find_instances_in_az(az).await?;
                         let terminating = instances
                             .into_iter()
-                            .filter(|i| !i.is_up_and_healthy())
+                            .filter(|i| !i.matches(instance_id) && !i.is_up_and_healthy())
                             .collect::<Vec<_>>();
                         if terminating.is_empty() {
                             self.terminate_instance(instance_id).await?;
