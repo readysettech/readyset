@@ -409,6 +409,7 @@ pub enum ReuseConfigType {
 pub use crate::builder::Builder;
 pub use crate::handle::Handle;
 pub use crate::metrics::NoriaMetricsRecorder;
+use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
 use controller::sql;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
@@ -429,16 +430,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 pub(crate) struct Config {
     pub(crate) sharding: Option<usize>,
-    pub(crate) partial_enabled: bool,
-
-    /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
-    ///
-    /// Defaults to false
-    ///
-    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
-    pub(crate) packet_filters_enabled: bool,
-
-    pub(crate) frontier_strategy: FrontierStrategy,
+    pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
     pub(crate) quorum: usize,
@@ -458,9 +450,7 @@ impl Default for Config {
             sharding: Some(2),
             #[cfg(not(test))]
             sharding: None,
-            partial_enabled: true,
-            packet_filters_enabled: false,
-            frontier_strategy: Default::default(),
+            materialization_config: Default::default(),
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 aggressively_update_state_sizes: false,

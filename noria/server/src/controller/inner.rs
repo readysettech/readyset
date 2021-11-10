@@ -640,13 +640,7 @@ impl Leader {
         ));
 
         let mut materializations = Materializations::new();
-        if !state.config.partial_enabled {
-            materializations.disable_partial()
-        }
-        if state.config.packet_filters_enabled {
-            materializations.enable_packet_filters();
-        }
-        materializations.set_frontier_strategy(state.config.frontier_strategy);
+        materializations.set_config(state.config.materialization_config);
 
         let cc = Arc::new(ChannelCoordinator::new());
         assert_ne!(state.config.quorum, 0);
