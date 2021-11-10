@@ -346,9 +346,6 @@ Resources:
       TemplateURL: !Sub >-
         https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml
       Parameters:
-        BastionSecurityGroupID: !GetAtt
-          - BastionStack
-          - Outputs.BastionSecurityGroupID
         ConsulJoinManagedPolicyArn: !GetAtt
           - ReadySetConsulStack
           - Outputs.ConsulJoinManagedPolicyArn
@@ -364,7 +361,6 @@ Resources:
         VPCID: !GetAtt
           - VPCStack
           - Outputs.VPCID
-        VPCCIDR: !Ref VPCCIDR
         ConsulEc2RetryJoinTagKey: !GetAtt
           - ReadySetConsulStack
           - Outputs.ConsulEc2RetryJoinTagKey

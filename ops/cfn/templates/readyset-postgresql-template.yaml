@@ -421,7 +421,6 @@ Resources:
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
   ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: [ ReadySetServerASGLifecycleTerminateSQS, ReadySetServerASGRole ]
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
       MaxSize: !Ref ReadySetServerNodes

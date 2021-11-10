@@ -8,7 +8,6 @@ Metadata:
           default: "VPC Network Configuration"
         Parameters:
           - VPCID
-          - VPCCIDR
           - PrivateSubnet1ID
           - PrivateSubnet2ID
           - PrivateSubnet3ID
@@ -18,7 +17,6 @@ Metadata:
       - Label:
           default: "SSH Access Configuration"
         Parameters:
-          - BastionSecurityGroupID
           - KeyPairName
       - Label:
           default: "Consul Configuration"
@@ -41,9 +39,6 @@ Metadata:
           - ReadySetMySQLAdapterUsername
           - ReadySetMySQLAdapterPassword
 Parameters:
-  BastionSecurityGroupID:
-    Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
-    Type: "AWS::EC2::SecurityGroup::Id"
   ReadySetAdapterInstanceType:
     Type: String
     Description: The EC2 instance type to use for ReadySet Adapter instances.
@@ -114,11 +109,6 @@ Parameters:
   VPCID:
     Description: VPC ID
     Type: "AWS::EC2::VPC::Id"
-  VPCCIDR:
-    Description: CIDR block for the VPC
-    Type: String
-    AllowedPattern: >-
-      ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
   ConsulJoinManagedPolicyArn:
     Description: ARN of an managed IAM policy that the permissions to find Consul Servers
     Type: String
@@ -379,7 +369,6 @@ Resources:
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS
   ReadySetServerASG:
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: [ ReadySetServerASGLifecycleTerminateSQS, ReadySetServerASGRole ]
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC
       MaxSize: !Ref ReadySetServerNodes
