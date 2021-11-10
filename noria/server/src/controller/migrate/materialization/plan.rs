@@ -786,7 +786,7 @@ impl<'a> Plan<'a> {
             },
         )?;
 
-        if self.m.packet_filters_enabled {
+        if self.m.config.packet_filters_enabled {
             self.setup_packet_filter()?;
         }
 

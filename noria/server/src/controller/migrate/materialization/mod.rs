@@ -68,6 +68,37 @@ enum IndexObligation {
     Replay(Index),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Config {
+    /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
+    ///
+    /// Defaults to false
+    ///
+    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
+    pub packet_filters_enabled: bool,
+
+    /// Strategy for determining which (partial) materializations should be placed beyond the
+    /// materialization frontier.
+    ///
+    /// Defaults to [`FrontierStrategy::None`]
+    pub frontier_strategy: FrontierStrategy,
+
+    /// Whether partial node creation is enabled at all.
+    ///
+    /// Defaults to true.
+    pub partial_enabled: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            packet_filters_enabled: false,
+            partial_enabled: true,
+            frontier_strategy: FrontierStrategy::None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
@@ -91,17 +122,10 @@ pub(in crate::controller) struct Materializations {
     redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
     partial: HashSet<NodeIndex>,
-    partial_enabled: bool,
-    frontier_strategy: FrontierStrategy,
 
     tag_generator: usize,
 
-    /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
-    ///
-    /// Defaults to false
-    ///
-    /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
-    packet_filters_enabled: bool,
+    config: Config,
 }
 
 impl Materializations {
@@ -120,29 +144,16 @@ impl Materializations {
             redundant_partial: HashMap::default(),
 
             partial: HashSet::default(),
-            partial_enabled: true,
-            frontier_strategy: FrontierStrategy::None,
 
             tag_generator: 0,
 
-            packet_filters_enabled: false,
+            config: Default::default(),
         }
     }
 
-    /// Disable partial materialization for all new materializations.
-    pub(in crate::controller) fn disable_partial(&mut self) {
-        self.partial_enabled = false;
-    }
-
-    /// Enable the creation of [`PacketFilter`]s for egresses before readers in all new
-    /// materializations
-    pub(in crate::controller) fn enable_packet_filters(&mut self) {
-        self.packet_filters_enabled = true;
-    }
-
-    /// Which nodes should be placed beyond the materialization frontier?
-    pub(in crate::controller) fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
-        self.frontier_strategy = f;
+    /// Set the config for all future materializations
+    pub(in crate::controller) fn set_config(&mut self, config: Config) {
+        self.config = config;
     }
 
     /// Does this partial node have a fully materialized duplicate?
@@ -411,7 +422,7 @@ impl Materializations {
             // be the case, we need to keep moving up the ancestor tree of `ni`, and check at each
             // stage that we can trace the key column back into each of our nearest
             // materializations.
-            let mut able = self.partial_enabled;
+            let mut able = self.config.partial_enabled;
             let mut add = HashMap::new();
 
             // bases can't be partial
@@ -580,7 +591,7 @@ impl Materializations {
             // name matching, we don't do that since MIR will sometimes place the name of identity
             // nodes and the like. It's up to the user to make sure they don't match node names
             // that are, say, above a full materialization.
-            if let FrontierStrategy::Match(ref m) = self.frontier_strategy {
+            if let FrontierStrategy::Match(ref m) = self.config.frontier_strategy {
                 n.purge = n.purge || n.name().contains(m);
                 continue;
             }
@@ -594,9 +605,9 @@ impl Materializations {
                 continue;
             }
 
-            if let FrontierStrategy::AllPartial = self.frontier_strategy {
+            if let FrontierStrategy::AllPartial = self.config.frontier_strategy {
                 n.purge = true;
-            } else if let FrontierStrategy::Readers = self.frontier_strategy {
+            } else if let FrontierStrategy::Readers = self.config.frontier_strategy {
                 n.purge = n.purge || n.is_reader();
             }
         }

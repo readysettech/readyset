@@ -59,19 +59,19 @@ impl Builder {
 
     /// Disable partial materialization for all subsequent migrations
     pub fn disable_partial(&mut self) {
-        self.config.partial_enabled = false;
+        self.config.materialization_config.partial_enabled = false;
     }
 
     /// Enable the creation of [`PacketFilter`]s for egresses before readers
     ///
     /// [`PacketFilter`]: noria_dataflow::node::special::PacketFilter
     pub fn enable_packet_filters(&mut self) {
-        self.config.packet_filters_enabled = true;
+        self.config.materialization_config.packet_filters_enabled = true;
     }
 
     /// Which nodes should be placed beyond the materialization frontier?
     pub fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
-        self.config.frontier_strategy = f;
+        self.config.materialization_config.frontier_strategy = f;
     }
 
     /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
