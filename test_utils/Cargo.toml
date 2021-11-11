@@ -1,0 +1,8 @@
+[package]
+name = "test_utils"
+version = "0.0.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+# Avoid adding dependencies as this is included in tests.

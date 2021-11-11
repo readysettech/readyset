@@ -25,7 +25,8 @@ members = [
     "readyset-logging",
     "query_generator",
     "maths",
-    "metrics-aggregator"
+    "metrics-aggregator",
+    "test_utils",
 ]
 [profile.release]
 debug=true

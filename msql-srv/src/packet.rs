@@ -343,6 +343,7 @@ fn packet(i: &[u8]) -> nom::IResult<&[u8], (u8, Packet<'_>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_utils::skip_slow_tests;
 
     #[test]
     fn test_one_ping() {
@@ -403,6 +404,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_large_packet_write() {
+        if skip_slow_tests() {
+            return;
+        }
         let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
 
         let packets = vec![
