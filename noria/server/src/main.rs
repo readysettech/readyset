@@ -185,6 +185,10 @@ struct Opts {
 
     #[clap(flatten)]
     logging: readyset_logging::Options,
+
+    /// Indicate if deployment state should be reset to upstream DDL
+    #[clap(long, hidden = true)]
+    reset_deployment_state: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -271,6 +275,8 @@ fn main() -> anyhow::Result<()> {
     if let Some(url) = opts.replication_url {
         builder.set_replicator_url(url);
     }
+
+    builder.set_should_reset_state(opts.reset_deployment_state);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

@@ -84,6 +84,7 @@ pub(super) async fn start_instance(
     region: Option<String>,
     reader_only: bool,
     volume_id: Option<VolumeId>,
+    should_reset_state: bool,
 ) -> Result<Handle, anyhow::Error> {
     let (worker_tx, worker_rx) = tokio::sync::mpsc::channel(16);
     let (controller_tx, controller_rx) = tokio::sync::mpsc::channel(16);
@@ -174,6 +175,7 @@ pub(super) async fn start_instance(
         valve.clone(),
         worker_descriptor,
         config,
+        should_reset_state,
     );
 
     tokio::spawn(maybe_abort_on_panic!(controller.run().map_err(move |e| {
