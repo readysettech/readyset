@@ -33,3 +33,5 @@ mysql_async = "0.28"
 
 slab = "0.4.2"
 futures = "0.1.26"
+
+test_utils = { path = "../test_utils" }

@@ -8,6 +8,31 @@ steps:
         login: true
         retries: 3
 
+  - label: ':rust: Run tests (including slow :snail: tests)'
+    key: rust-tests
+    command: .buildkite/run-tests.sh
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUN_SLOW_TESTS=1
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: c5a-4xlarge
+
   - label: 'Run MySQL generated logictests'
     key: logictest-generated-mysql
     command:

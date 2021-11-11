@@ -2681,6 +2681,7 @@ dependencies = [
  "postgres 0.19.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sha-1 0.9.8",
  "slab",
+ "test_utils",
  "thiserror",
  "time 0.2.27",
  "tokio",
@@ -5420,6 +5421,10 @@ dependencies = [
  "structmeta",
  "syn",
 ]
+
+[[package]]
+name = "test_utils"
+version = "0.0.0"
 
 [[package]]
 name = "textwrap"

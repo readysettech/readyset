@@ -33,7 +33,8 @@ members = [
     "demos/irl",
     "xtask",
     "ensure-ebs-volume",
-    "metrics-aggregator"
+    "metrics-aggregator",
+    "test_utils",
 ]
 [profile.release]
 debug=true
