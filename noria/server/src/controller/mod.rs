@@ -542,10 +542,13 @@ impl AuthorityLeaderElectionState {
 
                                 // check that running config is compatible with the new
                                 // configuration.
-                                assert_eq!(
-                                    state.config, self.config,
-                                    "Config in authority is not compatible with requested config!"
-                                );
+                                if state.config != self.config {
+                                    warn!(
+                                        authority_config = ?state.config,
+                                        our_config = ?self.config,
+                                        "Config in authority different than our config, changing to our config"
+                                    );
+                                }
                                 state.config = self.config.clone();
                                 Ok(state)
                             }
