@@ -94,6 +94,7 @@ chrono = "0.4.19"
 serial_test = "0.5.1"
 assert_approx_eq = "1.1.0"
 criterion = "0.3"
+include_dir = "0.6.2"
 
 [lib]
 name = "noria_server"
