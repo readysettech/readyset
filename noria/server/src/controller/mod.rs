@@ -8,7 +8,9 @@ use crate::{Config, ReadySetResult, VolumeId};
 use anyhow::{format_err, Context};
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
+use itertools::Itertools;
 use launchpad::select;
+use nom_sql::SqlQuery;
 use noria::consensus::{AuthorityWorkerHeartbeatResponse, WorkerId};
 use noria::ControllerDescriptor;
 use noria::{
@@ -191,6 +193,9 @@ pub struct Controller {
     /// A notify to be passed to leader's when created, used to notify the Controller that the
     /// leader is ready to handle requests.
     leader_ready_notification: Arc<Notify>,
+    /// Indicates if state should be reset to only reflect DDL changes, and erase all Noria
+    /// specific recipes. Also flattens all DDL changes into a single recipe.
+    should_reset_state: bool,
 }
 
 impl Controller {
@@ -203,6 +208,7 @@ impl Controller {
         shutoff_valve: Valve,
         worker_descriptor: WorkerDescriptor,
         config: Config,
+        should_reset_state: bool,
     ) -> Self {
         Self {
             inner: None,
@@ -217,6 +223,7 @@ impl Controller {
             leader_ready: false,
             leader_ready_notification: Arc::new(Notify::new()),
             authority_task: None,
+            should_reset_state,
         }
     }
 
@@ -375,6 +382,7 @@ impl Controller {
                 self.our_descriptor.clone(),
                 self.worker_descriptor.clone(),
                 self.config.clone(),
+                self.should_reset_state,
             )
             .instrument(tracing::info_span!("authority")),
         ));
@@ -446,6 +454,7 @@ struct AuthorityLeaderElectionState {
     leader_eligible: bool,
     /// True if we are the current leader.
     is_leader: bool,
+    should_reset_state: bool,
 }
 
 impl AuthorityLeaderElectionState {
@@ -455,6 +464,7 @@ impl AuthorityLeaderElectionState {
         descriptor: ControllerDescriptor,
         config: Config,
         region: Option<String>,
+        should_reset_state: bool,
     ) -> Self {
         // We are eligible to be a leader if we are in the primary region.
         let can_be_leader = if let Some(pr) = &config.primary_region {
@@ -470,6 +480,7 @@ impl AuthorityLeaderElectionState {
             config,
             leader_eligible: can_be_leader,
             is_leader: false,
+            should_reset_state,
         }
     }
 
@@ -525,6 +536,10 @@ impl AuthorityLeaderElectionState {
                                 node_restrictions: HashMap::new(),
                             }),
                             Some(mut state) => {
+                                if self.should_reset_state {
+                                    state.reset();
+                                }
+
                                 // check that running config is compatible with the new
                                 // configuration.
                                 assert_eq!(
@@ -666,6 +681,7 @@ async fn authority_inner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
+    should_reset_state: bool,
 ) -> anyhow::Result<()> {
     authority.init().await?;
 
@@ -675,6 +691,7 @@ async fn authority_inner(
         descriptor,
         config,
         worker_descriptor.region.clone(),
+        should_reset_state,
     );
 
     let mut worker_state =
@@ -742,6 +759,7 @@ pub(crate) async fn authority_runner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
+    should_reset_state: bool,
 ) -> anyhow::Result<()> {
     if let Err(e) = authority_inner(
         event_tx.clone(),
@@ -749,6 +767,7 @@ pub(crate) async fn authority_runner(
         descriptor,
         worker_descriptor,
         config,
+        should_reset_state,
     )
     .await
     {
@@ -958,5 +977,36 @@ mod tests {
                 err
             );
         }
+    }
+}
+
+impl ControllerState {
+    /// This method interates over the recipes currently installed and only keeps
+    /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
+    /// This option is pretty risky and should only be used if noria gets into an
+    /// unmanagable state. In theory this will remove all of noria specific state
+    /// preventing bad migrations, and only keep the DDL state, required to properly
+    /// keep the base tables and the binlog replication functional.
+    fn reset(&mut self) {
+        let new_recipe = self
+            .recipes
+            .iter()
+            .map(|q| Recipe::clean_queries(q))
+            .flatten()
+            .filter_map(|q| nom_sql::parse_query(nom_sql::Dialect::MySQL, &q).ok())
+            .filter(|q| {
+                matches!(
+                    q,
+                    SqlQuery::CreateTable(_)
+                        | SqlQuery::DropTable(_)
+                        | SqlQuery::AlterTable(_)
+                        | SqlQuery::RenameTable(_)
+                        | SqlQuery::CreateView(_),
+                )
+            })
+            .join(";\n");
+
+        self.recipes = vec![new_recipe];
+        self.recipe_version = 1;
     }
 }

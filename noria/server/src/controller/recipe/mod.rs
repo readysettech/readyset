@@ -252,23 +252,38 @@ impl Recipe {
         }
     }
 
+    /// Remove comments from queries and aggregate lines into singular queries
+    pub(crate) fn clean_queries(recipe_text: &str) -> Vec<String> {
+        recipe_text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
+            .map(|l| {
+                // remove inline comments, too
+                match l.find('#') {
+                    None => l.trim(),
+                    Some(pos) => l[0..pos - 1].trim(),
+                }
+            })
+            .fold(Vec::<String>::new(), |mut acc, l| {
+                match acc.last_mut() {
+                    Some(s) if !s.ends_with(';') => {
+                        s.push(' ');
+                        s.push_str(l);
+                    }
+                    _ => acc.push(l.to_string()),
+                }
+                acc
+            })
+    }
+
     /// Creates a recipe from a set of SQL queries in a string (e.g., read from a file).
     /// Note that the recipe is not backed by a Soup data-flow graph until `activate` is called on
     /// it.
     // crate viz for tests
     pub(crate) fn from_str(recipe_text: &str) -> ReadySetResult<Recipe> {
-        // remove comment lines
-        let lines: Vec<String> = recipe_text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
-            .map(String::from)
-            .collect();
-        let cleaned_recipe_text = lines.join("\n");
-
         // parse and compute differences to current recipe
-        let parsed_queries = Recipe::parse(&cleaned_recipe_text)?;
-
+        let parsed_queries = Recipe::parse(recipe_text)?;
         Ok(Recipe::from_queries(parsed_queries))
     }
 
@@ -521,34 +536,7 @@ impl Recipe {
     }
 
     fn parse(recipe_text: &str) -> ReadySetResult<Vec<(Option<String>, SqlQuery, bool)>> {
-        let lines: Vec<&str> = recipe_text
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| {
-                // remove inline comments, too
-                match l.find('#') {
-                    None => l.trim(),
-                    Some(pos) => l[0..pos - 1].trim(),
-                }
-            })
-            .collect();
-        let mut query_strings = Vec::new();
-        let mut q = String::new();
-
-        let linecount = lines.len();
-        let mut i = 1;
-        for l in lines {
-            q.push_str(l);
-            if !l.ends_with(';') && i < linecount {
-                q.push(' ');
-            } else {
-                // either line ends with semicolor, or it does not and this is the last line
-                // in both cases, we're at the end of the query
-                query_strings.push(q);
-                q = String::new();
-            }
-            i += 1;
-        }
+        let query_strings = Recipe::clean_queries(recipe_text);
 
         let parsed_queries = query_strings.iter().fold(
             Vec::new(),
