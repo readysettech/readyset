@@ -427,9 +427,18 @@ pub mod manual {
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
+/// Configuration for an running noria cluster
+// WARNING: if you change this structure or any of the structures used in its fields, make sure to
+// write a serialized instance of the previous version to tests/config_versions by running the
+// following command *before* your change:
+//
+// ```
+// cargo run --bin make_config_json
+// ```
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
-pub(crate) struct Config {
+pub struct Config {
     pub(crate) sharding: Option<usize>,
+    #[serde(default)]
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
