@@ -34,7 +34,7 @@ NORIA_TYPE="readyset-adapter"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
 
-/usr/local/bin/configure-vector.sh
+/usr/local/bin/configure-vector.sh || true
 
 systemctl reset-failed
 systemctl enable readyset-mysql-adapter
