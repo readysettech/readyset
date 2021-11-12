@@ -492,6 +492,10 @@ fn binlog_val_to_noria_val(
             //https://github.com/blackbeam/rust_mysql_common/blob/408effed435c059d80a9e708bcfa5d974527f476/src/binlog/value.rs#L144
             // When meta is 0, `mysql_common` encodes this value as number of seconds (since UNIX EPOCH)
             let epoch = String::from_utf8_lossy(buf).parse::<i64>().unwrap(); // Can unwrap because we know the format is integer
+            if epoch == 0 {
+                // The 0 epoch is reserved for the '0000-00-00 00:00:00' timestamp, which we currently set to None
+                return Ok(DataType::None);
+            }
             let time = chrono::naive::NaiveDateTime::from_timestamp(epoch, 0);
             Ok(time.try_into().unwrap()) // Can unwarp because we know maps derectly to noria type
         }

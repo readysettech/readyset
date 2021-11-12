@@ -1,4 +1,5 @@
 use mysql_async::prelude::Queryable;
+use mysql_time::MysqlTime;
 use noria::DataType as D;
 use noria::{
     consensus::{Authority, LocalAuthority, LocalAuthorityStore},
@@ -215,13 +216,14 @@ impl TestHandle {
 
     async fn check_results(
         &mut self,
+        view_name: &str,
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
         const MAX_ATTEMPTS: usize = 6;
         let mut attempt: usize = 0;
         loop {
-            match self.check_results_inner().await {
+            match self.check_results_inner(view_name).await {
                 Err(_) if attempt < MAX_ATTEMPTS => {
                     // Sometimes things are slow in CI, so we retry a few times before giving up
                     attempt += 1;
@@ -241,8 +243,8 @@ impl TestHandle {
         }
     }
 
-    async fn check_results_inner(&mut self) -> ReadySetResult<Vec<Vec<DataType>>> {
-        let mut getter = self.controller().await.view("noria_view").await?;
+    async fn check_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DataType>>> {
+        let mut getter = self.controller().await.view(view_name).await?;
         let results = getter.lookup(&[0.into()], true).await?;
         let mut results = results.as_ref().to_owned();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves
@@ -258,11 +260,13 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     let mut ctx = TestHandle::start_noria(url.to_string()).await?;
     // Allow some time to snapshot
 
-    ctx.check_results("Snapshot", SNAPSHOT_RESULT).await?;
+    ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
+        .await?;
 
     for (test_name, test_query, test_results) in TESTS {
         client.query(test_query).await?;
-        ctx.check_results(test_name, *test_results).await?;
+        ctx.check_results("noria_view", test_name, *test_results)
+            .await?;
     }
 
     // Stop the replication task, issue some queries then check they are picked up after reconnect
@@ -270,12 +274,13 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     client.query(DISCONNECT_QUERY).await?;
 
     // Make sure no replication takes place for real
-    ctx.check_results("Disconnected", TESTS[TESTS.len() - 1].2)
+    ctx.check_results("noria_view", "Disconnected", TESTS[TESTS.len() - 1].2)
         .await?;
 
     // Resume replication
     ctx.start_repl().await?;
-    ctx.check_results("Reconnect", RECONNECT_RESULT).await?;
+    ctx.check_results("noria_view", "Reconnect", RECONNECT_RESULT)
+        .await?;
 
     client.stop().await;
     ctx.stop().await;
@@ -305,6 +310,118 @@ async fn pgsql_replication() -> ReadySetResult<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn mysql_replication() -> ReadySetResult<()> {
     replication_test_inner(&mysql_url()).await
+}
+
+async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `dt_test` CASCADE;
+            DROP VIEW IF EXISTS dt_test_view;
+            CREATE TABLE `dt_test` (
+                id int NOT NULL PRIMARY KEY,
+                dt datetime,
+                ts timestamp,
+                d date,
+                t time
+            );
+            CREATE VIEW dt_test_view AS SELECT * FROM `dt_test` ORDER BY id ASC",
+        )
+        .await?;
+
+    // Allow invalid values for dates
+    client.query("SET @@sql_mode := ''").await?;
+    client
+        .query(
+            "INSERT INTO `dt_test` VALUES
+                (0, '0000-00-00', '0000-00-00', '0000-00-00', '25:27:89'),
+                (1, '0002-00-00', '0020-00-00', '0200-00-00', '14:27:89')",
+        )
+        .await?;
+
+    let mut ctx = TestHandle::start_noria(url.to_string()).await?;
+
+    // TODO: Those are obviously not the right answers, but at least we don't panic
+    ctx.check_results(
+        "dt_test_view",
+        "Snapshot",
+        &[
+            &[
+                D::Int(0),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+            ],
+            &[
+                D::Int(1),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+            ],
+        ],
+    )
+    .await?;
+
+    // Repeat, but this time using binlog replication
+    client
+        .query(
+            "INSERT INTO `dt_test` VALUES
+                (2, '0000-00-00', '0000-00-00', '0000-00-00', '25:27:89'),
+                (3, '0002-00-00', '0020-00-00', '0200-00-00', '14:27:89')",
+        )
+        .await?;
+
+    let res2 = ctx
+        .check_results(
+            "dt_test_view",
+            "Replication",
+            &[
+                &[
+                    D::Int(0),
+                    D::None,
+                    D::None,
+                    D::None,
+                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                ],
+                &[
+                    D::Int(1),
+                    D::None,
+                    D::None,
+                    D::None,
+                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                ],
+                &[
+                    D::Int(2),
+                    D::None,
+                    D::None,
+                    D::None,
+                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                ],
+                &[
+                    D::Int(3),
+                    D::None,
+                    D::None,
+                    D::None,
+                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+                ],
+            ],
+        )
+        .await?;
+
+    client.stop().await;
+    ctx.stop().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_datetime_replication() -> ReadySetResult<()> {
+    mysql_datetime_replication_inner().await
 }
