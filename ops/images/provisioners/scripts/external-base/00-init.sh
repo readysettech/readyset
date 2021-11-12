@@ -14,6 +14,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   lsb-release \
   software-properties-common \
   unattended-upgrades \
+  mariadb-client-core-10.3 \
   unzip
 
 # Enable auto upgrading packages for security updates
