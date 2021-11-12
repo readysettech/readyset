@@ -1415,14 +1415,18 @@ impl<'a> TryFrom<&'a Literal> for DataType {
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::CurrentTimestamp | Literal::CurrentTime => {
                 let ts = time::OffsetDateTime::now_utc();
-                let ndt = NaiveDate::from_ymd(ts.year(), ts.month() as u32, ts.day() as u32)
-                    .and_hms_nano(
+                if let Some(dt) =
+                    NaiveDate::from_ymd_opt(ts.year(), ts.month() as u32, ts.day() as u32)
+                {
+                    Ok(DataType::Timestamp(dt.and_hms_nano(
                         ts.hour() as u32,
                         ts.minute() as u32,
                         ts.second() as u32,
                         ts.nanosecond(),
-                    );
-                Ok(DataType::Timestamp(ndt))
+                    )))
+                } else {
+                    Ok(DataType::None)
+                }
             }
             Literal::CurrentDate => {
                 let ts = time::OffsetDateTime::now_utc();
@@ -2020,15 +2024,18 @@ impl TryFrom<&mysql_common::value::Value> for DataType {
             Value::Float(v) => DataType::try_from(*v),
             Value::Double(v) => DataType::try_from(*v),
             Value::Date(year, month, day, hour, minutes, seconds, micros) => {
-                Ok(DataType::Timestamp(
-                    NaiveDate::from_ymd((*year).into(), (*month).into(), (*day).into())
-                        .and_hms_micro(
-                            (*hour).into(),
-                            (*minutes).into(),
-                            (*seconds).into(),
-                            *micros,
-                        ),
-                ))
+                if let Some(dt) =
+                    NaiveDate::from_ymd_opt((*year).into(), (*month).into(), (*day).into())
+                {
+                    Ok(DataType::Timestamp(dt.and_hms_micro(
+                        (*hour).into(),
+                        (*minutes).into(),
+                        (*seconds).into(),
+                        *micros,
+                    )))
+                } else {
+                    Ok(DataType::None)
+                }
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
                 Ok(DataType::Time(Arc::new(MysqlTime::from_hmsus(
