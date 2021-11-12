@@ -38,7 +38,7 @@ use rust_decimal::Decimal;
 pub enum SqlType {
     Bool,
     Char(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
-    Varchar(#[strategy(1..255u16)] u16),
+    Varchar(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     Int(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     UnsignedInt(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
     Bigint(#[strategy(proptest::option::of(1..255u16))] Option<u16>),
@@ -123,7 +123,7 @@ impl fmt::Display for SqlType {
         match *self {
             SqlType::Bool => write!(f, "BOOL"),
             SqlType::Char(len) => write_with_len(f, "CHAR", len),
-            SqlType::Varchar(len) => write!(f, "VARCHAR({})", len),
+            SqlType::Varchar(len) => write_with_len(f, "VARCHAR", len),
             SqlType::Int(len) => write_with_len(f, "INT", len),
             SqlType::UnsignedInt(len) => {
                 write_with_len(f, "INT", len)?;
@@ -961,7 +961,7 @@ fn type_identifier_first_half(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u
                             tag_no_case("varying"),
                         )),
                     )),
-                    delim_u16,
+                    opt(delim_u16),
                     multispace0,
                     opt(tag_no_case("binary")),
                 )),
@@ -1510,7 +1510,6 @@ mod tests {
     #[test]
     fn sql_types() {
         let ok = ["bool", "integer(16)", "datetime(16)"];
-        let not_ok = ["varchar"];
 
         let res_ok: Vec<_> = ok
             .iter()
@@ -1525,11 +1524,6 @@ mod tests {
                 SqlType::DateTime(Some(16))
             ]
         );
-
-        assert!(not_ok
-            .iter()
-            .map(|t| type_identifier(Dialect::MySQL)(t.as_bytes()).is_ok())
-            .all(|r| !r));
     }
 
     #[test]
@@ -1902,6 +1896,12 @@ mod tests {
         fn bigserial_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"bigserial");
             assert_eq!(res, SqlType::BigSerial);
+        }
+
+        #[test]
+        fn varchar_without_length() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"varchar");
+            assert_eq!(res, SqlType::Varchar(None));
         }
     }
 }

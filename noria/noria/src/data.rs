@@ -438,7 +438,7 @@ impl DataType {
             (_, Some(Float), Float | Real) => Ok(Cow::Borrowed(self)),
             (_, Some(Real), Double) => Ok(Cow::Borrowed(self)),
             (_, Some(Numeric(_)), Numeric(_)) => Ok(Cow::Borrowed(self)),
-            (_, Some(Text | Tinytext | Mediumtext), Varchar(max_len)) => {
+            (_, Some(Text | Tinytext | Mediumtext), Varchar(Some(max_len))) => {
                 let actual_len = <&str>::try_from(self)?.len();
                 if actual_len <= (*max_len).into() {
                     Ok(Cow::Borrowed(self))
@@ -467,7 +467,7 @@ impl DataType {
                     ))
                 }
             }
-            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(None)) => {
+            (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Char(None) | Varchar(None)) => {
                 Ok(Cow::Borrowed(self))
             }
             (_, Some(Text | Tinytext | Mediumtext | Varchar(_)), Timestamp | DateTime(_)) => {
