@@ -61,7 +61,7 @@ fn build_cfn_template() -> Result<()> {
                     "readyset-postgresql-template.yaml",
                 ],
             ),
-            "readyset-vector-aggregator" => (
+            "readyset-monitor" => (
                 "READYSETMONITOR",
                 vec![
                     "readyset-mysql-template.yaml",
@@ -69,7 +69,7 @@ fn build_cfn_template() -> Result<()> {
                 ],
             ),
             "readyset-authority-consul" => (
-                "AUTHORITYCONSUL",
+                "READYSETAUTHORITYCONSUL",
                 vec!["readyset-authority-consul-template.yaml"],
             ),
             unknown_image_name => bail!(
