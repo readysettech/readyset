@@ -21,8 +21,7 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 3,
-  "iteration": 1636576707007,
+  "iteration": 1636746998531,
   "links": [],
   "panels": [
     {
@@ -88,6 +87,170 @@
     },
     {
       "datasource": "DS_PROMETHEUS",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "No"
+                },
+                "1": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Yes"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 14,
+        "y": 0
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(replicator_snapshot_status{deployment=\"$Deployment\", status=\"started\"}) - sum(replicator_snapshot_status{deployment=\"$Deployment\", status=~\"successful|failed\"})",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "Snapshot In Progress",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "No"
+                },
+                "1": {
+                  "color": "red",
+                  "index": 1,
+                  "text": "Yes"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 17,
+        "y": 0
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.0.6",
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "controller_migration_in_progress{deployment=\"$Deployment\"}",
+          "format": "time_series",
+          "instant": false,
+          "interval": "",
+          "legendFormat": "",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "title": "Migration in Progress",
+      "transformations": [],
+      "type": "stat"
+    },
+    {
+      "datasource": "DS_PROMETHEUS",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -114,7 +277,7 @@
         "h": 6,
         "w": 3,
         "x": 14,
-        "y": 0
+        "y": 3
       },
       "id": 9,
       "options": {
@@ -175,7 +338,7 @@
         "h": 6,
         "w": 3,
         "x": 17,
-        "y": 0
+        "y": 3
       },
       "id": 10,
       "options": {
@@ -346,6 +509,58 @@
                 "value": 124
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ReadySet Count"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 134
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MySQL Count"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 117
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ReadySet 50p"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 109
+              }
+            ]
           }
         ]
       },
@@ -365,7 +580,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -375,7 +590,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -386,7 +601,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg without (quantile,database_type) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -394,6 +609,26 @@
           "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "E"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "B"
+        },
+        {
+          "exemplar": true,
+          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"mysql\",query!=\"\"})",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "D"
         }
       ],
       "title": "Query Log",
@@ -411,15 +646,23 @@
               "instance": true,
               "job": true
             },
-            "indexByName": {},
+            "indexByName": {
+              "Time": 0,
+              "Value #A": 4,
+              "Value #B": 2,
+              "Value #C": 5,
+              "Value #D": 3,
+              "Value #E": 6,
+              "query": 1
+            },
             "renameByName": {
               "Value #50p Noria": "Noria 50p",
               "Value #90p Noria": "Noria 90p",
               "Value #99p Noria": "Noria 99p",
               "Value #A": "ReadySet 50p",
-              "Value #B": "MySQL 50p",
+              "Value #B": "ReadySet Count",
               "Value #C": "ReadySet 90p",
-              "Value #D": "MySQL 90p",
+              "Value #D": "MySQL Count",
               "Value #E": "ReadySet 99p",
               "Value #F": "MySQL 99p",
               "query": "Query Text"
@@ -500,7 +743,7 @@
         "h": 7,
         "w": 6,
         "x": 14,
-        "y": 6
+        "y": 9
       },
       "id": 16,
       "options": {
@@ -646,7 +889,7 @@
               "tooltip": false,
               "viz": false
             },
-            "lineInterpolation": "linear",
+            "lineInterpolation": "smooth",
             "lineStyle": {
               "fill": "solid"
             },
@@ -656,7 +899,7 @@
               "type": "linear"
             },
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -667,7 +910,7 @@
           },
           "decimals": 0,
           "mappings": [],
-          "max": 1,
+          "max": 2,
           "min": 0,
           "thresholds": {
             "mode": "absolute",
@@ -707,7 +950,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(server_view_query_result{deployment=\"$Deployment\",result=\"served_from_cache\"}[30s])) or vector(0) / sum(rate(server_view_query_result[30s]))",
+          "expr": "sum(rate(server_view_query_result{deployment=\"$Deployment\", result=\"served_from_cache\"}[1m])) / sum(rate(server_view_query_result{result=~\"served_from_cache|replay\"}[1m]))",
           "format": "time_series",
           "instant": false,
           "interval": "",
@@ -878,7 +1121,7 @@
         "h": 7,
         "w": 6,
         "x": 14,
-        "y": 13
+        "y": 16
       },
       "id": 15,
       "options": {
@@ -946,10 +1189,9 @@
       {
         "allValue": null,
         "current": {
-          "isNone": true,
           "selected": false,
-          "text": "None",
-          "value": ""
+          "text": "SELECT * FROM `t1` WHERE (`c1` = '<anonymized>')",
+          "value": "SELECT * FROM `t1` WHERE (`c1` = '<anonymized>')"
         },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
@@ -974,7 +1216,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},
