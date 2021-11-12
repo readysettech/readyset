@@ -1,0 +1,12 @@
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3.9-alpine3.12
+
+ADD src/requirements.txt /src/requirements.txt
+RUN \
+    add --no-cache --virtual .build-deps gcc libc-dev postgresql-libs postgresql-dev && \
+    pip install --no-cache-dir -r /src/requirements.txt && \
+    apk del .build-deps && \
+    apk add --no-cache libpq
+
+ADD src /src
+WORKDIR /src
+ENTRYPOINT ["python3", "test.py"]
