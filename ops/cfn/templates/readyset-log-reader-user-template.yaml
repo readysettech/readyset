@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Creates an IAM user for reading CloudWatch logs
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Authentication Parameters
+        Parameters:
+          - InitialPassword
+
+Parameters:
+  InitialPassword:
+    Description: Initial password for ReadySet user
+    Type: String
+    Default: R3adyS3t!
+    MinLength: 8
+    NoEcho: true
+    ConstraintDescription: Must follow your IAM user password policy
+
+Resources:
+  ReadySetUser:
+    Type: AWS::IAM::User
+    Properties:
+      LoginProfile:
+        Password: !Ref InitialPassword
+        PasswordResetRequired: true
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
+        - arn:aws:iam::aws:policy/IAMUserChangePassword
