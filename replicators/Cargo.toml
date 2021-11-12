@@ -36,3 +36,4 @@ mysql-time = { path = "../mysql-time" }
 
 [dev-dependencies]
 noria-server = { path = "../noria/server" }
+serial_test = "0.5.1"

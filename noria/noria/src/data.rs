@@ -2027,15 +2027,16 @@ impl TryFrom<&mysql_common::value::Value> for DataType {
                 if let Some(dt) =
                     NaiveDate::from_ymd_opt((*year).into(), (*month).into(), (*day).into())
                 {
-                    Ok(DataType::Timestamp(dt.and_hms_micro(
+                    if let Some(dt) = dt.and_hms_micro_opt(
                         (*hour).into(),
                         (*minutes).into(),
                         (*seconds).into(),
                         *micros,
-                    )))
-                } else {
-                    Ok(DataType::None)
+                    ) {
+                        return Ok(DataType::Timestamp(dt));
+                    }
                 }
+                Ok(DataType::None)
             }
             Value::Time(neg, days, hours, minutes, seconds, microseconds) => {
                 Ok(DataType::Time(Arc::new(MysqlTime::from_hmsus(

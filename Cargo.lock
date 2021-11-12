@@ -4470,6 +4470,7 @@ dependencies = [
  "readyset-logging",
  "rust_decimal",
  "serde_json",
+ "serial_test",
  "tokio",
  "tokio-postgres",
  "tracing",
