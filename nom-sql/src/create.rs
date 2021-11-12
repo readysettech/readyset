@@ -673,7 +673,7 @@ mod tests {
         let res = type_identifier(Dialect::MySQL)(type0.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::Bigint(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type1.as_bytes());
-        assert_eq!(res.unwrap().1, SqlType::Varchar(255));
+        assert_eq!(res.unwrap().1, SqlType::Varchar(Some(255)));
         let res = type_identifier(Dialect::MySQL)(type2.as_bytes());
         assert_eq!(res.unwrap().1, SqlType::UnsignedBigint(Some(20)));
         let res = type_identifier(Dialect::MySQL)(type3.as_bytes());
@@ -693,7 +693,7 @@ mod tests {
             res.unwrap().1,
             vec![
                 ColumnSpecification::new(Column::from("id"), SqlType::Bigint(Some(20))),
-                ColumnSpecification::new(Column::from("name"), SqlType::Varchar(255)),
+                ColumnSpecification::new(Column::from("name"), SqlType::Varchar(Some(255))),
             ]
         );
     }
@@ -709,8 +709,14 @@ mod tests {
                 table: Table::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(
+                        Column::from("users.name"),
+                        SqlType::Varchar(Some(255))
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("users.email"),
+                        SqlType::Varchar(Some(255))
+                    ),
                 ],
                 if_not_exists: true,
                 ..Default::default()
@@ -765,8 +771,14 @@ mod tests {
                 table: Table::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(
+                        Column::from("users.name"),
+                        SqlType::Varchar(Some(255))
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("users.email"),
+                        SqlType::Varchar(Some(255))
+                    ),
                 ],
                 keys: Some(vec![TableKey::PrimaryKey {
                     name: None,
@@ -787,8 +799,14 @@ mod tests {
                 table: Table::from("users"),
                 fields: vec![
                     ColumnSpecification::new(Column::from("users.id"), SqlType::Bigint(Some(20))),
-                    ColumnSpecification::new(Column::from("users.name"), SqlType::Varchar(255)),
-                    ColumnSpecification::new(Column::from("users.email"), SqlType::Varchar(255)),
+                    ColumnSpecification::new(
+                        Column::from("users.name"),
+                        SqlType::Varchar(Some(255))
+                    ),
+                    ColumnSpecification::new(
+                        Column::from("users.email"),
+                        SqlType::Varchar(Some(255))
+                    ),
                 ],
                 keys: Some(vec![TableKey::UniqueKey {
                     name: Some(String::from("id_k")),
@@ -925,10 +943,10 @@ mod tests {
                         ]
                     ),
                     non_null_col("customer_id", SqlType::Int(None)),
-                    non_null_col("street", SqlType::Varchar(255)),
-                    non_null_col("city", SqlType::Varchar(255)),
-                    non_null_col("state", SqlType::Varchar(255)),
-                    non_null_col("zip", SqlType::Varchar(255)),
+                    non_null_col("street", SqlType::Varchar(Some(255))),
+                    non_null_col("city", SqlType::Varchar(Some(255))),
+                    non_null_col("state", SqlType::Varchar(Some(255))),
+                    non_null_col("zip", SqlType::Varchar(Some(255))),
                     non_null_col(
                         "type",
                         SqlType::Enum(vec![
@@ -1065,12 +1083,12 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("last_name"),
-                        SqlType::Varchar(255),
+                        SqlType::Varchar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                     ColumnSpecification::with_constraints(
                         col("email"),
-                        SqlType::Varchar(255),
+                        SqlType::Varchar(Some(255)),
                         vec![ColumnConstraint::NotNull, ColumnConstraint::Unique,]
                     ),
                 ],
@@ -1246,7 +1264,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.object_repr"),
-                            SqlType::Varchar(200),
+                            SqlType::Varchar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1293,7 +1311,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("auth_group.name"),
-                            SqlType::Varchar(80),
+                            SqlType::Varchar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
@@ -1464,7 +1482,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("user_newtalk.user_ip"),
-                            SqlType::Varchar(40),
+                            SqlType::Varchar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
@@ -1658,7 +1676,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("django_admin_log.object_repr"),
-                            SqlType::Varchar(200),
+                            SqlType::Varchar(Some(200)),
                             vec![ColumnConstraint::NotNull],
                         ),
                         ColumnSpecification::with_constraints(
@@ -1705,7 +1723,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("auth_group.name"),
-                            SqlType::Varchar(80),
+                            SqlType::Varchar(Some(80)),
                             vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
                         ),
                     ],
@@ -1875,7 +1893,7 @@ mod tests {
                         ),
                         ColumnSpecification::with_constraints(
                             Column::from("user_newtalk.user_ip"),
-                            SqlType::Varchar(40),
+                            SqlType::Varchar(Some(40)),
                             vec![
                                 ColumnConstraint::NotNull,
                                 ColumnConstraint::DefaultValue(Literal::String(String::from(""))),
@@ -2004,7 +2022,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("token"),
-                        SqlType::Varchar(40),
+                        SqlType::Varchar(Some(40)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::NotNull
@@ -2027,7 +2045,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("type"),
-                        SqlType::Varchar(100),
+                        SqlType::Varchar(Some(100)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::NotNull,
@@ -2035,7 +2053,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("title"),
-                        SqlType::Varchar(150),
+                        SqlType::Varchar(Some(150)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),
@@ -2043,7 +2061,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("last_ip_address"),
-                        SqlType::Varchar(45),
+                        SqlType::Varchar(Some(45)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),
@@ -2051,7 +2069,7 @@ mod tests {
                     ),
                     ColumnSpecification::with_constraints(
                         col("last_user_agent"),
-                        SqlType::Varchar(255),
+                        SqlType::Varchar(Some(255)),
                         vec![
                             ColumnConstraint::Collation("utf8mb4_unicode_ci".into()),
                             ColumnConstraint::DefaultValue(Literal::Null),

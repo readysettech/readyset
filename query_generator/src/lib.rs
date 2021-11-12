@@ -173,7 +173,7 @@ fn value_of_type(typ: &SqlType) -> DataType {
 fn random_value_of_type(typ: &SqlType) -> DataType {
     let mut rng = rand::thread_rng();
     match typ {
-        SqlType::Char(Some(x)) | SqlType::Varchar(x) => {
+        SqlType::Char(Some(x)) | SqlType::Varchar(Some(x)) => {
             let length: usize = rng.gen_range(1..=*x).into();
             // It is safe to transform an String of consecutive a's into a DataType.
             #[allow(clippy::unwrap_used)]
@@ -186,7 +186,11 @@ fn random_value_of_type(typ: &SqlType) -> DataType {
             #[allow(clippy::unwrap_used)]
             DataType::try_from("a".repeat(length)).unwrap()
         }
-        SqlType::Blob | SqlType::Text | SqlType::Char(None) | SqlType::Binary(None) => {
+        SqlType::Blob
+        | SqlType::Text
+        | SqlType::Char(None)
+        | SqlType::Varchar(None)
+        | SqlType::Binary(None) => {
             // 2^16 bytes
             let length: usize = rng.gen_range(1..65536);
             // It is safe to transform an String of consecutive a's into a DataType.
