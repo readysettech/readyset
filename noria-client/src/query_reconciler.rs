@@ -105,9 +105,9 @@ where
                     } else {
                         return;
                     }
-                    counter!(recorded::RECONCILER_ALLOWED, 1);
-                    self.query_status_cache.set_successful_migration(stmt).await;
                 }
+                counter!(recorded::RECONCILER_ALLOWED, 1);
+                self.query_status_cache.set_successful_migration(stmt).await;
             }
             Err(e) if e.caused_by_unsupported() => {
                 error!(error = %e,
