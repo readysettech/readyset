@@ -117,7 +117,11 @@ where
             }
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry query reconciliation on this query.
-            _ => {}
+            Err(e) => {
+                warn!(error = %e,
+                      query = %stmt,
+                      "Select query may have transiently failed");
+            }
         }
     }
 
