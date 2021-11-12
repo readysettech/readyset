@@ -158,10 +158,10 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      # short commit id associated with AMIs: 209c959
-      READYSETMYSQLADAPTER: ami-04368d88269c4366e
-      READYSETSERVER: ami-06d085b6441cce99a
-      READYSETMONITOR: ami-0d58bd90ec29a80a0
+      # short commit id associated with AMIs: 9f9c954
+      READYSETMYSQLADAPTER: ami-06804f129cd35b2f0
+      READYSETSERVER: ami-0f9d500a6eb0391e1
+      READYSETMONITOR: ami-059cccfe54b7b4d06
 
 Resources:
   # --- START MYSQL ADAPTER --- #
