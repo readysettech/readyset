@@ -658,6 +658,23 @@ impl Opts {
     }
 
     #[instrument(skip(self))]
+    async fn maybe_grow_volume(&self, attached_volume: &AttachedVolume) -> Result<()> {
+        let res = self
+            .ec2()
+            .modify_volume()
+            .volume_id(&attached_volume.ebs_volume_id)
+            .size(self.volume_size_gb)
+            .send()
+            .await;
+
+        if let Err(error) = res {
+            error!(%error, "Error resizing volume, but continuing anyway");
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
     async fn ensure_disk_formatted(&self, block_device_path: &Path) -> Result<()> {
         info!("Checking to see whether disk already contains an ext4 filesystem...");
         let magic = Command::new("file")
@@ -668,6 +685,9 @@ impl Opts {
         let magic = String::from_utf8(magic.stdout)?;
         if magic.contains("ext4 filesystem data") {
             info!("It does");
+            info!("Running e2fsck");
+            run(Command::new("e2fsck").arg("-f").arg(block_device_path)).await?;
+            run(Command::new("resize2fs").arg(block_device_path)).await?;
             return Ok(());
         }
         info!("It does not; formatting disk...");
@@ -832,6 +852,7 @@ impl Opts {
 
     async fn run(&mut self) -> Result<()> {
         let attached_volume = self.ensure_volume_attached().await?;
+        self.maybe_grow_volume(&attached_volume).await?;
         self.ensure_disk_formatted(&attached_volume.block_device_path)
             .await?;
         self.ensure_filesystem_mounted(&attached_volume.block_device_path)
