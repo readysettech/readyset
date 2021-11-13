@@ -1,11 +1,15 @@
+use metrics::histogram;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::convert::TryInto;
+use std::time::SystemTime;
 
 use nom_sql::OrderType;
+use noria::metrics::recorded;
 use noria::util::like::LikePattern;
 use noria::ViewQueryFilter;
 use noria::{consistency::Timestamp, KeyComparison};
+use tracing::warn;
 
 use crate::backlog;
 use crate::prelude::*;
@@ -321,6 +325,19 @@ impl Reader {
     pub(in crate::node) fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();
+            m.handle_trace(
+                |trace| match SystemTime::now().duration_since(trace.start) {
+                    Ok(d) => {
+                        histogram!(
+                            recorded::PACKET_WRITE_PROPAGATION_TIME,
+                            d.as_micros() as f64
+                        );
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Write latency trace failed");
+                    }
+                },
+            );
             // make sure we don't fill a partial materialization
             // hole with incomplete (i.e., non-replay) state.
             if m.is_regular() && state.is_partial() {

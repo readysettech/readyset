@@ -21,6 +21,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
@@ -28,6 +29,9 @@ use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
 use vec_map::VecMap;
+
+// TODO(justin): Make write propagation sample rate configurable.
+const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
@@ -105,6 +109,18 @@ pub(crate) type TableRpc = Buffer<
     Tagged<LocalOrNot<PacketData>>,
 >;
 
+/// Information used to uniquely identify: a packet, and the time a packet entered the
+/// system.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PacketTrace {
+    /// Time that the packet trace was initiated at. Currently used to measure the
+    /// end-to-end trace duration. Comparing this value to other recorded system
+    /// clock values comes with caveats. The system clock on a single machine may
+    /// be adjusted, and system time values across machines is subject to
+    /// synchronization issues.
+    pub start: SystemTime,
+}
+
 /// Wrapper of packet payloads with their destination node.
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct PacketData {
@@ -112,6 +128,8 @@ pub struct PacketData {
     pub dst: LocalNodeIndex,
     /// The data associated with the packet.
     pub data: PacketPayload,
+    /// Optional packet trace to associate with the packet.
+    pub trace: Option<PacketTrace>,
 }
 
 /// Wrapper around types that can be propagated to base tables
@@ -195,9 +213,9 @@ impl TableBuilder {
             table_name: self.table_name,
             schema: self.schema,
             dst_is_local: false,
-
             shard_addrs: addrs,
             shards: conns,
+            last_trace_sample: Instant::now(),
         }
     }
 }
@@ -220,9 +238,9 @@ pub struct Table {
     table_name: String,
     schema: Option<CreateTableStatement>,
     dst_is_local: bool,
-
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
+    last_trace_sample: Instant,
 }
 
 impl fmt::Debug for Table {
@@ -380,6 +398,7 @@ impl Table {
                         let new_i = PacketData {
                             dst: i.dst,
                             data: PacketPayload::Input(rs),
+                            trace: i.trace.clone(),
                         };
 
                         let p = unsafe { LocalOrNot::new_for_dst(new_i, self.dst_is_local) };
@@ -507,6 +526,7 @@ impl Service<TableRequest> for Table {
                 let p = PacketData {
                     dst: self.node,
                     data: PacketPayload::Timestamp(t),
+                    trace: None,
                 };
                 future::Either::Right(self.timestamp(p).map_err(|e| table_err(tn, e)))
             }
@@ -631,7 +651,25 @@ impl Table {
         Ok(())
     }
 
-    fn prep_records(&self, mut ops: Vec<TableOperation>) -> ReadySetResult<PacketData> {
+    /// Generates a PacketTrace object every TRACE_SAMPLE_RATE. This performs
+    /// head based sampling, informing downstream nodes that process packets
+    /// to record trace info for all packets generated from this Input
+    /// packet.
+    fn generate_trace_info(&mut self) -> Option<PacketTrace> {
+        let now = Instant::now();
+        // If we have already sent a trace for a packet in the last TRACE_SAMPLE_RATE,
+        // do not include trace info in the packet.
+        if now - self.last_trace_sample < TRACE_SAMPLE_RATE {
+            return None;
+        }
+
+        self.last_trace_sample = now;
+        Some(PacketTrace {
+            start: SystemTime::now(),
+        })
+    }
+
+    fn prep_records(&mut self, mut ops: Vec<TableOperation>) -> ReadySetResult<PacketData> {
         for r in &mut ops {
             self.inject_dropped_cols(r)?;
         }
@@ -639,6 +677,7 @@ impl Table {
         Ok(PacketData {
             dst: self.node,
             data: PacketPayload::Input(ops),
+            trace: self.generate_trace_info(),
         })
     }
 

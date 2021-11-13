@@ -416,6 +416,12 @@ pub mod recorded {
     /// | Tag | Description |
     /// | path | The http path associated with the rpc request. |
     pub const CONTROLLER_RPC_REQUEST_TIME: &str = "controller.rpc_request_time";
+
+    /// Histgoram: Write propagation time from binlog to reader node. For each
+    /// input packet, this is recorded for each reader node that the packet
+    /// propagates to. If the packet does not reach the reader because it hits a
+    /// hole, the write propagation time is not recorded.
+    pub const PACKET_WRITE_PROPAGATION_TIME: &str = "packet.write_propagation_time_us";
 }
 
 /// A dumped metric's kind.

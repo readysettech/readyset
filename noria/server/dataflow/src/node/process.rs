@@ -135,7 +135,7 @@ impl Node {
                 // NOTE: bases only accept BaseOperations
                 match m.take().map(|p| *p) {
                     Some(Packet::Input { inner, .. }) => {
-                        let PacketData { dst, data } = unsafe { inner.take() };
+                        let PacketData { dst, data, trace } = unsafe { inner.take() };
                         let data = data
                             .try_into()
                             .expect("Payload of Input packet was not of Input type");
@@ -180,6 +180,7 @@ impl Node {
                         *m = Some(Box::new(Packet::Message {
                             link: Link::new(dst, dst),
                             data: rs,
+                            trace,
                         }));
                     }
                     Some(ref p) => {
@@ -529,7 +530,7 @@ impl Node {
                 src,
                 timestamp,
             } => {
-                let PacketData { dst, data } = unsafe { timestamp.take() };
+                let PacketData { dst, data, .. } = unsafe { timestamp.take() };
 
                 let timestamp: Timestamp =
                     data.try_into().expect("Packet data not of timestamp type");
@@ -589,6 +590,7 @@ impl Node {
                     timestamp: LocalOrNot::new(PacketData {
                         dst,
                         data: PacketPayload::Timestamp(timestamp),
+                        trace: None,
                     }),
                 });
 
