@@ -4,7 +4,7 @@ use vec1::Vec1;
 use crate::domain;
 use crate::prelude::*;
 use noria::{self, KeyComparison};
-use noria::{internal::LocalOrNot, PacketData};
+use noria::{internal::LocalOrNot, PacketData, PacketTrace};
 
 use std::collections::HashSet;
 use std::fmt;
@@ -204,6 +204,7 @@ pub enum Packet {
     Message {
         link: Link,
         data: Records,
+        trace: Option<PacketTrace>,
     },
 
     /// Update that is part of a tagged data-flow replay path.
@@ -338,6 +339,20 @@ impl Packet {
         }
     }
 
+    /// Perform a function on a packet's trace info if the packet has trace info and it is not
+    /// None. Otherwise  this is a noop and the function is not called.
+    pub(crate) fn handle_trace<F>(&mut self, map: F)
+    where
+        F: FnOnce(&PacketTrace),
+    {
+        if let Packet::Message {
+            trace: Some(ref t), ..
+        } = *self
+        {
+            map(t);
+        }
+    }
+
     pub(crate) fn is_regular(&self) -> bool {
         matches!(*self, Packet::Message { .. })
     }
@@ -361,9 +376,14 @@ impl Packet {
 
     pub(crate) fn clone_data(&self) -> Self {
         match *self {
-            Packet::Message { link, ref data } => Packet::Message {
+            Packet::Message {
+                link,
+                ref data,
+                ref trace,
+            } => Packet::Message {
                 link,
                 data: data.clone(),
+                trace: trace.clone(),
             },
             Packet::ReplayPiece {
                 link,

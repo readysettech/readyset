@@ -3248,6 +3248,7 @@ dependencies = [
  "petgraph",
  "pin-project 0.4.28",
  "proptest",
+ "rand 0.8.4",
  "regex",
  "reqwest",
  "rust_decimal",

@@ -505,6 +505,7 @@ mod test {
             Packet::Message {
                 link: create_link(),
                 data: records.into(),
+                trace: None,
             }
         }
     }

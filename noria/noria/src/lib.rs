@@ -311,7 +311,7 @@ pub use crate::table::{Table, TableRequest};
 pub use crate::view::View;
 
 #[doc(hidden)]
-pub use crate::table::{PacketData, PacketPayload};
+pub use crate::table::{PacketData, PacketPayload, PacketTrace};
 
 #[doc(hidden)]
 pub use crate::view::{
