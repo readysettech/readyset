@@ -12,6 +12,7 @@ on_error() {
 
 trap 'on_error' ERR
 
+/usr/local/bin/set-host-description.sh
 /usr/local/bin/cfn-init-wrapper.sh
 
 mkdir -p /opt/consul

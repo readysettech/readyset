@@ -38,6 +38,7 @@ NORIA_TYPE="readyset-server"
 SERVER_ADDRESS=${SERVER_ADDRESS}
 EOF
 
+/usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-vector.sh || true
 
 cat > /etc/default/ensure-ebs-volume <<EOF

@@ -13,6 +13,7 @@ on_error() {
 trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
+/usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-consul-client.sh
 /usr/local/bin/configure-prometheus.sh
 /usr/local/bin/configure-grafana.sh
