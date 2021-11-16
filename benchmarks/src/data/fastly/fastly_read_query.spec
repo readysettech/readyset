@@ -1,1 +1,1 @@
-uniform 0 1000
+uniform 0 1000000

@@ -89,6 +89,16 @@ impl TryFrom<&str> for ParameterAnnotation {
                 let to: i32 = chunks.next().unwrap().parse().unwrap();
                 ColumnGenerationSpec::Uniform(DataType::Int(from), DataType::Int(to))
             }
+            "zipf" => {
+                let from: i32 = chunks.next().unwrap().parse().unwrap();
+                let to: i32 = chunks.next().unwrap().parse().unwrap();
+                let alpha: f64 = chunks.next().unwrap().parse().unwrap();
+                ColumnGenerationSpec::Zipfian {
+                    min: DataType::Int(from),
+                    max: DataType::Int(to),
+                    alpha,
+                }
+            }
             "regex" => {
                 let regex = chunks.next().unwrap().trim_matches('"');
                 ColumnGenerationSpec::RandomString(regex.to_owned())

@@ -69,6 +69,7 @@ use lazy_static::lazy_static;
 use nom_sql::analysis::{contains_aggregate, ReferredColumns};
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::strategy::{BoxedStrategy, Strategy};
+use rand::distributions::Distribution;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
@@ -82,6 +83,7 @@ use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use test_strategy::Arbitrary;
+use zipf::ZipfDistribution;
 
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
@@ -496,7 +498,7 @@ pub fn find_primary_keys(stmt: &CreateTableStatement) -> Option<&ColumnSpecifica
 
 /// Variants and their parameters used to construct
 /// their respective ColumnGenerator.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ColumnGenerationSpec {
     /// Generates a unique value for every row.
     Unique,
@@ -521,6 +523,13 @@ pub enum ColumnGenerationSpec {
     Random,
     /// Generate a random string from a regex
     RandomString(String),
+    /// Generates an integer in the specified range. Cannot be used for
+    /// non discrete integer DataTypes.
+    Zipfian {
+        min: DataType,
+        max: DataType,
+        alpha: f64,
+    },
 }
 
 impl ColumnGenerationSpec {
@@ -553,12 +562,15 @@ impl ColumnGenerationSpec {
             }),
             ColumnGenerationSpec::Random => ColumnGenerator::Random(col_type.into()),
             ColumnGenerationSpec::RandomString(r) => ColumnGenerator::RandomString(r.into()),
+            ColumnGenerationSpec::Zipfian { min, max, alpha } => {
+                ColumnGenerator::Zipfian(ZipfianGenerator::new(min.clone(), max.clone(), *alpha))
+            }
         }
     }
 }
 
 /// Method to use to generate column information.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum ColumnGenerator {
     /// Repeatedly returns a single constant value.
     Constant(ConstantGenerator),
@@ -572,6 +584,8 @@ pub enum ColumnGenerator {
     Random(RandomGenerator),
     /// Returns a random string from a regex
     RandomString(RandomStringGenerator),
+    /// Returns a value generated from a zipfian distribution.
+    Zipfian(ZipfianGenerator),
 }
 
 impl ColumnGenerator {
@@ -582,6 +596,7 @@ impl ColumnGenerator {
             ColumnGenerator::Uniform(g) => g.gen(),
             ColumnGenerator::Random(g) => g.gen(),
             ColumnGenerator::RandomString(g) => g.gen(),
+            ColumnGenerator::Zipfian(g) => g.gen(),
         }
     }
 }
@@ -721,6 +736,42 @@ impl UniformGenerator {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ZipfianGenerator {
+    min: DataType,
+    dist: ZipfDistribution,
+}
+
+impl ZipfianGenerator {
+    fn new(min: DataType, max: DataType, alpha: f64) -> Self {
+        let num_elements: u64 = match (&min, &max) {
+            (DataType::Int(i), DataType::Int(j)) => (j - i) as u64,
+            (DataType::UnsignedInt(i), DataType::UnsignedInt(j)) => (j - i) as u64,
+            (DataType::UnsignedBigInt(i), DataType::UnsignedBigInt(j)) => (j - i) as u64,
+            (DataType::BigInt(i), DataType::BigInt(j)) => (j - i) as u64,
+            (_, _) => unimplemented!("DataTypes unsupported for discrete zipfian value generation"),
+        };
+
+        Self {
+            min,
+            dist: zipf::ZipfDistribution::new(num_elements as usize, alpha).unwrap(),
+        }
+    }
+
+    fn gen(&mut self) -> DataType {
+        let mut rng = rand::thread_rng();
+        let offset = self.dist.sample(&mut rng);
+
+        match self.min {
+            DataType::Int(i) => DataType::Int(i + offset as i32),
+            DataType::UnsignedInt(i) => DataType::UnsignedInt(i + offset as u32),
+            DataType::UnsignedBigInt(i) => DataType::UnsignedBigInt(i + offset as u64),
+            DataType::BigInt(i) => DataType::BigInt(i + offset as i64),
+            _ => unimplemented!("DataType unsupported for discrete zipfian value generation."),
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct RandomGenerator {
     sql_type: SqlType,
@@ -739,7 +790,7 @@ impl RandomGenerator {
 }
 
 /// Column data type and data generation information.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct ColumnSpec {
     sql_type: SqlType,
     gen_spec: ColumnGenerator,
@@ -749,13 +800,13 @@ pub struct ColumnSpec {
     expected_values: HashSet<DataType>,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct TableSpec {
     pub name: TableName,
     pub columns: HashMap<ColumnName, ColumnSpec>,
     column_name_counter: u32,
 
-    /// Name of the primary key columnfor the table, if any
+    /// Name of the primary key column for the table, if any
     pub primary_key: Option<ColumnName>,
 }
 
@@ -979,6 +1030,7 @@ impl TableSpec {
                         ColumnGenerator::Uniform(u) => u.gen(),
                         ColumnGenerator::Random(r) => r.gen(),
                         ColumnGenerator::RandomString(r) => r.gen(),
+                        ColumnGenerator::Zipfian(z) => z.gen(),
                     };
 
                     (col_name.clone(), value)

@@ -4140,6 +4140,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+ "zipf",
 ]
 
 [[package]]

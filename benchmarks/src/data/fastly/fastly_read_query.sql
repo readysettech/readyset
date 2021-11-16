@@ -11,4 +11,3 @@ FROM
 WHERE
 	A.id = R.article_id AND
 	R.user_id = ?
-LIMIT 5
