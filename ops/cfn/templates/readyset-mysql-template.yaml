@@ -32,8 +32,8 @@ Metadata:
           - ReadySetAdapterNodes
           - ReadySetServerInstanceType
           - ReadySetServerNodes
-          - ReadySetMonitorInstanceType
           - ReadySetServerVolumeSizeGB
+          - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
           - MySQLDatabaseURL
@@ -46,21 +46,21 @@ Parameters:
     Type: String
     Default: m5.large
     AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation
+    ConstraintDescription: Instance type must be 5th generation.
 
   ReadySetServerInstanceType:
     Description: The EC2 instance type to use for ReadySet Server instances.
     Type: String
     Default: c5.4xlarge
     AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation
+    ConstraintDescription: Instance type must be 5th generation.
 
   ReadySetMonitorInstanceType:
     Description: The EC2 instance type to use for the ReadySet monitoring instance.
     Type: String
     Default: c5.large
     AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation
+    ConstraintDescription: Instance type must be 5th generation.
 
   ReadySetAdapterNodes:
     Description: Number of Adapter nodes to create.
@@ -87,7 +87,7 @@ Parameters:
     Type: AWS::EC2::SecurityGroup::Id
 
   ReadySetServerVolumeSizeGB:
-    Description: Volume size, in gigabytes, to provision for Server instances.
+    Description: Volume size, in gigabytes, to provision for Server instances. This should match EBS volume size of RDS instance.
     Type: Number
     Default: 32
     MinValue: 32
@@ -106,7 +106,7 @@ Parameters:
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 
   KeyPairName:
-    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
 
@@ -120,8 +120,9 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
 
   VPCID:
-    Description: VPC ID
+    Description: ID of the VPC to deploy resources in.
     Type: AWS::EC2::VPC::Id
+    AllowedPattern: (^vpc-\w+)
 
   ConsulJoinManagedPolicyArn:
     Description: ARN of an managed IAM policy that the permissions to find Consul Servers
@@ -145,11 +146,11 @@ Parameters:
     NoEcho: True
 
   ReadySetMySQLAdapterUsername:
-    Description: Username to use to authenticate to the readyset adapter
+    Description: Username to use to authenticate to the ReadySet adapter.
     Type: String
 
   ReadySetMySQLAdapterPassword:
-    Description: Password to use to authenticate to the readyset adapter
+    Description: Password to use to authenticate to the ReadySet adapter.
     Type: String
     NoEcho: true
 
@@ -517,7 +518,11 @@ Outputs:
   ReadySetAdapterNLBDNSName:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetMySQLAdapterNLB.DNSName
+    Export:
+      Name: ReadySetAdapterNLBDNSName
 
   ReadySetMySQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetMySQLAdapterVPCEndpointService
+    Export:
+      Name: ReadySetPostgreSQLVPCEndpointService

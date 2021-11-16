@@ -9,12 +9,13 @@ Metadata:
           default: VPC Network Configuration
         Parameters:
           - VPCID
-          - VPCCIDR
           - VPCPrivateSubnetIds
+          - ReadySetServerSecurityGroupID
+          - ReadySetAdapterSecurityGroupID
+          - ReadySetMonitoringSecurityGroupID
       - Label:
           default: SSH Access Configuration
         Parameters:
-          - BastionSecurityGroupID
           - KeyPairName
       - Label:
           default: Consul Configuration
@@ -34,12 +35,10 @@ Metadata:
           - PostgresDatabaseURL
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
+          - ReadySetPostgresAdapterUsername
+          - ReadySetPostgresAdapterPassword
 
 Parameters:
-  BastionSecurityGroupID:
-    Description: ID of the bastion host security group to enable SSH connections (e.g., sg-7f16e910)
-    Type: AWS::EC2::SecurityGroup::Id
-
   ReadySetAdapterInstanceType:
     Description: The EC2 instance type to use for ReadySet Adapter instances.
     Type: String
@@ -52,26 +51,57 @@ Parameters:
     Type: String
     Default: c5.4xlarge
     AllowedPattern: ^(\w)5.*
-    ConstraintDescription: Instance type must be 5th generation
+    ConstraintDescription: Instance type must be 5th generation.
 
   ReadySetMonitorInstanceType:
     Description: The EC2 instance type to use for the ReadySet monitoring instance.
     Type: String
-    Default: t3.small
+    Default: c5.large
+    AllowedPattern: ^(\w)5.*
+    ConstraintDescription: Instance type must be 5th generation.
 
   ReadySetAdapterNodes:
-    Description: Number of ReadySet Adapter nodes to create.
+    Description: Number of Adapter nodes to create.
     Type: String
+    Default: 3
+    AllowedPattern: ^\d+$
 
   ReadySetServerNodes:
-    Description: Number of ReadySet Server nodes to create.
+    Description: Number of Server nodes to create.
     Type: String
+    Default: 3
+    AllowedPattern: ^\d+$
+
+  ReadySetServerSecurityGroupID:
+    Description: ID of the security group to apply to ReadySet Server instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
+  ReadySetAdapterSecurityGroupID:
+    Description: ID of the security group to apply to ReadySet Adapter instances.
+    Type: AWS::EC2::SecurityGroup::Id
+
+  ReadySetMonitoringSecurityGroupID:
+    Description: ID of the security group to apply to ReadySet Monitoring instances.
+    Type: AWS::EC2::SecurityGroup::Id
 
   ReadySetServerVolumeSizeGB:
     Description: Volume size, in gigabytes, to provision for Server instances. This should match EBS volume size of RDS instance.
     Type: Number
     Default: 32
     MinValue: 32
+
+  ReadySetMemoryLimitGB:
+    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
+    Type: Number
+    Default: 0
+    MinValue: 0
+
+  ReadySetDeploymentName:
+    Description: A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+    Type: String
+    MinLength: 1
+    AllowedPattern: ^[^/ ]+$
+    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
@@ -87,11 +117,6 @@ Parameters:
     Type: AWS::EC2::VPC::Id
     AllowedPattern: (^vpc-\w+)
 
-  VPCCIDR:
-    Description: CIDR block for the VPC.
-    Type: String
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
-
   ConsulJoinManagedPolicyArn:
     Description: ARN of an managed IAM policy that the permissions to find Consul Servers
     Type: String
@@ -99,7 +124,7 @@ Parameters:
   ConsulEc2RetryJoinTagKey:
     Description: The EC2 instance tag key to filter on when joining to other Consul nodes.
     Type: String
-    Default: ReadySetConsulNodeType
+    Default: ReadysetConsulNodeType
     ConstraintDescription: Must match EC2 Tag Name requirements.
 
   ConsulEc2RetryJoinTagValue:
@@ -113,28 +138,24 @@ Parameters:
     Type: String
     NoEcho: True
 
-  ReadySetMemoryLimitGB:
-    Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
-    Type: Number
-    Default: 0
-    MinValue: 0
-
-  ReadySetDeploymentName:
-    Description: A unique name for the ReadySet deployment. This is used to differentiate multiple ReadySet deployments with the same Consul cluster
+  ReadySetPostgresAdapterUsername:
+    Description: Username to use to authenticate to the ReadySet adapter.
     Type: String
-    MinLength: 1
-    AllowedPattern: ^[^/ ]+$
-    ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
+
+  ReadySetPostgresAdapterPassword:
+    Description: Password to use to authenticate to the ReadySet adapter.
+    Type: String
+    NoEcho: true
 
 # Update this with the latest AMI
 
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      # short commit id associated with AMIs: 5a4fd970d
-      READYSETPOSTGRESQLADAPTER: ami-04368d88269c4366e
-      READYSETSERVER: ami-06d085b6441cce99a
-      READYSETMONITOR: ami-0d58bd90ec29a80a0
+      # short commit id associated with AMIs: 9f9c954
+      READYSETPOSTGRESQLADAPTER: ami-06804f129cd35b2f0
+      READYSETSERVER: ami-0f9d500a6eb0391e1
+      READYSETMONITOR: ami-059cccfe54b7b4d06
 
 Resources:
   ReadySetPostgreSQLAdapterRole:
@@ -157,34 +178,6 @@ Resources:
       Roles:
         - !Ref ReadySetPostgreSQLAdapterRole
 
-  ReadySetPostgreSQLAdapterSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to the adapter and SSH from inside the VPC
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          SourceSecurityGroupId: !Ref BastionSecurityGroupID
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 6034
-          ToPort: 6034
-          CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
-
   ReadySetPostgreSQLAdapterTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -202,7 +195,7 @@ Resources:
       AssociatePublicIpAddress: false
       EbsOptimized: true
       SecurityGroups:
-        - !Ref ReadySetPostgreSQLAdapterSecurityGroup
+        - !Ref ReadySetAdapterSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
@@ -225,6 +218,8 @@ Resources:
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
             export UPSTREAM_DB_URL="${PostgresDatabaseURL}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
+            export USERNAME="${ReadySetPostgresAdapterUsername}"
+            export PASSWORD="${ReadySetPostgresAdapterPassword}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -354,62 +349,14 @@ Resources:
       Roles:
         - !Ref ReadySetServerRole
 
-  ReadySetServerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to and between servers and SSH from inside the VPC
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          SourceSecurityGroupId: !Ref BastionSecurityGroupID
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 6033
-          ToPort: 6033
-          SourceSecurityGroupId: !GetAtt ReadySetPostgreSQLAdapterSecurityGroup.GroupId
-        - IpProtocol: tcp
-          FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
-          ToPort: 61000
-          SourceSecurityGroupId: !GetAtt ReadySetPostgreSQLAdapterSecurityGroup.GroupId
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
-
-  # Seperate ingress rule for self referential ingress rule to prevent circular dependency.
-
-  ReadySetServerSecurityGroupIngressControllerRule:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ReadySetServerSecurityGroup
-      IpProtocol: tcp
-      FromPort: 6033
-      ToPort: 6033
-      SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
-
-  ReadySetServerSecurityGroupIngressWorkerRule:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !GetAtt ReadySetServerSecurityGroup.GroupId
-      IpProtocol: tcp
-      FromPort: 32768 # https://en.wikipedia.org/wiki/Ephemeral_port
-      ToPort: 61000
-      SourceSecurityGroupId: !GetAtt ReadySetServerSecurityGroup.GroupId
-
   ReadySetServerLC:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       InstanceType: !Ref ReadySetServerInstanceType
-      AssociatePublicIpAddress: false
       EbsOptimized: true
+      AssociatePublicIpAddress: false
       SecurityGroups:
-        - !Ref ReadySetServerSecurityGroup
+        - !Ref ReadySetServerSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
@@ -470,20 +417,6 @@ Resources:
 
   # --- END SERVER --- #
 
-  ReadySetDBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections from ReadySet to Postgres RDS
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref ReadySetPostgreSQLAdapterSecurityGroup
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref ReadySetServerSecurityGroup
 
   # --- START LOGS AGGREGATOR --- #
 
@@ -524,47 +457,17 @@ Resources:
       Roles:
         - !Ref ReadySetMonitorRole
 
-  ReadySetMonitorSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow connections to and from the aggregator within the VPC.
-      VpcId: !Ref VPCID
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 9000
-          ToPort: 9000
-          CidrIp: !Ref VPCCIDR
-        - IpProtocol: tcp
-          FromPort: 9090
-          ToPort: 9091
-          CidrIp: !Ref VPCCIDR
-          Description: Allow connections to a prometheus scrape endpoint and server within the VPC.
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: !Ref VPCCIDR
-          Description: Allow connections to the grafana server within the VPC.
-        - IpProtocol: tcp
-          FromPort: 8300
-          ToPort: 8301
-          CidrIp: !Ref VPCCIDR
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0
-
   ReadySetMonitorInstance:
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: !Ref ReadySetMonitorInstanceType
       SubnetId: !Select [0, !Ref VPCPrivateSubnetIds]
       SecurityGroupIds:
-        - !Ref ReadySetMonitorSecurityGroup
+        - !Ref ReadySetMonitoringSecurityGroupID
       KeyName: !Ref KeyPairName
       ImageId: !FindInMap
         - AWSAMIRegionMap
@@ -595,14 +498,14 @@ Resources:
           # --- END LOGS AGGREGATOR --- #
 
 Outputs:
-  ReadySetDBSecurityGroup:
-    Description: Attach this Security Group to your RDS instance.
-    Value: !Ref ReadySetDBSecurityGroup
-
   ReadySetAdapterNLBDNSName:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetPostgreSQLAdapterNLB.DNSName
+    Export:
+      Name: ReadySetAdapterNLBDNSName
 
   ReadySetPostgreSQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetPostgreSQLAdapterVPCEndpointService
+    Export:
+      Name: ReadySetPostgreSQLVPCEndpointService
