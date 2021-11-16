@@ -13,73 +13,74 @@ and Servers in separate ASGs inside a given VPC.
 This creates an instance of the `readyset-mysql-super-template.yaml` stack. It
 should be copied to `templates/dev.yaml` and filled in where appropriate.
 
-# Taskcat
-[Taskcat](https://github.com/aws-quickstart/taskcat) is a tool for testing
-AWS CloudFormation templates. We use it to test our Readyset CloudFormation
-deployments and simplify updating templates for stacks.
 
+# Complete ('Super') Stack Setup
+Development stacks are configured using CloudFormation templates in this directory. 
+
+## How-to
+Items to replace are noted with angle brackets like this: `<Replace Me>`
+
+We'll refer to your selected username as `<Username>` going forward.
+
+Super-stacks are currently limited to the `us-east-2` region, referred to as `<Region>` going forward.
+
+### Launching Your Own Stack
+ 1. Create an EC2 SSH Keypair, if you do not already have one
+    a. Go to https://console.aws.amazon.com/ec2/v2/home#CreateKeyPair
+    b. Create a key with your username as the name.
+      * We'll refer to this as `<EC2 SSH Keypair name>`
+    c. The default settings are OK
+    d. **Important**: Download the generated `.pem` key file when prompted
+ 2. Run the stack creation shell script with the command `bash ..//cfn-test/create-mysql-super-stack.sh <EC2 SSH Keypair Name>`
+
+# Testing CloudFormation Template Changes
+[Taskcat](https://github.com/aws-quickstart/taskcat) is a tool for testing AWS CloudFormation templates. 
+We use `taskcat` to validate, launch, and update CloudFormation stacks in AWS. 
+
+## Taskcat Installation
 Taskcat can be installed via pip.
 ```
 pip3 install taskcat --user
 ```
 
-# Getting started with a development stack.
-We deploy our CloudFormation stacks from the templates hosted in S3 buckets.
-To get started, a S3 bucket and an AWS EC2 keypair are needed:
-  1. Create an AWS EC2 SSH keypair, or note the name of an existing AWS EC2 SSH
-    keypair.
-  2. Create a regional bucket for Taskcat to upload CloudFormation stacks to.
-     A reasonable name is of the format `readysettech-tcat-<username>-<region>`.
-
-
-We use the tool `Taskcat` to simplify the process of uploading changes to
-stacks to S3 buckets. With the help of a little config, taskcat will take
-`/templates` and upload updates to the s3 bucket.
-
-  3. Create a file at `~/.taskcat.yml` with the following content:
+## Taskcat Setup
+ 1. The EC2 SSH Keypair name should be the same as above
+ 2. Create an AWS S3 Bucket
+    a. Go to https://s3.console.aws.amazon.com/s3/bucket/create
+    b. Add a name for the bucket like: `readysettech-tcat-<Username>-<Region>`
+      * We'll refer to this as `<S3 Bucket Name>`
+    c. The default settings are OK
+ 3. Set the `CFN_BUCKET` environment variable in your shell to `<S3 Bucket Name>`
+ 4. Get your local IP by running: `curl ifconfig.me`
+   * We'll refer to this as `<Access IP>`
+ 5. Create a local `taskcat` configuration file
+    a. Create a file at `~/.taskcat.yml`
+    b. The file contents should be as follows:
+```
+general:
+  s3_bucket: <S3 Bucket Name>
+  regions:
+    - <Region>
+  parameters:
+    AccessCIDR: <Access IP>/32
+    KeyPairName: <EC2 SSH Keypair name>
+    ReadySetS3BucketName: <S3 Bucket Name>
+    ReadySetDeploymentName: <EC2 SSH Keypair Name>
+    DatabaseName: readyset
   ```
-  general:
-    s3_bucket: <Bucket Name created in step 1>
-    regions:
-      - <region>
-    parameters:
-      AccessCIDR: <CIDR that you will be able to SSH to the Bastion Host from>
-      KeyPairName: <Name of AWS EC2 SSH keypair from step 1>
-      ReadySetS3BucketName: <Bucket Name created in step 2>
-      ReadySetDeploymentName: <A valid ReadySet deployment name>
-      DatabaseName: <Name of Database created in RDS>
-  ```
 
-Updates to the templates can be pushed to the S3 bucket with `taskcat upload`.
-
-## Creating a stack through the CloudFormation console.
-1. Go into the AWS Console for CloudFormation for the Sandbox account
-2. Click Create Stack
-3. For Amazon S3 URL put:
-    https://<bucket name>.s3.<region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml
-4. Fill out the parameters screen.
-   Make sure that ReadySetS3BucketName is configured to <bucket name> otherwise
-   it will not pull the substack templates correctly.
-5. Click Next until you get to the Review step. Make sure to check the two
-    "I acknowledge" checkboxes and then click Create stack.
-
-## Creating a stack with the CLI.
-1. `cp templates/dev.yaml.example templates/dev.yaml`.
-2. Fill in required parameters in `templates/dev.yaml`.
-3. `aws cloudformation create-stack --stack-name <stack name> --template-body file://<path to dev.yaml> --capabilities CAPABILITY_IAM`
-
-# Testing with Taskcat
-Taskcat can be used to check that a stack deployment works end-to-end. This only verifies that the AWS components start-up correctly, not any internal Readyset behavior.
+## Testing Template Changes
+Taskcat can be used to check that a CloudFormation stack launches all of its designated resources. Note that this is just the infrastructure components, not any specific Readyset behavior.
 
 `taskcat test run`: Starts a cloudformation stack. Outputs will be written to `taskcat outputs` and an `index.html` is viewable in a web browser.
 
-Note: The cloudformation stack will be torn down on both success and failure.
+The cloudformation stack will be torn down on both success and failure.
 
-# How to update AMI images from a build
-
-1. Make sure to unblock the release binaries step and the build packer images
-    step.
-2. Once build package images step has completed successfully, look at the
-    artifact named packer-manifest.json that was generated.
-3. Copy the AMI IDs from the manifest into
-    `templates/readyset-mysql-template.yaml`
+# Updating AMI Images From a Specific Build
+ 1. In Buildkite, go to the build with the AMIs you need.
+ 2. Ensure the following build jobs have run; click the button to run them
+   a. `🚀 :rust: Build release binaries?`
+   b. `packer: Build Readyset Packer images?`
+ 3. Look at the generated `packer-manifest.json` file
+ 4. Copy the AMI IDs from the manifest into `templates/readyset-mysql-template.yaml`
+ 5. Re-run the command to launch or test the stack, as needed
