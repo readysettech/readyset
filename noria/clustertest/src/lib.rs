@@ -294,8 +294,6 @@ impl DeploymentHandle {
         handle.process.kill()?;
 
         // Wait until the server is no longer visible in the deployment.
-        // This must be at least the value of the deployment's state.config.healthcheck_every,
-        // the interval where a worker's liveliness status changes.
         wait_until_worker_count(
             &mut self.handle,
             Duration::from_secs(45),
