@@ -858,11 +858,15 @@ name = "clustertest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap 3.0.0-beta.5",
  "envy",
  "futures 0.3.17",
  "futures-util",
  "mysql",
+ "nom-sql",
  "noria",
+ "noria-client-adapter",
+ "noria-mysql",
  "port_scanner",
  "rand 0.8.4",
  "serde",
