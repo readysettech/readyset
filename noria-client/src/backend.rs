@@ -14,7 +14,7 @@ use nom_sql::Dialect;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, span, trace, warn, Level};
 
-use nom_sql::{DeleteStatement, InsertStatement, Literal, SqlQuery, UpdateStatement};
+use nom_sql::{DeleteStatement, Expression, InsertStatement, Literal, SqlQuery, UpdateStatement};
 use noria::consistency::Timestamp;
 use noria::{ColumnSchema, DataType};
 use noria_client_metrics::recorded::SqlQueryType;
@@ -103,13 +103,13 @@ pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
     match set {
         nom_sql::SetStatement::Variable(var) => match &var.variable.to_ascii_lowercase()[..] {
             "time_zone" | "@@global.time_zone" | "@@local.time_zone" | "@@session.time_zone" => {
-                matches!(&var.value, Literal::String(s) if s == "+00:00")
+                matches!(var.value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
             }
             "autocommit" => {
-                matches!(&var.value, Literal::Integer(i) if *i == 1)
+                matches!(var.value, Expression::Literal(Literal::Integer(i)) if i == 1)
             }
             "@@session.sql_mode" | "@@global.sql_mode" | "sql_mode" => {
-                if let Literal::String(s) = &var.value {
+                if let Expression::Literal(Literal::String(ref s)) = var.value {
                     match raw_sql_modes_to_list(&s[..]) {
                         Ok(sql_modes) => {
                             let allowed = HashSet::from(ALLOWED_SQL_MODES);
@@ -128,7 +128,7 @@ pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
                 }
             }
             "names" => {
-                if let Literal::String(s) = &var.value {
+                if let Expression::Literal(Literal::String(ref s)) = var.value {
                     matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
                 } else {
                     false
