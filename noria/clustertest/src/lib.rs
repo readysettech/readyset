@@ -126,7 +126,7 @@ pub struct DeploymentParams {
     /// The root password for the mysql db.
     mysql_root_password: String,
     /// Is live QCA enabled on the adapter.
-    live_qca: bool,
+    live_qca_interval: Option<u64>,
 }
 
 impl DeploymentParams {
@@ -159,7 +159,7 @@ impl DeploymentParams {
             authority_address: env.authority_address,
             mysql_host: env.mysql_host,
             mysql_root_password: env.mysql_root_password,
-            live_qca: false,
+            live_qca_interval: None,
         }
     }
 
@@ -195,8 +195,8 @@ impl DeploymentParams {
         self.authority_address = authority_address;
     }
 
-    pub fn enable_live_qca(&mut self) {
-        self.live_qca = true;
+    pub fn enable_live_qca(&mut self, interval_ms: u64) {
+        self.live_qca_interval = Some(interval_ms);
     }
 }
 
@@ -448,7 +448,7 @@ fn start_mysql_adapter(
     port: u16,
     metrics_port: u16,
     mysql: Option<&String>,
-    live_qca: bool,
+    live_qca_interval: Option<u64>,
 ) -> Result<ProcessHandle> {
     let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
     runner.set_deployment(deployment_name);
@@ -457,8 +457,8 @@ fn start_mysql_adapter(
     runner.set_authority_addr(authority_addr);
     runner.set_authority(authority);
 
-    if live_qca {
-        runner.set_live_qca();
+    if let Some(interval) = live_qca_interval {
+        runner.set_live_qca(interval);
     }
 
     if let Some(mysql) = mysql {
@@ -582,7 +582,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             port,
             metrics_port,
             mysql_addr.as_ref(),
-            params.live_qca,
+            params.live_qca_interval,
         )?;
         // Sleep to give the adapter time to startup.
         sleep(Duration::from_millis(500)).await;

@@ -148,7 +148,9 @@ impl NoriaMySQLRunner {
         self.args.push(addr.to_string());
     }
 
-    pub fn set_live_qca(&mut self) {
+    pub fn set_live_qca(&mut self, reconciler_loop_interval: u64) {
         self.args.push("--live-qca".to_string());
+        self.args.push("--reconciler-loop-interval".to_string());
+        self.args.push(reconciler_loop_interval.to_string());
     }
 }
