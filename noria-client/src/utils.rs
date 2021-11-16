@@ -281,6 +281,7 @@ fn get_parameter_columns_recurse(cond: &Expression) -> Vec<(&Column, BinaryOpera
         } => vec![(col, BinaryOperator::LessOrEqual)],
         Expression::Between { .. } => vec![],
         Expression::NestedSelect(_) => vec![],
+        Expression::Variable(_) => vec![],
     }
 }
 

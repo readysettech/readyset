@@ -114,6 +114,7 @@ impl<'a> ReferredColumnsIter<'a> {
                 }
             }
             Expression::NestedSelect(_) => None,
+            Expression::Variable(_) => None,
         }
     }
 
@@ -222,6 +223,7 @@ pub fn contains_aggregate(expr: &Expression) -> bool {
                     InValue::List(exprs) => exprs.iter().any(contains_aggregate),
                 }
         }
+        Expression::Variable(_) => false,
     }
 }
 
@@ -270,7 +272,8 @@ impl Expression {
             Expression::Literal(_)
             | Expression::Column(_)
             | Expression::Exists(_)
-            | Expression::NestedSelect(_) => Box::new(iter::empty()) as _,
+            | Expression::NestedSelect(_)
+            | Expression::Variable(_) => Box::new(iter::empty()) as _,
             Expression::Call(fexpr) => Box::new(fexpr.arguments()) as _,
             Expression::BinaryOp { lhs, rhs, .. } => {
                 Box::new(vec![lhs, rhs].into_iter().map(AsRef::as_ref)) as _

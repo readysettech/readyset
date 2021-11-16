@@ -190,6 +190,7 @@ impl ReplaceLiteralsWithPlaceholders for Expression {
                 };
                 values
             }
+            Expression::Variable(_) => vec![],
         }
     }
 }

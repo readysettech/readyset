@@ -30,7 +30,10 @@ pub(crate) fn map_aggregates(expr: &mut Expression) -> Vec<(FunctionExpression, 
                 ret.append(&mut map_aggregates(else_expr));
             }
         }
-        Expression::Call(_) | Expression::Literal(_) | Expression::Column(_) => {}
+        Expression::Call(_)
+        | Expression::Literal(_)
+        | Expression::Column(_)
+        | Expression::Variable(_) => {}
         Expression::BinaryOp { lhs, rhs, .. } => {
             ret.append(&mut map_aggregates(lhs));
             ret.append(&mut map_aggregates(rhs));

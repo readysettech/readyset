@@ -75,6 +75,7 @@ fn normalize_expr(ce: &mut Expression, negate: bool) -> ReadySetResult<()> {
         }
         Expression::Call(_)
         | Expression::Literal(_)
+        | Expression::Variable(_)
         | Expression::Column(_)
         | Expression::Exists(_)
         | Expression::NestedSelect(_)

@@ -130,6 +130,7 @@ fn rewrite_expression(col_table_remap: &HashMap<String, String>, expr: &Expressi
             },
             negated: *negated,
         },
+        Expression::Variable(_) => expr.clone(),
     }
 }
 

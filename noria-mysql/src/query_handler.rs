@@ -1,5 +1,6 @@
-use nom_sql::analysis::ReferredColumns;
-use nom_sql::{Column, ColumnSpecification, FieldDefinitionExpression, SqlQuery, SqlType};
+use nom_sql::{
+    Column, ColumnSpecification, Expression, FieldDefinitionExpression, SqlQuery, SqlType,
+};
 use noria::results::Results;
 use noria::{ColumnSchema, DataType, ReadySetResult};
 use noria_client::backend::noria_connector::QueryResult;
@@ -8,7 +9,7 @@ use noria_client::QueryHandler;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "@@max_allowed_packet";
+const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
 const MAX_ALLOWED_PACKET_DEFAULT: DataType = DataType::UnsignedInt(67108864u32);
 
 /// MySQL flavor of [`QueryHandler`].
@@ -16,11 +17,10 @@ pub struct MySqlQueryHandler;
 
 impl QueryHandler for MySqlQueryHandler {
     fn requires_fallback(query: &SqlQuery) -> bool {
+        // Currently any query with variables requires a fallback
         match query {
             SqlQuery::Select(stmt) => stmt.fields.iter().any(|field| match field {
-                FieldDefinitionExpression::Expression { expr, .. } => {
-                    expr.referred_columns().any(|c| c.name.starts_with("@@"))
-                }
+                FieldDefinitionExpression::Expression { expr, .. } => expr.contains_vars(),
                 _ => false,
             }),
             _ => false,
@@ -38,17 +38,18 @@ impl QueryHandler for MySqlQueryHandler {
         // of rows.
         let (data, schema) = match query {
             SqlQuery::Select(stmt)
-                if stmt.fields.iter().any(|field| match field {
-                    FieldDefinitionExpression::Expression { expr, .. } => expr
-                        .referred_columns()
-                        .any(|c| c.name.to_lowercase().eq(MAX_ALLOWED_PACKET_VARIABLE_NAME)),
-                    _ => false,
+                if stmt.fields.iter().any(|field| {
+                    matches!(field, FieldDefinitionExpression::Expression {
+                        expr: Expression::Variable(var),
+                        ..
+                    } if var.as_non_user_var() == Some(MAX_ALLOWED_PACKET_VARIABLE_NAME))
                 }) =>
             {
+                let field_name = format!("@@{}", MAX_ALLOWED_PACKET_VARIABLE_NAME);
                 (
                     vec![Results::new(
                         vec![vec![MAX_ALLOWED_PACKET_DEFAULT]],
-                        Arc::new([MAX_ALLOWED_PACKET_VARIABLE_NAME.to_string()]),
+                        Arc::new([field_name.clone()]),
                     )],
                     SelectSchema {
                         use_bogo: false,
@@ -57,7 +58,7 @@ impl QueryHandler for MySqlQueryHandler {
                                 sql_type: SqlType::UnsignedInt(Some(8)),
                                 constraints: Vec::new(),
                                 column: Column {
-                                    name: MAX_ALLOWED_PACKET_VARIABLE_NAME.to_owned(),
+                                    name: field_name.clone(),
                                     table: None,
                                     function: None,
                                 },
@@ -65,7 +66,7 @@ impl QueryHandler for MySqlQueryHandler {
                             },
                             base: None,
                         }]),
-                        columns: Cow::Owned(vec![MAX_ALLOWED_PACKET_VARIABLE_NAME.to_owned()]),
+                        columns: Cow::Owned(vec![field_name]),
                     },
                 )
             }
