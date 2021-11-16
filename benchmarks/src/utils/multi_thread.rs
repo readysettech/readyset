@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::time::Interval;
 use tracing::error;
 
 /// A group of methods that facilitate executing a single benchmark from multiple
@@ -92,4 +93,10 @@ where
         }
     }
     Ok(())
+}
+
+pub(crate) fn throttle_interval(target_qps: Option<u64>, num_threads: u64) -> Option<Interval> {
+    target_qps
+        .as_ref()
+        .map(|qps| tokio::time::interval(Duration::from_nanos(1000000000 * num_threads / qps)))
 }

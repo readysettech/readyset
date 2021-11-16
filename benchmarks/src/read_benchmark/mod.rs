@@ -116,19 +116,17 @@ impl MultithreadBenchmark for ReadBenchmark {
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         let prepared_statement = params.query.prepared_statement(&mut conn).await?;
 
-        // Each thread should execute qps/num_threads every second.
-        let mut throttle_interval = params.target_qps.as_ref().map(|qps| {
-            tokio::time::interval(Duration::from_nanos(1000000000 * params.threads / qps))
-        });
-        // Track when we last sent a batch to the benchmark_results thread.
-        let last_report = Instant::now();
-
+        let mut throttle_interval =
+            multi_thread::throttle_interval(params.target_qps, params.threads);
+        let mut last_report = Instant::now();
         let mut result_batch = ReadBenchmarkResultBatch::new();
         loop {
+            // Report results every REPORT_RESULTS_INTERVAL.
             if last_report.elapsed() > REPORT_RESULTS_INTERVAL {
                 let mut new_results = ReadBenchmarkResultBatch::new();
                 std::mem::swap(&mut new_results, &mut result_batch);
                 sender.send(new_results)?;
+                last_report = Instant::now();
             }
 
             if let Some(interval) = &mut throttle_interval {
