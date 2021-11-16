@@ -16,6 +16,7 @@ async fn create_table_insert_test() {
     let mut deployment = DeploymentParams::new(cluster_name);
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
+    deployment.deploy_mysql();
     deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
@@ -46,8 +47,8 @@ async fn create_table_insert_test() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 #[ignore]
+#[serial]
 // TODO(ENG-641): Test is failing.
 async fn show_tables_test() {
     let cluster_name = "ct_show_tables";
@@ -55,6 +56,7 @@ async fn show_tables_test() {
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
@@ -72,8 +74,8 @@ async fn show_tables_test() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 #[ignore]
+#[serial]
 // TODO(ENG-641): Test is failing.
 async fn describe_table_test() {
     let cluster_name = "ct_describe_table";
@@ -81,6 +83,7 @@ async fn describe_table_test() {
     deployment.add_server(ServerParams::default());
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
@@ -164,7 +167,6 @@ async fn mirror_prepare_exec_test() {
         )
         .await
     );
-
     // Kill the one and only server, everything should go to fallback.
     deployment
         .kill_server(&deployment.server_addrs()[0])
@@ -179,6 +181,7 @@ async fn mirror_prepare_exec_test() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn live_qca_sanity_check() {
     let cluster_name = "ct_live_qca_sanity_check";
     let mut deployment = DeploymentParams::new(cluster_name);

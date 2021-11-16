@@ -132,7 +132,10 @@ async fn controller_in_primary_test() {
     deployment.teardown().await.unwrap();
 }
 
+// Ignored as this test cannot issue RPCs after killing the worker as it
+// will get into a failing state and will not accept RPCs.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 #[serial]
 async fn query_failure_recovery_with_volume_id() {
     let cluster_name = "ct_failure_recovery_with_volume_id";
@@ -171,12 +174,8 @@ async fn query_failure_recovery_with_volume_id() {
         .await
         .unwrap();
 
-    // Kill the first server to trigger failure recovery. We should
-    // not replicate base tables on to r2, as there are volume
-    // id restrictions.
     deployment.kill_server(&r1_addr).await.unwrap();
 
-    // Query the view.
     let res = deployment.handle.view("q").await;
     assert!(res.is_err());
 

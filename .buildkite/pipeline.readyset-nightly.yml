@@ -109,7 +109,7 @@ steps:
     - 'echo +++ Building binaries for clustertest'
     - cargo --locked build --release --bin noria-server --bin noria-mysql
     - 'echo +++ Running Clustertests'
-    - cargo --locked test clustertest
+    - cargo --locked test -p clustertest
     timeout_in_minutes: 60
 
     depends_on:

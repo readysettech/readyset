@@ -112,7 +112,10 @@ steps:
 
             - label: 'Run clustertests'
               include:
-                - noria/clustertest
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
             - label: ':rust: Deploy docs'
               include:

@@ -273,9 +273,9 @@ steps:
     key: noria-clustertest
     command:
     - 'echo +++ Building binaries for clustertest'
-    - cargo --locked build --release --bin noria-server --bin noria-mysql
+    - cargo --locked build --bin noria-server --bin noria-mysql
     - 'echo +++ Running Clustertests'
-    - cargo --locked test clustertest
+    - cargo --locked test -p clustertest
     timeout_in_minutes: 60
     depends_on:
     - build-image
@@ -286,7 +286,7 @@ steps:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
-          - BINARY_PATH=/workdir/target/release
+          - BINARY_PATH=/workdir/target/debug/
           - MYSQL_ROOT_PASSWORD=noria
           volumes:
           - 'target:/workdir/target'
