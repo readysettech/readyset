@@ -26,11 +26,41 @@ use url::Url;
 /// struct variable name, i.e. AUTHORITY_ADDRESS.
 #[derive(Deserialize, Debug)]
 struct Env {
-    authority_address: Option<String>,
-    authority: Option<String>,
+    #[serde(default = "default_authority_address")]
+    authority_address: String,
+    #[serde(default = "default_authority")]
+    authority: String,
+    #[serde(default = "default_binary_path")]
     binary_path: PathBuf,
-    mysql_host: Option<String>,
-    mysql_root_password: Option<String>,
+    #[serde(default = "default_mysql_host")]
+    mysql_host: String,
+    #[serde(default = "default_root_password")]
+    mysql_root_password: String,
+}
+
+fn default_authority_address() -> String {
+    "127.0.0.1:8500".to_string()
+}
+
+fn default_mysql_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_authority() -> String {
+    "consul".to_string()
+}
+
+fn default_binary_path() -> PathBuf {
+    // Convert from <dir>/noria/clustertest to <dir>/target/debug.
+    let mut path: PathBuf = std::env::var("CARGO_MANIFEST_DIR").unwrap().into();
+    path.pop();
+    path.pop();
+    path.push("target/debug");
+    path
+}
+
+fn default_root_password() -> String {
+    "noria".to_string()
 }
 
 /// Source of the noria binaries.
@@ -95,6 +125,8 @@ pub struct DeploymentParams {
     mysql_host: String,
     /// The root password for the mysql db.
     mysql_root_password: String,
+    /// Is live QCA enabled on the adapter.
+    live_qca: bool,
 }
 
 impl DeploymentParams {
@@ -123,15 +155,11 @@ impl DeploymentParams {
             servers: vec![],
             mysql_adapter: false,
             mysql: false,
-            authority: AuthorityType::from_str(
-                &env.authority.unwrap_or_else(|| "consul".to_string()),
-            )
-            .unwrap(),
-            authority_address: env
-                .authority_address
-                .unwrap_or_else(|| "127.0.0.1:8500".to_string()),
-            mysql_host: env.mysql_host.unwrap_or_else(|| "127.0.0.1".to_string()),
-            mysql_root_password: env.mysql_root_password.unwrap_or_else(|| "".to_string()),
+            authority: AuthorityType::from_str(&env.authority).unwrap(),
+            authority_address: env.authority_address,
+            mysql_host: env.mysql_host,
+            mysql_root_password: env.mysql_root_password,
+            live_qca: false,
         }
     }
 
@@ -165,6 +193,10 @@ impl DeploymentParams {
 
     pub fn set_authority_address(&mut self, authority_address: String) {
         self.authority_address = authority_address;
+    }
+
+    pub fn enable_live_qca(&mut self) {
+        self.live_qca = true;
     }
 }
 
@@ -413,12 +445,17 @@ fn start_mysql_adapter(
     authority: &str,
     port: u16,
     mysql: Option<&String>,
+    live_qca: bool,
 ) -> Result<ProcessHandle> {
     let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
     runner.set_deployment(deployment_name);
     runner.set_port(port);
     runner.set_authority_addr(authority_addr);
     runner.set_authority(authority);
+
+    if live_qca {
+        runner.set_live_qca();
+    }
 
     if let Some(mysql) = mysql {
         runner.set_mysql(mysql);
@@ -538,6 +575,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             &params.authority.to_string(),
             port,
             mysql_addr.as_ref(),
+            params.live_qca,
         )?;
         // Sleep to give the adapter time to startup.
         sleep(Duration::from_millis(500)).await;

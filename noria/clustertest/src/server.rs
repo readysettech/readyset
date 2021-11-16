@@ -142,4 +142,8 @@ impl NoriaMySQLRunner {
         self.args.push("--upstream-db-url".to_string());
         self.args.push(addr.to_string());
     }
+
+    pub fn set_live_qca(&mut self) {
+        self.args.push("--live-qca".to_string());
+    }
 }
