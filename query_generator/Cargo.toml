@@ -36,3 +36,4 @@ eui48 = "0.4"
 uuid = "0.8"
 bit-vec = { version = "0.6", features = ["serde"] }
 rand_regex = "0.15.1"
+zipf = "7.0.0"
