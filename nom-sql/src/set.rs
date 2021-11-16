@@ -3,8 +3,9 @@ use nom::character::complete::{multispace0, multispace1};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
-use crate::common::{literal, statement_terminator, Literal};
-use crate::Dialect;
+use crate::common::statement_terminator;
+use crate::expression::expression;
+use crate::{Dialect, Expression};
 use nom::branch::alt;
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::tuple;
@@ -30,7 +31,7 @@ impl fmt::Display for SetStatement {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct SetVariable {
     pub variable: String,
-    pub value: Literal,
+    pub value: Expression,
 }
 
 impl fmt::Display for SetVariable {
@@ -118,7 +119,7 @@ fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariabl
             multispace0,
             tag_no_case("="),
             multispace0,
-            literal(dialect),
+            expression(dialect),
             statement_terminator,
         ))(i)?;
 
@@ -161,7 +162,7 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariable {
                 variable: "SQL_AUTO_IS_NULL".to_owned(),
-                value: 0.into(),
+                value: Expression::Literal(0.into()),
             })
         );
     }
@@ -174,7 +175,7 @@ mod tests {
             res.unwrap().1,
             SetStatement::Variable(SetVariable {
                 variable: "@var".to_owned(),
-                value: 123.into(),
+                value: Expression::Literal(123.into()),
             })
         );
     }
@@ -211,6 +212,7 @@ mod tests {
         assert_eq!(format!("{}", res2.unwrap().1), expected);
         assert_eq!(format!("{}", res3.unwrap().1), expected);
     }
+
     #[test]
     fn local_set() {
         let qstring1 = "set lOcal var = 2";
@@ -240,6 +242,23 @@ mod tests {
             SetStatement::Names(SetNames {
                 charset: "utf8mb4".to_string(),
                 collation: Some("utf8mb4_unicode_ci".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn expression_set() {
+        let qstring = "SET @myvar = 100 + 200;";
+        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            SetStatement::Variable(SetVariable {
+                variable: "@myvar".to_owned(),
+                value: Expression::BinaryOp {
+                    lhs: Box::new(Expression::Literal(100.into())),
+                    op: crate::BinaryOperator::Add,
+                    rhs: Box::new(Expression::Literal(200.into())),
+                },
             })
         );
     }
