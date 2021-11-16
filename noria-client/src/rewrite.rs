@@ -333,6 +333,15 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
                     self.param_index += 1;
                     return Ok(());
                 }
+                Expression::BinaryOp {
+                    lhs: lhs @ box Expression::Literal(_),
+                    op: BinaryOperator::Equal,
+                    rhs: rhs @ box Expression::Column(_),
+                } => {
+                    // for lit = col, swap the equality first then revisit
+                    mem::swap(lhs, rhs);
+                    return self.visit_expression(expression);
+                }
                 Expression::In {
                     lhs: box Expression::Column(_),
                     rhs: InValue::List(exprs),
@@ -879,6 +888,15 @@ mod tests {
             test_auto_parametrize(
                 "SELECT count(*) FROM users WHERE id = 1 AND x IN (1, 2)",
                 "SELECT count(*) FROM users WHERE id = ? AND x IN (1, 2)",
+                vec![(0, 1.into())],
+            );
+        }
+
+        #[test]
+        fn literal_equals_column() {
+            test_auto_parametrize(
+                "SELECT * FROM users WHERE 1 = id",
+                "SELECT * FROM users WHERE id = ?",
                 vec![(0, 1.into())],
             );
         }

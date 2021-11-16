@@ -835,6 +835,9 @@ fn ad_hoc_unparametrized_select() {
 
     let rows: Vec<(i32, i32)> = conn.query("SELECT x, y FROM test WHERE x = 2").unwrap();
     assert_eq!(rows, vec![(2, 4)]);
+
+    let rows: Vec<(i32, i32)> = conn.query("SELECT x, y FROM test WHERE 1 = x").unwrap();
+    assert_eq!(rows, vec![(1, 3)]);
 }
 
 #[test]
