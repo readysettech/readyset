@@ -81,6 +81,7 @@ where
         }
         Expression::Exists(_) => {}
         Expression::NestedSelect(_) => {}
+        Expression::Variable(_) => {}
     }
 }
 

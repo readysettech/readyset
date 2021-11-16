@@ -4,9 +4,9 @@
 #![warn(clippy::todo, clippy::unimplemented)]
 
 use crate::{
-    Column, CommonTableExpression, Expression, FieldDefinitionExpression, FunctionExpression,
-    GroupByClause, InValue, JoinClause, JoinRightSide, LimitClause, Literal, OrderClause,
-    SelectStatement, SqlType, Table,
+    set::Variable, Column, CommonTableExpression, Expression, FieldDefinitionExpression,
+    FunctionExpression, GroupByClause, InValue, JoinClause, JoinRightSide, LimitClause, Literal,
+    OrderClause, SelectStatement, SqlType, Table,
 };
 
 /// Each method of the `Visitor` trait is a hook to be potentially overridden when recursively
@@ -135,6 +135,10 @@ pub trait Visitor<'ast>: Sized {
     ) -> Result<(), Self::Error> {
         walk_select_statement(self, select_statement)
     }
+
+    fn visit_variable(&mut self, _literal: &'ast mut Variable) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 pub fn walk_expression<'ast, V: Visitor<'ast>>(
@@ -179,6 +183,7 @@ pub fn walk_expression<'ast, V: Visitor<'ast>>(
             visitor.visit_expression(expr.as_mut())?;
             visitor.visit_sql_type(ty)
         }
+        Expression::Variable(var) => visitor.visit_variable(var),
     }
 }
 

@@ -978,6 +978,7 @@ fn lower_expression(parent: &MirNodeRef, expr: Expression) -> ReadySetResult<Dat
             }
         }
         Expression::Exists(_) => unsupported!("EXISTS not currently supported"),
+        Expression::Variable(_) => unsupported!("Variables not currently supported"),
         Expression::Between { .. } | Expression::NestedSelect(_) | Expression::In { .. } => {
             internal!("Expression should have been desugared earlier: {}", expr)
         }

@@ -101,42 +101,44 @@ pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
 /// statements should return an error
 pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
     match set {
-        nom_sql::SetStatement::Variable(var) => match &var.variable.to_ascii_lowercase()[..] {
-            "time_zone" | "@@global.time_zone" | "@@local.time_zone" | "@@session.time_zone" => {
-                matches!(var.value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
-            }
-            "autocommit" => {
-                matches!(var.value, Expression::Literal(Literal::Integer(i)) if i == 1)
-            }
-            "@@session.sql_mode" | "@@global.sql_mode" | "sql_mode" => {
-                if let Expression::Literal(Literal::String(ref s)) = var.value {
-                    match raw_sql_modes_to_list(&s[..]) {
-                        Ok(sql_modes) => {
-                            let allowed = HashSet::from(ALLOWED_SQL_MODES);
-                            sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
+        nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
+            match variable.as_non_user_var() {
+                Some("time_zone") => {
+                    matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
+                }
+                Some("autocommit") => {
+                    matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
+                }
+                Some("sql_mode") => {
+                    if let Expression::Literal(Literal::String(ref s)) = value {
+                        match raw_sql_modes_to_list(&s[..]) {
+                            Ok(sql_modes) => {
+                                let allowed = HashSet::from(ALLOWED_SQL_MODES);
+                                sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
+                            }
+                            Err(e) => {
+                                warn!(
+                                %e,
+                                "unknown sql modes in set"
+                                );
+                                false
+                            }
                         }
-                        Err(e) => {
-                            warn!(
-                            %e,
-                            "unknown sql modes in set"
-                            );
-                            false
-                        }
+                    } else {
+                        false
                     }
-                } else {
-                    false
                 }
-            }
-            "names" => {
-                if let Expression::Literal(Literal::String(ref s)) = var.value {
-                    matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
-                } else {
-                    false
+                Some("names") => {
+                    if let Expression::Literal(Literal::String(ref s)) = value {
+                        matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
+                    } else {
+                        false
+                    }
                 }
+                Some("foreign_key_checks") => true,
+                _ => false,
             }
-            "foreign_key_checks" => true,
-            _ => false,
-        },
+        }),
         nom_sql::SetStatement::Names(names) => {
             names.collation.is_none() && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
         }

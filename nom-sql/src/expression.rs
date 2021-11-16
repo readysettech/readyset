@@ -17,6 +17,7 @@ use crate::common::{
     column_function, column_identifier_no_alias, literal, type_identifier, ws_sep_comma,
 };
 use crate::select::nested_selection;
+use crate::set::Variable;
 use crate::{Column, Dialect, Literal, SelectStatement, SqlType};
 
 /// Function call expressions
@@ -309,6 +310,9 @@ pub enum Expression {
         /// If true indicates that the expression used the Postgres syntax (expr::type)
         postgres_style: bool,
     },
+
+    /// A variable reference
+    Variable(Variable),
 }
 
 impl Display for Expression {
@@ -365,6 +369,7 @@ impl Display for Expression {
                 postgres_style,
             } if *postgres_style => write!(f, "({}::{})", expr, ty),
             Expression::Cast { expr, ty, .. } => write!(f, "CAST({} as {})", expr, ty),
+            Expression::Variable(var) => write!(f, "{}", var),
         }
     }
 }
@@ -376,6 +381,14 @@ impl Expression {
         match self {
             Expression::BinaryOp { lhs, op, rhs } => Some((lhs.as_ref(), *op, rhs.as_ref())),
             _ => None,
+        }
+    }
+
+    /// Returns true if any variables are present in the expression
+    pub fn contains_vars(&self) -> bool {
+        match self {
+            Expression::Variable(_) => true,
+            _ => self.recursive_subexpressions().any(Self::contains_vars),
         }
     }
 }
@@ -728,6 +741,29 @@ named_with_dialect!(parenthesized_expr(dialect) -> Expression, do_parse!(
         >> (expr)
 ));
 
+named_with_dialect!(pub(crate)scoped_var(dialect) -> Variable, alt!(
+    do_parse!(
+        tag_no_case!("@@GLOBAL.")
+            >> identifier: call!(dialect.identifier())
+            >> (Variable::Global(identifier.to_ascii_lowercase()))) |
+    do_parse!(
+        tag_no_case!("@@SESSION.")
+            >> identifier: call!(dialect.identifier())
+            >> (Variable::Session(identifier.to_ascii_lowercase()))) |
+    do_parse!(
+        tag_no_case!("@@LOCAL.")
+            >> identifier: call!(dialect.identifier())
+            >> (Variable::Local(identifier.to_ascii_lowercase()))) |
+    do_parse!(
+        tag_no_case!("@@")
+            >> identifier: call!(dialect.identifier())
+            >> (Variable::Session(identifier.to_ascii_lowercase()))) |
+    do_parse!(
+        tag_no_case!("@")
+            >> identifier: call!(dialect.identifier())
+            >> (Variable::User(identifier.to_ascii_lowercase())))
+));
+
 // Expressions without (binary or unary) operators
 named_with_dialect!(simple_expr(dialect, &[u8]) -> Expression, alt!(
     call!(parenthesized_expr(dialect)) |
@@ -739,7 +775,8 @@ named_with_dialect!(simple_expr(dialect, &[u8]) -> Expression, alt!(
     call!(literal(dialect)) => { |l| Expression::Literal(l) } |
     call!(case_when(dialect)) |
     call!(column_identifier_no_alias(dialect)) => { |c| Expression::Column(c) } |
-    call!(cast(dialect))
+    call!(cast(dialect)) |
+    call!(scoped_var(dialect)) => { |v| Expression::Variable(v) }
 ));
 
 pub(crate) fn expression(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Expression> {

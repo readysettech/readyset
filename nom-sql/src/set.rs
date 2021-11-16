@@ -1,19 +1,20 @@
+use crate::common::statement_terminator;
+use crate::expression::{expression, scoped_var};
+use crate::{Dialect, Expression};
+use itertools::Itertools;
+use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{multispace0, multispace1};
+use nom::combinator::{map, opt};
+use nom::multi::separated_nonempty_list;
+use nom::sequence::{separated_pair, terminated, tuple};
+use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 
-use crate::common::statement_terminator;
-use crate::expression::expression;
-use crate::{Dialect, Expression};
-use nom::branch::alt;
-use nom::combinator::{map, map_res, opt};
-use nom::sequence::tuple;
-use nom::IResult;
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum SetStatement {
-    Variable(SetVariable),
+    Variable(SetVariables),
     Names(SetNames),
 }
 
@@ -21,7 +22,7 @@ impl fmt::Display for SetStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SET ")?;
         match self {
-            Self::Variable(set) => write!(f, "{}", set)?,
+            Self::Variable(set) => write!(f, "{}", set.to_string())?,
             Self::Names(set) => write!(f, "{}", set)?,
         };
         Ok(())
@@ -29,15 +30,50 @@ impl fmt::Display for SetStatement {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct SetVariable {
-    pub variable: String,
-    pub value: Expression,
+pub enum Variable {
+    User(String),
+    Local(String),
+    Global(String),
+    Session(String),
 }
 
-impl fmt::Display for SetVariable {
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct SetVariables {
+    /// A list of variables and their assigned values
+    pub variables: Vec<(Variable, Expression)>,
+}
+
+impl Variable {
+    /// If the variable is one of Local, Global or Session, returns the variable name
+    pub fn as_non_user_var(&self) -> Option<&str> {
+        match self {
+            Variable::Local(v) | Variable::Session(v) | Variable::Global(v) => Some(v.as_str()),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Variable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} = {}", self.variable, self.value.to_string())?;
-        Ok(())
+        match self {
+            Variable::Global(var) => write!(f, "@@GLOBAL.{}", var),
+            Variable::Session(var) => write!(f, "@@SESSION.{}", var),
+            Variable::Local(var) => write!(f, "@@LOCAL.{}", var),
+            Variable::User(var) => write!(f, "@{}", var),
+        }
+    }
+}
+
+impl fmt::Display for SetVariables {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.variables
+                .iter()
+                .map(|(var, value)| format!("{} = {}", var, value))
+                .join(", ")
+        )
     }
 }
 
@@ -59,38 +95,26 @@ impl fmt::Display for SetNames {
 
 /// check for one of three ways to specify scope and reformat to a single formatting. Returns none
 /// if scope is not specified
-pub fn scope(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Option<String>> {
+pub fn varkind(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Variable> {
     move |i| {
-        // ignore scope parsing if dialect is not MySQL
-        if !matches!(dialect, Dialect::MySQL) {
-            return Ok((i, None));
-        }
-        let (i, scope) = opt(alt((
+        let (i, scope) = alt((
+            scoped_var(dialect),
             map(
-                map_res(
-                    alt((
-                        tag_no_case("session"),
-                        tag_no_case("local"),
-                        tag_no_case("global"),
-                    )),
-                    str::from_utf8,
-                ),
-                |s: &str| format!("@@{}.", s.to_uppercase()),
+                separated_pair(tag_no_case("GLOBAL"), multispace1, dialect.identifier()),
+                |(_, ident)| Variable::Global(ident.to_ascii_lowercase()),
             ),
             map(
-                map_res(
-                    alt((
-                        tag_no_case("@@session"),
-                        tag_no_case("@@local"),
-                        tag_no_case("@@global"),
-                    )),
-                    str::from_utf8,
-                ),
-                |s: &str| format!("{}.", s.to_uppercase()),
+                separated_pair(tag_no_case("SESSION"), multispace1, dialect.identifier()),
+                |(_, ident)| Variable::Session(ident.to_ascii_lowercase()),
             ),
-            // check for @@ last
-            map(tag("@@"), |_| "@@SESSION.".into()),
-        )))(i)?;
+            map(
+                separated_pair(tag_no_case("LOCAL"), multispace1, dialect.identifier()),
+                |(_, ident)| Variable::Local(ident.to_ascii_lowercase()),
+            ),
+            map(dialect.identifier(), |ident| {
+                Variable::Local(ident.to_ascii_lowercase())
+            }),
+        ))(i)?;
 
         //scope may be followed by '.' or multispace
         let (i, _) = alt((tag("."), multispace0))(i)?;
@@ -111,25 +135,26 @@ pub fn set(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetStatement> {
     }
 }
 
-fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariable> {
+fn set_variable(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SetVariables> {
     move |i| {
-        let (remaining_input, (scope, var, _, _, _, value, _)) = tuple((
-            scope(dialect),
-            dialect.identifier(),
-            multispace0,
-            tag_no_case("="),
-            multispace0,
-            expression(dialect),
+        let (remaining_input, variables) = terminated(
+            separated_nonempty_list(
+                tuple((tag_no_case(","), multispace0)),
+                map(
+                    tuple((
+                        varkind(dialect),
+                        multispace0,
+                        alt((tag_no_case("="), tag_no_case(":="))),
+                        multispace0,
+                        expression(dialect),
+                    )),
+                    |(variable, _, _, _, value)| (variable, value),
+                ),
+            ),
             statement_terminator,
-        ))(i)?;
+        )(i)?;
 
-        let variable = if let Some(s) = scope {
-            format!("{}{}", s, var)
-        } else {
-            var.into()
-        };
-
-        Ok((remaining_input, SetVariable { variable, value }))
+        Ok((remaining_input, SetVariables { variables }))
     }
 }
 
@@ -160,9 +185,11 @@ mod tests {
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
-            SetStatement::Variable(SetVariable {
-                variable: "SQL_AUTO_IS_NULL".to_owned(),
-                value: Expression::Literal(0.into()),
+            SetStatement::Variable(SetVariables {
+                variables: vec!((
+                    Variable::Local("sql_auto_is_null".to_owned()),
+                    Expression::Literal(0.into())
+                )),
             })
         );
     }
@@ -173,9 +200,11 @@ mod tests {
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
-            SetStatement::Variable(SetVariable {
-                variable: "@var".to_owned(),
-                value: Expression::Literal(123.into()),
+            SetStatement::Variable(SetVariables {
+                variables: vec!((
+                    Variable::User("var".to_owned()),
+                    Expression::Literal(123.into())
+                )),
             })
         );
     }
@@ -183,7 +212,7 @@ mod tests {
     #[test]
     fn format_set() {
         let qstring = "set autocommit=1";
-        let expected = "SET autocommit = 1";
+        let expected = "SET @@LOCAL.autocommit = 1";
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
     }
@@ -252,13 +281,44 @@ mod tests {
         let res = set(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(
             res.unwrap().1,
-            SetStatement::Variable(SetVariable {
-                variable: "@myvar".to_owned(),
-                value: Expression::BinaryOp {
-                    lhs: Box::new(Expression::Literal(100.into())),
-                    op: crate::BinaryOperator::Add,
-                    rhs: Box::new(Expression::Literal(200.into())),
-                },
+            SetStatement::Variable(SetVariables {
+                variables: vec!((
+                    Variable::User("myvar".to_owned()),
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Literal(100.into())),
+                        op: crate::BinaryOperator::Add,
+                        rhs: Box::new(Expression::Literal(200.into())),
+                    }
+                )),
+            })
+        );
+    }
+
+    #[test]
+    fn list_set() {
+        let qstring = "SET @myvar = 100 + 200, @@notmyvar = 'value', @@Global.g = @@global.V;";
+        let res = set(Dialect::MySQL)(qstring.as_bytes());
+        assert_eq!(
+            res.unwrap().1,
+            SetStatement::Variable(SetVariables {
+                variables: vec!(
+                    (
+                        Variable::User("myvar".to_owned()),
+                        Expression::BinaryOp {
+                            lhs: Box::new(Expression::Literal(100.into())),
+                            op: crate::BinaryOperator::Add,
+                            rhs: Box::new(Expression::Literal(200.into())),
+                        }
+                    ),
+                    (
+                        Variable::Session("notmyvar".to_owned()),
+                        Expression::Literal("value".into()),
+                    ),
+                    (
+                        Variable::Global("g".to_owned()),
+                        Expression::Variable(Variable::Global("v".into())),
+                    )
+                ),
             })
         );
     }

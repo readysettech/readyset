@@ -112,7 +112,7 @@ fn extract_subqueries_from_expression(
                     .flatten(),
             )
             .collect()),
-        Expression::Literal(_) | Expression::Column(_) => Ok(vec![]),
+        Expression::Literal(_) | Expression::Column(_) | Expression::Variable(_) => Ok(vec![]),
     }
 }
 

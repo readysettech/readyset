@@ -132,7 +132,7 @@ fn rewrite_expression(expr: Expression) -> Expression {
                 arguments: arguments.into_iter().map(rewrite_expression).collect(),
             },
         }),
-        Literal(_) | Column(_) => expr,
+        Literal(_) | Column(_) | Variable(_) => expr,
         CaseWhen {
             condition,
             then_expr,

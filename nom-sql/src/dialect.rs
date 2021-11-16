@@ -17,7 +17,7 @@ use crate::keywords::{sql_keyword, sql_keyword_or_builtin_function, POSTGRES_NOT
 
 #[inline]
 fn is_sql_identifier(chr: u8) -> bool {
-    is_alphanumeric(chr) || chr == b'_' || chr == b'@'
+    is_alphanumeric(chr) || chr == b'_'
 }
 
 /// Byte array literal value (PostgreSQL)
