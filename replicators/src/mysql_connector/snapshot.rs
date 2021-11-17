@@ -214,7 +214,7 @@ impl MySqlReplicator {
     /// # Arguments
     /// * `noria`: The target Noria deployment
     /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
-    pub async fn replicate_to_noria(
+    pub async fn snapshot_to_noria(
         mut self,
         noria: &mut noria::ControllerHandle,
         install_recipe: bool,
