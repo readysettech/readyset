@@ -152,6 +152,14 @@ fn query_exprs(input: &str) -> nom::IResult<&str, Vec<(bool, Option<&str>, SqlQu
 
 #[allow(unused)]
 impl Recipe {
+    /// Get the id associated with an alias
+    pub(crate) fn id_from_alias(&self, alias: &str) -> Option<&QueryID> {
+        self.aliases.get(alias)
+    }
+    /// Get the SqlQuery associated with a query ID
+    pub(crate) fn expression(&self, id: &QueryID) -> Option<&SqlQuery> {
+        self.expressions.get(id).map(|expr| &expr.1)
+    }
     /// Return active aliases for expressions
     fn aliases(&self) -> Vec<&str> {
         self.aliases.keys().map(String::as_str).collect()
