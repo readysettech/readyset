@@ -60,6 +60,8 @@
 //! [2]: TableSpec::fresh_column
 //! [3]: QueryOperation::permute
 
+mod distribution_annotation;
+
 use anyhow::anyhow;
 use chrono::{FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use clap::Parser;
@@ -98,6 +100,8 @@ use noria::DataType;
 use rand::distributions::Standard;
 use rust_decimal::Decimal;
 use std::sync::Arc;
+
+pub use distribution_annotation::DistributionAnnotation;
 
 /// Generate a constant value with the given [`SqlType`]
 ///
@@ -570,7 +574,7 @@ impl ColumnGenerationSpec {
 }
 
 /// Method to use to generate column information.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnGenerator {
     /// Repeatedly returns a single constant value.
     Constant(ConstantGenerator),
@@ -586,6 +590,8 @@ pub enum ColumnGenerator {
     RandomString(RandomStringGenerator),
     /// Returns a value generated from a zipfian distribution.
     Zipfian(ZipfianGenerator),
+    /// Generate a unique value for every row from a non unique generator
+    NonRepeating(NonRepeatingGenerator),
 }
 
 impl ColumnGenerator {
@@ -597,6 +603,25 @@ impl ColumnGenerator {
             ColumnGenerator::Random(g) => g.gen(),
             ColumnGenerator::RandomString(g) => g.gen(),
             ColumnGenerator::Zipfian(g) => g.gen(),
+            ColumnGenerator::NonRepeating(g) => g.gen(),
+        }
+    }
+}
+
+impl ColumnGenerator {
+    fn into_unique(self) -> Self {
+        match self {
+            ColumnGenerator::Constant(_) => panic!("Can't make unique over Constant"),
+            u @ ColumnGenerator::Unique(_) | u @ ColumnGenerator::NonRepeating(_) => u, //nothing to do
+            u @ ColumnGenerator::Uniform(_)
+            | u @ ColumnGenerator::Zipfian(_)
+            | u @ ColumnGenerator::Random(_)
+            | u @ ColumnGenerator::RandomString(_) => {
+                ColumnGenerator::NonRepeating(NonRepeatingGenerator {
+                    generator: Box::new(u),
+                    generated: HashSet::new(),
+                })
+            }
         }
     }
 }
@@ -642,6 +667,12 @@ impl From<SqlType> for ConstantGenerator {
         Self {
             value: value_of_type(&t),
         }
+    }
+}
+
+impl From<DataType> for ConstantGenerator {
+    fn from(value: DataType) -> Self {
+        Self { value }
     }
 }
 
@@ -739,6 +770,8 @@ impl UniformGenerator {
 #[derive(Debug, Clone)]
 pub struct ZipfianGenerator {
     min: DataType,
+    max: DataType,
+    alpha: f64,
     dist: ZipfDistribution,
 }
 
@@ -754,6 +787,8 @@ impl ZipfianGenerator {
 
         Self {
             min,
+            max,
+            alpha,
             dist: zipf::ZipfDistribution::new(num_elements as usize, alpha).unwrap(),
         }
     }
@@ -772,6 +807,14 @@ impl ZipfianGenerator {
     }
 }
 
+impl PartialEq for ZipfianGenerator {
+    fn eq(&self, other: &Self) -> bool {
+        self.min == other.min && self.max == other.max && self.alpha == other.alpha
+    }
+}
+
+impl Eq for ZipfianGenerator {}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct RandomGenerator {
     sql_type: SqlType,
@@ -789,11 +832,37 @@ impl RandomGenerator {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct NonRepeatingGenerator {
+    generator: Box<ColumnGenerator>,
+    generated: HashSet<DataType>,
+}
+
+impl NonRepeatingGenerator {
+    fn gen(&mut self) -> DataType {
+        loop {
+            let d = match &mut *self.generator {
+                ColumnGenerator::Uniform(u) => u.gen(),
+                ColumnGenerator::Zipfian(z) => z.gen(),
+                ColumnGenerator::Random(r) => r.gen(),
+                ColumnGenerator::RandomString(r) => r.gen(),
+                ColumnGenerator::Unique(_) => panic!("Non repeating over Unique"),
+                ColumnGenerator::Constant(_) => panic!("Non repeating over Constant"),
+                ColumnGenerator::NonRepeating(_) => panic!("Nested NonRepeating"),
+            };
+
+            if self.generated.insert(d.clone()) {
+                return d;
+            }
+        }
+    }
+}
+
 /// Column data type and data generation information.
 #[derive(Debug, Clone)]
 pub struct ColumnSpec {
     sql_type: SqlType,
-    gen_spec: ColumnGenerator,
+    pub gen_spec: ColumnGenerator,
     /// Values per column that should be present in that column at least some of the time.
     ///
     /// This is used to ensure that queries that filter on constant values get at least some results
@@ -819,14 +888,26 @@ impl From<CreateTableStatement> for TableSpec {
             name: stmt.table.name.into(),
             columns: stmt
                 .fields
-                .into_iter()
+                .iter()
                 .map(|field| {
+                    let sql_type = field.sql_type.clone();
+                    let gen_spec = if let Some(d) =
+                        field.has_default().and_then(|l| DataType::try_from(l).ok())
+                    {
+                        // Prefer the specified default value for a field
+                        ColumnGenerator::Constant(
+                            d.coerce_to(&sql_type).unwrap().into_owned().into(),
+                        )
+                    } else {
+                        // Otherwise default to generating fields with a constant value.
+                        ColumnGenerator::Constant(sql_type.clone().into())
+                    };
+
                     (
-                        field.column.name.into(),
-                        // We default to generating fields with a constant value.
+                        field.column.name.clone().into(),
                         ColumnSpec {
-                            sql_type: field.sql_type.clone(),
-                            gen_spec: ColumnGenerator::Constant(field.sql_type.into()),
+                            sql_type,
+                            gen_spec,
                             expected_values: HashSet::new(),
                         },
                     )
@@ -857,6 +938,27 @@ impl From<CreateTableStatement> for TableSpec {
             // generated the TableSpec from. They should be valid columns.
             let col_spec = spec.columns.get_mut(&col).unwrap();
             col_spec.gen_spec = ColumnGenerator::Unique(col_spec.sql_type.clone().into());
+        }
+
+        // Apply annotations in the end
+        for field in stmt.fields.iter() {
+            if let Some(d) = field
+                .comment
+                .as_deref()
+                .and_then(|s| s.parse::<DistributionAnnotation>().ok())
+            {
+                let col_spec = spec
+                    .columns
+                    .get_mut(&ColumnName::from(field.column.name.as_str()))
+                    .unwrap();
+
+                let gen_spec = d.spec.generator_for_col(field.sql_type.clone());
+                col_spec.gen_spec = if d.unique {
+                    gen_spec.into_unique()
+                } else {
+                    gen_spec
+                }
+            }
         }
 
         spec
@@ -1031,6 +1133,7 @@ impl TableSpec {
                         ColumnGenerator::Random(r) => r.gen(),
                         ColumnGenerator::RandomString(r) => r.gen(),
                         ColumnGenerator::Zipfian(z) => z.gen(),
+                        ColumnGenerator::NonRepeating(r) => r.gen(),
                     };
 
                     (col_name.clone(), value)

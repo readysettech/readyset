@@ -164,6 +164,13 @@ impl ColumnSpecification {
             comment: None,
         }
     }
+
+    pub fn has_default(&self) -> Option<&Literal> {
+        self.constraints.iter().find_map(|c| match c {
+            ColumnConstraint::DefaultValue(ref l) => Some(l),
+            _ => None,
+        })
+    }
 }
 
 fn fixed_point(i: &[u8]) -> IResult<&[u8], Literal> {

@@ -73,6 +73,24 @@ impl fmt::Display for CreateTableStatement {
     }
 }
 
+impl CreateTableStatement {
+    /// If the create statement contained a comment, return it
+    pub fn get_comment(&self) -> Option<&str> {
+        self.options.iter().find_map(|opt| match opt {
+            CreateTableOption::Comment(s) => Some(s.as_str()),
+            _ => None,
+        })
+    }
+
+    /// If the create statement contained AUTOINCREMENT, return it
+    pub fn get_autoincrement(&self) -> Option<u64> {
+        self.options.iter().find_map(|opt| match opt {
+            CreateTableOption::AutoIncrement(i) => Some(*i),
+            _ => None,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)] // TODO: maybe this actually matters
 pub enum SelectSpecification {

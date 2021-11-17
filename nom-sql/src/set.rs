@@ -29,6 +29,15 @@ impl fmt::Display for SetStatement {
     }
 }
 
+impl SetStatement {
+    pub fn variables(&self) -> Option<&[(Variable, Expression)]> {
+        match self {
+            SetStatement::Names(_) => None,
+            SetStatement::Variable(set) => Some(&set.variables),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Variable {
     User(String),
@@ -48,6 +57,14 @@ impl Variable {
     pub fn as_non_user_var(&self) -> Option<&str> {
         match self {
             Variable::Local(v) | Variable::Session(v) | Variable::Global(v) => Some(v.as_str()),
+            _ => None,
+        }
+    }
+
+    /// If the variable is a User variable, returns the variable name
+    pub fn as_user_var(&self) -> Option<&str> {
+        match self {
+            Variable::User(v) => Some(v.as_str()),
             _ => None,
         }
     }
