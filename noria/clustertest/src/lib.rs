@@ -4,6 +4,8 @@ mod server;
 mod readyset;
 #[cfg(test)]
 mod readyset_mysql;
+#[cfg(test)]
+mod utils;
 
 use anyhow::{anyhow, Result};
 use futures::executor;
