@@ -618,7 +618,7 @@ impl Recipe {
     /// contained in `new` (but not in `self`) will be added; any contained in `self`, but not in
     /// `new` will be removed.
     /// Consumes `self` and returns a replacement recipe.
-    pub(super) fn replace(mut self, mut new: Recipe) -> Result<Recipe, String> {
+    pub(super) fn replace(mut self, mut new: Recipe) -> Recipe {
         // generate replacement recipe with correct version and lineage
         new.version = self.version + 1;
         // retain the old incorporator but move it to the new recipe
@@ -629,7 +629,7 @@ impl Recipe {
         new.inc = prior_inc;
 
         // return new recipe as replacement for self
-        Ok(new)
+        new
     }
 
     /// Increments the version of a recipe. Returns the new version number.
@@ -743,7 +743,7 @@ mod tests {
 
         let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE x = 42;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 2);
         assert_eq!(r1.prior, Some(Box::new(r0_copy)));
@@ -752,7 +752,7 @@ mod tests {
 
         let r2_txt = "SELECT c FROM b;\nSELECT a, c FROM b;";
         let r2_t = Recipe::from_str(r2_txt).unwrap();
-        let r2 = r1.replace(r2_t).unwrap();
+        let r2 = r1.replace(r2_t);
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
         assert_eq!(r2.prior, Some(Box::new(r1_copy)));
@@ -764,7 +764,7 @@ mod tests {
 
         let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a FROM b;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 1);
         assert_eq!(r1.aliases.len(), 2);
@@ -778,7 +778,7 @@ mod tests {
 
         let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a, c FROM b WHERE x = 42;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 2);
 
@@ -796,7 +796,7 @@ mod tests {
 
         let r1_txt = "  QUERY q_0: SELECT a FROM b; QUERY q_1: SELECT x FROM y;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.expressions.len(), 2);
     }
 
@@ -807,7 +807,7 @@ mod tests {
         let r1_txt = "  QUERY q_0: SELECT a FROM b;\
                       QUERY q_1: SELECT x FROM y;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.expressions.len(), 2);
     }
 
@@ -817,7 +817,7 @@ mod tests {
 
         let r1_txt = "QUERY q_0: SELECT a FROM b;\nVIEW q_1: SELECT x FROM y";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t).unwrap();
+        let r1 = r0.replace(r1_t);
         assert_eq!(r1.expressions.len(), 2);
     }
 }
