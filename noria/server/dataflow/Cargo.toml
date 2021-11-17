@@ -31,7 +31,7 @@ regex = "1"
 serde_derive = "1.0.8"
 serde_json = "1.0.2"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.8.4", features = ["full"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 vec_map = { version = "0.8.0", features = ["eders"] }
 tempfile = "3.0.2"

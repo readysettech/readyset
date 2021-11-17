@@ -52,7 +52,7 @@ serde_json = "1.0.2"
 serde_with = "1.9.4"
 slab = "0.4"
 bincode = "1.3.3"
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.8.4", features = ["full"] }
 async-bincode = "0.6.1"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 stream-cancel = "0.8.0"
