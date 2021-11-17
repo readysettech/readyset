@@ -1,9 +1,13 @@
+use crate::utils::query_until_expected;
 use crate::*;
 use mysql::prelude::Queryable;
 use mysql::Value;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
+use std::time::Duration;
+
+const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
@@ -27,8 +31,16 @@ async fn create_table_insert_test() {
         .unwrap();
     conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);").unwrap();
 
-    let res: Vec<(i32, i32)> = conn.query(r"SELECT * FROM t1;").unwrap();
-    assert_eq!(res, vec![(1, 4)]);
+    assert!(
+        query_until_expected(
+            &mut conn,
+            r"SELECT * FROM t1;",
+            (),
+            &[(1, 4)],
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     deployment.teardown().await.unwrap();
 }
@@ -142,18 +154,25 @@ async fn mirror_prepare_exec_test() {
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
         .unwrap();
 
-    let prep_stmt = adapter_conn
-        .prep(r"SELECT * FROM t1 WHERE uid = ?")
-        .unwrap();
-    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt.clone(), (2,)).unwrap();
-    assert_eq!(result, vec![(2, 5)]);
+    assert!(
+        query_until_expected(
+            &mut adapter_conn,
+            r"SELECT * FROM t1 WHERE uid = ?;",
+            (2,),
+            &[(2, 5)],
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     // Kill the one and only server, everything should go to fallback.
     deployment
         .kill_server(&deployment.server_addrs()[0])
         .await
         .unwrap();
-    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt, (2,)).unwrap();
+    let result: Vec<(i32, i32)> = adapter_conn
+        .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
+        .unwrap();
     assert_eq!(result, vec![(2, 5)]);
 
     deployment.teardown().await.unwrap();
@@ -187,20 +206,30 @@ async fn live_qca_sanity_check() {
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
         .unwrap();
 
-    let prep_stmt = adapter_conn
-        .prep(r"SELECT * FROM t1 WHERE uid = ?")
-        .unwrap();
-    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt.clone(), (2,)).unwrap();
-    assert_eq!(result, vec![(2, 5)]);
+    assert!(
+        query_until_expected(
+            &mut adapter_conn,
+            r"SELECT * FROM t1 WHERE uid = ?;",
+            (2,),
+            &[(2, 5)],
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
-    sleep(Duration::from_secs(4)).await;
+    // Sleep so QCA has time to perform the migration..
+    sleep(Duration::from_secs(2)).await;
 
-    // Second execute should go to noria.
-    let prep_stmt = adapter_conn
-        .prep(r"SELECT * FROM t1 WHERE uid = ?")
-        .unwrap();
-    let result: Vec<(i32, i32)> = adapter_conn.exec(prep_stmt.clone(), (2,)).unwrap();
-    assert_eq!(result, vec![(2, 5)]);
+    assert!(
+        query_until_expected(
+            &mut adapter_conn,
+            r"SELECT * FROM t1 WHERE uid = ?;",
+            (2,),
+            &[(2, 5)],
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     // TODO(justin): Add utilities to abstract out this ridiculous way of getting
     // metrics.
