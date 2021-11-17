@@ -75,6 +75,37 @@ pub(crate) struct ControllerState {
     node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 }
 
+impl ControllerState {
+    /// This method interates over the recipes currently installed and only keeps
+    /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
+    /// This option is pretty risky and should only be used if noria gets into an
+    /// unmanagable state. In theory this will remove all of noria specific state
+    /// preventing bad migrations, and only keep the DDL state, required to properly
+    /// keep the base tables and the binlog replication functional.
+    fn reset(&mut self) {
+        let new_recipe = self
+            .recipes
+            .iter()
+            .map(|q| Recipe::clean_queries(q))
+            .flatten()
+            .filter_map(|q| nom_sql::parse_query(nom_sql::Dialect::MySQL, &q).ok())
+            .filter(|q| {
+                matches!(
+                    q,
+                    SqlQuery::CreateTable(_)
+                        | SqlQuery::DropTable(_)
+                        | SqlQuery::AlterTable(_)
+                        | SqlQuery::RenameTable(_)
+                        | SqlQuery::CreateView(_),
+                )
+            })
+            .join(";\n");
+
+        self.recipes = vec![new_recipe];
+        self.recipe_version = 1;
+    }
+}
+
 pub struct Worker {
     healthy: bool,
     uri: Url,
@@ -993,36 +1024,5 @@ mod tests {
                 err
             );
         }
-    }
-}
-
-impl ControllerState {
-    /// This method interates over the recipes currently installed and only keeps
-    /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
-    /// This option is pretty risky and should only be used if noria gets into an
-    /// unmanagable state. In theory this will remove all of noria specific state
-    /// preventing bad migrations, and only keep the DDL state, required to properly
-    /// keep the base tables and the binlog replication functional.
-    fn reset(&mut self) {
-        let new_recipe = self
-            .recipes
-            .iter()
-            .map(|q| Recipe::clean_queries(q))
-            .flatten()
-            .filter_map(|q| nom_sql::parse_query(nom_sql::Dialect::MySQL, &q).ok())
-            .filter(|q| {
-                matches!(
-                    q,
-                    SqlQuery::CreateTable(_)
-                        | SqlQuery::DropTable(_)
-                        | SqlQuery::AlterTable(_)
-                        | SqlQuery::RenameTable(_)
-                        | SqlQuery::CreateView(_),
-                )
-            })
-            .join(";\n");
-
-        self.recipes = vec![new_recipe];
-        self.recipe_version = 1;
     }
 }
