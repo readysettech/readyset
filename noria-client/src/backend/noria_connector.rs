@@ -368,6 +368,57 @@ impl NoriaConnector {
         })
     }
 
+    pub(crate) async fn verbose_outputs(&mut self) -> ReadySetResult<QueryResult<'_>> {
+        let noria = &mut self.inner.get_mut().await?.noria;
+        let outputs = noria.verbose_outputs().await?;
+        //TODO(DAN): this is ridiculous, update Meta instead
+        let select_schema = SelectSchema {
+            use_bogo: false,
+            schema: Cow::Owned(vec![
+                ColumnSchema {
+                    spec: nom_sql::ColumnSpecification {
+                        column: nom_sql::Column {
+                            name: "name".to_string(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: nom_sql::SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    base: None,
+                },
+                ColumnSchema {
+                    spec: nom_sql::ColumnSpecification {
+                        column: nom_sql::Column {
+                            name: "query".to_string(),
+                            table: None,
+                            function: None,
+                        },
+                        sql_type: nom_sql::SqlType::Text,
+                        constraints: vec![],
+                        comment: None,
+                    },
+                    base: None,
+                },
+            ]),
+
+            columns: Cow::Owned(vec!["name".to_string(), "query".to_string()]),
+        };
+        let data = outputs
+            .into_iter()
+            .map(|(n, q)| vec![DataType::from(n), DataType::from(q.to_string())])
+            .collect::<Vec<_>>();
+        let data = vec![Results::new(
+            data,
+            Arc::new(["name".to_string(), "query".to_string()]),
+        )];
+        Ok(QueryResult::Select {
+            data,
+            select_schema,
+        })
+    }
+
     // TODO(andrew): Allow client to map table names to NodeIndexes without having to query Noria
     // repeatedly. Eventually, this will be responsibility of the TimestampService.
     pub async fn node_index_of(&mut self, table_name: &str) -> ReadySetResult<LocalNodeIndex> {

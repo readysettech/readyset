@@ -14,7 +14,9 @@ use nom_sql::{CreateQueryCacheStatement, Dialect, DropQueryCacheStatement};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, span, trace, warn, Level};
 
-use nom_sql::{DeleteStatement, Expression, InsertStatement, Literal, SqlQuery, UpdateStatement};
+use nom_sql::{
+    DeleteStatement, Expression, InsertStatement, Literal, ShowStatement, SqlQuery, UpdateStatement,
+};
 use noria::consistency::Timestamp;
 use noria::{ColumnSchema, DataType};
 use noria_client_metrics::recorded::SqlQueryType;
@@ -1311,9 +1313,12 @@ where
                 | nom_sql::SqlQuery::RenameTable(_) => {
                     unsupported!("{} not yet supported", parsed_query.query_type());
                 }
+                nom_sql::SqlQuery::Show(ShowStatement::Queries) => {
+                    Ok(QueryResult::Noria(self.noria.verbose_outputs().await?))
+                }
                 nom_sql::SqlQuery::Set(_)
-                | nom_sql::SqlQuery::Show(_)
-                | nom_sql::SqlQuery::CompoundSelect(_) => {
+                | nom_sql::SqlQuery::CompoundSelect(_)
+                | nom_sql::SqlQuery::Show(_) => {
                     let res = upstream.query(query).await.map(QueryResult::Upstream);
                     handle.set_upstream_duration();
                     res
@@ -1379,6 +1384,7 @@ where
                     execution_timer = Some((Instant::now(), SqlQueryType::Read));
                     self.noria.graphviz(*simplified).await
                 }
+                SqlQuery::Show(ShowStatement::Queries) => self.noria.verbose_outputs().await,
                 _ => {
                     error!("unsupported query");
                     unsupported!("query type unsupported");
