@@ -843,6 +843,22 @@ impl NoriaConnector {
         Ok(qname)
     }
 
+    /// Make a request to Noria to drop the query with the given name, and remove it from all
+    /// internal state.
+    pub async fn drop_view(&mut self, name: &str) -> ReadySetResult<()> {
+        noria_await!(
+            self.inner.get_mut().await?,
+            self.inner.get_mut().await?.noria.remove_query(name)
+        )?;
+        // dropping queries is rare and we don't have a huge number of queries usually, so fine to
+        // just linear scan
+        self.tl_cached.retain(|_, v| v != name);
+        tokio::task::block_in_place(|| {
+            self.cached.write().unwrap().retain(|_, v| v != name);
+        });
+        Ok(())
+    }
+
     async fn do_insert(
         &mut self,
         q: &InsertStatement,

@@ -114,7 +114,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::AlterTable(_)
         | SqlQuery::RenameTable(_)
         | SqlQuery::Use(_)
-        | SqlQuery::CreateQueryCache(_) => true,
+        | SqlQuery::CreateQueryCache(_)
+        | SqlQuery::DropQueryCache(_) => true,
     }
 }
 

@@ -17,6 +17,7 @@ pub use self::create::{
 };
 pub use self::delete::DeleteStatement;
 pub use self::dialect::Dialect;
+pub use self::drop::DropQueryCacheStatement;
 pub use self::explain::ExplainStatement;
 pub use self::expression::{
     BinaryOperator, Expression, FunctionExpression, InValue, UnaryOperator,
