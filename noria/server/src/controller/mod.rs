@@ -74,7 +74,6 @@ pub(crate) struct ControllerState {
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 }
-
 impl ControllerState {
     /// This method interates over the recipes currently installed and only keeps
     /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
@@ -845,6 +844,26 @@ mod tests {
             "source = {:?}",
             source
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn remove_query() {
+        let mut noria = start_simple("remove_query").await;
+        noria
+            .extend_recipe(
+                "CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+                QUERY test_query: SELECT * FROM users;",
+            )
+            .await
+            .unwrap();
+
+        let queries = noria.outputs().await.unwrap();
+        assert!(queries.contains_key("test_query"));
+
+        noria.remove_query("test_query").await.unwrap();
+
+        let queries = noria.outputs().await.unwrap();
+        assert!(!queries.contains_key("test_query"));
     }
 
     mod replication_offsets {

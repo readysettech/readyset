@@ -344,6 +344,11 @@ impl Leader {
                 let ret = futures::executor::block_on(self.install_recipe(authority, body))?;
                 return_serialized!(ret);
             }
+            (Method::POST, "/remove_query") => {
+                let query_name = bincode::deserialize(&body)?;
+                let ret = futures::executor::block_on(self.remove_query(authority, query_name))?;
+                return_serialized!(ret);
+            }
             (Method::POST, "/set_replication_offset") => {
                 let body = bincode::deserialize(&body)?;
                 let ret =
@@ -1448,6 +1453,40 @@ impl Leader {
                 internal!("failed to parse recipe: {}", error);
             }
         }
+    }
+
+    async fn remove_query(
+        &mut self,
+        authority: &Arc<Authority>,
+        query_name: &str,
+    ) -> ReadySetResult<()> {
+        let old = self.recipe.clone();
+        let mut new = old.clone();
+        new.remove_query(query_name);
+        let new = old.clone().replace(new);
+
+        if let Err(error) = self.apply_recipe(new).await {
+            self.recipe = old;
+            error!(%error, "Failed to apply recipe");
+            return Err(error);
+        }
+
+        let recipe_version = self.recipe.version();
+        let recipe_txt = self.recipe.to_string();
+        let install_result = authority
+            .update_controller_state::<_, _, ()>(move |state: Option<ControllerState>| {
+                let mut state = state.ok_or(())?;
+                state.recipes = vec![recipe_txt.clone()];
+                state.recipe_version = recipe_version;
+                Ok(state)
+            })
+            .await;
+
+        if let Err(e) = install_result {
+            internal!("failed to persist recipe installation: {}", e);
+        }
+
+        Ok(())
     }
 
     async fn set_replication_offset(
