@@ -474,6 +474,7 @@ dependencies = [
  "rand 0.8.4",
  "reqwest",
  "rinfluxdb",
+ "serde_json",
  "structopt",
  "tokio",
  "tracing",

@@ -6,17 +6,15 @@
 //! packages a parameterized prepared statement we intend to execute
 //! for a benchmark, with "how" to generate the parameters for this
 //! statement. Each parameter in a prepared statement is generated
-//! based on a ParameterAnnotation.
+//! based on a DistributionAnnotation.
 
-use anyhow::bail;
 use clap::Parser;
 use mysql::consts::ColumnType;
 use mysql_async::prelude::Queryable;
 use mysql_async::Statement;
 use mysql_async::Value;
 use nom_sql::SqlType;
-use noria::DataType;
-use query_generator::ColumnGenerationSpec;
+use query_generator::DistributionAnnotation;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs;
@@ -31,12 +29,12 @@ pub struct ArbitraryQueryParameters {
     query: PathBuf,
 
     /// A annotation spec for each of the parameters in query. See
-    /// `ParameterAnnotations` for the format of the file.
+    /// `DistributionAnnotations` for the format of the file.
     #[clap(long)]
     query_spec_file: Option<PathBuf>,
 
     /// An query spec passed in as a comma separated list. See
-    /// `ParameterAnnotation` for the format for each parameters annotation.
+    /// `DistributionAnnotation` for the format for each parameters annotation.
     #[clap(long, conflicts_with = "query-spec-file")]
     query_spec: Option<String>,
 }
@@ -49,9 +47,9 @@ impl ArbitraryQueryParameters {
         // Mapping against two different parameters.
         #[allow(clippy::manual_map)]
         let spec = if let Some(f) = &self.query_spec_file {
-            Some(ParameterAnnotations::try_from(f.as_path()).unwrap())
+            Some(DistributionAnnotations::try_from(f.as_path()).unwrap())
         } else if let Some(s) = &self.query_spec {
-            Some(ParameterAnnotations::try_from(s.clone()).unwrap())
+            Some(DistributionAnnotations::try_from(s.clone()).unwrap())
         } else {
             None
         };
@@ -65,77 +63,32 @@ impl ArbitraryQueryParameters {
     }
 }
 
-/// An annotation for how to generate a parameter's value for a query. A
-/// parameter annotation takes the following form:
-///   <annotation type> <annotation type parameters>.
-///
-/// The annotation type indicates a general way of generating the parameter,
-/// for example, `uniform` is a annotation type that may be used to generate
-/// uniformly random values over a minimum and maximum value that can
-/// be specified via the parameters, i.e. `uniform 4 100`.
-pub struct ParameterAnnotation {
-    pub spec: ColumnGenerationSpec,
-}
-
-impl TryFrom<&str> for ParameterAnnotation {
-    type Error = anyhow::Error;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let mut chunks = s.split_ascii_whitespace();
-
-        let spec = match chunks.next().unwrap() {
-            "uniform" => {
-                let from: i32 = chunks.next().unwrap().parse().unwrap();
-                let to: i32 = chunks.next().unwrap().parse().unwrap();
-                ColumnGenerationSpec::Uniform(DataType::Int(from), DataType::Int(to))
-            }
-            "zipf" => {
-                let from: i32 = chunks.next().unwrap().parse().unwrap();
-                let to: i32 = chunks.next().unwrap().parse().unwrap();
-                let alpha: f64 = chunks.next().unwrap().parse().unwrap();
-                ColumnGenerationSpec::Zipfian {
-                    min: DataType::Int(from),
-                    max: DataType::Int(to),
-                    alpha,
-                }
-            }
-            "regex" => {
-                let regex = chunks.next().unwrap().trim_matches('"');
-                ColumnGenerationSpec::RandomString(regex.to_owned())
-            }
-            _ => bail!("Unrecognized annotation"),
-        };
-
-        Ok(Self { spec })
-    }
-}
-
-/// Utility wrapper around Vec<ParameterAnnotation>. A list of ParameterAnnotation
+/// Utility wrapper around Vec<DistributionAnnotation>. A list of DistributionAnnotation
 /// delimited by a comma ',' or newline '\n' can be converted from a String
-/// through ParameterAnnotations::try_from. A wrapper to convert from a file
-/// including ParameterAnnotations is also provided.
-pub struct ParameterAnnotations(Vec<ParameterAnnotation>);
+/// through DistributionAnnotations::try_from. A wrapper to convert from a file
+/// including DistributionAnnotations is also provided.
+pub struct DistributionAnnotations(Vec<DistributionAnnotation>);
 
-impl TryFrom<String> for ParameterAnnotations {
+impl TryFrom<String> for DistributionAnnotations {
     type Error = anyhow::Error;
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        Ok(ParameterAnnotations(
+        Ok(DistributionAnnotations(
             s.split(&[',', '\n'][..])
                 .filter_map(|m| {
                     if m.trim().is_empty() {
                         return None;
                     }
-                    Some(ParameterAnnotation::try_from(m))
+                    Some(m.parse())
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ))
     }
 }
 
-impl TryFrom<&Path> for ParameterAnnotations {
+impl TryFrom<&Path> for DistributionAnnotations {
     type Error = anyhow::Error;
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        ParameterAnnotations::try_from(std::fs::read_to_string(path)?)
+        DistributionAnnotations::try_from(std::fs::read_to_string(path)?)
     }
 }
 
@@ -166,7 +119,7 @@ pub(crate) fn column_to_sqltype(c: &ColumnType) -> SqlType {
 
 pub struct ParameterGenerationSpec {
     pub column_type: SqlType,
-    pub annotation: Option<ParameterAnnotation>,
+    pub annotation: Option<DistributionAnnotation>,
 }
 
 /// A query prepared against MySQL and the corresponding specification for
@@ -191,7 +144,11 @@ impl PreparedStatement {
         }
     }
 
-    pub fn new_with_annotation(query: String, stmt: Statement, spec: ParameterAnnotations) -> Self {
+    pub fn new_with_annotation(
+        query: String,
+        stmt: Statement,
+        spec: DistributionAnnotations,
+    ) -> Self {
         let params = stmt
             .params()
             .iter()
@@ -231,22 +188,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_uniform_annotation_spec() {
-        let q = "uniform 4 100";
-        let s = ParameterAnnotation::try_from(q).unwrap();
-        assert!(matches!(
-            s.spec,
-            ColumnGenerationSpec::Uniform(DataType::Int(4), DataType::Int(100))
-        ));
-    }
-
-    #[test]
     fn parse_annotation_specs() {
         let q = "
             uniform 4 100
             uniform 5 101"
             .to_string();
-        let s = ParameterAnnotations::try_from(q).unwrap();
+        let s = DistributionAnnotations::try_from(q).unwrap();
         assert_eq!(s.0.len(), 2);
     }
 }

@@ -25,7 +25,7 @@ rinfluxdb = { version = "0.1.0" }
 reqwest = { version = "0.11" }
 chrono = "0.4"
 atomic-counter = "1.0.1"
-
+serde_json = "1.0"
 
 # local dependencies
 noria = { path = "../noria/noria/" }
@@ -39,8 +39,8 @@ noria-mysql = { path = "../noria-mysql" }
 path = "src/lib.rs"
 
 [[bin]]
-name = "fastly_data_generator"
-path = "src/bin/fastly_data_generator.rs"
+name = "data_generator"
+path = "src/bin/data_generator.rs"
 
 [[bin]]
 name = "reader"

@@ -7,6 +7,7 @@ use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseConnection;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::convert::TryInto;
+use std::io::{stdout, Write};
 
 const MAX_BATCH_ROWS: usize = 10000;
 
@@ -18,7 +19,16 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
             continue;
         }
 
+        println!(
+            "Generating table '{}', {} rows",
+            table_name, table_spec.num_rows
+        );
+
         let mut rows_remaining = table_spec.num_rows;
+        let row_at_start = table_spec.num_rows as f64;
+
+        print!("Progress 0.00%");
+        let _ = stdout().flush();
 
         while rows_remaining > 0 {
             let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
@@ -49,7 +59,14 @@ pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec)
                 .with_context(|| format!("Inserting row into database for {}", table_name))?;
 
             rows_remaining -= rows_to_generate;
+
+            print!(
+                "\rProgress {:.2}%",
+                (1.0 - rows_remaining as f64 / row_at_start) * 100.0
+            );
+            let _ = stdout().flush();
         }
+        println!();
     }
 
     Ok(())
