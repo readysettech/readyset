@@ -115,8 +115,7 @@ pub struct Options {
         long,
         env = "METRICS_ADDRESS",
         default_value = "0.0.0.0:6034",
-        parse(try_from_str),
-        requires("upstream-db-url")
+        parse(try_from_str)
     )]
     metrics_address: SocketAddr,
 
@@ -353,6 +352,7 @@ where
                 valve,
                 prometheus_handle,
             };
+
             let fut = async move {
                 let http_listener = http_server.create_listener().await.unwrap();
                 NoriaAdapterHttpRouter::route_requests(http_server, http_listener).await
