@@ -127,7 +127,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         cache
     };
 
-    // Deploy http router if an address was supplied to retrieve QCA data.
+    // Create the HTTP server for handling metrics aggregator requests.
     let router_handle = {
         let (handle, valve) = Valve::new();
         let http_server = MetricsAggregatorHttpRouter {

@@ -10,9 +10,9 @@
 pub mod backend;
 mod convert;
 pub mod http_router;
-mod query_handler;
 #[allow(dead_code)]
-pub mod query_reconciler;
+pub mod migration_handler;
+mod query_handler;
 #[allow(dead_code)] // TODO(ENG-685): Remove when utilized in main.
 pub mod query_status_cache;
 pub mod rewrite;
