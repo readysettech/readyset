@@ -14,6 +14,7 @@ use nom::IResult;
 pub enum ShowStatement {
     Events,
     Tables(Tables),
+    Queries,
 }
 
 impl fmt::Display for ShowStatement {
@@ -22,6 +23,7 @@ impl fmt::Display for ShowStatement {
         match self {
             Self::Events => write!(f, "EVENTS"),
             Self::Tables(tables) => write!(f, "{}", tables),
+            Self::Queries => write!(f, "QUERY CACHES"),
         }
     }
 }
@@ -31,6 +33,11 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
         let (i, _) = tag_no_case("show")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, statement) = alt((
+            //ReadySet specific show statement
+            map(
+                tuple((tag_no_case("query"), multispace1, tag_no_case("caches"))),
+                |_| ShowStatement::Queries,
+            ),
             map(show_tables(dialect), ShowStatement::Tables),
             map(tag_no_case("events"), |_| ShowStatement::Events),
         ))(i)?;
@@ -191,5 +198,15 @@ mod tests {
         let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
         assert_eq!(res1, ShowStatement::Events);
         assert_eq!(res2, ShowStatement::Events);
+    }
+
+    #[test]
+    fn show_queries() {
+        let qstring1 = "SHOW QUERY CACHES";
+        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let qstring2 = "SHOW\tQUERY\tCACHES";
+        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        assert_eq!(res1, ShowStatement::Queries);
+        assert_eq!(res2, ShowStatement::Queries);
     }
 }
