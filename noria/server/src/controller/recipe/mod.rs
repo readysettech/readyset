@@ -10,6 +10,7 @@ use tracing::{debug, error, warn};
 use nom_sql::CreateTableStatement;
 use noria_errors::{internal, internal_err, ReadySetError};
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 use std::str;
 use std::vec::Vec;
 
@@ -43,6 +44,29 @@ pub(crate) struct Recipe {
     /// NOTE: this is an Option so that we can call [`Option::take`] on it, but will
     /// never actually be None externally.
     inc: Option<SqlIncorporator>,
+}
+
+impl Display for Recipe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for query_id in &self.expression_order {
+            let (name, query, public) = &self.expressions[query_id];
+            if *public {
+                write!(f, "query")?;
+            }
+            if let Some(name) = name {
+                if *public {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", name)?;
+            }
+            if *public || name.is_some() {
+                write!(f, ": ")?;
+            }
+            writeln!(f, "{}", query)?;
+        }
+
+        Ok(())
+    }
 }
 
 unsafe impl Send for Recipe {}
@@ -578,7 +602,8 @@ impl Recipe {
         self.prior.as_deref()
     }
 
-    fn remove_query(&mut self, qname: &str) -> bool {
+    /// Remove the query with the given `name` from the recipe.
+    pub(super) fn remove_query(&mut self, qname: &str) -> bool {
         let qid = self.aliases.get(qname).cloned();
         if qid.is_none() {
             warn!(%qname, "Query not found in expressions");

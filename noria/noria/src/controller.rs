@@ -524,6 +524,13 @@ impl ControllerHandle {
         self.rpc("install_recipe", request)
     }
 
+    /// Remove all nodes related to the query with the given name
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn remove_query(&mut self, name: &str) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("remove_query", name)
+    }
+
     /// Set the replication offset stored with the recipe
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
