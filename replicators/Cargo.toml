@@ -9,7 +9,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 clap = "3.0.0-beta.2"
 native-tls = "0.2.7"
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.8.4", features = ["full"] }
 futures = { version = "0.3" }
 bytes = "1.0"
 chrono = "0.4"

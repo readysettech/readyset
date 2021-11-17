@@ -5,7 +5,7 @@ authors = ["justin@readyset.io"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.8.4", features = ["full"] }
 futures = "0.3.0"
 futures-util = "0.3.0"
 anyhow = "1.0"

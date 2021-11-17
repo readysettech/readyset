@@ -15,7 +15,7 @@ noria-client = { path = "../noria-client" }
 noria-client-adapter = { path = "../noria-client/adapter" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv" }
-tokio = "1.8.1"
+tokio = "1.8.4"
 anyhow = "1.0.42"
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
@@ -38,6 +38,6 @@ postgres = { git = "https://github.com/readysettech/rust-postgres.git", features
 proptest = "1.0.0"
 serial_test = "0.5.1"
 test-strategy = "0.1.1"
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.8.4", features = ["full"] }
 zookeeper = "0.5.4"
 launchpad = { path = "../launchpad" }
