@@ -163,10 +163,10 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_ad_hoc_queries: bool,
-    // TODO(ENG-685): Remove option when live_qca flag is removed in main.
+    // TODO(ENG-685): Remove option when async_migrations flag is removed in main.
     query_status_cache: Option<Arc<QueryStatusCache>>,
-    live_qca: bool,
-    query_validate: bool,
+    async_migrations: bool,
+    validate_queries: bool,
 }
 
 impl Default for BackendBuilder {
@@ -182,8 +182,8 @@ impl Default for BackendBuilder {
             query_log_sender: None,
             query_log_ad_hoc_queries: false,
             query_status_cache: None,
-            live_qca: false,
-            query_validate: false,
+            async_migrations: false,
+            validate_queries: false,
         }
     }
 }
@@ -218,8 +218,8 @@ impl BackendBuilder {
             query_log_sender: self.query_log_sender,
             query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
             query_status_cache: self.query_status_cache,
-            live_qca: self.live_qca,
-            query_validate: self.query_validate,
+            async_migrations: self.async_migrations,
+            validate_queries: self.validate_queries,
             _query_handler: PhantomData,
         }
     }
@@ -275,13 +275,13 @@ impl BackendBuilder {
         self
     }
 
-    pub fn live_qca(mut self, live_qca: bool) -> Self {
-        self.live_qca = live_qca;
+    pub fn async_migrations(mut self, async_migrations: bool) -> Self {
+        self.async_migrations = async_migrations;
         self
     }
 
-    pub fn query_validate(mut self, query_validate: bool) -> Self {
-        self.query_validate = query_validate;
+    pub fn validate_queries(mut self, validate_queries: bool) -> Self {
+        self.validate_queries = validate_queries;
         self
     }
 }
@@ -328,18 +328,19 @@ pub struct Backend<DB, Handler> {
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: Option<Arc<QueryStatusCache>>,
 
-    /// Run with query coverage analysis enabled in the serving path.
-    live_qca: bool,
+    /// Run migrations in asynchronously in a separate tokio task. Queries are enqueued
+    /// for migration via the `PendingMigration` status in the query_status_cache.
+    async_migrations: bool,
 
     /// Run select statements with query validation.
-    query_validate: bool,
+    validate_queries: bool,
 
     _query_handler: PhantomData<Handler>,
 }
 
 impl<DB, Handler> Backend<DB, Handler> {
-    fn live_qca_enabled(&self) -> bool {
-        self.live_qca
+    fn async_migrations(&self) -> bool {
+        self.async_migrations
     }
 }
 
@@ -568,7 +569,7 @@ where
         handle.set_noria_duration();
         let upstream_res = upstream_res?;
 
-        if self.query_validate {
+        if self.validate_queries {
             if let Err(e) = noria_res {
                 internal!("Query failed to execute on noria {}", e)
             }
@@ -744,8 +745,8 @@ where
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => {
                 if self.upstream.is_some() {
-                    if self.live_qca_enabled() {
-                        // The query status cache is guaranteed to exist if `live_qca` is enabled.
+                    if self.async_migrations() {
+                        // The query status cache is guaranteed to exist if `async_migrations` is enabled.
                         #[allow(clippy::unwrap_used)]
                         let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
 
@@ -753,7 +754,7 @@ where
                             // Register the query if this is the first time we the
                             // adapter has seen it.
                             None => {
-                                query_status_cache.register_query(stmt).await;
+                                query_status_cache.set_pending_migration(stmt).await;
                                 let handle = event.start_timer();
                                 let result = self
                                     .prepare_fallback(query)
@@ -956,8 +957,8 @@ where
             Some(prep) => {
                 match prep.as_ref() {
                     SqlQuery::Select(ref stmt) => {
-                        if self.live_qca_enabled() {
-                            // The query status cache is guaranteed to exist if `live_qca` is enabled.
+                        if self.async_migrations() {
+                            // The query status cache is guaranteed to exist if `async_migrations` is enabled.
                             #[allow(clippy::unwrap_used)]
                             let stmt = stmt.clone();
                             let query_status_cache =
@@ -1174,7 +1175,7 @@ where
 
         // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
         // default when the upstream connector is present.
-        let live_qca_enabled = self.live_qca_enabled();
+        let async_migrations = self.async_migrations();
         let res = if let Some(ref mut upstream) = self.upstream {
             match parsed_query.as_ref() {
                 nom_sql::SqlQuery::Select(ref stmt) => {
@@ -1182,8 +1183,8 @@ where
                         event.query = Some(parsed_query.clone());
                     }
                     let execution_timer = Instant::now();
-                    let res = if live_qca_enabled {
-                        // The query status cache is guarenteed to exist if `live_qca` is enabled.
+                    let res = if async_migrations {
+                        // The query status cache is guarenteed to exist if `async_migrations` is enabled.
                         #[allow(clippy::unwrap_used)]
                         let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
 
@@ -1191,14 +1192,14 @@ where
                             // If this is the first time this adapter has seen the query, we should
                             // set the queries status in the cache and send it to fallback.
                             None => {
-                                query_status_cache.register_query(stmt).await;
+                                query_status_cache.set_pending_migration(stmt).await;
                                 let handle = event.start_timer();
                                 let res = upstream.query(&query).await.map(QueryResult::Upstream);
                                 handle.set_upstream_duration();
                                 res
                             }
                             Some(AdmitStatus::Deny) => {
-                                query_status_cache.register_query(stmt).await;
+                                query_status_cache.set_pending_migration(stmt).await;
                                 let handle = event.start_timer();
                                 let res = upstream.query(&query).await.map(QueryResult::Upstream);
                                 handle.set_upstream_duration();
@@ -1217,7 +1218,7 @@ where
                     } else {
                         // If we are validating the schema, explicitely compare the
                         // prepare results for this select before we proceed.
-                        if self.query_validate {
+                        if self.validate_queries {
                             self.mirror_prepare(stmt.clone(), query, event, true)
                                 .await?;
                         }

@@ -72,7 +72,7 @@ services:
       NORIA_DEPLOYMENT: frameworktests
       UPSTREAM_DB_URL: mysql://root:root@mysql/test
       LOG_LEVEL: trace
-      LIVE_QCA: "true"
+      ASYNC_MIGRATIONS: "true"
       QUERY_LOG: "true"
       ALLOWED_USERNAME: root
       ALLOWED_PASSWORD: root

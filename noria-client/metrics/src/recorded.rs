@@ -29,16 +29,16 @@ pub const QUERY_EXECUTION_TIME: &str = "noria-client.execution_time";
 /// | database_type | The database type being executed. Must be a ['DatabaseType'] |
 pub const QUERY_LOG_EXECUTION_TIME: &str = "query-log.execution_time";
 
-/// Counter: The total number of queries processing by the query reconciler.
-/// Incremented on each loop of the reconciler.
-pub const RECONCILER_PROCESSED: &str = "reconciler.processed";
+/// Counter: The total number of queries processing by the migration handler.
+/// Incremented on each loop of the migration handler.
+pub const MIGRATION_HANDLER_PROCESSED: &str = "migration-handler.processed";
 
-/// Counter: The number of queries the reconciler has set to allowed.
-/// Incremented on each loop of the reconciler.
+/// Counter: The number of queries themigration handler has set to allowed.
+/// Incremented on each loop of the migration handler.
 /// TODO(justin): In the future it would be good to support gauges for the
-/// counts of each query status in the reconciler cache. Requires optimization of
-/// locking.
-pub const RECONCILER_ALLOWED: &str = "reconciler.allowed";
+/// counts of each query status in the query status cache. Requires
+/// optimization of locking.
+pub const MIGRATION_HANDLER_ALLOWED: &str = "migration-handler.allowed";
 
 /// Counter: The number of HTTP requests received at the noria-client.
 pub const ADAPTER_EXTERNAL_REQUESTS: &str = "noria-client.external_requests";

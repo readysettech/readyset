@@ -16,7 +16,7 @@ use futures_util::stream::StreamExt;
 use maplit::hashmap;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::http_router::NoriaAdapterHttpRouter;
-use noria_client::query_reconciler::QueryReconciler;
+use noria_client::migration_handler::MigrationHandler;
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
@@ -102,13 +102,30 @@ pub struct Options {
     #[clap(long, env = "ALLOW_UNAUTHENTICATED_CONNECTIONS")]
     allow_unauthenticated_connections: bool,
 
-    /// Run with query coverage analysis enabled in the serving path.
-    #[clap(long, env = "LIVE_QCA", requires("upstream-db-url"))]
-    live_qca: bool,
+    /// Run migrations in a separate thread off of the serving path.
+    #[clap(
+        long,
+        env = "ASYNC_MIGRATIONS",
+        requires_if("true", "upstream-db-url"),
+        requires_all(&["max-processing-minutes", "migration-task-interval"])
+    )]
+    async_migrations: bool,
 
-    /// Run with query coverage analysis enabled in the serving path.
-    #[clap(long, env = "QUERY_VALIDATE", requires("upstream-db-url"))]
-    query_validate: bool,
+    /// Sets the maximum time in minutes that we will retry migrations for in the
+    /// migration handler. If this time is reached, the query will be exclusively
+    /// sent to fallback.
+    ///
+    /// Defaults to 15 minutes.
+    #[clap(long, env = "MAX_PROCESSING_MINUTES", default_value = "15")]
+    max_processing_minutes: i64,
+
+    /// Sets the migration handlers's loop interval in milliseconds.
+    #[clap(long, env = "MIGRATION_TASK_INTERVAL", default_value = "20000")]
+    migration_task_interval: u64,
+
+    /// Validate queries executing against noria with the upstream db.
+    #[clap(long, env = "VALIDATE_QUERIES", requires("upstream-db-url"))]
+    validate_queries: bool,
 
     /// IP:PORT to host endpoint for scraping metrics from the adapter.
     #[clap(
@@ -118,27 +135,6 @@ pub struct Options {
         parse(try_from_str)
     )]
     metrics_address: SocketAddr,
-
-    /// Set max processing time in minutes for any query within the system before it's deemed to be
-    /// unsupported by ReadySet, and will be sent exclusively to fallback.
-    ///
-    /// Defaults to 5 minutes.
-    #[clap(
-        long,
-        env = "MAX_PROCESSING_MINUTES",
-        default_value = "15",
-        requires("upstream-db-url")
-    )]
-    max_processing_minutes: i64,
-
-    /// Sets the query reconciler's loop interval in milliseconds.
-    #[clap(
-        long,
-        env = "RECONCILE_INTERVAL",
-        default_value = "20000",
-        requires("upstream-db-url")
-    )]
-    reconciler_loop_interval: u64,
 
     /// Allow database connections authenticated as this user. Ignored if
     /// --allow-unauthenticated-connections is passed
@@ -290,20 +286,27 @@ where
             None
         };
 
-        let query_status_cache = if options.live_qca {
+        // We currently only create the query status cache when we migrate async as
+        // the regular serving path does not update the query status cache when performing
+        // migrations.
+        // TODO(ENG-806): Integrate query status cache into the serving path when we are
+        // not migrating async.
+        let query_status_cache = if options.async_migrations {
             let cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
                 options.max_processing_minutes,
             )));
 
-            // Only start the live qca task if there is an upstream db.
+            // Only start the migration task if there is an upstream db.
             if let Some(upstream_db_url) = options.upstream_db_url.clone() {
                 let ch = ch.clone();
                 let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
                 let shutdown_recv = shutdown_sender.subscribe();
-                let loop_interval = options.reconciler_loop_interval;
+                let loop_interval = options.migration_task_interval;
+                let validate_queries = options.validate_queries;
                 let cache = cache.clone();
                 let fut = async move {
-                    let connection = span!(Level::INFO, "live-qca upstream database connection");
+                    let connection =
+                        span!(Level::INFO, "migration task upstream database connection");
                     let upstream = H::UpstreamDatabase::connect(upstream_db_url.clone())
                         .instrument(
                             connection
@@ -318,20 +321,20 @@ where
                         query_cache.clone(),
                         None,
                     )
-                    .instrument(
-                        connection
-                            .in_scope(|| span!(Level::DEBUG, "Building live-qca noria connector")),
-                    )
+                    .instrument(connection.in_scope(|| {
+                        span!(Level::DEBUG, "Building migration task noria connector")
+                    }))
                     .await;
 
-                    let mut reconciler = QueryReconciler::new(
+                    let mut migration_handler = MigrationHandler::new(
                         noria,
                         upstream,
                         cache,
+                        validate_queries,
                         std::time::Duration::from_millis(loop_interval),
                         shutdown_recv,
                     );
-                    reconciler.run().await
+                    migration_handler.run().await
                 };
 
                 rt.handle().spawn(fut);
@@ -342,7 +345,7 @@ where
             None
         };
 
-        // Deploy http router if an address was supplied to retrieve QCA data.
+        // Spawn a thread for handling this adapter's HTTP request server.
         let router_handle = {
             let (handle, valve) = Valve::new();
             let query_cache = query_status_cache.as_ref().cloned();
@@ -391,9 +394,9 @@ where
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
-                .live_qca(options.live_qca)
+                .async_migrations(options.async_migrations)
                 .query_status_cache(query_status_cache.clone())
-                .query_validate(options.query_validate);
+                .validate_queries(options.validate_queries);
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
@@ -613,10 +616,26 @@ impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
 mod tests {
     use super::*;
 
+    // Certain clap things, like `requires`, only ever throw an error at runtime, not at
+    // compile-time - this tests that none of those happen
     #[test]
-    fn arg_parsing() {
-        // Certain clap things, like `requires`, only ever throw an error at runtime, not at
-        // compile-time - this tests that none of those happen
+    fn arg_parsing_noria_standalone() {
+        let opts = Options::parse_from(vec![
+            "noria-mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            "zookeeper:2181",
+            "--allow-unauthenticated-connections",
+        ]);
+
+        assert_eq!(opts.deployment, "test");
+    }
+
+    #[test]
+    fn arg_parsing_with_upstream() {
         let opts = Options::parse_from(vec![
             "noria-mysql",
             "--deployment",
@@ -631,5 +650,25 @@ mod tests {
         ]);
 
         assert_eq!(opts.deployment, "test");
+    }
+
+    #[test]
+    fn async_migrations_param_defaults() {
+        let opts = Options::parse_from(vec![
+            "noria-mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            "zookeeper:2181",
+            "--allow-unauthenticated-connections",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+            "--async-migrations",
+        ]);
+
+        assert_eq!(opts.max_processing_minutes, 15);
+        assert_eq!(opts.migration_task_interval, 20000);
     }
 }

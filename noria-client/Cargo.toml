@@ -49,4 +49,4 @@ path = "src/lib.rs"
 
 [features]
 ryw = []
-reconciler-schema-check = []
+migration-schema-check = []

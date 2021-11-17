@@ -7,7 +7,7 @@
 //! how the query is handled in the adapter.
 //!
 //! If the query:
-//!   - NeedsProcessing: The query should be sent to the fallback database.
+//!   - PendingMigration: The query should be sent to the fallback database.
 //!   - SuccessfulMigration: The query should be sent to noria.
 //!   - FailedExecute: The query should be sent to fallback if failed enough times.
 //!   - Is not in the cache: The queries status should be determined and
@@ -82,11 +82,11 @@ impl Serialize for QueryList {
 }
 
 /// Represents the current state of any given query. Deny is an implicit state
-/// that is derived from a combination of NeedsProcessing and other query
+/// that is derived from a combination of PendingMigration and other query
 /// status metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueryState {
-    NeedsProcessing,
+    PendingMigration,
     SuccessfulMigration,
     FailedExecute(u32),
     Unsupported,
@@ -107,7 +107,7 @@ pub struct QueryStatusCache {
     /// that is cached.
     inner: tokio::sync::RwLock<HashMap<Query, QueryStatus>>,
     /// Defines a maximum age that any query may stay in the QueryStatusCache
-    /// with a state of QueryState::NeedsProcessing before it is inferred to be
+    /// with a state of QueryState::PendingMigration before it is inferred to be
     /// denied. If a query is denied it is sent exclusively to fallback.
     max_processing: chrono::Duration,
 }
@@ -129,16 +129,16 @@ impl QueryStatusCache {
         Utc::now() - self.max_processing
     }
 
-    /// Registers a query with a default state of [`QueryState::NeedsProcessing`] if
+    /// Registers a query with a default state of [`QueryState::PendingMigration`] if
     /// it doesn't already exist in the cache. If it does exist in the cache this
     /// will no-op. Can only be called by proxy of calling `exists` which will check
     /// if we have seen a query or not, and if not register it.
-    pub async fn register_query(&self, query: &Query) {
+    pub async fn set_pending_migration(&self, query: &Query) {
         self.inner
             .write()
             .await
             .entry(query.clone())
-            .or_insert_with(|| QueryStatus::new(QueryState::NeedsProcessing));
+            .or_insert_with(|| QueryStatus::new(QueryState::PendingMigration));
     }
 
     /// Sets the provided query to have a QueryState of SuccessfulMigration.
@@ -151,11 +151,11 @@ impl QueryStatusCache {
         });
     }
 
-    /// Sets the provided query to have a QueryState of NeedsProcessing.
+    /// Sets the provided query to have a QueryState of PendingMigration.
     /// If the query is not found this is a no-op.
     pub async fn set_failed_query(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::NeedsProcessing;
+            s.state = QueryState::PendingMigration;
             s
         });
     }
@@ -183,19 +183,19 @@ impl QueryStatusCache {
     /// If the query is not found this is a no-op.
     pub async fn set_failed_prepare(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::NeedsProcessing;
+            s.state = QueryState::PendingMigration;
             s
         });
     }
 
     /// Returns a list of queries that currently need the be processed to determine
     /// if they should be allowed (are supported by Noria).
-    pub async fn needs_processing(&self) -> Vec<Query> {
+    pub async fn pending_migration(&self) -> Vec<Query> {
         self.inner
             .read()
             .await
             .iter()
-            .filter(|(_, status)| matches!(status.state, QueryState::NeedsProcessing if status.first_seen >= self.max_age()))
+            .filter(|(_, status)| matches!(status.state, QueryState::PendingMigration if status.first_seen >= self.max_age()))
             .map(|(q, _)| q.clone())
             .collect()
     }
@@ -219,7 +219,7 @@ impl QueryStatusCache {
             .await
             .iter()
             .filter(|(_, status)| {
-                (matches!(status.state, QueryState::NeedsProcessing) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES) || matches!(status.state, QueryState::Unsupported)
+                (matches!(status.state, QueryState::PendingMigration) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES) || matches!(status.state, QueryState::Unsupported)
            })
             .map(|(q, _)| q.clone())
             .collect::<Vec<Query>>()
@@ -232,7 +232,7 @@ impl QueryStatusCache {
             let QueryStatus { state, .. } = &s;
 
             match state {
-                QueryState::NeedsProcessing => AdmitStatus::Deny,
+                QueryState::PendingMigration => AdmitStatus::Deny,
                 QueryState::SuccessfulMigration => AdmitStatus::Allow,
                 QueryState::FailedExecute(count) if count < &MAXIMUM_FAILED_EXECUTES => {
                     AdmitStatus::Allow
@@ -269,19 +269,19 @@ mod tests {
     async fn query_is_allowed() {
         let cache = test_cache();
         let query = select_statement("SELECT * FROM t1").unwrap();
-        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.pending_migration().await.len(), 0);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
         assert_eq!(cache.admit(&query).await, None);
 
-        cache.register_query(&query).await;
-        assert_eq!(cache.needs_processing().await, vec![query.clone()]);
+        cache.set_pending_migration(&query).await;
+        assert_eq!(cache.pending_migration().await, vec![query.clone()]);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
 
         cache.set_successful_migration(&query).await;
-        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.pending_migration().await.len(), 0);
         assert_eq!(cache.allow_list().await, vec![query.clone()].into());
         assert_eq!(cache.deny_list().await.len(), 0);
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
@@ -292,9 +292,9 @@ mod tests {
         let cache = test_cache();
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        cache.register_query(&query).await;
-        cache.register_query(&query).await;
-        assert_eq!(cache.needs_processing().await.len(), 1);
+        cache.set_pending_migration(&query).await;
+        cache.set_pending_migration(&query).await;
+        assert_eq!(cache.pending_migration().await.len(), 1);
     }
 
     #[tokio::test]
@@ -302,17 +302,17 @@ mod tests {
         let cache = test_cache();
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        cache.register_query(&query).await;
+        cache.set_pending_migration(&query).await;
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
 
         cache.set_successful_migration(&query).await;
-        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.pending_migration().await.len(), 0);
         assert_eq!(cache.allow_list().await, vec![query.clone()].into());
         assert_eq!(cache.deny_list().await.len(), 0);
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
 
         cache.set_failed_execute(&query).await;
-        assert_eq!(cache.needs_processing().await.len(), 0);
+        assert_eq!(cache.pending_migration().await.len(), 0);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
         // Allow until max_age has been hit.
@@ -324,7 +324,7 @@ mod tests {
         let cache = test_cache();
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        cache.register_query(&query).await;
+        cache.set_pending_migration(&query).await;
         for _ in 0..4 {
             cache.set_failed_execute(&query).await;
         }
