@@ -68,6 +68,37 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct DropQueryCacheStatement {
+    pub name: String,
+}
+
+impl fmt::Display for DropQueryCacheStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DROP QUERY CACHE `{}`", self.name)
+    }
+}
+
+pub fn drop_query_cache(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], DropQueryCacheStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("query")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, name) = dialect.identifier()(i)?;
+        Ok((
+            i,
+            DropQueryCacheStatement {
+                name: name.into_owned(),
+            },
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +123,20 @@ mod tests {
         let expected = "DROP TABLE IF EXISTS `users`, `posts`";
         let res = drop_table(Dialect::MySQL)(qstring.as_bytes());
         assert_eq!(format!("{}", res.unwrap().1), expected);
+    }
+
+    #[test]
+    fn parse_drop_query_cache() {
+        let res = test_parse!(drop_query_cache(Dialect::MySQL), b"DROP QUERY CACHE test");
+        assert_eq!(res.name, "test".to_owned());
+    }
+
+    #[test]
+    fn format_drop_query_cache() {
+        let res = DropQueryCacheStatement {
+            name: "test".to_owned(),
+        }
+        .to_string();
+        assert_eq!(res, "DROP QUERY CACHE `test`");
     }
 }

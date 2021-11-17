@@ -7,7 +7,7 @@ use crate::create::create_query_cache;
 use crate::create::CreateQueryCacheStatement;
 use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use crate::delete::{deletion, DeleteStatement};
-use crate::drop::{drop_table, DropTableStatement};
+use crate::drop::{drop_query_cache, drop_table, DropQueryCacheStatement, DropTableStatement};
 use crate::explain::{explain_statement, ExplainStatement};
 use crate::insert::{insertion, InsertStatement};
 use crate::rename::{rename_table, RenameTableStatement};
@@ -32,6 +32,7 @@ pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
     CreateQueryCache(CreateQueryCacheStatement),
+    DropQueryCache(DropQueryCacheStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -57,6 +58,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
             SqlQuery::CreateView(ref create) => write!(f, "{}", create),
             SqlQuery::CreateQueryCache(ref create) => write!(f, "{}", create),
+            SqlQuery::DropQueryCache(ref drop) => write!(f, "{}", drop),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
@@ -83,6 +85,7 @@ impl SqlQuery {
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateQueryCache(_) => "CREATE QUERY CACHE",
+            Self::DropQueryCache(_) => "DROP QUERY CACHE",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::Update(_) => "UPDATE",
@@ -113,6 +116,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),
             map(create_query_cache(dialect), SqlQuery::CreateQueryCache),
+            map(drop_query_cache(dialect), SqlQuery::DropQueryCache),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
             map(start_transaction(dialect), SqlQuery::StartTransaction),
             map(commit(dialect), SqlQuery::Commit),
