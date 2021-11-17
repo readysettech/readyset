@@ -103,6 +103,8 @@ pub struct Leader {
     pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
     /// A client to the current authority.
     pub(super) authority: Arc<Authority>,
+    /// Optional server id to use when registering for a slot for binlog replication.
+    pub(super) server_id: Option<u32>,
 }
 
 pub(super) fn graphviz(
@@ -207,6 +209,7 @@ impl Leader {
             }
         };
 
+        let server_id = self.server_id;
         let authority = Arc::clone(&self.authority);
         self.replicator_task = Some(tokio::spawn(async move {
             loop {
@@ -216,7 +219,7 @@ impl Leader {
                 if let Err(err) = replicators::NoriaAdapter::start_with_url(
                     &url,
                     noria,
-                    None,
+                    server_id,
                     Some(ready_notification.clone()),
                 )
                 .await
@@ -638,6 +641,7 @@ impl Leader {
         controller_uri: Url,
         authority: Arc<Authority>,
         replicator_url: Option<String>,
+        server_id: Option<u32>,
     ) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
@@ -696,6 +700,7 @@ impl Leader {
             replicator_url,
             replicator_task: None,
             authority,
+            server_id,
         }
     }
 
