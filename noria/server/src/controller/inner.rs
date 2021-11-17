@@ -278,6 +278,7 @@ impl Leader {
             }
             (Method::POST, "/inputs") => return_serialized!(self.inputs()),
             (Method::POST, "/outputs") => return_serialized!(self.outputs()),
+            (Method::POST, "/verbose_outputs") => return_serialized!(self.verbose_outputs()),
             (Method::GET | Method::POST, "/instances") => {
                 return_serialized!(self.get_instances());
             }
@@ -927,6 +928,32 @@ impl Leader {
                     // the reader node itself.
                     (name, r.is_for())
                 })
+            })
+            .collect()
+    }
+
+    /// Get a map of all known output nodes, mapping the name of the node to the `SqlQuery`
+    ///
+    /// Output nodes here refers to nodes of type `Reader`, which is the nodes created in response
+    /// to calling `.maintain` or `.stream` for a node during a migration
+    fn verbose_outputs(&self) -> BTreeMap<String, nom_sql::SqlQuery> {
+        self.ingredients
+            .externals(petgraph::EdgeDirection::Outgoing)
+            .filter_map(|n| {
+                #[allow(clippy::indexing_slicing)] // just came from self.ingredients
+                if self.ingredients[n].is_reader() {
+                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
+                    let name = self.ingredients[n].name().to_owned();
+
+                    // Alias should always resolve to an id and id should always resolve to an
+                    // expression. However, this mapping will not catch bugs that break this
+                    // assumption
+                    let id = self.recipe.id_from_alias(&name);
+                    let expr = id.map(|id| self.recipe.expression(id)).flatten();
+                    expr.map(|e| (name, e.clone()))
+                } else {
+                    None
+                }
             })
             .collect()
     }

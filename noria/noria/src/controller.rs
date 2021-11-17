@@ -293,6 +293,22 @@ impl ControllerHandle {
         Ok(bincode::deserialize(&body)?)
     }
 
+    /// Enumerate all know external views. Includes the SqlQuery that created the view
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub async fn verbose_outputs(&mut self) -> ReadySetResult<BTreeMap<String, nom_sql::SqlQuery>> {
+        let body: hyper::body::Bytes = self
+            .handle
+            .ready()
+            .await
+            .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?
+            .call(ControllerRequest::new("verbose_outputs", &())?)
+            .await
+            .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?;
+
+        Ok(bincode::deserialize(&body)?)
+    }
+
     /// Obtain a `View` that allows you to query the given external view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
