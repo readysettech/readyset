@@ -5,11 +5,10 @@ use nom::{
     combinator::map_res,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::str;
 use std::str::FromStr;
+use std::{borrow::Cow, fmt};
 
-use crate::column::{column_specification, Column, ColumnSpecification};
 use crate::common::{
     column_identifier_no_alias, if_not_exists, schema_table_reference, statement_terminator,
     ws_sep_comma, IndexType, ReferentialAction, TableKey,
@@ -20,6 +19,10 @@ use crate::expression::expression;
 use crate::order::{order_type, OrderType};
 use crate::select::{nested_selection, SelectStatement};
 use crate::table::Table;
+use crate::{
+    column::{column_specification, Column, ColumnSpecification},
+    select::selection,
+};
 use crate::{ColumnConstraint, Dialect};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
@@ -132,6 +135,25 @@ impl fmt::Display for CreateViewStatement {
         }
         write!(f, "AS ")?;
         write!(f, "{}", self.definition)
+    }
+}
+
+/// `CREATE QUERY CACHE [<name>] AS ...`
+///
+/// This is a non-standard ReadySet specific extension to SQL
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub struct CreateQueryCacheStatement {
+    pub name: Option<String>,
+    pub statement: SelectStatement,
+}
+
+impl fmt::Display for CreateQueryCacheStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CREATE QUERY CACHE ")?;
+        if let Some(name) = &self.name {
+            write!(f, "`{}` ", name)?;
+        }
+        write!(f, "AS {}", self.statement)
     }
 }
 
@@ -672,6 +694,31 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     }
 }
 
+/// Parse a [`CreateQueryCacheStatement`]
+pub fn create_query_cache(
+    dialect: Dialect,
+) -> impl Fn(&[u8]) -> IResult<&[u8], CreateQueryCacheStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("create")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("query")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, name) = opt(terminated(dialect.identifier(), multispace1))(i)?;
+        let (i, _) = tag_no_case("as")(i)?;
+        let (i, _) = multispace1(i)?;
+        let (i, statement) = selection(dialect)(i)?;
+        Ok((
+            i,
+            CreateQueryCacheStatement {
+                name: name.map(Cow::into_owned),
+                statement,
+            },
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{common::type_identifier, ColumnConstraint, Literal, SqlType};
@@ -1196,6 +1243,8 @@ mod tests {
     }
 
     mod mysql {
+        use std::vec;
+
         use crate::{ColumnConstraint, Literal, SqlType};
 
         use super::*;
@@ -1394,6 +1443,39 @@ mod tests {
             let expected = "CREATE VIEW `v` AS SELECT * FROM `t`";
             let res = view_creation(Dialect::MySQL)(qstring.as_bytes());
             assert_eq!(format!("{}", res.unwrap().1), expected);
+        }
+
+        #[test]
+        fn create_query_cache_with_name() {
+            let res = test_parse!(
+                create_query_cache(Dialect::MySQL),
+                b"CREATE QUERY CACHE foo AS SELECT id FROM users WHERE name = ?"
+            );
+            assert_eq!(res.name, Some("foo".to_owned()));
+            assert_eq!(res.statement.tables, vec!["users".into()]);
+        }
+
+        #[test]
+        fn create_query_cache_without_name() {
+            let res = test_parse!(
+                create_query_cache(Dialect::MySQL),
+                b"CREATE QUERY CACHE AS SELECT id FROM users WHERE name = ?"
+            );
+            assert_eq!(res.name, None);
+            assert_eq!(res.statement.tables, vec!["users".into()]);
+        }
+
+        #[test]
+        fn display_create_query_cache() {
+            let stmt = test_parse!(
+                create_query_cache(Dialect::MySQL),
+                b"CREATE QUERY CACHE foo AS SELECT id FROM users WHERE name = ?"
+            );
+            let res = stmt.to_string();
+            assert_eq!(
+                res,
+                "CREATE QUERY CACHE `foo` AS SELECT `id` FROM `users` WHERE (`name` = ?)"
+            );
         }
 
         #[test]

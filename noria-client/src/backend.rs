@@ -10,7 +10,7 @@ use std::{
 };
 
 use metrics::histogram;
-use nom_sql::Dialect;
+use nom_sql::{CreateQueryCacheStatement, Dialect};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, span, trace, warn, Level};
 
@@ -847,6 +847,7 @@ where
             nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::RenameTable(..)
+            | nom_sql::SqlQuery::CreateQueryCache(..)
             | nom_sql::SqlQuery::Explain(_) => {
                 error!("unsupported query");
                 unsupported!("query type unsupported");
@@ -1284,6 +1285,16 @@ where
                     .map(QueryResult::Noria)
                     .map_err(|e| e.into()),
 
+                SqlQuery::CreateQueryCache(CreateQueryCacheStatement {
+                    ref name,
+                    ref statement,
+                }) => {
+                    self.noria
+                        .create_view(name.as_ref().map(|s| s.as_str()), statement)
+                        .await?;
+                    Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
+                }
+
                 // Table Create / Drop (RYW not supported)
                 // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
                 nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
@@ -1347,6 +1358,13 @@ where
                     execution_timer = Some((Instant::now(), SqlQueryType::Write));
                     self.noria.handle_delete(q).await
                 }
+                SqlQuery::CreateQueryCache(CreateQueryCacheStatement { name, statement }) => {
+                    self.noria
+                        .create_view(name.as_ref().map(|s| s.as_str()), statement)
+                        .await?;
+                    Ok(noria_connector::QueryResult::Empty)
+                }
+
                 SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                     execution_timer = Some((Instant::now(), SqlQueryType::Read));
                     self.noria.graphviz(*simplified).await

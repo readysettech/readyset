@@ -3,6 +3,8 @@ use std::fmt;
 use std::str;
 
 use crate::compound_select::{compound_selection, CompoundSelectStatement};
+use crate::create::create_query_cache;
+use crate::create::CreateQueryCacheStatement;
 use crate::create::{creation, view_creation, CreateTableStatement, CreateViewStatement};
 use crate::delete::{deletion, DeleteStatement};
 use crate::drop::{drop_table, DropTableStatement};
@@ -29,6 +31,7 @@ use nom::IResult;
 pub enum SqlQuery {
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
+    CreateQueryCache(CreateQueryCacheStatement),
     AlterTable(AlterTableStatement),
     Insert(InsertStatement),
     CompoundSelect(CompoundSelectStatement),
@@ -53,6 +56,7 @@ impl fmt::Display for SqlQuery {
             SqlQuery::Insert(ref insert) => write!(f, "{}", insert),
             SqlQuery::CreateTable(ref create) => write!(f, "{}", create),
             SqlQuery::CreateView(ref create) => write!(f, "{}", create),
+            SqlQuery::CreateQueryCache(ref create) => write!(f, "{}", create),
             SqlQuery::Delete(ref delete) => write!(f, "{}", delete),
             SqlQuery::DropTable(ref drop) => write!(f, "{}", drop),
             SqlQuery::Update(ref update) => write!(f, "{}", update),
@@ -78,6 +82,7 @@ impl SqlQuery {
             Self::Insert(_) => "INESRT",
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
+            Self::CreateQueryCache(_) => "CREATE QUERY CACHE",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
             Self::Update(_) => "UPDATE",
@@ -107,6 +112,7 @@ pub fn sql_query(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], SqlQuery>
             map(updating(dialect), SqlQuery::Update),
             map(set(dialect), SqlQuery::Set),
             map(view_creation(dialect), SqlQuery::CreateView),
+            map(create_query_cache(dialect), SqlQuery::CreateQueryCache),
             map(alter_table_statement(dialect), SqlQuery::AlterTable),
             map(start_transaction(dialect), SqlQuery::StartTransaction),
             map(commit(dialect), SqlQuery::Commit),
