@@ -381,6 +381,7 @@ impl Controller {
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
                     self.config.replication_url.clone(),
+                    self.config.replication_server_id,
                 );
                 leader.start(self.leader_ready_notification.clone()).await;
                 self.leader_ready = false;

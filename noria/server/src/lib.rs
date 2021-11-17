@@ -449,6 +449,7 @@ pub struct Config {
     /// Configuration for converting SQL to MIR
     pub(crate) mir_config: sql::mir::Config,
     pub(crate) replication_url: Option<String>,
+    pub(crate) replication_server_id: Option<u32>,
 }
 
 impl Default for Config {
@@ -470,6 +471,7 @@ impl Default for Config {
             abort_on_task_failure: true,
             mir_config: Default::default(),
             replication_url: None,
+            replication_server_id: None,
         }
     }
 }

@@ -150,6 +150,11 @@ impl Builder {
         self.config.replication_url = Some(url);
     }
 
+    /// Sets the server uuid to use when registering for a binlog replication slot.
+    pub fn set_replication_server_id(&mut self, id: u32) {
+        self.config.replication_server_id = Some(id);
+    }
+
     /// Configures this Noria server to accept only reader domains.
     pub fn as_reader_only(&mut self) {
         self.reader_only = true;
