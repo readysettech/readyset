@@ -438,18 +438,22 @@ fn start_server(
     })
 }
 
+// TODO(justin): Wrap these parameters.
+#[allow(clippy::too_many_arguments)]
 fn start_mysql_adapter(
     noria_mysql_path: &Path,
     deployment_name: &str,
     authority_addr: &str,
     authority: &str,
     port: u16,
+    metrics_port: u16,
     mysql: Option<&String>,
     live_qca: bool,
 ) -> Result<ProcessHandle> {
     let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
     runner.set_deployment(deployment_name);
     runner.set_port(port);
+    runner.set_metrics_port(metrics_port);
     runner.set_authority_addr(authority_addr);
     runner.set_authority(authority);
 
@@ -567,13 +571,16 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
 
     // Start a MySQL adapter instance.
     let mysql_adapter_handle = if params.mysql_adapter || params.mysql {
+        // TODO(justin): Turn this into a stateful object.
         port = get_next_good_port(Some(port));
+        let metrics_port = get_next_good_port(Some(port));
         let process = start_mysql_adapter(
             params.noria_binaries.noria_mysql.as_ref().unwrap(),
             &params.name,
             &params.authority_address,
             &params.authority.to_string(),
             port,
+            metrics_port,
             mysql_addr.as_ref(),
             params.live_qca,
         )?;

@@ -138,6 +138,11 @@ impl NoriaMySQLRunner {
         self.args.push(format!("127.0.0.1:{}", port.to_string()));
     }
 
+    pub fn set_metrics_port(&mut self, port: u16) {
+        self.args.push("--metrics-address".to_string());
+        self.args.push(format!("0.0.0.0:{}", port.to_string()));
+    }
+
     pub fn set_mysql(&mut self, addr: &str) {
         self.args.push("--upstream-db-url".to_string());
         self.args.push(addr.to_string());
