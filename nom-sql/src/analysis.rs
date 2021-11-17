@@ -4,6 +4,7 @@ use maplit::hashset;
 use std::collections::{HashSet, VecDeque};
 use std::iter;
 
+use crate::create::CreateQueryCacheStatement;
 use crate::{Column, Expression, FunctionExpression, InValue, SqlQuery, Table};
 
 pub trait ReferredTables {
@@ -16,7 +17,10 @@ impl ReferredTables for SqlQuery {
             SqlQuery::CreateTable(ref ctq) => hashset![ctq.table.clone()],
             SqlQuery::AlterTable(ref atq) => hashset![atq.table.clone()],
             SqlQuery::Insert(ref iq) => hashset![iq.table.clone()],
-            SqlQuery::Select(ref sq) => sq.tables.iter().cloned().collect(),
+            SqlQuery::Select(ref sq)
+            | SqlQuery::CreateQueryCache(CreateQueryCacheStatement {
+                statement: ref sq, ..
+            }) => sq.tables.iter().cloned().collect(),
             SqlQuery::CompoundSelect(ref csq) => csq
                 .selects
                 .iter()

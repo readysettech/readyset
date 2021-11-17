@@ -746,7 +746,43 @@ impl NoriaConnector {
     }
 }
 
+fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
+    format!("q_{:x}", utils::hash_select_query(statement))
+}
+
 impl NoriaConnector {
+    pub async fn create_view(
+        &mut self,
+        name: Option<&str>,
+        statement: &nom_sql::SelectStatement,
+    ) -> ReadySetResult<()> {
+        let name = name.map_or_else(|| Cow::Owned(generate_query_name(statement)), Cow::Borrowed);
+        noria_await!(
+            self.inner.get_mut().await?,
+            self.inner
+                .get_mut()
+                .await?
+                .noria
+                .extend_recipe(&format!("QUERY {}: {}", name, statement))
+        )?;
+
+        // If the query is already in there with a different name, we don't need to make a new name
+        // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
+        // be hitting noria anyway
+        self.tl_cached
+            .entry(statement.clone())
+            .or_insert_with(|| name.clone().into_owned());
+        tokio::task::block_in_place(|| {
+            self.cached
+                .write()
+                .unwrap()
+                .entry(statement.clone())
+                .or_insert_with(|| name.clone().into_owned());
+        });
+
+        Ok(())
+    }
+
     async fn get_view(
         &mut self,
         q: &nom_sql::SelectStatement,
@@ -763,8 +799,7 @@ impl NoriaConnector {
                 let qname = match qname_opt {
                     Some(qname) => qname,
                     None => {
-                        let qh = utils::hash_select_query(q);
-                        let qname = format!("q_{:x}", qh);
+                        let qname = generate_query_name(q);
 
                         // add the query to Noria
                         if create_if_not_exist {

@@ -12,7 +12,9 @@ pub use self::common::{
     Double, FieldDefinitionExpression, Float, ItemPlaceholder, Literal, SqlType, TableKey,
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
-pub use self::create::{CreateTableStatement, CreateViewStatement, SelectSpecification};
+pub use self::create::{
+    CreateQueryCacheStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
+};
 pub use self::delete::DeleteStatement;
 pub use self::dialect::Dialect;
 pub use self::explain::ExplainStatement;
