@@ -229,6 +229,12 @@ Resources:
       ResourceSignal:
         Count: !Ref ReadySetAdapterNodes
         Timeout: PT20M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        WaitOnResourceSignals: true
+        PauseTime: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetPostgreSQLAdapterLC
@@ -395,6 +401,12 @@ Resources:
       ResourceSignal:
         Count: !Ref ReadySetServerNodes
         Timeout: PT20M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        WaitOnResourceSignals: true
+        PauseTime: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ReadySetServerLC

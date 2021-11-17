@@ -154,6 +154,12 @@ Resources:
       ResourceSignal:
         Count: !Ref ConsulServerNodes
         Timeout: PT20M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        WaitOnResourceSignals: true
+        PauseTime: PT20M
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       LaunchConfigurationName: !Ref ConsulServerLC
