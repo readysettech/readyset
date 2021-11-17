@@ -1407,9 +1407,7 @@ impl Leader {
             Ok(r) => {
                 let _old = self.recipe.clone();
                 let old = mem::replace(&mut self.recipe, Recipe::blank_with_config_from(&_old));
-                let new = old
-                    .replace(r)
-                    .map_err(|e| internal_err(format!("recipe replace failed: {}", e)))?;
+                let new = old.replace(r);
                 match self.apply_recipe(new).await {
                     Ok(x) => {
                         self.replication_offset = r_txt_spec.replication_offset.clone();
