@@ -212,7 +212,6 @@ mod controller;
 mod data;
 mod data_serde;
 mod data_text_types;
-mod map;
 pub mod metrics;
 mod table;
 pub mod util;
@@ -308,7 +307,6 @@ pub use crate::data::{
     TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
 };
 pub use crate::data_text_types::{Text, TinyText};
-pub use crate::map::Map;
 pub use crate::table::{Table, TableRequest};
 pub use crate::view::View;
 

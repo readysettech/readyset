@@ -32,6 +32,7 @@ pub mod prelude;
 pub mod state; // pub for doctests
 
 mod domain;
+mod node_map;
 mod processing;
 
 use derivative::Derivative;
@@ -50,6 +51,7 @@ pub type DomainConfig = domain::Config;
 
 pub use crate::domain::{Domain, DomainBuilder, Index};
 pub use crate::node::special::PostLookup;
+pub use crate::node_map::NodeMap;
 pub use crate::payload::{DomainRequest, Packet};
 pub use crate::processing::SuggestedIndex;
 

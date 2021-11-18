@@ -9,7 +9,6 @@ pub use self::local::*;
 pub use self::records::*;
 pub use noria::internal::{Index, IndexType};
 pub use noria::DataType;
-pub use noria::Map;
 use petgraph::prelude::*;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
