@@ -649,4 +649,11 @@ impl ControllerHandle {
     ) -> impl Future<Output = ReadySetResult<Option<ReplicationOffset>>> + '_ {
         self.rpc("replication_offset", ())
     }
+
+    /// Get a list of all current tables node indexes that are involved in snapshotting.
+    pub fn snapshotting_tables(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
+        self.rpc("snapshotting_tables", ())
+    }
 }

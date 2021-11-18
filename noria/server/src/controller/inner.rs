@@ -396,6 +396,12 @@ impl Leader {
                 let res = futures::executor::block_on(self.replication_offset())?;
                 return_serialized!(res);
             }
+            (Method::POST, "/snapshotting_tables") => {
+                // this method can't be `async` since `Leader` isn't Send because `Graph`
+                // isn't Send :(
+                let res = futures::executor::block_on(self.snapshotting_tables())?;
+                return_serialized!(res);
+            }
             _ => Err(ReadySetError::UnknownEndpoint),
         }
     }
@@ -927,6 +933,23 @@ impl Leader {
                 let base = &self.ingredients[n];
                 assert!(base.is_base());
                 (base.name().to_owned(), n)
+            })
+            .collect()
+    }
+
+    /// Transform a list of node indices into a list of table names.
+    fn tables_from_nodes(&self, nodes: HashSet<usize>) -> HashSet<String> {
+        self.ingredients
+            .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
+            .filter_map(|n| {
+                if nodes.contains(&n.index()) {
+                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
+                    let base = &self.ingredients[n];
+                    debug_assert!(base.is_base());
+                    Some(base.name().to_owned())
+                } else {
+                    None
+                }
             })
             .collect()
     }
@@ -1777,24 +1800,7 @@ impl Leader {
     async fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
         // Collect a *unique* list of domains that might contain base tables, to avoid sending
         // multiple requests to a domain that happens to contain multiple base tables
-        #[allow(clippy::indexing_slicing)] // inputs returns valid node indices
-        let domains = self
-            .inputs()
-            .values()
-            .map(|ni| self.ingredients[*ni].domain())
-            .collect::<HashSet<_>>();
-
-        // HACK(eta): validate that all of the domains exist. Doing this inside the future
-        // combinator hellscape below is unwieldy enough to merit maybe introducing a TOCTOU bug :P
-
-        for di in domains.iter() {
-            if !self.domains.contains_key(di) {
-                return Err(ReadySetError::NoSuchDomain {
-                    domain_index: di.index(),
-                    shard: 0,
-                });
-            }
-        }
+        let domains = self.domains_with_base_tables().await?;
 
         stream::iter(domains)
             .map(|domain| {
@@ -1823,5 +1829,54 @@ impl Leader {
                 },
             )
             .await
+    }
+
+    /// Collects a unique list of domains that might contain base tables. Errors out if a domain
+    /// retrieved does not appears in self.domains.
+    async fn domains_with_base_tables(&self) -> ReadySetResult<HashSet<DomainIndex>> {
+        #[allow(clippy::indexing_slicing)] // inputs returns valid node indices
+        let domains = self
+            .inputs()
+            .values()
+            .map(|ni| self.ingredients[*ni].domain())
+            .collect::<HashSet<_>>();
+
+        for di in domains.iter() {
+            if !self.domains.contains_key(di) {
+                return Err(ReadySetError::NoSuchDomain {
+                    domain_index: di.index(),
+                    shard: 0,
+                });
+            }
+        }
+
+        Ok(domains)
+    }
+
+    /// Returns a list of all table names that are currently involved in snapshotting.
+    pub async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<String>> {
+        // Collect a *unique* list of domains that might contain base tables, to avoid sending
+        // multiple requests to a domain that happens to contain multiple base tables
+        let domains = self.domains_with_base_tables().await?;
+
+        let table_indices: Vec<usize> = stream::iter(domains)
+            .map(|domain| {
+                #[allow(clippy::indexing_slicing)] // validated above
+                self.domains[&domain].send_to_healthy::<Vec<usize>>(
+                    DomainRequest::RequestSnapshottingTables,
+                    &self.workers,
+                )
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS)
+            .try_fold(vec![], |acc: Vec<usize>, table_indices| async move {
+                Ok(table_indices
+                    .into_iter()
+                    .flatten()
+                    .chain(acc.into_iter())
+                    .collect())
+            })
+            .await?;
+
+        Ok(self.tables_from_nodes(table_indices.into_iter().collect()))
     }
 }
