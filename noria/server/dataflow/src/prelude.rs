@@ -3,6 +3,7 @@
 //! It is expected that files within the dataflow crate have use prelude::* at the top, and the
 //! same applies to external users of the dataflow crate. Therefore, pay attention to whether `pub`
 //! or `crate` is used.
+
 use std::cell;
 
 // core types
@@ -17,11 +18,12 @@ pub(crate) use crate::payload::ReplayPathSegment;
 pub(crate) use noria::PacketPayload;
 
 // domain local state
+pub use crate::node_map::NodeMap;
 pub(crate) use crate::state::{
     LookupResult, MemoryState, PersistentState, RecordResult, Row, Rows, State,
 };
-pub(crate) type StateMap = Map<Box<dyn State>>;
-pub type DomainNodes = Map<cell::RefCell<Node>>;
+pub(crate) type StateMap = NodeMap<Box<dyn State>>;
+pub type DomainNodes = NodeMap<cell::RefCell<Node>>;
 pub(crate) type ReplicaAddr = (DomainIndex, usize);
 
 // public exports

@@ -283,12 +283,12 @@ pub struct Domain {
 
     not_ready: HashSet<LocalNodeIndex>,
 
-    ingress_inject: Map<(usize, Vec<DataType>)>,
+    ingress_inject: NodeMap<(usize, Vec<DataType>)>,
 
     persistence_parameters: PersistenceParameters,
 
     mode: DomainMode,
-    waiting: Map<Waiting>,
+    waiting: NodeMap<Waiting>,
     /// Contains information about active upquery remaps (i.e. when the
     /// [`Ingredient::handle_upquery`] API is used). These result in lots of secondary upqueries to
     /// fill the hole of the original upquery that was remapped, and the state required is stored
@@ -315,7 +315,7 @@ pub struct Domain {
     /// These include the whole replay path, not just the parts relevant to this domain, and don't
     /// include the domain-specific information in `ReplayPath` and `ReplayPathSegment`.
     raw_replay_paths: HashMap<Tag, Vec<OptColumnRef>>,
-    reader_triggered: Map<HashSet<KeyComparison, RandomState>>,
+    reader_triggered: NodeMap<HashSet<KeyComparison, RandomState>>,
 
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
     /// as part of the implementation of materialization frontiers
@@ -326,7 +326,7 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: VecDeque<TimedPurge>,
 
-    replay_paths_by_dst: Map<HashMap<Vec<usize>, Vec<Tag>>>,
+    replay_paths_by_dst: NodeMap<HashMap<Vec<usize>, Vec<Tag>>>,
     /// If a (node, cols) pair appears in this set, those columns are generated
     /// and require use of the `Ingredient::handle_upquery` API.
     generated_columns: HashSet<(LocalNodeIndex, Vec<usize>)>,

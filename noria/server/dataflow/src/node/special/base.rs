@@ -571,7 +571,7 @@ mod tests {
                 &PersistenceParameters::default(),
             ));
 
-            let mut state_map = Map::new();
+            let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
             assert_eq!(
@@ -616,7 +616,7 @@ mod tests {
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
             state.process_records(&mut recs, None, None);
 
-            let mut state_map = Map::new();
+            let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
             assert_eq!(
@@ -661,7 +661,7 @@ mod tests {
             let mut recs = vec![Record::Positive(vec![2.into(), 3.into(), 4.into()])].into();
             state.process_records(&mut recs, None, None);
 
-            let mut state_map = Map::new();
+            let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
             assert_eq!(
