@@ -20,6 +20,7 @@ enum Subcommand {
         opts: commands::presigned_docker_image_urls::Opts,
     },
     Bisect(Box<commands::bisect::BisectCommand>),
+    MockPrometheusPushGateway,
 }
 
 #[derive(Parser, Debug)]
@@ -61,5 +62,6 @@ fn main() -> Result<()> {
         }
         Subcommand::PreCache => commands::pre_cache::run(),
         Subcommand::Bisect(opts) => commands::bisect::run(*opts),
+        Subcommand::MockPrometheusPushGateway => Ok(commands::mock_prometheus_push_gateway::run()?),
     }
 }
