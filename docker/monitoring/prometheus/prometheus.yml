@@ -7,5 +7,10 @@ scrape_configs:
   - job_name: 'prometheus'
     scrape_interval: 5s
     static_configs:
+      - targets: ['localhost:9092']
+    honor_labels: true
+  - job_name: 'pushgateway'
+    scrape_interval: 5s
+    static_configs:
       - targets: ['localhost:9091']
     honor_labels: true

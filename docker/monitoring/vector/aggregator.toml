@@ -31,4 +31,4 @@ encoding.codec = "text"
 [sinks.prometheus]
 type = "prometheus_exporter"
 inputs = ["metrics"]
-address = "0.0.0.0:9091"
+address = "0.0.0.0:9092"

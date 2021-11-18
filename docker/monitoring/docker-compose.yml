@@ -23,6 +23,9 @@ services:
       start_period: 5s 
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  pushgateway:
+    image: prom/pushgateway
+    network_mode: "host"
   grafana:
     image: grafana/grafana:8.0.6
     network_mode: "host"
