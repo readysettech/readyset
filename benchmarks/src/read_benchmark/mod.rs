@@ -13,6 +13,7 @@ use mysql_async::Row;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::ArbitraryQueryParameters;
 
@@ -46,13 +47,17 @@ pub struct ReadBenchmarkParams {
 pub struct ReadBenchmark {
     #[clap(flatten)]
     params: ReadBenchmarkParams,
+
+    /// Install and generate from an arbitrary schema.
+    #[clap(flatten)]
+    data_generator: DataGenerator,
 }
 
 #[async_trait]
 impl BenchmarkControl for ReadBenchmark {
     async fn setup(&self) -> Result<()> {
-        // TODO(justin): Support data generation before benchmarking.
-        Ok(())
+        self.data_generator.install().await?;
+        self.data_generator.generate().await
     }
 
     async fn benchmark(&self) -> Result<()> {

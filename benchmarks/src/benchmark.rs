@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use enum_dispatch::enum_dispatch;
 
+#[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]
 #[derive(clap::Subcommand)]
 pub enum Benchmark {

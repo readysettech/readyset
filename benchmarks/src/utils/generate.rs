@@ -1,15 +1,63 @@
 //! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`,
 //! and generate batches of data to write to the connection.
 
-use super::spec::DatabaseGenerationSpec;
+use super::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use anyhow::{Context, Result};
+use clap::{Parser, ValueHint};
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseConnection;
+use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
+use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::io::{stdout, Write};
+use std::path::PathBuf;
 
 const MAX_BATCH_ROWS: usize = 10000;
+
+#[derive(Parser, Clone)]
+pub struct DataGenerator {
+    /// Path to the desired database SQL schema.
+    #[clap(long, value_hint = ValueHint::AnyPath)]
+    schema: PathBuf,
+
+    /// MySQL database connection string. This parameter is kept separate
+    /// from other benchmarks MySQL parameter as data generation typically
+    /// will go directly to the upstream MySQL database.
+    #[clap(long)]
+    database_url: DatabaseURL,
+
+    /// Change or assign values to user variables in the provided schema.
+    /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
+    #[clap(long, default_value = "{}")]
+    var_overrides: serde_json::Value,
+}
+
+impl DataGenerator {
+    pub async fn install(&self) -> anyhow::Result<()> {
+        let mut conn = self.database_url.connect().await?;
+        let ddl = std::fs::read_to_string(self.schema.as_path())?;
+        conn.query_drop(ddl).await
+    }
+
+    pub async fn generate(&self) -> anyhow::Result<()> {
+        let user_vars: HashMap<String, String> = self
+            .var_overrides
+            .as_object()
+            .expect("var-overrides should be formatted as a json map")
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.as_str().unwrap().to_owned()))
+            .collect();
+
+        let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
+        let database_spec = DatabaseGenerationSpec::new(schema);
+        let mut conn = self.database_url.connect().await?;
+        load(&mut conn, database_spec).await?;
+
+        Ok(())
+    }
+}
 
 pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random

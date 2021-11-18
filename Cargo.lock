@@ -462,6 +462,7 @@ dependencies = [
  "enum_dispatch",
  "futures 0.3.17",
  "hdrhistogram",
+ "metrics",
  "mysql",
  "mysql_async",
  "nom 5.1.2",
