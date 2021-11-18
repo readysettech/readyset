@@ -235,11 +235,14 @@ Resources:
 
   ReadySetMySQLAdapterASG:
     CreationPolicy:
+      AutoScalingCreationPolicy:
+        MinSuccessfulInstancesPercent: 10
       ResourceSignal:
         Count: !Ref ReadySetAdapterNodes
         Timeout: PT20M
     UpdatePolicy:
       AutoScalingRollingUpdate:
+        MinSuccessfulInstancesPercent: 10
         MinInstancesInService: 1
         MaxBatchSize: 1
         WaitOnResourceSignals: true
@@ -412,11 +415,14 @@ Resources:
 
   ReadySetServerASG:
     CreationPolicy:
+      AutoScalingCreationPolicy:
+        MinSuccessfulInstancesPercent: 10
       ResourceSignal:
         Count: !Ref ReadySetServerNodes
         Timeout: PT20M
     UpdatePolicy:
       AutoScalingRollingUpdate:
+        MinSuccessfulInstancesPercent: 10
         MinInstancesInService: 1
         MaxBatchSize: 1
         WaitOnResourceSignals: true
