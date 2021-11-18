@@ -537,10 +537,10 @@ Outputs:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetMySQLAdapterNLB.DNSName
     Export:
-      Name: ReadySetAdapterNLBDNSName
+      Name: ReadySetMySQLAdapterNLBDNSName
 
   ReadySetMySQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Export:
-      Name: ReadySetPostgreSQLVPCEndpointService
+      Name: ReadySetMySQLVPCEndpointService

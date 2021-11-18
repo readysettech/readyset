@@ -520,7 +520,7 @@ Outputs:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetPostgreSQLAdapterNLB.DNSName
     Export:
-      Name: ReadySetAdapterNLBDNSName
+      Name: ReadySetPostgreSQLAdapterNLBDNSName
 
   ReadySetPostgreSQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
