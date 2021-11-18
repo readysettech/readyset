@@ -7492,4 +7492,5 @@ async fn forbid_full_materialization() {
     assert!(err
         .to_string()
         .contains("Creation of fully materialized query is forbidden"));
+    assert!(err.caused_by_unsupported());
 }

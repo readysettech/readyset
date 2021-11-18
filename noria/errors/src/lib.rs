@@ -509,7 +509,7 @@ pub enum ReadySetError {
 impl ReadySetError {
     fn any_cause<F>(&self, f: F) -> bool
     where
-        F: Fn(&Self) -> bool,
+        F: Fn(&Self) -> bool + Clone,
     {
         // TODO(grfn): Once https://github.com/rust-lang/rust/issues/58520 stabilizes, this can be
         // rewritten to use that
@@ -518,7 +518,7 @@ impl ReadySetError {
                 .source()
                 .and_then(|e| e.downcast_ref::<Box<ReadySetError>>())
                 .iter()
-                .any(|e| f(*e))
+                .any(move |e| e.any_cause(f.clone()))
     }
 
     /// Returns `true` if the error is an [`UnparseableQuery`].
@@ -834,7 +834,7 @@ impl From<Size0Error> for ReadySetError {
 
 #[cfg(test)]
 mod test {
-    use crate::{internal, ReadySetResult};
+    use crate::{internal, ReadySetError, ReadySetResult};
 
     #[test]
     #[should_panic(expected = "errors/src/lib.rs")]
@@ -843,5 +843,16 @@ mod test {
             internal!("honk")
         }
         example().unwrap();
+    }
+
+    #[test]
+    fn caused_by_unsupported_two_deep() {
+        let err = ReadySetError::RpcFailed {
+            during: "test".to_owned(),
+            source: Box::new(ReadySetError::MigrationPlanFailed {
+                source: Box::new(ReadySetError::Unsupported("Test".to_owned())),
+            }),
+        };
+        assert!(err.caused_by_unsupported());
     }
 }
