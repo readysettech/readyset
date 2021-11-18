@@ -895,6 +895,10 @@ impl PersistentState {
                 .collect()
         })
     }
+
+    pub fn is_snapshotting(&self) -> bool {
+        self.snapshot_mode.is_enabled()
+    }
 }
 
 // SliceTransforms are used to create prefixes of all inserted keys, which can then be used for

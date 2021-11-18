@@ -372,6 +372,16 @@ impl Domain {
         self.shard.unwrap_or(0)
     }
 
+    fn snapshotting_base_nodes(&self) -> Vec<usize> {
+        self.state
+            .iter()
+            .filter_map(|(idx, s)| match s.as_persistent() {
+                Some(p_state) if p_state.is_snapshotting() => Some(idx.id()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Initiate a replay for a miss represented by the given keys and column indices in the given
     /// node.
     ///
@@ -1833,6 +1843,9 @@ impl Domain {
             }
             DomainRequest::RequestReplicationOffset => {
                 Ok(Some(bincode::serialize(&self.replication_offset()?)?))
+            }
+            DomainRequest::RequestSnapshottingTables => {
+                Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
             }
             DomainRequest::Packet(pkt) => {
                 self.handle_packet(Box::new(pkt), executor)?;
