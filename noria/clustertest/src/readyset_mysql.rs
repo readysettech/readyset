@@ -182,14 +182,14 @@ async fn mirror_prepare_exec_test() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn live_qca_sanity_check() {
-    let cluster_name = "ct_live_qca_sanity_check";
+async fn async_migrations_sanity_check() {
+    let cluster_name = "ct_async_migrations_sanity_check";
     let mut deployment = DeploymentParams::new(cluster_name);
     deployment.add_server(ServerParams::default());
     deployment.deploy_mysql();
     deployment.deploy_mysql_adapter();
-    // Enable live QCA with an interval of 500ms.
-    deployment.enable_live_qca(500);
+    // Enable async migrations with an interval of 500ms.
+    deployment.enable_async_migrations(500);
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
@@ -220,7 +220,7 @@ async fn live_qca_sanity_check() {
         .await
     );
 
-    // Sleep so QCA has time to perform the migration..
+    // Sleep so we have time to perform the migration async.
     sleep(Duration::from_secs(2)).await;
 
     assert!(
