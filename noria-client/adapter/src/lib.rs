@@ -14,6 +14,7 @@ use clap::Parser;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use maplit::hashmap;
+use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::http_router::NoriaAdapterHttpRouter;
 use noria_client::migration_handler::MigrationHandler;
@@ -261,11 +262,10 @@ where
 
         let prometheus_handle = if options.prometheus_metrics {
             let _guard = rt.enter();
-            let database_label: noria_client_metrics::recorded::DatabaseType =
-                self.database_type.into();
+            let database_label: noria_client_metrics::DatabaseType = self.database_type.into();
 
             let recorder = PrometheusBuilder::new()
-                .add_global_label("database_type", database_label)
+                .add_global_label("upstream_db_type", database_label)
                 .add_global_label("deployment", &options.deployment)
                 .build();
 
@@ -281,11 +281,7 @@ where
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log {
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
-            rt.spawn(query_logger(
-                qlog_receiver,
-                self.database_type,
-                shutdown_recv,
-            ));
+            rt.spawn(query_logger(qlog_receiver, shutdown_recv));
             Some(qlog_sender)
         } else {
             None
@@ -555,13 +551,9 @@ async fn reconcile_endpoint_registration(
 /// Async task that logs query stats.
 async fn query_logger(
     mut receiver: UnboundedReceiver<QueryExecutionEvent>,
-    db_type: DatabaseType,
     mut shutdown_recv: broadcast::Receiver<()>,
 ) {
     let _span = info_span!("query-logger");
-
-    let database_label: noria_client_metrics::recorded::DatabaseType = db_type.into();
-    let database_label = String::from(database_label);
 
     loop {
         select! {
@@ -579,12 +571,25 @@ async fn query_logger(
                         _ => "".to_string()
                     };
 
+                    if let Some(parse) = event.parse_duration {
+                        metrics::histogram!(
+                            noria_client_metrics::recorded::QUERY_LOG_PARSE_TIME,
+                            parse,
+                            "query" => query.clone(),
+                            "event_type" => SharedString::from(event.event),
+                            "query_type" => SharedString::from(event.sql_type)
+                        );
+
+                    }
+
                     if let Some(noria) = event.noria_duration {
                         metrics::histogram!(
                             noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
                             noria.as_secs_f64(),
                             "query" => query.clone(),
-                            "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
+                            "database_type" => String::from(noria_client_metrics::DatabaseType::Noria),
+                            "event_type" => SharedString::from(event.event),
+                            "query_type" => SharedString::from(event.sql_type)
                         );
                     }
 
@@ -593,7 +598,9 @@ async fn query_logger(
                             noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
                             upstream.as_secs_f64(),
                             "query" => query.clone(),
-                            "database_type" => database_label.clone()
+                            "database_type" => String::from(noria_client_metrics::DatabaseType::Mysql),
+                            "event_type" => SharedString::from(event.event),
+                            "query_type" => SharedString::from(event.sql_type)
                         );
                     }
                 } else {
@@ -608,11 +615,11 @@ async fn query_logger(
     }
 }
 
-impl From<DatabaseType> for noria_client_metrics::recorded::DatabaseType {
+impl From<DatabaseType> for noria_client_metrics::DatabaseType {
     fn from(database_type: DatabaseType) -> Self {
         match database_type {
-            DatabaseType::Mysql => noria_client_metrics::recorded::DatabaseType::Mysql,
-            DatabaseType::Psql => noria_client_metrics::recorded::DatabaseType::Psql,
+            DatabaseType::Mysql => noria_client_metrics::DatabaseType::Mysql,
+            DatabaseType::Psql => noria_client_metrics::DatabaseType::Psql,
         }
     }
 }

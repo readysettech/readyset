@@ -9,7 +9,6 @@ use std::{
     time::Instant,
 };
 
-use metrics::histogram;
 use nom_sql::{CreateQueryCacheStatement, Dialect, DropQueryCacheStatement};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, span, trace, warn, Level};
@@ -19,8 +18,7 @@ use nom_sql::{
 };
 use noria::consistency::Timestamp;
 use noria::{ColumnSchema, DataType};
-use noria_client_metrics::recorded::SqlQueryType;
-use noria_client_metrics::{EventType, QueryExecutionEvent};
+use noria_client_metrics::{EventType, QueryExecutionEvent, SqlQueryType};
 use noria_errors::{
     internal, internal_err, unsupported,
     ReadySetError::{self, PreparedStatementMissing},
@@ -782,6 +780,7 @@ where
 
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => {
+                event.sql_type = SqlQueryType::Read;
                 if self.upstream.is_some() {
                     if self.async_migrations() {
                         // The query status cache is guaranteed to exist if `async_migrations` is enabled.
@@ -831,7 +830,9 @@ where
                 }
             }
             nom_sql::SqlQuery::Insert(_) => {
+                event.sql_type = SqlQueryType::Write;
                 if let Some(ref mut upstream) = self.upstream {
+                    let handle = event.start_timer();
                     let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
                     handle.set_upstream_duration();
                     res
@@ -844,8 +845,12 @@ where
                 }
             }
             nom_sql::SqlQuery::Update(_) => {
+                event.sql_type = SqlQueryType::Write;
                 if let Some(ref mut upstream) = self.upstream {
-                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                    let handle = event.start_timer();
+                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
+                    handle.set_upstream_duration();
+                    res
                 } else {
                     Ok(PrepareResult::Noria(
                         self.noria
@@ -855,8 +860,12 @@ where
                 }
             }
             nom_sql::SqlQuery::Delete(ref stmt) => {
+                event.sql_type = SqlQueryType::Write;
                 if let Some(ref mut upstream) = self.upstream {
-                    upstream.prepare(query).await.map(PrepareResult::Upstream)
+                    let handle = event.start_timer();
+                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
+                    handle.set_upstream_duration();
+                    res
                 } else {
                     Ok(PrepareResult::Noria(
                         self.noria.prepare_delete(stmt, self.prepared_count).await?,
@@ -995,6 +1004,7 @@ where
             Some(prep) => {
                 match prep.as_ref() {
                     SqlQuery::Select(ref stmt) => {
+                        event.sql_type = SqlQueryType::Read;
                         if self.async_migrations() {
                             // The query status cache is guaranteed to exist if `async_migrations` is enabled.
                             #[allow(clippy::unwrap_used)]
@@ -1059,6 +1069,7 @@ where
                         }
                     }
                     SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
+                        event.sql_type = SqlQueryType::Write;
                         if self.upstream.is_some() {
                             match prepared_statement.upstream {
                                 Some(upstream_id) => {
@@ -1112,9 +1123,9 @@ where
         query: &str,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let start = time::Instant::now();
+        let start = Instant::now();
         let slowlog = self.slowlog;
-        let mut handle = event.start_timer();
+        let handle = event.start_timer();
 
         if self.is_in_tx() {
             let res = self.query_fallback(query).await;
@@ -1126,7 +1137,7 @@ where
         }
 
         let parse_result = self.parse_query(query);
-        let parse_time = start.elapsed().as_micros();
+        handle.set_parse_duration();
 
         // fallback to upstream database on query parse failure
         let parsed_query = match parse_result {
@@ -1139,6 +1150,7 @@ where
                 // TODO(Dan): Implement RYW for query_fallback
                 if self.upstream.is_some() {
                     error!(error = %e, "Error received from noria, sending query to fallback");
+                    let handle = event.start_timer();
                     let res = self.query_fallback(query).await;
                     if slowlog {
                         warn_on_slow_query(&start, query);
@@ -1157,6 +1169,8 @@ where
             return if self.upstream.is_some() {
                 // Fallback is enabled, so route this query to the underlying
                 // database.
+                //
+                let handle = event.start_timer();
                 let res = self.query_fallback(query).await;
                 if slowlog {
                     warn_on_slow_query(&start, query);
@@ -1193,17 +1207,10 @@ where
                 if let Some(upstream) = &mut self.upstream {
                     if self.mirror_ddl {
                         if let Err(e) = self.noria.$noria_method($stmt).await {
-                            drop(handle);
                             event.set_noria_error(&e);
-                        } else {
-                            handle.set_noria_duration();
                         }
-                        handle = event.start_timer();
                     }
                     let upstream_res = upstream.query(query).await;
-                    // TODO(peter): Implement logic to detect if results differed.
-                    handle.set_upstream_duration();
-
                     Ok(QueryResult::Upstream(upstream_res?))
                 } else {
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
@@ -1214,13 +1221,14 @@ where
         // Upstream reads are tried when noria reads produce an error. Upstream writes are done by
         // default when the upstream connector is present.
         let async_migrations = self.async_migrations();
+        let handle = event.start_timer();
         let res = if let Some(ref mut upstream) = self.upstream {
             match parsed_query.as_ref() {
                 nom_sql::SqlQuery::Select(ref stmt) => {
+                    event.sql_type = SqlQueryType::Read;
                     if self.query_log_ad_hoc_queries {
                         event.query = Some(parsed_query.clone());
                     }
-                    let execution_timer = Instant::now();
                     let res = if async_migrations {
                         // The query status cache is guarenteed to exist if `async_migrations` is enabled.
                         #[allow(clippy::unwrap_used)]
@@ -1264,20 +1272,13 @@ where
                         self.cascade_read(stmt.clone(), query, self.ticket.clone(), event)
                             .await
                     };
-                    //TODO(Dan): Implement fallback execution timing
-                    let execution_time = execution_timer.elapsed().as_micros();
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_time,
-                        SqlQueryType::Read,
-                    );
                     res
                 }
                 nom_sql::SqlQuery::Insert(InsertStatement { table: t, .. })
                 | nom_sql::SqlQuery::Update(UpdateStatement { table: t, .. })
                 | nom_sql::SqlQuery::Delete(DeleteStatement { table: t, .. }) => {
-                    let execution_timer = Instant::now();
-
+                    event.sql_type = SqlQueryType::Write;
+                    let handle = event.start_timer();
                     // Update ticket if RYW enabled
                     let query_result = if cfg!(feature = "ryw") {
                         if let Some(timestamp_service) = &mut self.timestamp_client {
@@ -1308,13 +1309,6 @@ where
                         upstream.query(query).await
                     };
                     handle.set_upstream_duration();
-
-                    measure_parse_and_execution_time(
-                        parse_time,
-                        execution_timer.elapsed().as_micros(),
-                        SqlQueryType::Write,
-                    );
-
                     Ok(QueryResult::Upstream(query_result?))
                 }
 
@@ -1382,30 +1376,19 @@ where
             // Interacting directly with Noria writer (No RYW support)
             //
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
-            let mut execution_timer = None;
-
+            // TODO: Implement event execution metrics for Noria without upstream.
             let res = match parsed_query.as_ref() {
                 SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                 SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await,
 
                 SqlQuery::Select(q) => {
-                    execution_timer = Some((Instant::now(), SqlQueryType::Read));
                     self.noria
                         .handle_select(q.clone(), self.ticket.clone(), true)
                         .await
                 }
-                SqlQuery::Insert(q) => {
-                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
-                    self.noria.handle_insert(q).await
-                }
-                SqlQuery::Update(q) => {
-                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
-                    self.noria.handle_update(q).await
-                }
-                SqlQuery::Delete(q) => {
-                    execution_timer = Some((Instant::now(), SqlQueryType::Write));
-                    self.noria.handle_delete(q).await
-                }
+                SqlQuery::Insert(q) => self.noria.handle_insert(q).await,
+                SqlQuery::Update(q) => self.noria.handle_update(q).await,
+                SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
                 SqlQuery::CreateQueryCache(CreateQueryCacheStatement { name, statement }) => {
                     self.noria
                         .create_view(name.as_ref().map(|s| s.as_str()), statement)
@@ -1417,7 +1400,6 @@ where
                     Ok(noria_connector::QueryResult::Empty)
                 }
                 SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
-                    execution_timer = Some((Instant::now(), SqlQueryType::Read));
                     self.noria.graphviz(*simplified).await
                 }
                 SqlQuery::Show(ShowStatement::Queries) => self.noria.verbose_outputs().await,
@@ -1426,10 +1408,6 @@ where
                     unsupported!("query type unsupported");
                 }
             }?;
-
-            if let Some((timer, kind)) = execution_timer {
-                measure_parse_and_execution_time(parse_time, timer.elapsed().as_micros(), kind);
-            }
 
             Ok(QueryResult::Noria(res))
         };
@@ -1443,7 +1421,7 @@ where
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let mut query_event = QueryExecutionEvent::new(EventType::Execute);
+        let mut query_event = QueryExecutionEvent::new(EventType::Query);
         let query_logger = self.query_log_sender.clone();
         let res = self.query_inner(query, &mut query_event).await;
 
@@ -1500,21 +1478,4 @@ fn log_query(sender: Option<UnboundedSender<QueryExecutionEvent>>, event: QueryE
             warn!("Error logging query with query logging enabled: {}", e);
         }
     }
-}
-
-fn measure_parse_and_execution_time(
-    parse_time: u128,
-    execution_time: u128,
-    sql_query_type: SqlQueryType,
-) {
-    histogram!(
-        noria_client_metrics::recorded::QUERY_PARSING_TIME,
-        parse_time as f64,
-        "query_type" => sql_query_type
-    );
-    histogram!(
-        noria_client_metrics::recorded::QUERY_EXECUTION_TIME,
-        execution_time as f64,
-        "query_type" => sql_query_type
-    );
 }
