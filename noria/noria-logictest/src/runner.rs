@@ -538,6 +538,7 @@ impl TestScript {
 
                     BackendBuilder::new()
                         .require_authentication(false)
+                        .validate_queries(true, true)
                         .build::<_, $handler>(noria, upstream)
                 }};
             }
