@@ -5,6 +5,7 @@ use noria::ReadySetResult;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span};
 use tracing_futures::Instrument;
 
@@ -169,6 +170,8 @@ impl MySqlReplicator {
 
         info!(rows = %nrows, "Replication started");
 
+        table_mutator.set_snapshot_mode(true).await?;
+
         while let Some(row) = row_stream.next().await.map_err(log_err)? {
             rows.push(row);
             cnt += 1;
@@ -326,26 +329,48 @@ impl MySqlReplicator {
         Ok(())
     }
 
+    async fn dumper_task_for_table(
+        &mut self,
+        noria: &mut noria::ControllerHandle,
+        table_name: String,
+    ) -> ReadySetResult<JoinHandle<(String, ReadySetResult<()>)>> {
+        let span = info_span!("replicating table", table = %table_name);
+        span.in_scope(|| info!("Replicating table"));
+
+        let dumper = self
+            .dump_table(&table_name)
+            .instrument(span.clone())
+            .await?;
+        let table_mutator = noria.table(&table_name).instrument(span.clone()).await?;
+
+        Ok(tokio::spawn(async {
+            (
+                table_name,
+                Self::replicate_table(dumper, table_mutator)
+                    .instrument(span)
+                    .await,
+            )
+        }))
+    }
+
     /// Copy all base tables into noria
     async fn dump_tables(&mut self, noria: &mut noria::ControllerHandle) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
 
         // For each table we spawn a new task to parallelize the replication process somewhat
-        for table_name in self.tables.as_ref().unwrap() {
-            let span = info_span!("replicating table", table = %table_name);
-            span.in_scope(|| info!("Replicating table"));
-
-            let dumper = self.dump_table(table_name).instrument(span.clone()).await?;
-            let mut table_mutator = noria.table(table_name).instrument(span.clone()).await?;
-
-            table_mutator.set_snapshot_mode(true).await?;
-            replication_tasks.push(tokio::spawn(
-                Self::replicate_table(dumper, table_mutator).instrument(span),
-            ));
+        for table_name in self.tables.clone().unwrap() {
+            replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
         }
 
         while let Some(task_result) = replication_tasks.next().await {
-            task_result.unwrap()?; // The unwrap is for the join handle in that case
+            match task_result.unwrap() {
+                // SAFETY: The unwrap is for the join handle in that case
+                (_, Ok(())) => {}
+                (table_name, Err(err)) => {
+                    error!(table = %table_name, error = %err, "Replication failed, retrying");
+                    replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
+                }
+            }
         }
 
         Ok(())
