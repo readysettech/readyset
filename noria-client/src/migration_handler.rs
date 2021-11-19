@@ -8,7 +8,7 @@
 use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::QueryStatusCache;
 use crate::upstream_database::NoriaCompare;
-use crate::{UpstreamDatabase, UpstreamPrepare};
+use crate::UpstreamDatabase;
 use metrics::counter;
 use noria::ReadySetResult;
 use noria_client_metrics::recorded;
@@ -147,12 +147,5 @@ where
                       "Select query may have transiently failed");
             }
         }
-    }
-
-    fn compare_prepare_result(
-        _noria: noria_connector::PrepareResult,
-        _upstream: UpstreamPrepare<DB>,
-    ) -> bool {
-        true
     }
 }
