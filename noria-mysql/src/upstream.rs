@@ -62,13 +62,15 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Column]) -> Result<()
         )));
     }
 
-    for (sch, col) in schema.iter().zip(columns.iter()) {
-        let noria_column_type = convert_column(&sch.spec)?.coltype;
-        if !is_subtype(noria_column_type, col.column_type()) {
-            return Err(Error::ReadySet(ReadySetError::WrongColumnType(
-                format!("{:?}", col.column_type()),
-                format!("{:?}", noria_column_type),
-            )));
+    if cfg!(feature = "schema-check") {
+        for (sch, col) in schema.iter().zip(columns.iter()) {
+            let noria_column_type = convert_column(&sch.spec)?.coltype;
+            if !is_subtype(noria_column_type, col.column_type()) {
+                return Err(Error::ReadySet(ReadySetError::WrongColumnType(
+                    format!("{:?}", col.column_type()),
+                    format!("{:?}", noria_column_type),
+                )));
+            }
         }
     }
 
@@ -357,6 +359,7 @@ mod tests {
         assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 
+    #[cfg(feature = "schema-check")]
     #[test]
     fn compare_different_type_schema() {
         let s: StatementMeta = StatementMeta {

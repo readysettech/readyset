@@ -108,7 +108,7 @@ where
         // Check if we can successfully prepare against noria as well.
         match self.noria.prepare_select(stmt.clone(), 0, true).await {
             Ok(n) => {
-                if cfg!(feature = "migration-schema-check") && self.validate_queries {
+                if self.validate_queries {
                     if let noria_connector::PrepareResult::Select {
                         ref schema,
                         ref params,

@@ -61,13 +61,15 @@ fn schema_column_match(schema: &[ColumnSchema], columns: &[Type]) -> Result<(), 
         )));
     }
 
-    for (sch, col) in schema.iter().zip(columns.iter()) {
-        let noria_type = type_to_pgsql(&sch.spec.sql_type)?;
-        if &noria_type != col {
-            return Err(Error::ReadySet(ReadySetError::WrongColumnType(
-                col.to_string(),
-                noria_type.to_string(),
-            )));
+    if cfg!(feature = "schema-check") {
+        for (sch, col) in schema.iter().zip(columns.iter()) {
+            let noria_type = type_to_pgsql(&sch.spec.sql_type)?;
+            if &noria_type != col {
+                return Err(Error::ReadySet(ReadySetError::WrongColumnType(
+                    col.to_string(),
+                    noria_type.to_string(),
+                )));
+            }
         }
     }
     Ok(())
@@ -348,6 +350,7 @@ mod tests {
         assert!(s.compare(&schema_spec, &param_specs).is_err());
     }
 
+    #[cfg(feature = "schema-check")]
     #[test]
     fn compare_different_type_schema() {
         let s: StatementMeta = StatementMeta {
