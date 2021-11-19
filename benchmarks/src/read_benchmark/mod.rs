@@ -17,6 +17,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::ArbitraryQueryParameters;
+use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -64,6 +65,11 @@ impl BenchmarkControl for ReadBenchmark {
     }
 
     async fn benchmark(&self) -> Result<()> {
+        benchmark_counter!(
+            "read_benchmark.queries_executed",
+            Count,
+            "Number of queries executed in this benchmark run"
+        );
         multi_thread::run_multithread_benchmark::<Self>(self.params.threads, self.params.clone())
             .await
     }
@@ -102,12 +108,26 @@ impl MultithreadBenchmark for ReadBenchmark {
         interval: Duration,
     ) -> Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
+        let mut queries_this_interval = 0;
         for u in results {
+            queries_this_interval += u.queries.len() as u64;
             for l in u.queries {
                 hist.record(u64::try_from(l).unwrap()).unwrap();
+                benchmark_histogram!(
+                    "read_benchmark.query_duration",
+                    Microseconds,
+                    "Duration of queries executed",
+                    l as f64
+                );
             }
         }
+        benchmark_increment_counter!(
+            "read_benchmark.queries_executed",
+            Count,
+            queries_this_interval
+        );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
+        benchmark_histogram!("read_benchmark.qps", Count, "Queries per second", qps);
         println!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,
