@@ -163,6 +163,7 @@ impl TestHandle {
         url: String,
         authority: Arc<Authority>,
     ) -> ReadySetResult<TestHandle> {
+        readyset_logging::init_test_logging();
         let noria = Builder::for_tests()
             .start(Arc::clone(&authority))
             .await
@@ -378,42 +379,41 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         )
         .await?;
 
-    let _res2 = ctx
-        .check_results(
-            "dt_test_view",
-            "Replication",
+    ctx.check_results(
+        "dt_test_view",
+        "Replication",
+        &[
             &[
-                &[
-                    D::Int(0),
-                    D::None,
-                    D::None,
-                    D::None,
-                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
-                ],
-                &[
-                    D::Int(1),
-                    D::None,
-                    D::None,
-                    D::None,
-                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
-                ],
-                &[
-                    D::Int(2),
-                    D::None,
-                    D::None,
-                    D::None,
-                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
-                ],
-                &[
-                    D::Int(3),
-                    D::None,
-                    D::None,
-                    D::None,
-                    D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
-                ],
+                D::Int(0),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
             ],
-        )
-        .await?;
+            &[
+                D::Int(1),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+            ],
+            &[
+                D::Int(2),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+            ],
+            &[
+                D::Int(3),
+                D::None,
+                D::None,
+                D::None,
+                D::Time(MysqlTime::from_hmsus(false, 0, 0, 0, 0).into()),
+            ],
+        ],
+    )
+    .await?;
 
     client.stop().await;
     ctx.stop().await;
