@@ -62,7 +62,7 @@ impl Display for Recipe {
             if *public || name.is_some() {
                 write!(f, ": ")?;
             }
-            writeln!(f, "{}", query)?;
+            writeln!(f, "{};", query)?;
         }
 
         Ok(())
@@ -852,5 +852,14 @@ mod tests {
         let r1_t = Recipe::from_str(r1_txt).unwrap();
         let r1 = r0.replace(r1_t);
         assert_eq!(r1.expressions.len(), 2);
+    }
+
+    #[test]
+    fn display_parses() {
+        let recipe =
+            Recipe::from_str("CREATE TABLE b (a INT);\nQUERY q_0: SELECT a FROM b;").unwrap();
+        let recipe_s = recipe.to_string();
+        let res = Recipe::from_str(&recipe_s).unwrap();
+        assert_eq!(res.expressions().len(), 2);
     }
 }
