@@ -20,8 +20,8 @@ pub const QUERY_PARSING_TIME: &str = "noria-client.parsing_time";
 /// | query_type | The type of query that was being executed. Must be a [`SqlQueryType`] |
 pub const QUERY_EXECUTION_TIME: &str = "noria-client.execution_time";
 
-/// Histogram: The time in microseconds that the database spent
-/// executing a query.
+/// Histogram: The time in seconds that the database spent executing a
+/// query.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
