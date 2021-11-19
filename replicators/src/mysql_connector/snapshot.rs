@@ -172,7 +172,17 @@ impl MySqlReplicator {
 
         table_mutator.set_snapshot_mode(true).await?;
 
-        while let Some(row) = row_stream.next().await.map_err(log_err)? {
+        loop {
+            let row = match row_stream.next().await {
+                Ok(Some(row)) => row,
+                Ok(None) => break,
+                Err(err) if cnt == nrows => {
+                    info!(error = %err, "Error encountered during snapshot, but all rows replicated succesfully");
+                    break;
+                }
+                Err(err) => return Err(err).map_err(log_err),
+            };
+
             rows.push(row);
             cnt += 1;
 
