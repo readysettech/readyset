@@ -45,6 +45,8 @@ const META_KEY: &[u8] = b"meta";
 // The indices themselves are stored in a column family each, with their position in
 // PersistentState::indices as name.
 const DEFAULT_CF: &str = "default";
+// The column family for the primary key. It is always zero, becuase it is always the first index.
+const PK_CF: &str = "0";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 100_000;
@@ -306,8 +308,8 @@ impl State for PersistentState {
         let index_id = self.indices.len().to_string();
 
         tokio::task::block_in_place(|| {
+            self.create_cf(&index_id);
             let db = self.db.as_mut().unwrap();
-            db.create_cf(&index_id, &self.db_opts).unwrap();
             let cf = db.cf_handle(&index_id).unwrap();
 
             // Build the new index for existing values:
@@ -500,15 +502,10 @@ impl PersistentState {
                 if state.indices.is_empty() {
                     // This is the first time we're initializing this PersistentState,
                     // so persist the primary key index right away.
-                    state
-                        .db
-                        .as_mut()
-                        .unwrap()
-                        .create_cf("0", &state.db_opts)
-                        .unwrap();
+                    state.create_cf(PK_CF);
 
                     let persistent_index = PersistentIndex {
-                        column_family: "0".to_string(),
+                        column_family: PK_CF.to_string(),
                         columns: pk.to_vec(),
                     };
 
@@ -525,6 +522,21 @@ impl PersistentState {
     fn db(&self) -> &rocksdb::DB {
         // for the unwrap here, see the note on Self::db
         self.db.as_ref().unwrap()
+    }
+
+    /// Create a new column family
+    fn create_cf(&mut self, cf: &str) {
+        // for the unwrap here, see the note on Self::db
+        self.db
+            .as_mut()
+            .unwrap()
+            .create_cf(cf, &self.db_opts)
+            .unwrap();
+    }
+
+    /// Drop an existing column family
+    fn drop_cf(&mut self, cf: &str) {
+        self.db.as_mut().unwrap().drop_cf(cf).unwrap()
     }
 
     fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
@@ -616,8 +628,30 @@ impl PersistentState {
     /// Enables or disables the snapshot mode. In snapshot mode auto compactions are
     /// disabled and writes don't go to WAL first. When set to false manual compaction
     /// will be triggered, which may block for some time.
+    /// In addition all column families will be dropped prior to entering this mode.
     pub(crate) fn set_snapshot_mode(&mut self, snapshot: SnapshotMode) {
         self.snapshot_mode = snapshot;
+
+        if snapshot.is_enabled() {
+            let main_index = self.indices.first().cloned();
+
+            // Clear the data
+            while let Some(index_to_drop) = self.indices.pop() {
+                self.persist_meta();
+                self.drop_cf(&index_to_drop.column_family);
+            }
+
+            // Recreate the original primary index
+            if let Some(main_index) = main_index {
+                self.create_cf(PK_CF);
+                self.indices.push(main_index);
+                self.persist_meta();
+            }
+
+            self.replication_offset = None; // Remove any replication offset
+            self.persist_meta();
+        }
+
         let opts = &[(
             "disable_auto_compactions",
             if snapshot.is_enabled() {

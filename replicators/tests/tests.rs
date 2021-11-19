@@ -164,10 +164,11 @@ impl TestHandle {
         authority: Arc<Authority>,
     ) -> ReadySetResult<TestHandle> {
         readyset_logging::init_test_logging();
-        let noria = Builder::for_tests()
-            .start(Arc::clone(&authority))
-            .await
-            .unwrap();
+        let mut builder = Builder::for_tests();
+        let mut persistence = noria_server::PersistenceParameters::default();
+        persistence.mode = noria_server::DurabilityMode::DeleteOnExit;
+        builder.set_persistence(persistence);
+        let noria = builder.start(Arc::clone(&authority)).await.unwrap();
 
         let mut handle = TestHandle {
             url,
