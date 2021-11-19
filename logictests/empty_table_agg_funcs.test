@@ -1,7 +1,3 @@
-onlyif mysql
-statement ok
-SET GLOBAL sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''));
-
 statement ok
 CREATE TABLE t1 (id int, PRIMARY KEY(id));
 
@@ -39,6 +35,7 @@ SELECT count(*), max(id) from t1;
 0
 NULL
 
+onlyif noria
 query III nosort
 SELECT count(*), id, number from t2;
 ----
