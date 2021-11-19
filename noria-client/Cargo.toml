@@ -49,4 +49,4 @@ path = "src/lib.rs"
 
 [features]
 ryw = []
-migration-schema-check = []
+schema-check = []
