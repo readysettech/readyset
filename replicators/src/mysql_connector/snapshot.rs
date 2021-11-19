@@ -3,13 +3,20 @@ use mysql::prelude::*;
 use mysql_async as mysql;
 use noria::ReadySetResult;
 use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::fmt::{self, Display};
-use tracing::{debug, info, info_span};
+use tracing::{debug, error, info, info_span};
 use tracing_futures::Instrument;
 
 use super::BinlogPosition;
 
-const BATCH_SIZE: usize = 1024; // How many queries to buffer before pushing to Noria
+const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to Noria
+
+/// Pass the error forward while logging it
+fn log_err<E: Error>(err: E) -> E {
+    error!(error = ?err);
+    err
+}
 
 enum TableKind {
     BaseTable,
@@ -96,9 +103,14 @@ impl MySqlReplicator {
     /// it may seem inefficient but apparently that is the correct way to
     /// replicate a table, and `mysqldump` and `debezium` do just that
     pub async fn dump_table(&self, table: &str) -> mysql::Result<TableDumper> {
-        let conn = self.pool.get_conn().await?;
+        let conn = self.pool.get_conn().await.map_err(log_err)?;
+        let query_count = format!("select count(*) from `{}`", table);
         let query = format!("select * from `{}`", table);
-        Ok(TableDumper { query, conn })
+        Ok(TableDumper {
+            query_count,
+            query,
+            conn,
+        })
     }
 
     /// From MySQL docs:
@@ -143,24 +155,40 @@ impl MySqlReplicator {
         mut table_mutator: noria::Table,
     ) -> ReadySetResult<()> {
         let mut cnt = 0;
-        let mut row_stream = dumper.stream().await?;
+
+        // Query for number of rows first
+        let nrows: usize = dumper
+            .conn
+            .query_first(&dumper.query_count)
+            .await
+            .map_err(log_err)?
+            .unwrap_or(0);
+
+        let mut row_stream = dumper.stream().await.map_err(log_err)?;
         let mut rows = Vec::with_capacity(BATCH_SIZE);
 
-        info!("Replication started");
+        info!(rows = %nrows, "Replication started");
 
-        while let Some(row) = row_stream.next().await? {
+        while let Some(row) = row_stream.next().await.map_err(log_err)? {
             rows.push(row);
             cnt += 1;
 
             if rows.len() == BATCH_SIZE {
                 // We aggregate rows into batches and then send them all to noria
                 let send_rows = std::mem::replace(&mut rows, Vec::with_capacity(BATCH_SIZE));
-                table_mutator.insert_many(send_rows).await?;
+                table_mutator
+                    .insert_many(send_rows)
+                    .await
+                    .map_err(log_err)?;
+            }
+
+            if cnt % 1_000_000 == 0 {
+                info!(rows_replicated = %cnt, "Replication progress");
             }
         }
 
         if !rows.is_empty() {
-            table_mutator.insert_many(rows).await?;
+            table_mutator.insert_many(rows).await.map_err(log_err)?;
         }
 
         info!(rows_replicated = %cnt, "Replication finished");
@@ -304,14 +332,13 @@ impl MySqlReplicator {
 
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
-            let dumper = self.dump_table(table_name).await?;
-            let mut table_mutator = noria.table(table_name).await?;
-
-            table_mutator.set_snapshot_mode(true).await?;
-
             let span = info_span!("replicating table", table = %table_name);
             span.in_scope(|| debug!("Replicating table"));
 
+            let dumper = self.dump_table(table_name).instrument(span.clone()).await?;
+            let mut table_mutator = noria.table(table_name).instrument(span.clone()).await?;
+
+            table_mutator.set_snapshot_mode(true).await?;
             replication_tasks.push(tokio::spawn(
                 Self::replicate_table(dumper, table_mutator).instrument(span),
             ));
@@ -329,6 +356,7 @@ impl MySqlReplicator {
 // This is required because mysql::QueryResult borrows from conn and then
 // we have some hard to solve borrowing issues
 pub struct TableDumper {
+    query_count: String,
     query: String,
     conn: mysql::Conn,
 }

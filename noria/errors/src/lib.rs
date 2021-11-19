@@ -455,7 +455,7 @@ pub enum ReadySetError {
     ReplicationOffsetLogDifferent(String, String),
 
     /// An error that was encountered in the mysql_async crate during snapshot/binlog replication proccess
-    #[error("MySQL Error during replication: {0}")]
+    #[error("Error during replication: {0}")]
     ReplicationFailed(String),
 
     /// There are no available Workers to assign domains to.
@@ -806,7 +806,7 @@ impl From<url::ParseError> for ReadySetError {
 /// and deserialized.
 impl From<mysql_async::Error> for ReadySetError {
     fn from(e: mysql_async::Error) -> ReadySetError {
-        ReadySetError::ReplicationFailed(e.to_string())
+        ReadySetError::ReplicationFailed(format!("MySQL: {}", e))
     }
 }
 
@@ -814,7 +814,7 @@ impl From<mysql_async::Error> for ReadySetError {
 /// and deserialized.
 impl From<tokio_postgres::Error> for ReadySetError {
     fn from(e: tokio_postgres::Error) -> ReadySetError {
-        ReadySetError::ReplicationFailed(e.to_string())
+        ReadySetError::ReplicationFailed(format!("PostgreSQL: {}", e))
     }
 }
 
