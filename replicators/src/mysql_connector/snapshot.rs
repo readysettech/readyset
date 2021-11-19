@@ -261,15 +261,10 @@ impl MySqlReplicator {
 
         // Although the table dumping happens on a connection pool, and not within our transaction,
         // it doesn't matter because we maintain a read lock on all the tables anyway
-        self.dump_tables(noria).await?;
+        self.dump_tables(noria, tx).await?;
         noria
             .set_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
-
-        drop(tx);
-
-        // After the lock is released we want to compact the tables
-        self.finish_snapshot(noria).await?;
 
         Ok(binlog_position)
     }
@@ -284,7 +279,7 @@ impl MySqlReplicator {
     ) -> ReadySetResult<BinlogPosition> {
         // We must hold the locking connection open until replication is finished,
         // if dropped, it would probably remain open in the pool, but we can't risk it
-        let _lock = self.flush_and_read_lock().await?;
+        let lock = self.flush_and_read_lock().await?;
         debug!("Acquired read lock");
 
         let binlog_position = self.get_binlog_position().await?;
@@ -298,37 +293,16 @@ impl MySqlReplicator {
             debug!("Recipe installed");
         }
 
-        self.dump_tables(noria).await?;
+        self.dump_tables(noria, lock).await?;
         noria
             .set_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
 
-        drop(_lock);
-
-        // After the lock is released we want to compact the tables
-        self.finish_snapshot(noria).await?;
-
         Ok(binlog_position)
     }
 
-    async fn finish_snapshot(&self, noria: &mut noria::ControllerHandle) -> ReadySetResult<()> {
-        let mut compacting = FuturesUnordered::new();
-        for table_name in self.tables.as_ref().unwrap() {
-            let mut noria_table = noria.table(table_name).await?;
-            compacting.push(async move {
-                let span = info_span!("Compacting table", table = %table_name);
-                span.in_scope(|| info!("Compacting table"));
-                noria_table.set_snapshot_mode(false).await?;
-                span.in_scope(|| info!("Compacting finished"));
-                ReadySetResult::Ok(())
-            })
-        }
-        while let Some(f) = compacting.next().await {
-            f?;
-        }
-        Ok(())
-    }
-
+    /// Spawns a new tokio task that replicates a given table to noria, returning
+    /// the join handle
     async fn dumper_task_for_table(
         &mut self,
         noria: &mut noria::ControllerHandle,
@@ -354,8 +328,13 @@ impl MySqlReplicator {
     }
 
     /// Copy all base tables into noria
-    async fn dump_tables(&mut self, noria: &mut noria::ControllerHandle) -> ReadySetResult<()> {
+    async fn dump_tables<L>(
+        &mut self,
+        noria: &mut noria::ControllerHandle,
+        _lock: L,
+    ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
+        let mut compacting_tasks = FuturesUnordered::new();
 
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.clone().unwrap() {
@@ -363,14 +342,34 @@ impl MySqlReplicator {
         }
 
         while let Some(task_result) = replication_tasks.next().await {
+            // The unwrap is for the join handle in that case
             match task_result.unwrap() {
-                // SAFETY: The unwrap is for the join handle in that case
-                (_, Ok(())) => {}
+                (table_name, Ok(())) => {
+                    let mut noria_table = noria.table(&table_name).await?;
+                    compacting_tasks.push(tokio::spawn(async move {
+                        let span = info_span!("Compacting table", table = %table_name);
+                        span.in_scope(|| info!("Compacting table"));
+                        noria_table
+                            .set_snapshot_mode(false)
+                            .instrument(span.clone())
+                            .await?;
+                        span.in_scope(|| info!("Compacting finished"));
+                        ReadySetResult::Ok(())
+                    }));
+                }
                 (table_name, Err(err)) => {
                     error!(table = %table_name, error = %err, "Replication failed, retrying");
                     replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
                 }
             }
+        }
+
+        // Replication is done, release the lock
+        drop(_lock);
+
+        while let Some(compaction_result) = compacting_tasks.next().await {
+            // The unwrap is for the join handle
+            compaction_result.unwrap()?;
         }
 
         Ok(())
