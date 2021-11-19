@@ -333,7 +333,7 @@ impl MySqlReplicator {
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.as_ref().unwrap() {
             let span = info_span!("replicating table", table = %table_name);
-            span.in_scope(|| debug!("Replicating table"));
+            span.in_scope(|| info!("Replicating table"));
 
             let dumper = self.dump_table(table_name).instrument(span.clone()).await?;
             let mut table_mutator = noria.table(table_name).instrument(span.clone()).await?;
