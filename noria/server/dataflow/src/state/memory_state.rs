@@ -228,10 +228,6 @@ impl State for MemoryState {
         self.state[index].lookup_range(key)
     }
 
-    fn keys(&self) -> Vec<Vec<usize>> {
-        self.state.iter().map(|s| s.columns().to_vec()).collect()
-    }
-
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         #[allow(clippy::ptr_arg)]
         fn fix(rs: &Rows) -> impl Iterator<Item = Vec<DataType>> + '_ {

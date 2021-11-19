@@ -568,61 +568,53 @@ impl SqlToMirConverter {
         // primary keys can either be specified directly (at the end of CREATE TABLE), or inline
         // with the definition of a field (i.e., as a ColumnConstraint).
         // We assume here that an earlier rewrite pass has coalesced all primary key definitions in
-        // the TableKey structure passed in via `keys`.
-        let primary_keys = match keys {
-            None => vec![],
-            Some(keys) => keys
-                .iter()
-                .filter_map(|k| match *k {
-                    ref k @ TableKey::PrimaryKey { .. } => Some(k),
+        // the TableKey structure.
+
+        // For our unique keys, we want the very first key to be the primary key if present, as it will be used
+        // as the primary index.
+        // TODO: failing that we want to index on a unique integer key, failing that on whatever.
+
+        let (primary_key, unique_keys) = match keys {
+            None => (None, vec![].into()),
+            Some(keys) => {
+                let primary_key = keys
+                    .iter()
+                    .filter_map(|k| match k {
+                        TableKey::PrimaryKey { columns, .. } => {
+                            Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
+                        }
+                        _ => None,
+                    })
+                    .next();
+
+                let unique_keys = keys.iter().filter_map(|k| match k {
+                    TableKey::UniqueKey { columns, .. } => {
+                        Some(columns.iter().map(Column::from).collect::<Box<[Column]>>())
+                    }
                     _ => None,
-                })
-                .collect(),
+                });
+
+                (primary_key, unique_keys.collect::<Box<[_]>>())
+            }
         };
-        invariant!(primary_keys.len() <= 1);
 
         // remember the schema for this version
         let base_schemas = self.base_schemas.entry(String::from(name)).or_default();
         base_schemas.push((self.schema_version, cols.to_vec()));
 
-        // make node
-        Ok(if let Some(pk) = primary_keys.first() {
-            match **pk {
-                TableKey::PrimaryKey { ref columns, .. } => {
-                    debug!(
-                        %name,
-                        primary_key = %columns.iter().map(|c| c.name.as_str()).join(", "),
-                        "Assigning primary key for base",
-                    );
-                    MirNode::new(
-                        name,
-                        self.schema_version,
-                        cols.iter().map(|cs| Column::from(&cs.column)).collect(),
-                        MirNodeInner::Base {
-                            column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
-                            keys: columns.iter().map(Column::from).collect(),
-                            adapted_over: None,
-                        },
-                        vec![],
-                        vec![],
-                    )
-                }
-                _ => internal!(),
-            }
-        } else {
-            MirNode::new(
-                name,
-                self.schema_version,
-                cols.iter().map(|cs| Column::from(&cs.column)).collect(),
-                MirNodeInner::Base {
-                    column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
-                    keys: vec![],
-                    adapted_over: None,
-                },
-                vec![],
-                vec![],
-            )
-        })
+        Ok(MirNode::new(
+            name,
+            self.schema_version,
+            cols.iter().map(|cs| Column::from(&cs.column)).collect(),
+            MirNodeInner::Base {
+                column_specs: cols.iter().map(|cs| (cs.clone(), None)).collect(),
+                primary_key,
+                unique_keys,
+                adapted_over: None,
+            },
+            vec![],
+            vec![],
+        ))
     }
 
     fn make_union_node(

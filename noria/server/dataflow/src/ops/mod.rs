@@ -262,7 +262,7 @@ pub mod test {
             defaults: Vec<DataType>,
         ) -> IndexPair {
             use crate::node::special::Base;
-            let i = Base::new(defaults);
+            let i = Base::new().with_default_values(defaults);
             let global = self.graph.add_node(Node::new(name, fields, i));
             self.graph.add_edge(self.source, global, ());
             let mut remap = HashMap::new();

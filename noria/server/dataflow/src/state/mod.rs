@@ -129,8 +129,6 @@ pub(crate) trait State: SizeOf + Send {
 
     fn rows(&self) -> usize;
 
-    fn keys(&self) -> Vec<Vec<usize>>;
-
     /// Return a copy of all records. Panics if the state is only partially materialized.
     fn cloned_records(&self) -> Vec<Vec<DataType>>;
 

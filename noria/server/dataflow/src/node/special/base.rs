@@ -66,7 +66,8 @@ impl From<Records> for BaseWrite {
 /// type corresponding to the node's type.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Base {
-    primary_key: Option<Vec<usize>>,
+    primary_key: Option<Box<[usize]>>,
+    unique_keys: Vec<Box<[usize]>>,
 
     defaults: Vec<DataType>,
     dropped: Vec<usize>,
@@ -75,21 +76,42 @@ pub struct Base {
 
 impl Base {
     /// Create a non-durable base node operator.
-    pub fn new(defaults: Vec<DataType>) -> Self {
-        Base {
-            defaults,
-            ..Base::default()
-        }
+    pub fn new() -> Self {
+        Default::default()
     }
 
-    /// Builder with a known primary key.
-    pub fn with_key(mut self, primary_key: Vec<usize>) -> Base {
-        self.primary_key = Some(primary_key);
+    pub fn with_default_values(mut self, defaults: Vec<DataType>) -> Self {
+        self.defaults = defaults;
         self
     }
 
-    pub fn key(&self) -> Option<&[usize]> {
-        self.primary_key.as_ref().map(|cols| &cols[..])
+    /// Assign a known primary key to the base, a primary key can't contain NULL columns
+    pub fn with_primary_key<K: Into<Box<[usize]>>>(mut self, primary_key: K) -> Self {
+        self.primary_key = Some(primary_key.into());
+        self
+    }
+
+    /// Add a set of known unique keys to base, per SQL specification a key with NULL columns
+    /// can be repeat multiple times even as a unique key
+    pub fn with_unique_keys<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
+        mut self,
+        unique_keys: K,
+    ) -> Self {
+        self.unique_keys = unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
+        self
+    }
+
+    pub fn primary_key(&self) -> Option<&[usize]> {
+        self.primary_key.as_deref()
+    }
+
+    /// Return the list of all unique indices in this base, including the primary key and
+    /// the unique keys. If primary key is set it will be the first in the list.
+    pub fn all_unique_keys(&self) -> impl Iterator<Item = &[usize]> {
+        self.primary_key
+            .iter()
+            .map(AsRef::as_ref)
+            .chain(self.unique_keys.iter().map(AsRef::as_ref))
     }
 
     /// Add a new column to this base node.
@@ -148,7 +170,7 @@ impl Clone for Base {
     fn clone(&self) -> Base {
         Base {
             primary_key: self.primary_key.clone(),
-
+            unique_keys: self.unique_keys.clone(),
             defaults: self.defaults.clone(),
             dropped: self.dropped.clone(),
             unmodified: self.unmodified,
@@ -160,7 +182,7 @@ impl Default for Base {
     fn default() -> Self {
         Base {
             primary_key: None,
-
+            unique_keys: Vec::new(),
             defaults: Vec::new(),
             dropped: Vec::new(),
             unmodified: true,
@@ -242,12 +264,12 @@ impl Base {
         state: &StateMap,
         snapshot_mode: SnapshotMode,
     ) -> ReadySetResult<BaseWrite> {
-        if self.primary_key.is_none() || ops.is_empty() {
-            return self.process_unkeyed(ops);
-        }
+        let key_cols = match &self.primary_key {
+            Some(key) if !ops.is_empty() => key.as_ref(),
+            _ => return self.process_unkeyed(ops),
+        };
 
         let mut n_ops = ops.len();
-        let key_cols = &self.primary_key.as_ref().unwrap()[..];
         // Sort all of the operations lexicographically by key types, all unkeyed operations will move
         // to the front of the vector (which can only be `SetReplicationOffset`), for the rest of the operations
         // it will group them by their key value.
@@ -396,9 +418,9 @@ impl Base {
         &self,
         n: NodeIndex,
     ) -> HashMap<NodeIndex, SuggestedIndex> {
-        if let Some(ref pk) = self.primary_key {
+        if let Some(pk) = &self.primary_key {
             hashmap! {
-                n => SuggestedIndex::Strict(Index::hash_map(pk.clone()))
+                n => SuggestedIndex::Strict(Index::hash_map(pk.as_ref().to_vec()))
             }
         } else {
             HashMap::new()
@@ -415,6 +437,7 @@ mod tests {
         let b = Base::default();
 
         assert!(b.primary_key.is_none());
+        assert!(b.unique_keys.is_empty());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -423,9 +446,10 @@ mod tests {
 
     #[test]
     fn it_works_new() {
-        let b = Base::new(vec![]);
+        let b = Base::new();
 
         assert!(b.primary_key.is_none());
+        assert!(b.unique_keys.is_empty());
 
         assert_eq!(b.defaults.len(), 0);
         assert_eq!(b.dropped.len(), 0);
@@ -448,7 +472,7 @@ mod tests {
                 node::NodeType::Source,
             ));
 
-            let b = Base::new(vec![]).with_key(vec![0, 2]);
+            let b = Base::new().with_primary_key([0, 2]);
             let global = graph.add_node(Node::new("b", &["x", "y", "z"], b));
             graph.add_edge(source, global, ());
             let local = unsafe { LocalNodeIndex::make(0_u32) };
@@ -552,7 +576,7 @@ mod tests {
         fn lots_of_changes_in_same_batch_persistent() {
             let state = PersistentState::new(
                 String::from("lots_of_changes_in_same_batch_persistent"),
-                None,
+                Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             );
 
@@ -561,13 +585,13 @@ mod tests {
 
         #[test]
         fn delete_row_unkeyed() {
-            let mut b = Base::new(vec![]);
+            let mut b = Base::new();
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
             let state: Box<dyn State> = Box::new(PersistentState::new(
                 String::from("delete_row_not_in_batch"),
-                None,
+                Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             ));
 
@@ -601,13 +625,13 @@ mod tests {
 
         #[test]
         fn delete_row_not_in_batch_keyed() {
-            let mut b = Base::new(vec![]).with_key(vec![0]);
+            let mut b = Base::new().with_primary_key([0]);
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
             let mut state: Box<dyn State> = Box::new(PersistentState::new(
                 String::from("delete_row_not_in_batch_keyed"),
-                None,
+                Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             ));
 
@@ -646,13 +670,13 @@ mod tests {
 
         #[test]
         fn delete_after_key_update() {
-            let mut b = Base::new(vec![]).with_key(vec![0]);
+            let mut b = Base::new().with_primary_key([0]);
 
             let ni = unsafe { LocalNodeIndex::make(0u32) };
 
             let mut state: Box<dyn State> = Box::new(PersistentState::new(
                 String::from("delete_after_key_update"),
-                None,
+                Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             ));
 

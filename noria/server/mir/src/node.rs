@@ -67,10 +67,11 @@ impl MirNode {
         removed_cols: Vec<&ColumnSpecification>,
     ) -> MirNodeRef {
         let over_node = node.borrow();
-        match over_node.inner {
+        match &over_node.inner {
             MirNodeInner::Base {
-                ref column_specs,
-                ref keys,
+                column_specs,
+                primary_key,
+                unique_keys,
                 ..
             } => {
                 let new_column_specs: Vec<(ColumnSpecification, Option<usize>)> = column_specs
@@ -96,7 +97,8 @@ impl MirNode {
 
                 let new_inner = MirNodeInner::Base {
                     column_specs: new_column_specs,
-                    keys: keys.clone(),
+                    primary_key: primary_key.clone(),
+                    unique_keys: unique_keys.clone(),
                     adapted_over: Some(BaseNodeAdaptation {
                         over: node.clone(),
                         columns_added: added_cols.into_iter().cloned().collect(),
@@ -442,7 +444,8 @@ mod tests {
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
-                    keys: vec![Column::from("c1")],
+                    primary_key: Some([Column::from("c1")].into()),
+                    unique_keys: Default::default(),
                     adapted_over: None,
                 },
                 ancestors: vec![],
@@ -506,7 +509,8 @@ mod tests {
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
                     column_specs: vec![cspec("c1"), cspec("c2"), cspec("c3")],
-                    keys: vec![Column::from("c1")],
+                    primary_key: Some([Column::from("c1")].into()),
+                    unique_keys: Default::default(),
                     adapted_over: None,
                 },
                 ancestors: vec![],
@@ -557,7 +561,8 @@ mod tests {
                 columns: parent_columns,
                 inner: MirNodeInner::Base {
                     column_specs: vec![cspec("c1")],
-                    keys: vec![Column::from("c1")],
+                    primary_key: Some([Column::from("c1")].into()),
+                    unique_keys: Default::default(),
                     adapted_over: None,
                 },
                 ancestors: vec![],

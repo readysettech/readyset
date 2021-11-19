@@ -133,10 +133,17 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::Base {
                     ref mut column_specs,
-                    ref keys,
+                    ref primary_key,
+                    ref unique_keys,
                     ref adapted_over,
-                } => match *adapted_over {
-                    None => make_base_node(&name, column_specs.as_mut_slice(), keys, mig)?,
+                } => match adapted_over {
+                    None => make_base_node(
+                        &name,
+                        column_specs.as_mut_slice(),
+                        primary_key.as_deref(),
+                        unique_keys,
+                        mig,
+                    )?,
                     Some(ref bna) => adapt_base_node(
                         bna.over.clone(),
                         mig,
@@ -435,7 +442,8 @@ fn column_names(cs: &[Column]) -> Vec<&str> {
 fn make_base_node(
     name: &str,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
-    pkey_columns: &[Column],
+    primary_key: Option<&[Column]>,
+    unique_keys: &[Box<[Column]>],
     mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     // remember the absolute base column ID for potential later removal
@@ -463,24 +471,38 @@ fn make_base_node(
         })
         .collect::<Result<Vec<DataType>, _>>()?;
 
-    #[allow(clippy::cmp_owned)]
-    let base = if !pkey_columns.is_empty() {
-        let pkey_column_ids = pkey_columns
-            .iter()
-            .map(|pkc| {
-                // FIXME(eta): why was this commented out?
-                //assert_eq!(pkc.table.as_ref().unwrap(), name);
+    let cols_from_spec = |cols: &[Column]| -> ReadySetResult<Vec<usize>> {
+        cols.iter()
+            .map(|col| {
                 column_specs
                     .iter()
-                    .position(|&(ref cs, _)| Column::from(&cs.column) == *pkc)
+                    .position(|(ColumnSpecification { column, .. }, _)| {
+                        column.name == col.name
+                            && column.table == col.table
+                            && column.function == col.function
+                    })
                     .ok_or_else(|| {
-                        internal_err(format!("could not find pkey column id for {:?}", pkc))
+                        internal_err(format!("could not find pkey column id for {:?}", col))
                     })
             })
-            .collect::<ReadySetResult<Vec<_>>>()?;
-        node::special::Base::new(default_values).with_key(pkey_column_ids)
+            .collect()
+    };
+
+    let primary_key = primary_key.map(cols_from_spec).transpose()?;
+
+    let unique_keys = unique_keys
+        .iter()
+        .map(|u| cols_from_spec(u))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+
+    let base = node::special::Base::new()
+        .with_default_values(default_values)
+        .with_unique_keys(unique_keys);
+
+    let base = if let Some(pk) = primary_key {
+        base.with_primary_key(pk)
     } else {
-        node::special::Base::new(default_values)
+        base
     };
 
     Ok(FlowNode::New(mig.add_base(

@@ -572,7 +572,7 @@ mod tests {
     fn it_queries_through_all_persistent() {
         let state = Box::new(PersistentState::new(
             String::from("it_queries_through_all_persistent"),
-            None,
+            Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
         ));
 
@@ -593,7 +593,7 @@ mod tests {
     fn it_queries_through_some_persistent() {
         let state = Box::new(PersistentState::new(
             String::from("it_queries_through_some_persistent"),
-            None,
+            Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
         ));
 
@@ -616,7 +616,7 @@ mod tests {
         let additional = Some(vec![DataType::Int(42)]);
         let state = Box::new(PersistentState::new(
             String::from("it_queries_through_w_literals"),
-            None,
+            Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
         ));
 
@@ -651,7 +651,7 @@ mod tests {
 
         let state = Box::new(PersistentState::new(
             String::from("it_queries_through_w_arithmetic_and_literals_persistent"),
-            None,
+            Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
         ));
 
@@ -674,7 +674,7 @@ mod tests {
 
         let state = Box::new(PersistentState::new(
             String::from("it_queries_nested_expressions"),
-            None,
+            Vec::<Box<[usize]>>::new(),
             &PersistenceParameters::default(),
         ));
 

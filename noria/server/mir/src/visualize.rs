@@ -102,7 +102,7 @@ impl GraphViz for MirNodeInner {
             }
         };
 
-        match *self {
+        match self {
             MirNodeInner::Aggregation {
                 ref on,
                 ref group_by,
@@ -124,8 +124,8 @@ impl GraphViz for MirNodeInner {
                 write!(f, "{} | γ: {}", op_string, group_cols)
             }
             MirNodeInner::Base {
-                ref column_specs,
-                ref keys,
+                column_specs,
+                unique_keys,
                 ..
             } => {
                 write!(
@@ -136,10 +136,14 @@ impl GraphViz for MirNodeInner {
                         .map(|&(ref cs, _)| cs.column.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
-                    keys.iter()
-                        .map(|c| c.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    unique_keys
+                        .iter()
+                        .map(|k| k
+                            .iter()
+                            .map(|c| c.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .join("; ")
                 )
             }
             MirNodeInner::Extremum {
