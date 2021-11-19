@@ -371,7 +371,7 @@ steps:
     - build-noria-psql-adapter-release
     - build-ensure-ebs-volume-release
 
-  - label: ':packer: Build readyset images'
+  - label: ':packer: Build ReadySet Customer images'
     key: build-images
     commands:
     - cd ops/images
@@ -379,7 +379,8 @@ steps:
     - 'echo +++ :buildkite: Downloading binary artifacts'
     - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-mysql-adapter,amazon-ebs.readyset-server,amazon-ebs.metrics-aggregator .
+    - packer init .
+    - packer build -only=amazon-ebs.readyset-* .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:
@@ -404,11 +405,9 @@ steps:
     key: build-infra-images
     commands:
     - cd ops/images
-    - mkdir binaries
-    - 'echo +++ :buildkite: Downloading binary artifacts'
-    - buildkite-agent artifact download target/release/* binaries/
     - 'echo +++ :packer: Running packer build'
-    - packer build -only=amazon-ebs.readyset-authority-consul,amazon-ebs.readyset-monitor .
+    - packer init .
+    - packer build -only=amazon-ebs.tailscale-subnet-router .
     artifact_paths:
     - ops/images/packer-manifest.json
     depends_on:
