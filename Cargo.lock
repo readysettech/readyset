@@ -1303,6 +1303,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "deployment-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.0.0-beta.5",
+ "noria",
+ "tokio",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

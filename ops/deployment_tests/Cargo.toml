@@ -1,0 +1,16 @@
+[package]
+name = "deployment-tools"
+version = "0.1.0"
+authors = ["Readyset Technology, Inc."]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.38"
+clap = "3.0.0-beta.5"
+tokio = { version = "1.8.4" }
+noria = { path = "../../noria/noria" }
+
+[[bin]]
+name = "verify_healthy_workers"
+path = "src/verify_healthy_workers.rs"
+

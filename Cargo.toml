@@ -23,6 +23,7 @@ members = [
     "noria/timestamp_service",
     "ops/readyset-substrate",
     "ops/cfn-deploy",
+    "ops/deployment_tests",
     "psql-srv",
     "unbounded-interval-tree",
     "launchpad",
