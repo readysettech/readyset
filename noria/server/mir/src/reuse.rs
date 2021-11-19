@@ -222,7 +222,8 @@ mod tests {
             vec![Column::from("aa"), Column::from("ab")],
             MirNodeInner::Base {
                 column_specs: vec![cspec("aa"), cspec("ab")],
-                keys: vec![Column::from("aa")],
+                primary_key: Some([Column::from("aa")].into()),
+                unique_keys: Default::default(),
                 adapted_over: None,
             },
             vec![],
@@ -234,7 +235,8 @@ mod tests {
             vec![Column::from("ba"), Column::from("bb")],
             MirNodeInner::Base {
                 column_specs: vec![cspec("ba"), cspec("bb")],
-                keys: vec![Column::from("ba")],
+                primary_key: Some([Column::from("ba")].into()),
+                unique_keys: Default::default(),
                 adapted_over: None,
             },
             vec![],

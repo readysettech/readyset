@@ -1723,7 +1723,7 @@ impl Domain {
 
                                 Box::new(PersistentState::new(
                                     base_name,
-                                    base.key(),
+                                    base.all_unique_keys(),
                                     &self.persistence_parameters,
                                 ))
                             }

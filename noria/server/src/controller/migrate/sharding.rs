@@ -423,7 +423,7 @@ pub fn shard(
                 trace!("well, its parent is a base");
 
                 // we can't shard compound bases (yet)
-                if let Some(k) = graph[p].get_base().unwrap().key() {
+                if let Some(k) = graph[p].get_base().unwrap().primary_key() {
                     if k.len() != 1 {
                         trace!("no, parent is weird (has compound key)");
                         continue;

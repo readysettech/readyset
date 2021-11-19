@@ -22,6 +22,7 @@ default = []
 generate_mysql_tests = ["default"]
 param_filter = []
 profiling = ["timekeeper/default"]
+bench = ["dataflow/bench"]
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 jemallocator = "0.3"

@@ -16,10 +16,11 @@ pub enum MirNodeInner {
         group_by: Vec<Column>,
         kind: Aggregation,
     },
-    /// column specifications, keys (non-compound), tx flag, adapted base
+    /// column specifications, unique-keys (non-compound), tx flag, adapted base
     Base {
         column_specs: Vec<(ColumnSpecification, Option<usize>)>,
-        keys: Vec<Column>,
+        primary_key: Option<Box<[Column]>>,
+        unique_keys: Box<[Box<[Column]>]>,
         adapted_over: Option<BaseNodeAdaptation>,
     },
     /// over column, group_by columns
@@ -200,7 +201,7 @@ impl MirNodeInner {
             }
         }
 
-        match *self {
+        match self {
             MirNodeInner::Aggregation {
                 on: ref our_on,
                 group_by: ref our_group_by,
@@ -220,14 +221,16 @@ impl MirNodeInner {
                 }
             }
             MirNodeInner::Base {
-                column_specs: ref our_column_specs,
-                keys: ref our_keys,
-                adapted_over: ref our_adapted_over,
+                column_specs: our_column_specs,
+                primary_key: our_primary_key,
+                unique_keys: our_keys,
+                adapted_over: our_adapted_over,
             } => {
-                match *other {
+                match other {
                     MirNodeInner::Base {
-                        ref column_specs,
-                        ref keys,
+                        column_specs,
+                        unique_keys,
+                        primary_key,
                         ..
                     } => {
                         // if we are instructed to adapt an earlier base node, we cannot reuse
@@ -243,7 +246,9 @@ impl MirNodeInner {
                         // note that as long as we are not adapting a previous base node,
                         // we do *not* need `adapted_over` to *match*, since current reuse
                         // does not depend on how base node was created from an earlier one
-                        our_column_specs == column_specs && our_keys == keys
+                        our_column_specs == column_specs
+                            && our_keys == unique_keys
+                            && primary_key == our_primary_key
                     }
                     _ => false,
                 }
@@ -334,14 +339,14 @@ impl MirNodeInner {
                 }
             }
             MirNodeInner::TopK {
-                order: ref our_order,
-                group_by: ref our_group_by,
+                order: our_order,
+                group_by: our_group_by,
                 k: our_k,
                 offset: our_offset,
-            } => match *other {
+            } => match other {
                 MirNodeInner::TopK {
-                    ref order,
-                    ref group_by,
+                    order,
+                    group_by,
                     k,
                     offset,
                 } => {
@@ -387,7 +392,7 @@ impl MirNodeInner {
 
 impl Debug for MirNodeInner {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        match *self {
+        match self {
             MirNodeInner::Aggregation {
                 ref on,
                 ref group_by,
@@ -409,8 +414,8 @@ impl Debug for MirNodeInner {
                 write!(f, "{} γ[{}]", op_string, group_cols)
             }
             MirNodeInner::Base {
-                ref column_specs,
-                ref keys,
+                column_specs,
+                unique_keys,
                 ..
             } => write!(
                 f,
@@ -420,10 +425,14 @@ impl Debug for MirNodeInner {
                     .map(|&(ref cs, _)| cs.column.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
-                keys.iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                unique_keys
+                    .iter()
+                    .map(|k| k
+                        .iter()
+                        .map(|c| c.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .join(";")
             ),
             MirNodeInner::Extremum {
                 ref on,

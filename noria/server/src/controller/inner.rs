@@ -1198,9 +1198,10 @@ impl Leader {
                 node_index: node.local_addr().id(),
                 expected_type: NodeType::Base,
             })?
-            .key()
+            .primary_key()
             .map(|k| k.to_owned())
             .unwrap_or_default();
+
         let mut is_primary = false;
         if key.is_empty() {
             if let Sharding::ByColumn(col, _) = node.sharded_by() {

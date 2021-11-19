@@ -160,6 +160,7 @@ impl<'a> KeyType<'a> {
             KeyType::Multi(arr) => arr.get(idx),
         }
     }
+
     pub fn from<I>(other: I) -> Self
     where
         I: IntoIterator<Item = &'a DataType>,
@@ -212,6 +213,30 @@ impl<'a> KeyType<'a> {
             KeyType::Quin(_) => 5,
             KeyType::Sex(_) => 6,
             KeyType::Multi(k) => k.len(),
+        }
+    }
+
+    /// Return true if any of the elements is null
+    pub fn has_null(&self) -> bool {
+        match self {
+            KeyType::Single(e) => e.is_none(),
+            KeyType::Double((e0, e1)) => e0.is_none() || e1.is_none(),
+            KeyType::Tri((e0, e1, e2)) => e0.is_none() || e1.is_none() || e2.is_none(),
+            KeyType::Quad((e0, e1, e2, e3)) => {
+                e0.is_none() || e1.is_none() || e2.is_none() || e3.is_none()
+            }
+            KeyType::Quin((e0, e1, e2, e3, e4)) => {
+                e0.is_none() || e1.is_none() || e2.is_none() || e3.is_none() || e4.is_none()
+            }
+            KeyType::Sex((e0, e1, e2, e3, e4, e5)) => {
+                e0.is_none()
+                    || e1.is_none()
+                    || e2.is_none()
+                    || e3.is_none()
+                    || e4.is_none()
+                    || e5.is_none()
+            }
+            KeyType::Multi(k) => k.iter().any(DataType::is_none),
         }
     }
 }

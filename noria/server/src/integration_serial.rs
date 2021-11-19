@@ -43,8 +43,8 @@ async fn it_works_basic() {
 
     let _ = g
         .migrate(|mig| {
-            let a = mig.add_base("a", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
-            let b = mig.add_base("b", &["a", "b"], Base::new(vec![]).with_key(vec![0]));
+            let a = mig.add_base("a", &["a", "b"], Base::new().with_primary_key([0]));
+            let b = mig.add_base("b", &["a", "b"], Base::new().with_primary_key([0]));
 
             let mut emits = HashMap::new();
             emits.insert(a, vec![0, 1]);
