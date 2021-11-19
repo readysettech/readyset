@@ -1309,6 +1309,7 @@ dependencies = [
  "anyhow",
  "clap 3.0.0-beta.5",
  "noria",
+ "prometheus-http-query",
  "tokio",
 ]
 
