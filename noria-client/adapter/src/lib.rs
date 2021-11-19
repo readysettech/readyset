@@ -577,7 +577,7 @@ async fn query_logger(
                     if let Some(noria) = event.noria_duration {
                         metrics::histogram!(
                             noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                            noria,
+                            noria.as_secs() as f64,
                             "query" => query.clone(),
                             "database_type" => String::from(noria_client_metrics::recorded::DatabaseType::Noria)
                         );
@@ -586,7 +586,7 @@ async fn query_logger(
                     if let Some(upstream) = event.upstream_duration {
                         metrics::histogram!(
                             noria_client_metrics::recorded::QUERY_LOG_EXECUTION_TIME,
-                            upstream,
+                            upstream.as_secs() as f64,
                             "query" => query.clone(),
                             "database_type" => database_label.clone()
                         );
