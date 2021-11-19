@@ -29,6 +29,7 @@ use noria_errors::{
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::query_status_cache::{AdmitStatus, QueryStatusCache};
+use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -169,6 +170,7 @@ pub struct BackendBuilder {
     query_status_cache: Option<Arc<QueryStatusCache>>,
     async_migrations: bool,
     validate_queries: bool,
+    fail_invalidated_queries: bool,
 }
 
 impl Default for BackendBuilder {
@@ -186,6 +188,7 @@ impl Default for BackendBuilder {
             query_status_cache: None,
             async_migrations: false,
             validate_queries: false,
+            fail_invalidated_queries: false,
         }
     }
 }
@@ -222,6 +225,7 @@ impl BackendBuilder {
             query_status_cache: self.query_status_cache,
             async_migrations: self.async_migrations,
             validate_queries: self.validate_queries,
+            fail_invalidated_queries: self.fail_invalidated_queries,
             _query_handler: PhantomData,
         }
     }
@@ -282,8 +286,13 @@ impl BackendBuilder {
         self
     }
 
-    pub fn validate_queries(mut self, validate_queries: bool) -> Self {
+    pub fn validate_queries(
+        mut self,
+        validate_queries: bool,
+        fail_invalidated_queries: bool,
+    ) -> Self {
         self.validate_queries = validate_queries;
+        self.fail_invalidated_queries = fail_invalidated_queries;
         self
     }
 }
@@ -336,6 +345,7 @@ pub struct Backend<DB, Handler> {
 
     /// Run select statements with query validation.
     validate_queries: bool,
+    fail_invalidated_queries: bool,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -571,9 +581,35 @@ where
         handle.set_noria_duration();
         let upstream_res = upstream_res?;
 
+        // Validate that the result we receive from MySQL and ReadySet has comparable
+        // schemas. As we do not support allow/deny lists outside of async migrations,
+        // we may repeatedly try these failing queries against Noria.
+        // TODO(ENG-806): Assign these queries to allow and deny list.
         if self.validate_queries {
-            if let Err(e) = noria_res {
-                internal!("Query failed to execute on noria {}", e)
+            match &noria_res {
+                Ok(n) => {
+                    if let noria_connector::PrepareResult::Select {
+                        ref schema,
+                        ref params,
+                        ..
+                    } = n
+                    {
+                        if let Err(e) = upstream_res.meta.compare(schema, params) {
+                            if self.fail_invalidated_queries {
+                                internal!("Query comparison failed to validate: {}", e);
+                            } else {
+                                error!("Query comparison failed to validate: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // We do not return an error if Noria fails completely with
+                    // --fail-invalidated-queries, as these queries should still go
+                    // to fallback in tests. We only care if our comparison when noria
+                    // succeeds yields incorrect results.
+                    error!("Query failed to execute on noria: {}", e);
+                }
             }
         }
 
