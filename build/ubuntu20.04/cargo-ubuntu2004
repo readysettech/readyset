@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -eux -o pipefail
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+AWS_ACCOUNT=${AWS_ACCOUNT:-305232526136} # build
+AWS_REGION=${AWS_REGION:-us-east-2}
+VERSION=${BUILDKITE_COMMIT:-local}
+
+image_name="builder/ubuntu2004"
+docker_repo="$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
+image="$docker_repo/$image_name"
+
+echo "--- Pulling $image:latest"
+if docker pull "$image:latest"; then
+    cache_from="--cache-from=$image:latest"
+else
+    echo "Failed to pull previous build of image"
+    cache_from=""
+fi
+
+build_cmd_prefix=(
+    "docker" "build" \
+    "-f" "$SCRIPT_DIR/Dockerfile" \
+    "-t" "$image:$VERSION" \
+    "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
+)
+build_cmd_suffix=(
+    "."
+)
+if [ -n "$cache_from" ]; then
+    build_cmd=("${build_cmd_prefix[@]}" "$cache_from" "${build_cmd_suffix[@]}")
+else
+    build_cmd=("${build_cmd_prefix[@]}" "${build_cmd_suffix[@]}")
+fi
+
+echo "+++ Building $image:$VERSION"
+DOCKER_BUILDKIT=1 "${build_cmd[@]}"
+
+mkdir -p $SCRIPT_DIR/../../target-ubuntu2004
+mkdir -p $SCRIPT_DIR/{registry,cachepot}
+docker run -it --rm \
+  --volume $PWD:/workdir \
+  --volume $SCRIPT_DIR/../../target-ubuntu2004:/workdir/target \
+  --volume $SCRIPT_DIR/registry:/usr/local/cargo/registry \
+  --volume $SCRIPT_DIR/cachepot:/root/.cache/cachepot \
+  --workdir /workdir \
+  $image:$VERSION \
+  cargo "$@"

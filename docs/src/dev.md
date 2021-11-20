@@ -77,6 +77,36 @@
 1. `cargo build --release` causes an error: `error:invalid channel name 'nightly-2020-11-15-x86_64-unknown-linux-gnu' in '/home/ubuntu/noria/rust-toolchain'`
 - Noria is pinned to a version of Rust that you have not installed, here: [noria/rust-toolchain](https://github.com/readysettech/noria/blob/master/rust-toolchain). Install the listed version with:`$rustup toolchain install <insert channel name here>`
 
+### Building binaries with a specific ubuntu version
+
+Building binaries locally, and then trying to use them in a remote virtual
+machine may cause issues if your local glibc version is newer than the glibc
+version in the virtual machine. To help aleviate this issue, we have scripts
+which will build a docker container for a specific version of ubuntu, and then
+run cargo inside of this container for you. You use it in place of `cargo`, and
+it will create a `target-ubuntu2004` folder at the root of the monorepo where
+your built binaries will live.
+
+Currently all supported environments will be found inside the `build` folder.
+For example, if you would like to build for the ubuntu-20.04 release, you can
+use the script found in the `build/ubuntu20.04/cargo-ubuntu2004` file, and
+simply pass it the arguments you would normally pass cargo.
+
+```sh
+$ ./build/ubuntu20.04/cargo-ubuntu2004 build --bin=noria-server
+```
+
+You will then find the release binaries inside of the `target-ubuntu2004`
+directory at the root of the monorepo.
+
+You can also symlink any of these scripts to make them easier to execute.
+Example:
+
+```sh
+$ ln -s $(pwd)/build/ubuntu20.04/cargo-ubuntu2004 $HOME/bin/cargo-ubuntu2004
+$ cargo-ubuntu2004 build --bin=noria-server
+```
+
 ### Arch Setup Script
 
 If you're using Arch linux, you can use the following setup script:

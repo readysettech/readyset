@@ -1,4 +1,5 @@
 target/
+target-ubuntu2004/
 docs/book/
 .idea/
 .DS_Store
