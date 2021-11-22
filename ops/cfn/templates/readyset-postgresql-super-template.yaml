@@ -44,7 +44,9 @@ Metadata:
           - ReadySetAdapterNodes
           - ReadySetServerInstanceType
           - ReadySetServerNodes
-          - ReadySetServerVolumeSizeGB
+          - ReadySetServerInitialVolumeSizeGB
+          - ReadySetServerAutoGrowVolume
+          - ReadySetServerMaxVolumeSizeGB
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
@@ -222,11 +224,24 @@ Parameters:
     AllowedPattern: ^[^/ ]+$
     ConstraintDescription: Must be non-empty and cannot contain slashes ("/") or spaces
 
-  ReadySetServerVolumeSizeGB:
-    Description: Volume size, in gigabytes, to provision for Server instances.
+  ReadySetServerInitialVolumeSizeGB:
+    Description: Initial volume size, in gigabytes, to provision for Server instances. This should match the EBS volume size of the RDS instance.
     Type: Number
     Default: 32
     MinValue: 32
+
+  ReadySetServerAutoGrowVolume:
+    Description: Automatically grow the volume for the ReadySet server.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
+  ReadySetServerMaxVolumeSizeGB:
+    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false
+    Type: Number
+    Default: 0
 
 Resources:
   # Base VPC to deploy resources into
@@ -336,7 +351,9 @@ Resources:
         ReadySetPostgresAdapterPassword: !Ref DatabasePassword
         ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
         ReadySetServerNodes: !Ref ReadySetServerNodes
-        ReadySetServerVolumeSizeGB: !Ref ReadySetServerVolumeSizeGB
+        ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
+        ReadySetServerAutoGrowVolume: !Ref ReadySetServerAutoGrowVolume
+        ReadySetServerMaxVolumeSizeGB: !Ref ReadySetServerMaxVolumeSizeGB
         ReadySetMonitorInstanceType: !Ref ReadySetMonitorInstanceType
         ReadySetMemoryLimitGB: !Ref ReadySetMemoryLimitGB
         ReadySetDeploymentName: !Ref ReadySetDeploymentName

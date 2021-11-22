@@ -32,7 +32,9 @@ Metadata:
           - ReadySetAdapterNodes
           - ReadySetServerInstanceType
           - ReadySetServerNodes
-          - ReadySetServerVolumeSizeGB
+          - ReadySetServerInitialVolumeSizeGB
+          - ReadySetServerAutoGrowVolume
+          - ReadySetServerMaxVolumeSizeGB
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
@@ -86,11 +88,24 @@ Parameters:
     Description: ID of the security group to apply to ReadySet Monitoring instances.
     Type: AWS::EC2::SecurityGroup::Id
 
-  ReadySetServerVolumeSizeGB:
-    Description: Volume size, in gigabytes, to provision for Server instances. This should match EBS volume size of RDS instance.
+  ReadySetServerInitialVolumeSizeGB:
+    Description: Initial volume size, in gigabytes, to provision for Server instances. This should match the EBS volume size of the RDS instance.
     Type: Number
     Default: 32
     MinValue: 32
+
+  ReadySetServerAutoGrowVolume:
+    Description: Automatically grow the volume for the ReadySet server.
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+
+  ReadySetServerMaxVolumeSizeGB:
+    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false
+    Type: Number
+    Default: 0
 
   ReadySetMemoryLimitGB:
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
@@ -160,9 +175,9 @@ Mappings:
   AWSAMIRegionMap:
     us-east-2:
       # short commit id associated with AMIs: 4a0eb70
-      READYSETMYSQLADAPTER: ami-08f671b60ee061fe1
-      READYSETSERVER: ami-0e3072c527cc70d9b
-      READYSETMONITOR: ami-0de0c9dac569bac73
+      READYSETMYSQLADAPTER: ami-0ab3b53dbd0b9277c
+      READYSETSERVER: ami-0f98ebeb1d22480fe
+      READYSETMONITOR: ami-08fdcfd8be7d50d0e
 
 Resources:
   # --- START MYSQL ADAPTER --- #
@@ -341,6 +356,7 @@ Resources:
                 Action:
                   - ec2:AttachVolume
                   - ec2:DetachVolume
+                  - ec2:ModifyVolume
                 Resource:
                   - arn:aws:ec2:*:*:volume/*
                 Condition:
@@ -410,7 +426,9 @@ Resources:
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="0"
             export REPLICATION_URL="${MySQLDatabaseURL}"
-            export VOLUME_SIZE_GB="${ReadySetServerVolumeSizeGB}"
+            export INITIAL_VOLUME_SIZE_GB="${ReadySetServerInitialVolumeSizeGB}"
+            export AUTO_GROW_VOLUME="${ReadySetServerAutoGrowVolume}"
+            export MAX_VOLUME_SIZE_GB="${ReadySetServerMaxVolumeSizeGB}"
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS

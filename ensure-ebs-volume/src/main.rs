@@ -18,6 +18,7 @@ use aws_sdk_sqs as sqs;
 use aws_types::config::Config;
 use aws_types::region::Region;
 use clap::Parser;
+use futures::future::{self, Either};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,7 @@ use tokio::fs::create_dir_all;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use tokio::join;
 use tokio::process::Command;
 use tokio::task;
 use tokio::time;
@@ -34,6 +36,11 @@ use tracing::debug;
 use tracing::warn;
 use tracing::{error, info, instrument};
 use tracing_subscriber::EnvFilter;
+
+mod util;
+mod volume_grow;
+
+use crate::util::run_command;
 
 const WAIT_TIMER: Duration = Duration::from_secs(1);
 
@@ -50,9 +57,17 @@ struct Opts {
     #[clap(default_value = "sdb")]
     device: PathBuf,
 
-    /// Size of the volume to create in gigabytes
-    #[clap(long, default_value = "32", env = "VOLUME_SIZE_GB")]
-    volume_size_gb: i32,
+    /// Initial size of the volume to create in gigabytes
+    #[clap(long, default_value = "32", env = "INITIAL_VOLUME_SIZE_GB")]
+    initial_volume_size_gb: i32,
+
+    /// Enable automatically growing the volume when nearly full
+    #[clap(long, env = "AUTO_GROW_VOLUME")]
+    auto_grow_volume: bool,
+
+    /// Maximum size in gigabytes to grow the volume to. Ignored unless --auto-grow-volume is passed
+    #[clap(long, env = "MAX_VOLUME_SIZE_GB")]
+    max_volume_size: Option<i32>,
 
     /// Tag key to use for volumes
     #[clap(long, default_value = "ReadySet:ServerVolume", env = "VOLUME_TAG_KEY")]
@@ -110,14 +125,6 @@ where
 async fn exists(path: &Path) -> Result<bool> {
     let path = path.to_path_buf();
     Ok(task::spawn_blocking(move || path.exists()).await?)
-}
-
-async fn run(command: &mut Command) -> Result<()> {
-    let status = command.status().await?;
-    if !status.success() {
-        bail!("Command exited with {}", status);
-    }
-    Ok(())
 }
 
 #[derive(Debug)]
@@ -406,9 +413,9 @@ async fn configure_volume_id(environment_file: &Path, volume_id: &str) -> Result
 
 #[instrument]
 async fn start_readyset_server() -> Result<()> {
-    run(Command::new("systemctl").arg("reset-failed")).await?;
-    run(Command::new("systemctl").args(["enable", "readyset-server"])).await?;
-    run(Command::new("systemctl").args(["restart", "readyset-server"])).await?;
+    run_command(Command::new("systemctl").arg("reset-failed")).await?;
+    run_command(Command::new("systemctl").args(["enable", "readyset-server"])).await?;
+    run_command(Command::new("systemctl").args(["restart", "readyset-server"])).await?;
     Ok(())
 }
 
@@ -501,7 +508,7 @@ impl Opts {
             .ec2()
             .create_volume()
             .availability_zone(az)
-            .size(self.volume_size_gb)
+            .size(self.initial_volume_size_gb)
             .tag_specifications(tag_specification)
             .send()
             .await?;
@@ -663,7 +670,7 @@ impl Opts {
             .ec2()
             .modify_volume()
             .volume_id(&attached_volume.ebs_volume_id)
-            .size(self.volume_size_gb)
+            .size(self.initial_volume_size_gb)
             .send()
             .await;
 
@@ -686,8 +693,8 @@ impl Opts {
         if magic.contains("ext4 filesystem data") {
             info!("It does");
             info!("Running e2fsck");
-            run(Command::new("e2fsck").arg("-f").arg(block_device_path)).await?;
-            run(Command::new("resize2fs").arg(block_device_path)).await?;
+            run_command(Command::new("e2fsck").arg("-f").arg(block_device_path)).await?;
+            run_command(Command::new("resize2fs").arg(block_device_path)).await?;
             return Ok(());
         }
         info!("It does not; formatting disk...");
@@ -817,10 +824,10 @@ impl Opts {
     #[instrument(skip(self))]
     async fn teardown_volume(&self, volume: &AttachedVolume) -> Result<()> {
         info!("Stopping readyset-server");
-        run(Command::new("systemctl").args(["stop", "readyset-server"])).await?;
+        run_command(Command::new("systemctl").args(["stop", "readyset-server"])).await?;
 
         info!(mountpoint = %self.mountpoint.display(), "Unmounting filesystem");
-        run(Command::new("umount").arg(&self.mountpoint)).await?;
+        run_command(Command::new("umount").arg(&self.mountpoint)).await?;
 
         info!("Detaching volume");
         self.ec2()
@@ -866,7 +873,31 @@ impl Opts {
         info!("Starting readyset-server");
         start_readyset_server().await?;
 
-        self.wait_for_terminate_message(attached_volume).await?;
+        let volume_grower = if self.auto_grow_volume {
+            let volume_grower = volume_grow::run(
+                self.ec2().clone(),
+                attached_volume.ebs_volume_id.clone(),
+                attached_volume.block_device_path.clone(),
+                self.mountpoint.clone(),
+                self.max_volume_size,
+            );
+
+            Either::Left(tokio::spawn(async move {
+                if let Err(error) = volume_grower.await {
+                    error!(%error, "Volume grower task failed");
+                }
+            }))
+        } else {
+            Either::Right(future::ready(Ok(())))
+        };
+
+        let terminate_waiter = async move {
+            if let Err(error) = self.wait_for_terminate_message(attached_volume).await {
+                error!(%error, "Termination watier task failed");
+            };
+        };
+
+        join!(volume_grower, terminate_waiter).0?;
         Ok(())
     }
 }

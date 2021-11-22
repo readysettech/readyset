@@ -47,12 +47,20 @@ AWS_CLOUDFORMATION_RESOURCE=${AWS_CLOUDFORMATION_RESOURCE}
 AWS_CLOUDFORMATION_REGION=${AWS_CLOUDFORMATION_REGION}
 SQS_QUEUE_URL=${SQS_QUEUE_URL}
 NORIA_QUORUM=${NORIA_QUORUM}
-VOLUME_SIZE_GB=${VOLUME_SIZE_GB}
+INITIAL_VOLUME_SIZE_GB=${INITIAL_VOLUME_SIZE_GB}
 VOLUME_TAG_KEY="ReadySet:ServerVolume"
 VOLUME_TAG_VALUE=${DEPLOYMENT}
 INSTANCE_TAG_KEY="ReadySet:ServerInstance"
 INSTANCE_TAG_VALUE=${DEPLOYMENT}
 EOF
+
+if [ "$AUTO_GROW_VOLUME" = "true" ]; then
+  echo "AUTO_GROW_VOLUME=true" >> /etc/default/ensure-ebs-volume
+
+  if [ "$MAX_VOLUME_SIZE_GB" != "0" ]; then
+    echo "MAX_VOLUME_SIZE_GB=${MAX_VOLUME_SIZE_GB}" >> /etc/default/ensure-ebs-volume
+  fi
+fi
 
 mkdir -p /var/lib/readyset-server
 systemctl reset-failed
