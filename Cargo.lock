@@ -462,7 +462,11 @@ dependencies = [
  "enum_dispatch",
  "futures 0.3.17",
  "hdrhistogram",
+ "indoc",
+ "itertools 0.10.1",
  "metrics",
+ "metrics-exporter-prometheus",
+ "metrics-util",
  "mysql",
  "mysql_async",
  "nom 5.1.2",
@@ -2127,6 +2131,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "indoc"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5a75aeaaef0ce18b58056d306c27b07436fbb34b8816c53094b76dd81803136"
+dependencies = [
+ "unindent",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2565,8 +2578,10 @@ dependencies = [
  "metrics-util",
  "parking_lot",
  "quanta",
+ "reqwest",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6019,6 +6034,12 @@ name = "unicode-xid"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
+
+[[package]]
+name = "unindent"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f14ee04d9415b52b3aeab06258a3f07093182b88ba0f9b8d203f211a7a7d41c7"
 
 [[package]]
 name = "untrusted"

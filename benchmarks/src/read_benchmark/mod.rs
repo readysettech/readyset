@@ -2,6 +2,7 @@
 //! This is a multi-threaded benchmark that runs a single query with
 //! randomly generated parameters across several threads. It can be used to
 //! evaluate a ReadySet deployment at various loads and request patterns.
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 
@@ -37,10 +38,6 @@ pub struct ReadBenchmarkParams {
     /// The number of threads to execute the read benchmark across.
     #[clap(long, default_value = "1")]
     threads: u64,
-
-    /// The connection string of a database that accepts MySQL queries.
-    #[clap(long)]
-    mysql_conn_str: String,
 }
 
 #[derive(Parser, Clone)]
@@ -60,9 +57,19 @@ impl BenchmarkControl for ReadBenchmark {
         self.data_generator.generate().await
     }
 
+    async fn is_already_setup(&self) -> Result<bool> {
+        // TODO(mc):  If this uses a constant schema, implement a check here.  If not, keep
+        // returning false.
+        Ok(false)
+    }
+
     async fn benchmark(&self) -> Result<()> {
         multi_thread::run_multithread_benchmark::<Self>(self.params.threads, self.params.clone())
             .await
+    }
+
+    fn labels(&self) -> HashMap<String, String> {
+        self.params.query.labels()
     }
 }
 
@@ -117,7 +124,7 @@ impl MultithreadBenchmark for ReadBenchmark {
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&params.common.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         let prepared_statement = params.query.prepared_statement(&mut conn).await?;
 

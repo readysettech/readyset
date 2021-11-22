@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark_gauge;
 
 #[derive(Parser)]
 pub struct Template {
@@ -20,8 +23,25 @@ impl BenchmarkControl for Template {
         // supports being skipped if sharing setup with other benchmarks.
         Ok(())
     }
+    async fn is_already_setup(&self) -> Result<bool> {
+        // You can write code to determine whether or not the benchmark is
+        // already setup (e.g. schema already exists, migrations already run,
+        // etc) here.
+        Ok(false)
+    }
     async fn benchmark(&self) -> Result<()> {
-        // Performing of the actual thing we want to benchmark.
+        // Performing of the actual thing we want to benchmark, along with recording metrics
+        benchmark_gauge!(
+            "template.fake_number_of_queries",
+            Count,
+            "number of queries executed",
+            133333337.0,
+            "label_key_1" => "label_value_1",
+            "label_key_2" => "label_value_2"
+        );
         Ok(())
+    }
+    fn labels(&self) -> HashMap<String, String> {
+        HashMap::new()
     }
 }

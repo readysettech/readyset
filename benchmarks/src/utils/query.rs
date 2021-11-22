@@ -15,6 +15,7 @@ use mysql_async::Statement;
 use mysql_async::Value;
 use nom_sql::SqlType;
 use query_generator::DistributionAnnotation;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs;
@@ -60,6 +61,24 @@ impl ArbitraryQueryParameters {
             None => PreparedStatement::new(query, stmt),
             Some(s) => PreparedStatement::new_with_annotation(query, stmt, s),
         })
+    }
+
+    pub fn labels(&self) -> HashMap<String, String> {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "query.file".to_string(),
+            self.query.to_string_lossy().to_string(),
+        );
+        if let Some(query_spec_file) = self.query_spec_file.as_ref() {
+            labels.insert(
+                "query.spec_file".to_string(),
+                query_spec_file.to_string_lossy().to_string(),
+            );
+        }
+        if let Some(query_spec) = self.query_spec.clone() {
+            labels.insert("query.spec".to_string(), query_spec);
+        }
+        labels
     }
 }
 

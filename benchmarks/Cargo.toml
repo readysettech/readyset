@@ -27,6 +27,8 @@ chrono = "0.4"
 atomic-counter = "1.0.1"
 serde_json = "1.0"
 metrics = "0.17.0"
+metrics-util = "0.10.0"
+metrics-exporter-prometheus = {version = "0.6.0", features = ["push-gateway"]}
 
 # local dependencies
 noria = { path = "../noria/noria/" }
@@ -70,3 +72,9 @@ path = "src/bin/write_propagation.rs"
 [[bin]]
 name = "weavegrid_data_generator"
 path = "src/bin/weavegrid_data_generator.rs"
+
+[features]
+
+[dev-dependencies]
+indoc = "1.0.3"
+itertools = "0.10.1"

@@ -12,9 +12,9 @@ use tracing::error;
 #[async_trait]
 pub(crate) trait MultithreadBenchmark {
     /// The result messages passed to the result's thread via an UnboundedSender.
-    type BenchmarkResult;
+    type BenchmarkResult: Send;
     /// Thset of parameters used to initialize the benchmark threads.
-    type Parameters;
+    type Parameters: Clone;
     /// Process a batch of benchmark results collected over `interval`. This aggregates
     /// all updates send on the `sender` parameter fo `benchmark_thread`.
     async fn handle_benchmark_results(
@@ -76,8 +76,6 @@ pub(crate) async fn run_multithread_benchmark<B>(
 ) -> Result<()>
 where
     B: MultithreadBenchmark + 'static,
-    <B as MultithreadBenchmark>::Parameters: Clone,
-    <B as MultithreadBenchmark>::BenchmarkResult: Send,
 {
     let (sender, receiver) = unbounded_channel::<B::BenchmarkResult>();
 
