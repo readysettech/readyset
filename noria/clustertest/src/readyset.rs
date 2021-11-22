@@ -203,3 +203,38 @@ async fn new_leader_worker_set() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn balance_base_table_domains() {
+    let cluster_name = "ct_balance_base_table_domains";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.set_sharding(1);
+    deployment.add_server(ServerParams::default());
+    deployment.add_server(ServerParams::default());
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+
+    deployment
+        .handle
+        .install_recipe(
+            "
+        CREATE TABLE t1 (id INT PRIMARY KEY);
+        CREATE TABLE t2 (id INT PRIMARY KEY);",
+        )
+        .await
+        .unwrap();
+
+    let info = deployment.handle.get_info().await.unwrap();
+
+    dbg!(&info);
+
+    // 2 workers
+    assert_eq!(info.len(), 2);
+    // each with 1 domain shard
+    for (_, domains) in &*info {
+        assert_eq!(domains.len(), 1);
+    }
+
+    deployment.teardown().await.unwrap();
+}
