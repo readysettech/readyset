@@ -42,14 +42,14 @@ use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::{InvalidEdge, Materializations};
-use crate::controller::{
-    DomainPlacementRestriction, Leader, NodeRestrictionKey, Worker, WorkerIdentifier,
-};
+use crate::controller::migrate::scheduling::Scheduler;
+use crate::controller::{Leader, WorkerIdentifier};
 
 pub(crate) mod assignment;
 mod augmentation;
 pub(crate) mod materialization;
 mod routing;
+mod scheduling;
 mod sharding;
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
@@ -222,7 +222,8 @@ impl DomainMigrationPlan {
         }
     }
 
-    /// Enqueues a request to add a new domain.
+    /// Enqueues a request to add a new domain `idx` with `nodes`, running on a worker per-shard
+    /// given by `shard_workers`
     ///
     /// Arguments are passed to [`Leader::place_domain`] when the plan is applied.
     pub fn add_new_domain(
@@ -866,19 +867,7 @@ impl Migration {
             // Boot up new domains (they'll ignore all updates for now)
             debug!("booting new domains");
             let mut dmp = DomainMigrationPlan::new(mainline);
-
-            /// Verifies that the worker `worker` meets the domain placement restrictions
-            /// of all dataflow nodes that will be placed in a new domain on the worker.
-            /// If the set of restrictions in this domain are too stringent, no worker
-            /// may be able to satisfy the domain placement.
-            fn worker_meets_restrictions(
-                worker: &Worker,
-                restrictions: &[&DomainPlacementRestriction],
-            ) -> bool {
-                restrictions
-                    .iter()
-                    .all(|r| r.worker_volume == worker.volume_id)
-            }
+            let mut scheduler = Scheduler::new(mainline, &self.worker, &ingredients)?;
 
             for domain in changed_domains {
                 if mainline.domains.contains_key(&domain) {
@@ -887,70 +876,11 @@ impl Migration {
                 }
 
                 let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-                let num_shards = ingredients[nodes[0].0].sharded_by().shards();
+                let worker_shards = scheduler.schedule_domain(domain, &nodes)?;
 
-                #[allow(clippy::indexing_slicing)] // checked above
-                let is_reader_domain = nodes.iter().any(|(n, _)| ingredients[*n].is_reader());
-
-                // If this migration has a specified worker, we attempt to place
-                // the domains on to that worker.
-                let target_worker = self.worker.clone();
-                let worker_selector = |(worker_id, _): &(&WorkerIdentifier, &Worker)| {
-                    (target_worker.is_none())
-                        || (target_worker
-                            .as_ref()
-                            .filter(|s_worker_id| **worker_id == **s_worker_id)
-                            .is_some())
-                };
-
-                let worker_set = mainline
-                    .workers
-                    .iter()
-                    .filter(|(_, w)| w.healthy)
-                    .filter(worker_selector)
-                    .filter(|(_, worker)| !worker.reader_only || is_reader_domain);
-
-                // We create a second iterator used to assign workers in a round robin
-                // fashion.
-                let mut round_robin = worker_set.clone().cycle();
-
-                let mut worker_shards: Vec<WorkerIdentifier> = Vec::new();
-                for i in 0..num_shards.unwrap_or(1) {
-                    // Shards of certain dataflow nodes may have restrictions that
-                    // limit the workers they are placed upon.
-                    let dataflow_node_restrictions = nodes
-                        .iter()
-                        .filter_map(|(n, _)| {
-                            #[allow(clippy::indexing_slicing)] // checked above
-                            let node_name = ingredients[*n].name();
-                            mainline.node_restrictions.get(&NodeRestrictionKey {
-                                node_name: node_name.into(),
-                                shard: i,
-                            })
-                        })
-                        .collect::<Vec<_>>();
-
-                    // If there are placement restrictions we select the first worker
-                    // that meets the placement restrictions. This can lead to imbalance
-                    // in the number of dataflow nodes placed on each server.
-                    let (worker_id, _) = if !dataflow_node_restrictions.is_empty() {
-                        let restriction_filter = |(_, worker): &(&WorkerIdentifier, &Worker)| {
-                            worker_meets_restrictions(*worker, &dataflow_node_restrictions)
-                        };
-                        worker_set.clone().find(restriction_filter)
-                    } else {
-                        round_robin.next()
-                    }
-                    .ok_or(ReadySetError::NoAvailableWorkers {
-                        domain_index: domain.index(),
-                        shard: i,
-                    })?;
-
-                    worker_shards.push(worker_id.clone());
-                }
-
-                dmp.add_new_domain(domain, worker_shards, nodes.clone());
-                dmp.valid_domains.insert(domain, num_shards.unwrap_or(1));
+                let num_shards = worker_shards.len();
+                dmp.add_new_domain(domain, worker_shards, nodes);
+                dmp.valid_domains.insert(domain, num_shards);
             }
 
             // And now, the last piece of the puzzle -- set up materializations
