@@ -66,17 +66,17 @@ impl ArbitraryQueryParameters {
     pub fn labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
         labels.insert(
-            "query.file".to_string(),
+            "query_file".to_string(),
             self.query.to_string_lossy().to_string(),
         );
         if let Some(query_spec_file) = self.query_spec_file.as_ref() {
             labels.insert(
-                "query.spec_file".to_string(),
+                "query_spec_file".to_string(),
                 query_spec_file.to_string_lossy().to_string(),
             );
         }
         if let Some(query_spec) = self.query_spec.clone() {
-            labels.insert("query.spec".to_string(), query_spec);
+            labels.insert("query_spec".to_string(), query_spec);
         }
         labels
     }
