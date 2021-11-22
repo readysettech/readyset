@@ -593,7 +593,7 @@ impl ControllerHandle {
         self.rpc("replicate_readers", request)
     }
 
-    /// Replicate the readers associated with the list of queries to the given worker.
+    /// Query the controller for information about the graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn get_info(&mut self) -> impl Future<Output = ReadySetResult<GraphInfo>> + '_ {
