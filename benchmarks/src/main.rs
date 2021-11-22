@@ -15,10 +15,10 @@ struct BenchmarkRunner {
     #[clap(long)]
     skip_setup: bool,
 
-    /// Job name, for metrics purposes.  In CI, it makes sense to set this to
-    /// the CL# or commit hash.
-    #[clap(long)]
-    job_name: String,
+    /// Instance label, for metrics.  In CI, it makes sense to set this to the
+    /// CL# or commit hash.
+    #[clap(long, default_value("local"))]
+    instance_label: String,
 
     /// The duartion, specified as the number of seconds that the experiment
     /// should be running. If `None` is provided, the experiment will run
@@ -41,7 +41,6 @@ impl BenchmarkRunner {
                 .disable_http_listener()
                 .idle_timeout(MetricKindMask::ALL, None)
                 .push_gateway_config(&self.prometheus, Duration::from_secs(10));
-            builder = builder.add_global_label("benchmark_name", self.benchmark.name_label());
             for (key, value) in &self.benchmark.labels() {
                 builder = builder.add_global_label(key, value);
             }
@@ -69,8 +68,11 @@ impl BenchmarkRunner {
             recorder.update_gauge(&key, GaugeValue::Absolute(duration.as_micros() as f64));
         }
 
-        self.prometheus
-            .push_str(&format!("/metrics/job/{}/", self.job_name));
+        self.prometheus.push_str(&format!(
+            "/metrics/job/{}/instance/{}",
+            self.benchmark.name_label(),
+            self.instance_label
+        ));
         self.prometheus = self.prometheus.replace("//", "/");
         let client = reqwest::Client::default();
         let output = handle.render();
