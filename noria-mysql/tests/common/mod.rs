@@ -83,3 +83,17 @@ pub fn setup(partial: bool) -> mysql::Opts {
         true,
     )
 }
+
+#[allow(dead_code)]
+pub fn query_cache_setup(
+    query_status_cache: std::sync::Arc<noria_client::query_status_cache::QueryStatusCache>,
+    fallback: bool,
+) -> mysql::Opts {
+    noria_client_test_helpers::setup_inner::<MySQLAdapter>(
+        BackendBuilder::new().require_authentication(false),
+        fallback,
+        true,
+        true,
+        query_status_cache,
+    )
+}

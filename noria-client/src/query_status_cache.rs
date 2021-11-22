@@ -28,14 +28,15 @@ const MAXIMUM_FAILED_EXECUTES: u32 = 5;
 /// along with its current state.
 #[derive(Debug, Clone)]
 struct QueryStatus {
-    first_seen: DateTime<Utc>,
+    // Indicates when the state field was last changed
+    last_state_change: DateTime<Utc>,
     state: QueryState,
 }
 
 impl QueryStatus {
     fn new(state: QueryState) -> Self {
         Self {
-            first_seen: Utc::now(),
+            last_state_change: Utc::now(),
             state,
         }
     }
@@ -134,14 +135,19 @@ impl QueryStatusCache {
     }
 
     /// Registers a query with a default state of [`QueryState::PendingMigration`] if
-    /// it doesn't already exist in the cache. If it does exist in the cache this
-    /// will no-op. Can only be called by proxy of calling `exists` which will check
-    /// if we have seen a query or not, and if not register it.
+    /// it doesn't already exist in the cache. If it already exists as pending in the cache this
+    /// will no op.
     pub async fn set_pending_migration(&self, query: &Query) {
         self.inner
             .write()
             .await
             .entry(query.clone())
+            .and_modify(|s| {
+                if s.state != QueryState::PendingMigration {
+                    s.state = QueryState::PendingMigration;
+                    s.last_state_change = Utc::now();
+                }
+            })
             .or_insert_with(|| QueryStatus::new(QueryState::PendingMigration));
     }
 
@@ -155,9 +161,10 @@ impl QueryStatusCache {
             .await
             .entry(query.clone())
             .and_modify(|s| match s.state {
-                QueryState::FailedExecute(_) => {}
+                QueryState::FailedExecute(_) | QueryState::SuccessfulMigration => {}
                 _ => {
                     s.state = QueryState::SuccessfulMigration;
+                    s.last_state_change = Utc::now();
                 }
             })
             .or_insert_with(|| QueryStatus::new(QueryState::SuccessfulMigration));
@@ -167,8 +174,13 @@ impl QueryStatusCache {
     /// If the query is not found this is a no-op.
     pub async fn set_failed_query(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::PendingMigration;
-            s
+            if s.state != QueryState::PendingMigration {
+                s.state = QueryState::PendingMigration;
+                s.last_state_change = Utc::now();
+                s
+            } else {
+                s
+            }
         });
     }
 
@@ -177,7 +189,12 @@ impl QueryStatusCache {
             .write()
             .await
             .entry(query.clone())
-            .and_modify(|s| s.state = QueryState::Unsupported)
+            .and_modify(|s| {
+                if s.state != QueryState::Unsupported {
+                    s.state = QueryState::Unsupported;
+                    s.last_state_change = Utc::now();
+                }
+            })
             .or_insert_with(|| QueryStatus::new(QueryState::Unsupported));
     }
 
@@ -189,6 +206,7 @@ impl QueryStatusCache {
                 QueryState::FailedExecute(n) => QueryState::FailedExecute(n + 1),
                 _ => QueryState::FailedExecute(1),
             };
+            s.last_state_change = Utc::now();
             s
         });
     }
@@ -197,7 +215,10 @@ impl QueryStatusCache {
     /// If the query is not found this is a no-op.
     pub async fn set_failed_prepare(&self, query: &Query) {
         self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::PendingMigration;
+            if s.state != QueryState::PendingMigration {
+                s.state = QueryState::PendingMigration;
+                s.last_state_change = Utc::now();
+            }
             s
         });
     }
@@ -209,7 +230,7 @@ impl QueryStatusCache {
             .read()
             .await
             .iter()
-            .filter(|(_, status)| matches!(status.state, QueryState::PendingMigration if status.first_seen >= self.max_age()))
+            .filter(|(_, status)| matches!(status.state, QueryState::PendingMigration if status.last_state_change >= self.max_age()))
             .map(|(q, _)| q.clone())
             .collect()
     }
@@ -233,7 +254,7 @@ impl QueryStatusCache {
             .await
             .iter()
             .filter(|(_, status)| {
-                (matches!(status.state, QueryState::PendingMigration) && status.first_seen < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES) || matches!(status.state, QueryState::Unsupported)
+                (matches!(status.state, QueryState::PendingMigration) && status.last_state_change < self.max_age()) || matches!(status.state, QueryState::FailedExecute(n) if n >= MAXIMUM_FAILED_EXECUTES) || matches!(status.state, QueryState::Unsupported)
            })
             .map(|(q, _)| q.clone())
             .collect::<Vec<Query>>()
@@ -243,10 +264,13 @@ impl QueryStatusCache {
     /// Returns whether we should admit the query for execution in Noria.
     pub async fn admit(&self, query: &Query) -> Option<AdmitStatus> {
         self.inner.read().await.get(query).map(|s| {
-            let QueryStatus { state, first_seen } = &s;
+            let QueryStatus {
+                state,
+                last_state_change,
+            } = &s;
             match state {
                 QueryState::PendingMigration => {
-                    if first_seen < &self.max_age() {
+                    if last_state_change < &self.max_age() {
                         AdmitStatus::Deny
                     } else {
                         AdmitStatus::Pending

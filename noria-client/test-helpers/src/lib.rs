@@ -54,6 +54,26 @@ pub fn setup<A>(
 where
     A: Adapter + 'static,
 {
+    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(1)));
+    setup_inner::<A>(
+        backend_builder,
+        fallback,
+        partial,
+        wait_for_backend,
+        query_status_cache,
+    )
+}
+
+pub fn setup_inner<A>(
+    backend_builder: BackendBuilder,
+    fallback: bool,
+    partial: bool,
+    wait_for_backend: bool,
+    query_status_cache: Arc<QueryStatusCache>,
+) -> A::ConnectionOpts
+where
+    A: Adapter + 'static,
+{
     // Run with VERBOSE=1 for log output.
     if env::var("VERBOSE").is_ok() {
         readyset_logging::init_test_logging();
@@ -67,7 +87,10 @@ where
         LocalAuthorityStore::new(),
     ))));
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
 
     let mut noria_handle = {
         let authority = Arc::clone(&authority);
@@ -90,7 +113,6 @@ where
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
