@@ -100,7 +100,7 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
             // If there are placement restrictions we select the first worker
             // that meets the placement restrictions. This can lead to imbalance
             // in the number of dataflow nodes placed on each server.
-            let worker_id = if !dataflow_node_restrictions.is_empty() {
+            let worker_id = if dataflow_node_restrictions.is_empty() {
                 round_robin.next()
             } else {
                 workers.clone().find(|(_, worker)| {
