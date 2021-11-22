@@ -11,7 +11,9 @@
 //! 3. Otherwise, for each shard in the domain (which is just the list of natural numbers from 0 to the
 //!    number of shards exclusive) we either:
 //!    a. Run the domain shard on the worker matching its [placement restrictions][], if it has any, or
-//!    b. Run it on the worker that has the smallest number of domain shards scheduled onto it.
+//!    b. If the domain contains base tables, run it on the worker running the smallest number of
+//!       other base tables, or otherwise
+//!    c. Run it on the worker that has the smallest number of domain shards scheduled onto it
 //!
 //! [reader_only]: Worker::reader_only
 //! [worker]: Migration::worker
@@ -37,11 +39,18 @@ fn worker_meets_restrictions(
         .all(|r| r.worker_volume == worker.volume_id)
 }
 
+/// Statistics about the domains scheduled onto a worker
+#[derive(Default, Clone, Copy)]
+struct WorkerStats {
+    num_domain_shards: usize,
+    num_base_table_domain_shards: usize,
+}
+
 /// A short-lived struct holding all the information necessary to assign domain shards to workers.
 pub(crate) struct Scheduler<'leader, 'migration> {
     valid_workers: Vec<(&'leader WorkerIdentifier, &'leader Worker)>,
     node_restrictions: &'leader HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
-    worker_domain_shards: HashMap<&'leader WorkerIdentifier, Vec<(usize, DomainIndex)>>,
+    worker_stats: HashMap<&'leader WorkerIdentifier, WorkerStats>,
     ingredients: &'migration Graph,
 }
 
@@ -60,21 +69,24 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
             .filter(|(wi, _)| worker.iter().all(|target_worker| *target_worker == **wi))
             .collect();
 
-        let mut worker_domain_shards: HashMap<&WorkerIdentifier, Vec<(usize, DomainIndex)>> =
-            HashMap::new();
+        let mut worker_stats: HashMap<&WorkerIdentifier, WorkerStats> = HashMap::new();
         for (di, dh) in &leader.domains {
-            for (shard_i, wi) in dh.shards.iter().enumerate() {
-                worker_domain_shards
-                    .entry(wi)
-                    .or_default()
-                    .push((shard_i, *di));
+            let is_base_table_domain = leader.domain_nodes[di]
+                .iter()
+                .any(|ni| ingredients[*ni].is_base());
+            for wi in &dh.shards {
+                let stats = worker_stats.entry(wi).or_default();
+                stats.num_domain_shards += 1;
+                if is_base_table_domain {
+                    stats.num_base_table_domain_shards += 1;
+                }
             }
         }
 
         Ok(Self {
             valid_workers,
             node_restrictions: &leader.node_restrictions,
-            worker_domain_shards,
+            worker_stats,
             ingredients,
         })
     }
@@ -100,6 +112,7 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
             .shards()
             .unwrap_or(1);
         let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
+        let is_base_table_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_base());
 
         let workers = self
             .valid_workers
@@ -122,13 +135,20 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
                 .collect::<Vec<_>>();
 
             let worker_id = if dataflow_node_restrictions.is_empty() {
-                // If there are no placement restrictions, pick the worker running the smallest
-                // number of domain shards
+                // If there are no placement restrictions, pick the node based on load-balancing
+                // heuristics
                 workers.clone().min_by_key(|(wi, _)| {
-                    self.worker_domain_shards
-                        .get(wi)
-                        .map(|domain_shards| domain_shards.len())
-                        .unwrap_or(0)
+                    let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
+
+                    if is_base_table_domain {
+                        // If there are base tables in the domain, find the worker running the
+                        // smallest number of base table domain shards
+                        stats.num_base_table_domain_shards
+                    } else {
+                        // Otherwise, find the worker running the smallest number of domain shards
+                        // overall
+                        stats.num_domain_shards
+                    }
                 })
             } else {
                 // Otherwise, if there are placement restrictions, we select the first worker that
@@ -144,10 +164,12 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
                 shard,
             })?;
 
-            self.worker_domain_shards
-                .entry(worker_id)
-                .or_default()
-                .push((shard, domain_index));
+            let stats = self.worker_stats.entry(worker_id).or_default();
+            stats.num_domain_shards += 1;
+            if is_base_table_domain {
+                stats.num_base_table_domain_shards += 1;
+            }
+
             res.push(worker_id.clone());
         }
 

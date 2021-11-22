@@ -572,6 +572,7 @@ impl Node {
         matches!(self.inner, NodeType::Sharder { .. })
     }
 
+    /// Returns `true` if self is a base table node
     pub fn is_base(&self) -> bool {
         matches!(self.inner, NodeType::Base(..))
     }
