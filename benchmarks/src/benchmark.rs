@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::read_benchmark::ReadBenchmark;
+use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
 use anyhow::Result;
@@ -29,6 +30,7 @@ pub enum Benchmark {
     /// Basic read benchmark
     ReadBenchmark,
     ScaleViews,
+    ScaleConnections,
 }
 
 impl Benchmark {
@@ -37,6 +39,7 @@ impl Benchmark {
             Self::Template(_) => "template",
             Self::ReadBenchmark(_) => "read_benchmark",
             Self::ScaleViews(_) => "scale_views",
+            Self::ScaleConnections(_) => "scale_connections",
         }
     }
 }

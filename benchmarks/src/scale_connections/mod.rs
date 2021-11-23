@@ -1,0 +1,93 @@
+use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::{benchmark_counter, benchmark_histogram};
+use anyhow::Result;
+use async_trait::async_trait;
+use clap::Parser;
+use std::collections::HashMap;
+use std::time::Instant;
+use tracing::info;
+
+#[derive(Parser, Clone)]
+pub struct ScaleConnectionsParams {
+    /// Common shared benchmark parameters.
+    #[clap(flatten)]
+    common: BenchmarkParameters,
+
+    /// The number of views to create in the experiment.
+    #[clap(long, default_value = "1")]
+    num_connections: usize,
+
+    /// Whether to open all the connections in parallel or serially, closing
+    /// each connection before opening the next.
+    #[clap(long)]
+    parallel: bool,
+}
+
+#[derive(Parser, Clone)]
+pub struct ScaleConnections {
+    #[clap(flatten)]
+    params: ScaleConnectionsParams,
+}
+
+#[async_trait]
+impl BenchmarkControl for ScaleConnections {
+    async fn setup(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn is_already_setup(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    async fn benchmark(&self) -> Result<()> {
+        info!(
+            "Running benchmark connecting to {} connections.",
+            self.params.num_connections
+        );
+
+        let mut connections = Vec::new();
+        for _ in 0..self.params.num_connections {
+            let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+
+            let start = Instant::now();
+            let conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let connection_time = start.elapsed();
+
+            // Keep the state alive by storing it in the struct.
+            if self.params.parallel {
+                connections.push(conn);
+            }
+
+            info!(
+                "connection:\t{:.1}ms",
+                connection_time.as_secs_f64() * 1000.0,
+            );
+
+            benchmark_histogram!(
+                "scale_connections.connection_duration",
+                Seconds,
+                "The number of seconds spent creating a new connection",
+                connection_time.as_secs_f64()
+            );
+
+            benchmark_counter!(
+                "scale_connections.connections",
+                Count,
+                "The number of connections the benchmark has executed",
+                1
+            )
+        }
+
+        Ok(())
+    }
+
+    fn labels(&self) -> HashMap<String, String> {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "num_connections".to_string(),
+            self.params.num_connections.to_string(),
+        );
+        labels.insert("parallel".to_string(), self.params.parallel.to_string());
+        labels
+    }
+}
