@@ -107,7 +107,7 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(mut ch: ControllerHandle) -> ReadySetResult<Self> {
+    async fn new(mut ch: ControllerHandle, region: Option<String>) -> ReadySetResult<Self> {
         ch.ready().await?;
         let inputs = ch.inputs().await?;
         let mut i = BTreeMap::new();
@@ -121,7 +121,11 @@ impl NoriaBackendInner {
         let mut o = BTreeMap::new();
         for (n, _) in outputs {
             ch.ready().await?;
-            let t = ch.view(&n).await?;
+            let t = match &region {
+                None => ch.view(&n).await?,
+                Some(r) => ch.view_from_region(&n, r).await?,
+            };
+
             o.insert(n, t);
         }
         Ok(NoriaBackendInner {
@@ -131,19 +135,7 @@ impl NoriaBackendInner {
         })
     }
 
-    async fn ensure_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
-        self.get_or_make_mutator(table).await
-    }
-
-    async fn ensure_getter(
-        &mut self,
-        view: &str,
-        region: Option<&str>,
-    ) -> ReadySetResult<&mut View> {
-        self.get_or_make_getter(view, region).await
-    }
-
-    async fn get_or_make_mutator(&mut self, table: &str) -> ReadySetResult<&mut Table> {
+    async fn get_noria_table(&mut self, table: &str) -> ReadySetResult<&mut Table> {
         if !self.inputs.contains_key(table) {
             let t = noria_await!(self, self.noria.table(table))?;
             self.inputs.insert(table.to_owned(), t);
@@ -151,7 +143,7 @@ impl NoriaBackendInner {
         Ok(self.inputs.get_mut(table).unwrap())
     }
 
-    async fn get_or_make_getter(
+    async fn get_noria_view(
         &mut self,
         view: &str,
         region: Option<&str>,
@@ -333,7 +325,7 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch).await;
+        let backend = NoriaBackendInner::new(ch, region.clone()).await;
         if let Err(e) = &backend {
             error!(%e, "Error creating a noria backend");
         }
@@ -434,7 +426,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "query::insert::access mutator");
-        let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
+        let putter = self.inner.get_mut().await?.get_noria_table(table).await?;
         trace!("query::insert::extract schema");
         let schema = putter
             .schema()
@@ -479,7 +471,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&q.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
         trace!("insert::extract schema");
         let schema = mutator
@@ -555,7 +547,7 @@ impl NoriaConnector {
         match prep {
             PreparedStatement::Insert(ref q) => {
                 let table = &q.table.name;
-                let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
+                let putter = self.inner.get_mut().await?.get_noria_table(table).await?;
                 trace!("insert::extract schema");
                 let schema = putter
                     .schema()
@@ -590,7 +582,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&q.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
 
         trace!("delete::extract schema");
@@ -652,7 +644,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&q.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
         trace!("update::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
@@ -722,7 +714,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&statement.table.name)
+            .get_noria_table(&statement.table.name)
             .await?;
         trace!("delete::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
@@ -919,7 +911,7 @@ impl NoriaConnector {
 
         // create a mutator if we don't have one for this table already
         trace!(%table, "insert::access mutator");
-        let putter = self.inner.get_mut().await?.ensure_mutator(table).await?;
+        let putter = self.inner.get_mut().await?.get_noria_table(table).await?;
         trace!("insert::extract schema");
         let schema = putter
             .schema()
@@ -1087,7 +1079,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&q.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
 
         let q = q.into_owned();
@@ -1124,7 +1116,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_mutator(&q.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
 
         let q = q.into_owned();
@@ -1168,7 +1160,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_getter(&qname, self.region.as_deref())
+            .get_noria_view(&qname, self.region.as_deref())
             .await?;
 
         let getter_schema = getter
@@ -1233,7 +1225,7 @@ impl NoriaConnector {
             .inner
             .get_mut()
             .await?
-            .ensure_getter(&qname, self.region.as_deref())
+            .get_noria_view(&qname, self.region.as_deref())
             .await?
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
@@ -1304,7 +1296,7 @@ impl NoriaConnector {
         let getter = noria
             .get_mut()
             .await?
-            .ensure_getter(name, region.as_deref())
+            .get_noria_view(name, region.as_deref())
             .await?;
 
         // TODO(DAN): These should have been passed as UnsignedBigInt
