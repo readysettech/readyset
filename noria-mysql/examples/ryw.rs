@@ -11,6 +11,7 @@ use noria_client::{
         noria_connector::{self, NoriaConnector},
         BackendBuilder, QueryResult,
     },
+    query_status_cache::QueryStatusCache,
     Backend, UpstreamDatabase,
 };
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -42,11 +43,12 @@ async fn main() {
     let upstream = Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
 
     let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
+    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
 
     let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()
         .require_authentication(false)
         .enable_ryw(true)
-        .build(noria, upstream);
+        .build(noria, upstream, query_status_cache);
 
     // Install Query/Recipe to noria (must match the underlying mysql database structure)
     let test_sql_string = "

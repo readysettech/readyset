@@ -102,12 +102,7 @@ pub struct Options {
     allow_unauthenticated_connections: bool,
 
     /// Run migrations in a separate thread off of the serving path.
-    #[clap(
-        long,
-        env = "ASYNC_MIGRATIONS",
-        requires_if("true", "upstream-db-url"),
-        requires_all(&["max-processing-minutes", "migration-task-interval"])
-    )]
+    #[clap(long, env = "ASYNC_MIGRATIONS", requires("upstream-db-url"))]
     async_migrations: bool,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
@@ -291,36 +286,32 @@ where
             None
         };
 
-        // We currently only create the query status cache when we migrate async as
-        // the regular serving path does not update the query status cache when performing
-        // migrations.
-        // TODO(ENG-806): Integrate query status cache into the serving path when we are
-        // not migrating async.
-        let query_status_cache = if options.async_migrations {
-            let cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
-                options.max_processing_minutes,
-            )));
+        let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
+            options.max_processing_minutes,
+        )));
 
-            // Only start the migration task if there is an upstream db.
-            if let Some(upstream_db_url) = options.upstream_db_url.clone() {
-                let ch = ch.clone();
-                let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
-                let shutdown_recv = shutdown_sender.subscribe();
-                let loop_interval = options.migration_task_interval;
-                let validate_queries = options.validate_queries;
-                let cache = cache.clone();
-                let fut = async move {
-                    let connection =
-                        span!(Level::INFO, "migration task upstream database connection");
-                    let upstream = H::UpstreamDatabase::connect(upstream_db_url.clone())
-                        .instrument(
-                            connection
-                                .in_scope(|| span!(Level::INFO, "Connecting to upstream database")),
-                        )
-                        .await
-                        .unwrap();
+        if options.async_migrations {
+            #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
+            let upstream_db_url = options.upstream_db_url.as_ref().unwrap().clone();
+            let ch = ch.clone();
+            let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let shutdown_recv = shutdown_sender.subscribe();
+            let loop_interval = options.migration_task_interval;
+            let validate_queries = options.validate_queries;
+            let cache = query_status_cache.clone();
 
-                    let noria = NoriaConnector::new(
+            let fut = async move {
+                let connection = span!(Level::INFO, "migration task upstream database connection");
+                let upstream = H::UpstreamDatabase::connect(upstream_db_url.clone())
+                    .instrument(
+                        connection
+                            .in_scope(|| span!(Level::INFO, "Connecting to upstream database")),
+                    )
+                    .await
+                    .unwrap();
+
+                let noria =
+                    NoriaConnector::new(
                         ch.clone(),
                         auto_increments.clone(),
                         query_cache.clone(),
@@ -331,29 +322,24 @@ where
                     }))
                     .await;
 
-                    let mut migration_handler = MigrationHandler::new(
-                        noria,
-                        upstream,
-                        cache,
-                        validate_queries,
-                        std::time::Duration::from_millis(loop_interval),
-                        shutdown_recv,
-                    );
-                    migration_handler.run().await
-                };
+                let mut migration_handler = MigrationHandler::new(
+                    noria,
+                    upstream,
+                    cache,
+                    validate_queries,
+                    std::time::Duration::from_millis(loop_interval),
+                    shutdown_recv,
+                );
+                migration_handler.run().await
+            };
 
-                rt.handle().spawn(fut);
-            }
-
-            Some(cache)
-        } else {
-            None
-        };
+            rt.handle().spawn(fut);
+        }
 
         // Spawn a thread for handling this adapter's HTTP request server.
         let router_handle = {
             let (handle, valve) = Valve::new();
-            let query_cache = query_status_cache.as_ref().cloned();
+            let query_cache = query_status_cache.clone();
             let http_server = NoriaAdapterHttpRouter {
                 listen_addr: options.metrics_address,
                 query_cache,
@@ -400,9 +386,11 @@ where
                 .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .async_migrations(options.async_migrations)
-                .query_status_cache(query_status_cache.clone())
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .allow_unsupported_set(options.allow_unsupported_set);
+
+            // can't move query_status_cache into the async move block
+            let query_status_cache = query_status_cache.clone();
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
@@ -430,7 +418,10 @@ where
                         None
                     };
 
-                let backend = backend_builder.clone().build(noria, upstream);
+                let backend =
+                    backend_builder
+                        .clone()
+                        .build(noria, upstream, query_status_cache.clone());
                 connection_handler
                     .process_connection(s, backend)
                     .instrument(connection.clone())

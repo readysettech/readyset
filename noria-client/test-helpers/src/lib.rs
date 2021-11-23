@@ -14,6 +14,7 @@ use noria::consensus::Authority;
 use noria::consensus::LocalAuthorityStore;
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::BackendBuilder;
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, LocalAuthority};
 use tokio::net::TcpStream;
@@ -89,6 +90,7 @@ where
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -110,7 +112,7 @@ where
             let backend = backend_builder
                 .dialect(A::DIALECT)
                 .mirror_ddl(A::MIRROR_DDL)
-                .build(noria, upstream);
+                .build(noria, upstream, query_status_cache);
 
             A::run_backend(backend, s).await;
             noria_handle.shutdown();

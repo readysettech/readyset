@@ -116,8 +116,6 @@ pub struct BackendBuilder {
     timestamp_client: Option<TimestampClient>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_ad_hoc_queries: bool,
-    // TODO(ENG-685): Remove option when async_migrations flag is removed in main.
-    query_status_cache: Option<Arc<QueryStatusCache>>,
     async_migrations: bool,
     validate_queries: bool,
     fail_invalidated_queries: bool,
@@ -136,7 +134,6 @@ impl Default for BackendBuilder {
             timestamp_client: None,
             query_log_sender: None,
             query_log_ad_hoc_queries: false,
-            query_status_cache: None,
             async_migrations: false,
             validate_queries: false,
             fail_invalidated_queries: false,
@@ -154,6 +151,7 @@ impl BackendBuilder {
         self,
         noria: NoriaConnector,
         upstream: Option<DB>,
+        qsc: Arc<QueryStatusCache>,
     ) -> Backend<DB, Handler> {
         let parsed_query_cache = HashMap::new();
         let prepared_queries = HashMap::new();
@@ -174,7 +172,7 @@ impl BackendBuilder {
             prepared_statements: Default::default(),
             query_log_sender: self.query_log_sender,
             query_log_ad_hoc_queries: self.query_log_ad_hoc_queries,
-            query_status_cache: self.query_status_cache,
+            query_status_cache: qsc,
             async_migrations: self.async_migrations,
             validate_queries: self.validate_queries,
             fail_invalidated_queries: self.fail_invalidated_queries,
@@ -226,11 +224,6 @@ impl BackendBuilder {
             self.ticket = Some(Timestamp::default());
             self.timestamp_client = Some(TimestampClient::default())
         }
-        self
-    }
-
-    pub fn query_status_cache(mut self, query_status_cache: Option<Arc<QueryStatusCache>>) -> Self {
-        self.query_status_cache = query_status_cache;
         self
     }
 
@@ -295,7 +288,7 @@ pub struct Backend<DB, Handler> {
     query_log_ad_hoc_queries: bool,
 
     /// A cache of queries that we've seen, and their current state, used for processing
-    query_status_cache: Option<Arc<QueryStatusCache>>,
+    query_status_cache: Arc<QueryStatusCache>,
 
     /// Run migrations in asynchronously in a separate tokio task. Queries are enqueued
     /// for migration via the `PendingMigration` status in the query_status_cache.
@@ -800,7 +793,7 @@ where
                     if self.async_migrations() {
                         // The query status cache is guaranteed to exist if `async_migrations` is enabled.
                         #[allow(clippy::unwrap_used)]
-                        let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
+                        let query_status_cache = self.query_status_cache.clone();
 
                         let result = match query_status_cache.admit(stmt).await {
                             // Register the query if this is the first time we the
@@ -1024,8 +1017,7 @@ where
                             // The query status cache is guaranteed to exist if `async_migrations` is enabled.
                             #[allow(clippy::unwrap_used)]
                             let stmt = stmt.clone();
-                            let query_status_cache =
-                                self.query_status_cache.as_ref().unwrap().clone();
+                            let query_status_cache = self.query_status_cache.clone();
                             match query_status_cache.admit(&stmt).await {
                                 // If prepare was called for this query prior, it should be in the
                                 // query status cache.
@@ -1247,7 +1239,7 @@ where
                     let res = if async_migrations {
                         // The query status cache is guarenteed to exist if `async_migrations` is enabled.
                         #[allow(clippy::unwrap_used)]
-                        let query_status_cache = self.query_status_cache.as_ref().unwrap().clone();
+                        let query_status_cache = self.query_status_cache.clone();
 
                         match query_status_cache.admit(stmt).await {
                             // If this is the first time this adapter has seen the query, we should
