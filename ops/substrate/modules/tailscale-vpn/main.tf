@@ -5,32 +5,28 @@ resource "aws_instance" "subnet-router" {
   ami           = var.ami_id
   instance_type = var.instance_type
   monitoring    = var.enable_detailed_monitoring
-
-  # Networking & Security
-  associate_public_ip_address = true
-  iam_instance_profile        = module.subnet-router-iam-role.iam_instance_profile_name
-  key_name                    = var.key_pair_name
-  subnet_id                   = data.aws_subnet_ids.public.ids
-  vpc_security_group_ids = [
-    aws_security_group.tailscale.id,
-  ]
-
-  root_block_device {
-    volume_size           = var.root_volume_configs["volume_size"]
-    delete_on_termination = var.root_volume_configs["delete_on_termination"]
-  }
-
+  user_data_base64 = base64encode(data.template_file.launch-script.rendered)
   tags = merge(var.resource_tags, {
     Name = local.subnet_router_ec2_name,
     role = "subnet-router"
   })
 
-  user_data_base64 = base64encode(templatefile(
-    "${path.module}/templates/tailscale-node-userdata.tpl", {
-      advertised_routes   = join(",", var.ts_cfg_advertised_routes)
-      auth_key_secret_arn = var.iam_authorized_secrets_manager_arn
-    })
-  )
+  # Networking & Security
+  associate_public_ip_address = true
+  iam_instance_profile        = module.subnet-router-iam-role.iam_instance_profile_name
+  key_name                    = var.key_pair_name
+  subnet_id                   = sort(data.aws_subnet_ids.public.ids)[0]
+  vpc_security_group_ids = [
+    aws_security_group.tailscale.id,
+  ]
+
+  root_block_device {
+    volume_type           = "gp2"
+    volume_size           = var.root_volume_configs["volume_size"]
+    delete_on_termination = var.root_volume_configs["delete_on_termination"]
+    encrypted             = true
+    kms_key_id            = data.aws_kms_alias.ebs.target_key_arn
+  }
 }
 
 resource "aws_eip" "subnet-router" {

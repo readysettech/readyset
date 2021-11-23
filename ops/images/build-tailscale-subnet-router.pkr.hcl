@@ -18,6 +18,7 @@ build {
       "provisioners/scripts/internal-base/10-aws-cli.sh",
       "provisioners/scripts/internal-base/99-tailscale.sh",
       "provisioners/scripts/tailscale-subnet-router/00-init.sh",
+      "provisioners/scripts/reset-cloud-init.sh",
     ]
   }
 }

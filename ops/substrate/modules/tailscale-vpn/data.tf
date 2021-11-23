@@ -22,7 +22,8 @@ data "aws_iam_policy_document" "subnet-router" {
     sid    = "getSecret"
     effect = "Allow"
     actions = [
-      "secretsmanager:GetSecretValue"
+      "secretsmanager:GetSecretValue",
+      "ssm:GetParameter",
     ]
 
     resources = [var.iam_authorized_secrets_manager_arn]
@@ -42,5 +43,17 @@ data "aws_iam_policy_document" "subnet-router" {
       # ARN of KMS key that was used to encrypt Secrets Manager secrets
       resources = [var.iam_authorized_secrets_manager_kms_key_arn]
     }
+  }
+}
+
+data "aws_kms_alias" "ebs" {
+  name = "alias/aws/ebs"
+}
+
+data "template_file" "launch-script" {
+  template = file("${path.module}/templates/tailscale-node-userdata.tpl")
+  vars = {
+    advertised_routes   = join(",", var.ts_cfg_advertised_routes)
+    auth_key_secret_arn = var.iam_authorized_secrets_manager_arn
   }
 }

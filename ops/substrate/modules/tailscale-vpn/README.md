@@ -11,6 +11,7 @@ No requirements.
 | Name | Version |
 |------|---------|
 | aws | n/a |
+| template | n/a |
 
 ## Inputs
 

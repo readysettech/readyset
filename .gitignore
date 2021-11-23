@@ -7,7 +7,6 @@ docs/book/
 .terraform.lock.hcl
 .terraform-version
 provider.tf
-*.tfvars
 *.tfstate
 *.tfstate.backup
 *.vi
