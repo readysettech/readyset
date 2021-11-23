@@ -94,3 +94,4 @@ pub mod utils;
 
 // Benchmarks
 mod read_benchmark;
+mod scale_views;

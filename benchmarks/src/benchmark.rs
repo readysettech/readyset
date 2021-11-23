@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::read_benchmark::ReadBenchmark;
+use crate::scale_views::ScaleViews;
 use crate::template::Template;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -27,6 +28,7 @@ pub enum Benchmark {
     Template, // Example benchmark that does not execute any commands.
     /// Basic read benchmark
     ReadBenchmark,
+    ScaleViews,
 }
 
 impl Benchmark {
@@ -34,6 +36,7 @@ impl Benchmark {
         match self {
             Self::Template(_) => "template",
             Self::ReadBenchmark(_) => "read_benchmark",
+            Self::ScaleViews(_) => "scale_views",
         }
     }
 }

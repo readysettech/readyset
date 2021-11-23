@@ -1,0 +1,164 @@
+//! Evaluates the impact of creating a view in ReadySet on the time it
+//! takes to create a connection and prepare a new view.
+//!
+//! This benchmark serially creates connections and views until
+//! `--num-views` is reached. At each point we measure the time
+//! it takes to create the connection and the number of views.
+//! `--param_count` can be specified to modify the number of
+//! parameters in the view.
+use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::{benchmark_counter, benchmark_histogram};
+use anyhow::{bail, Result};
+use async_trait::async_trait;
+use clap::Parser;
+use itertools::Itertools;
+use mysql_async::prelude::Queryable;
+use std::collections::HashMap;
+use std::time::Instant;
+use tracing::info;
+
+const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
+
+#[derive(Parser, Clone)]
+pub struct ScaleViewsParams {
+    /// Common shared benchmark parameters.
+    #[clap(flatten)]
+    common: BenchmarkParameters,
+
+    /// The number of views to create in the experiment.
+    #[clap(long, default_value = "1")]
+    num_views: usize,
+
+    /// The number of parameters in each view.
+    #[clap(long, default_value = "1")]
+    param_count: usize,
+}
+
+#[derive(Parser, Clone)]
+pub struct ScaleViews {
+    #[clap(flatten)]
+    params: ScaleViewsParams,
+}
+
+// This kind of state would be useful to pass from setup() to benchmark().
+// TODO: Is there a way we can add this into the API?.
+fn get_columns(num_views: usize, param_count: usize) -> Vec<String> {
+    // Need enough columns s.t. there are enough permutations over the columns
+    // to match num_views.
+
+    let mut num_columns = param_count;
+    let mut num_choices = 0;
+    while num_choices < num_views {
+        num_choices = num_integer::binomial(num_columns, param_count);
+        num_columns += 1;
+    }
+
+    (0..num_columns).map(|i| format!("c{}", i)).collect()
+}
+
+#[async_trait]
+impl BenchmarkControl for ScaleViews {
+    /// Creates a table with enough columns that we can create `num_views` off a
+    /// combination of the columns.
+    async fn setup(&self) -> Result<()> {
+        info!("Beginning setup");
+        let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+
+        let columns = get_columns(self.params.num_views, self.params.param_count);
+        if columns.len() > MAX_MYSQL_COLUMN_COUNT {
+            bail!(
+                "Too many columns required: {}, the max is: {}",
+                columns.len(),
+                MAX_MYSQL_COLUMN_COUNT
+            );
+        }
+
+        let columns_with_type = columns
+            .iter()
+            .map(|c| format!("{} int", c))
+            .collect::<Vec<_>>();
+        let create_table_stmt = format!("CREATE TABLE bigtable ({})", columns_with_type.join(","));
+
+        info!("Creating a table with {} columns", columns.len());
+        let _ = conn.query_drop(create_table_stmt).await;
+
+        Ok(())
+    }
+
+    async fn is_already_setup(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    async fn benchmark(&self) -> Result<()> {
+        info!(
+            "Running benchmark with {} views, {} params per view",
+            self.params.num_views, self.params.param_count
+        );
+        let columns = get_columns(self.params.num_views, self.params.param_count);
+        let permutations: Vec<Vec<&String>> = columns
+            .iter()
+            .combinations(self.params.param_count)
+            .collect();
+
+        assert!(permutations.len() >= self.params.num_views);
+        for c in permutations.iter().take(self.params.num_views) {
+            let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+
+            let start = Instant::now();
+            let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let connection_time = start.elapsed();
+
+            let condition = c
+                .iter()
+                .map(|p| format!("{} = ?", p))
+                .collect::<Vec<String>>()
+                .join(" AND ");
+
+            let start = Instant::now();
+            let _ = conn
+                .prep(format!("SELECT * FROM bigtable WHERE {}", condition))
+                .await
+                .unwrap();
+            let prepare_time = start.elapsed();
+
+            info!(
+                "connection:\t{:.1}ms\tprepare:\t{:.1}ms",
+                connection_time.as_secs_f64() * 1000.0,
+                prepare_time.as_secs_f64() * 1000.0
+            );
+
+            benchmark_histogram!(
+                "scale_views.connection_duration",
+                Seconds,
+                "The number of seconds spent creating a new connection",
+                connection_time.as_secs_f64()
+            );
+            benchmark_histogram!(
+                "scale_views.prepare_duration",
+                Seconds,
+                "The number of seconds spent executing a prepare for a view",
+                prepare_time.as_secs_f64()
+            );
+
+            benchmark_counter!(
+                "scale_views.num_views",
+                Count,
+                "The number of views prepared against the backend.",
+                1
+            )
+        }
+
+        Ok(())
+    }
+
+    fn labels(&self) -> HashMap<String, String> {
+        let mut labels = HashMap::new();
+        labels.insert("num_views".to_string(), self.params.num_views.to_string());
+        labels.insert(
+            "param_count".to_string(),
+            self.params.param_count.to_string(),
+        );
+        labels
+    }
+}

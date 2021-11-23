@@ -655,6 +655,7 @@ dependencies = [
  "noria-client",
  "noria-logictest",
  "noria-mysql",
+ "num-integer",
  "query_generator",
  "rand 0.8.4",
  "readyset-logging",
