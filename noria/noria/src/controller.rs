@@ -294,7 +294,7 @@ impl ControllerHandle {
         Ok(bincode::deserialize(&body)?)
     }
 
-    /// Enumerate all know external views. Includes the SqlQuery that created the view
+    /// Enumerate all known external views. Includes the SqlQuery that created the view
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn verbose_outputs(&mut self) -> ReadySetResult<BTreeMap<String, nom_sql::SqlQuery>> {

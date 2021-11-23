@@ -18,6 +18,7 @@ use metrics::SharedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::http_router::NoriaAdapterHttpRouter;
 use noria_client::migration_handler::MigrationHandler;
+use noria_client::outputs_synchronizer::OutputsSynchronizer;
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
@@ -345,6 +346,23 @@ where
                 migration_handler.run().await
             };
 
+            rt.handle().spawn(fut);
+        }
+
+        if options.explicit_migrations {
+            let ch = ch.clone();
+            let loop_interval = options.outputs_polling_interval;
+            let query_status_cache = query_status_cache.clone();
+            let shutdown_recv = shutdown_sender.subscribe();
+            let fut = async move {
+                let mut outputs_synchronizer = OutputsSynchronizer::new(
+                    ch,
+                    query_status_cache,
+                    std::time::Duration::from_secs(loop_interval),
+                    shutdown_recv,
+                );
+                outputs_synchronizer.run().await
+            };
             rt.handle().spawn(fut);
         }
 
