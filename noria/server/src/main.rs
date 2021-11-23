@@ -193,6 +193,10 @@ struct Opts {
     /// Sets the server id when acquiring a binlog replication slot.
     #[clap(long, hidden = true)]
     repliation_server_id: Option<u32>,
+
+    /// Sets the number of concurrent replay requests in a noria-server.
+    #[clap(long, hidden = true)]
+    max_concurrent_replays: Option<usize>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -261,6 +265,10 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(pr) = opts.primary_region {
         builder.set_primary_region(pr);
+    }
+
+    if let Some(r) = opts.max_concurrent_replays {
+        builder.set_max_concurrent_replay(r)
     }
 
     if opts.reader_only {
