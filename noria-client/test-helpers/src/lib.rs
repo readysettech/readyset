@@ -123,7 +123,7 @@ where
             let s = TcpStream::from_std(s).unwrap();
 
             let ch = ControllerHandle::new(authority).await;
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None, false).await;
             // backend either has upstream or noria writer
             let upstream = if fallback {
                 Some(A::make_upstream().await)

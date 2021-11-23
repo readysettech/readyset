@@ -178,6 +178,16 @@ pub struct Options {
     /// Allow executing, but ignore, unsupported `SET` statements
     #[clap(long, hidden = true, env = "ALLOW_UNSUPPORTED_SET")]
     allow_unsupported_set: bool,
+
+    /// Only run migrations through CREATE QUERY CACHE statements. Async migrations are not
+    /// supported in this case.
+    #[clap(long, env = "EXPLICIT_MIGRATIONS", conflicts_with = "async-migrations")]
+    explicit_migrations: bool,
+
+    // TODO(DAN): require explicit migrations
+    /// Specifies the polling interval in seconds for requesting outputs from the Leader.
+    #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "300")]
+    outputs_polling_interval: u64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -310,12 +320,14 @@ where
                     .await
                     .unwrap();
 
+                //TODO(DAN): allow compatibility with async and explicit migrations
                 let noria =
                     NoriaConnector::new(
                         ch.clone(),
                         auto_increments.clone(),
                         query_cache.clone(),
                         None,
+                        false,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -391,6 +403,7 @@ where
 
             // can't move query_status_cache into the async move block
             let query_status_cache = query_status_cache.clone();
+            let explicit_migrations = options.explicit_migrations;
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
@@ -400,6 +413,7 @@ where
                     auto_increments.clone(),
                     query_cache.clone(),
                     region.clone(),
+                    explicit_migrations,
                 )
                 .instrument(connection.in_scope(|| span!(Level::DEBUG, "Building noria connector")))
                 .await;

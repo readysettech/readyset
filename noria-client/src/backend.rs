@@ -581,7 +581,7 @@ where
         let handle = event.start_timer();
         let (noria_res, upstream_res) = tokio::join!(
             self.noria
-                .prepare_select(q.clone(), self.prepared_count, create_view_in_noria),
+                .prepare_select(q.clone(), self.prepared_count, create_view_in_noria,),
             connector.prepare(query),
         );
         handle.set_noria_duration();
@@ -1400,7 +1400,7 @@ where
                     ref statement,
                 }) => {
                     self.noria
-                        .create_view(name.as_ref().map(|s| s.as_str()), statement)
+                        .handle_create_query_cache(name.as_ref().map(|s| s.as_str()), statement)
                         .await?;
                     Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                 }
@@ -1412,6 +1412,7 @@ where
 
                 // Table Create / Drop (RYW not supported)
                 // TODO(andrew, justin): how are these types of writes handled w.r.t RYW?
+                // CREATE VIEW will still trigger migrations with explicit-migrations enabled
                 nom_sql::SqlQuery::CreateView(stmt) => handle_ddl!(handle_create_view(stmt)),
                 nom_sql::SqlQuery::CreateTable(stmt) => handle_ddl!(handle_create_table(stmt)),
                 nom_sql::SqlQuery::DropTable(_)
@@ -1454,6 +1455,7 @@ where
             // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
             // TODO: Implement event execution metrics for Noria without upstream.
             let res = match parsed_query.as_ref() {
+                // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                 SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                 SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await,
 
@@ -1487,7 +1489,7 @@ where
                 SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
                 SqlQuery::CreateQueryCache(CreateQueryCacheStatement { name, statement }) => {
                     self.noria
-                        .create_view(name.as_ref().map(|s| s.as_str()), statement)
+                        .handle_create_query_cache(name.as_ref().map(|s| s.as_str()), statement)
                         .await?;
                     Ok(noria_connector::QueryResult::Empty)
                 }

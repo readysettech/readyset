@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
 
     let upstream: Option<MySqlUpstream> = None;
-    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None, false).await;
     let slowlog = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()
