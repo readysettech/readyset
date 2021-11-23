@@ -26,8 +26,8 @@ use noria_client_metrics::recorded;
 pub struct NoriaAdapterHttpRouter {
     /// The address to attempt to listen on.
     pub listen_addr: SocketAddr,
-    /// A reference to the QueryStatusCache that is in use by the adapter, if it's enabled.
-    pub query_cache: Option<Arc<QueryStatusCache>>,
+    /// A reference to the QueryStatusCache that is in use by the adapter.
+    pub query_cache: Arc<QueryStatusCache>,
     /// A valve for the http stream to trigger closing.
     pub valve: Valve,
 
@@ -81,9 +81,9 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
 
         metrics::increment_counter!(recorded::ADAPTER_EXTERNAL_REQUESTS);
 
-        match (&self.query_cache, req.method(), req.uri().path()) {
-            (Some(query_cache), &Method::GET, "/allow-list") => {
-                let query_cache = query_cache.clone();
+        match (req.method(), req.uri().path()) {
+            (&Method::GET, "/allow-list") => {
+                let query_cache = self.query_cache.clone();
                 Box::pin(async move {
                     let allow_list = query_cache.allow_list().await;
                     let res = match serde_json::to_string(&allow_list) {
@@ -99,8 +99,8 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     Ok(res.unwrap())
                 })
             }
-            (Some(query_cache), &Method::GET, "/deny-list") => {
-                let query_cache = query_cache.clone();
+            (&Method::GET, "/deny-list") => {
+                let query_cache = self.query_cache.clone();
                 Box::pin(async move {
                     let deny_list = query_cache.deny_list().await;
                     let res = match serde_json::to_string(&deny_list) {
@@ -116,7 +116,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
                     Ok(res.unwrap())
                 })
             }
-            (_, &Method::GET, "/health") => Box::pin(async move {
+            (&Method::GET, "/health") => Box::pin(async move {
                 let res = res
                     .status(200)
                     .header(CONTENT_TYPE, "text/plain")
@@ -124,7 +124,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
 
                 Ok(res.unwrap())
             }),
-            (_, &Method::GET, "/prometheus") => {
+            (&Method::GET, "/prometheus") => {
                 let body = self.prometheus_handle.as_ref().map(|x| x.render());
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match body {

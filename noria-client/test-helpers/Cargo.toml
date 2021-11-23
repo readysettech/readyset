@@ -15,3 +15,4 @@ noria-client = { path = "../" }
 noria-server = { path = "../../noria/server/" }
 readyset-logging = { path = "../../readyset-logging" }
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time"] }
+chrono = "0.4"

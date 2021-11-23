@@ -22,6 +22,7 @@ use nom_sql::SelectStatement;
 use noria::consensus::{Authority, LocalAuthorityStore};
 use noria::ControllerHandle;
 use noria_client::backend::{BackendBuilder, NoriaConnector};
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::UpstreamDatabase;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
@@ -529,6 +530,7 @@ impl TestScript {
             let (s, _) = listener.accept().await.unwrap();
 
             let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+            let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
 
             macro_rules! make_backend {
                 ($upstream:ty, $handler:ty) => {{
@@ -546,7 +548,7 @@ impl TestScript {
                     BackendBuilder::new()
                         .require_authentication(false)
                         .validate_queries(true, true)
-                        .build::<_, $handler>(noria, upstream)
+                        .build::<_, $handler>(noria, upstream, query_status_cache)
                 }};
             }
 

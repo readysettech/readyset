@@ -21,6 +21,7 @@ use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, DataType, KeyComparison, View, ViewQuery};
 use noria_client::backend::Backend;
 use noria_client::backend::{noria_connector::NoriaConnector, BackendBuilder};
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::UpstreamDatabase;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::ColumnGenerationSpec;
@@ -126,13 +127,14 @@ impl Writer {
 
         let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
         let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+        let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
         let upstream = Some(MySqlUpstream::connect(self.database_url.clone()).await?);
         let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
 
         let mut b = BackendBuilder::new()
             .require_authentication(false)
             .enable_ryw(true)
-            .build(noria, upstream);
+            .build(noria, upstream, query_status_cache);
 
         let mut view = if let Some(region) = self.target_region.as_deref() {
             ch.view_from_region("w", region).await.unwrap()

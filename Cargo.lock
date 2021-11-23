@@ -3811,6 +3811,7 @@ name = "noria-client-test-helpers"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "nom-sql",
  "noria",
  "noria-client",

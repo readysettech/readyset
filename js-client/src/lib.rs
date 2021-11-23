@@ -13,6 +13,7 @@ use tokio::runtime::Runtime;
 use nom_sql::{Dialect, SelectStatement};
 use noria::{consensus::Authority, ControllerHandle, DataType, ZookeeperAuthority};
 use noria_client::backend::{Backend, BackendBuilder, NoriaConnector};
+use noria_client::query_status_cache::QueryStatusCache;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
@@ -84,6 +85,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     });
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
+    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
 
     let noria = rt.block_on(NoriaConnector::new(
         ch,
@@ -102,7 +104,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         .require_authentication(false)
         .enable_ryw(read_your_write)
         .dialect(dialect)
-        .build(noria, upstream);
+        .build(noria, upstream, query_status_cache);
 
     let jsclient = RefCell::new(JsClient::new(b, rt));
     Ok(cx.boxed(jsclient))
