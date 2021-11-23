@@ -815,7 +815,7 @@ where
                                 handle.set_upstream_duration();
                                 result
                             }
-                            Some(AdmitStatus::Deny) => {
+                            Some(AdmitStatus::Deny) | Some(AdmitStatus::Pending) => {
                                 let handle = event.start_timer();
                                 let result = self
                                     .prepare_fallback(query)
@@ -1062,7 +1062,7 @@ where
 
                                     res
                                 }
-                                Some(AdmitStatus::Deny) => {
+                                Some(AdmitStatus::Deny) | Some(AdmitStatus::Pending) => {
                                     if let (Some(statement_id), Some(upstream)) =
                                         (prepared_statement.upstream, &mut self.upstream)
                                     {
@@ -1259,7 +1259,7 @@ where
                                 handle.set_upstream_duration();
                                 res
                             }
-                            Some(AdmitStatus::Deny) => {
+                            Some(AdmitStatus::Deny) | Some(AdmitStatus::Pending) => {
                                 query_status_cache.set_pending_migration(stmt).await;
                                 let handle = event.start_timer();
                                 let res = upstream.query(&query).await.map(QueryResult::Upstream);
