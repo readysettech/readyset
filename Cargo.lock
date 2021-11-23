@@ -657,6 +657,7 @@ dependencies = [
  "noria-mysql",
  "query_generator",
  "rand 0.8.4",
+ "readyset-logging",
  "reqwest",
  "rinfluxdb",
  "serde_json",

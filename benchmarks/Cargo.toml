@@ -37,6 +37,7 @@ query_generator = { path = "../query_generator" }
 noria-logictest = { path = "../noria/noria-logictest" }
 noria-client = { path = "../noria-client" }
 noria-mysql = { path = "../noria-mysql" }
+readyset-logging = { path = "../readyset-logging" }
 
 [lib]
 path = "src/lib.rs"

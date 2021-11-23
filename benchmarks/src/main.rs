@@ -34,6 +34,9 @@ struct BenchmarkRunner {
 
     #[clap(subcommand)]
     benchmark: Benchmark,
+
+    #[clap(flatten)]
+    logging: readyset_logging::Options,
 }
 
 impl BenchmarkRunner {
@@ -91,5 +94,7 @@ impl BenchmarkRunner {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let benchmark_runner = BenchmarkRunner::parse();
+    benchmark_runner.logging.init()?;
+
     benchmark_runner.run().await
 }
