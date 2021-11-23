@@ -18,7 +18,10 @@ locals {
   source_region  = "us-east-2"
 
   internal_account_ids = [local.build_account_id, local.sandbox_account_id]
-  customer_account_ids = ["724964194832"]
+  customer_account_ids = [
+    "724964194832", # IRL
+    "135195219264", # Kevin Kwok Demo
+  ]
 
   ami_users = concat(local.internal_account_ids, local.customer_account_ids)
 
