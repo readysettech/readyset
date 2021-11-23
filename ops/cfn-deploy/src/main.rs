@@ -55,6 +55,10 @@ fn build_cfn_template() -> Result<()> {
             "readyset-mysql-adapter" => {
                 ("READYSETMYSQLADAPTER", vec!["readyset-mysql-template.yaml"])
             }
+            "readyset-psql-adapter" => (
+                "READYSETPOSTGRESQLADAPTER",
+                vec!["readyset-psql-template.yaml"],
+            ),
             "readyset-server" => (
                 "READYSETSERVER",
                 vec![

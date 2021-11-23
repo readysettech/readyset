@@ -28,11 +28,16 @@ variable "readyset_monitor_ami_id" {
   default     = env("READYSET_MONITOR_AMI_ID")
 }
 
-
 variable "readyset_mysql_adapter_ami_id" {
   type        = string
   description = "AMI ID for the readyset-mysql-adapter image"
   default     = env("READYSET_MYSQL_ADAPTER_AMI_ID")
+}
+
+variable "readyset_psql_adapter_ami_id" {
+  type        = string
+  description = "AMI ID for the readyset-psql-adapter image"
+  default     = env("READYSET_PSQL_ADAPTER_AMI_ID")
 }
 
 variable "readyset_server_ami_id" {
