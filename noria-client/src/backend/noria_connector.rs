@@ -263,6 +263,9 @@ pub struct NoriaConnector {
     /// to allow returning references to schemas from views all the way to msql-srv,
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<String>,
+
+    /// Whether migrations can only be created through CREATE QUERY CACHE or CREATE VIEW
+    explicit_migrations: bool,
 }
 
 /// Removes limit and offset params passed in with an execute function. These are not sent to the
@@ -326,6 +329,7 @@ impl Clone for NoriaConnector {
             prepared_statement_cache: self.prepared_statement_cache.clone(),
             region: self.region.clone(),
             failed_views: self.failed_views.clone(),
+            explicit_migrations: self.explicit_migrations,
         }
     }
 }
@@ -336,6 +340,7 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
+        explicit_migrations: bool,
     ) -> Self {
         let backend = NoriaBackendInner::new(ch, region.clone()).await;
         if let Err(e) = &backend {
@@ -352,6 +357,7 @@ impl NoriaConnector {
             prepared_statement_cache: HashMap::new(),
             region,
             failed_views: HashSet::new(),
+            explicit_migrations,
         }
     }
 
@@ -807,7 +813,9 @@ fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
 }
 
 impl NoriaConnector {
-    pub async fn create_view(
+    /// This function handles CREATE QUERY CACHE statements. When explicit-migrations is enabled,
+    /// this function is the only way to create a view in noria.
+    pub async fn handle_create_query_cache(
         &mut self,
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
@@ -1155,6 +1163,7 @@ impl NoriaConnector {
         })
     }
 
+    // enabling explicit_migrations will prevent handle_select from creating a view
     pub(crate) async fn handle_select(
         &mut self,
         // TODO(mc):  Take a reference here; requires getting rewrite::process_query() to Cow
@@ -1165,7 +1174,13 @@ impl NoriaConnector {
         let processed = rewrite::process_query(&mut query)?;
 
         trace!("query::select::access view");
-        let qname = self.get_view(&query, false, create_if_not_exist).await?;
+        let qname = self
+            .get_view(
+                &query,
+                false,
+                create_if_not_exist && !self.explicit_migrations,
+            )
+            .await?;
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
@@ -1198,6 +1213,7 @@ impl NoriaConnector {
         res
     }
 
+    // enabling explicit_migrations will prevent prepare_select from creating a view
     pub(crate) async fn prepare_select(
         &mut self,
         mut statement: nom_sql::SelectStatement,
@@ -1237,7 +1253,13 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self.get_view(&statement, true, create_if_not_exist).await?;
+        let qname = self
+            .get_view(
+                &statement,
+                true,
+                create_if_not_exist && !self.explicit_migrations,
+            )
+            .await?;
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
@@ -1364,7 +1386,6 @@ impl NoriaConnector {
                 .noria
                 .extend_recipe(&format!("VIEW {}: {};", q.name, q.definition))
         )?;
-
         Ok(QueryResult::Empty)
     }
 }

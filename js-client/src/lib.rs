@@ -92,6 +92,7 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
         auto_increments,
         query_cache,
         Some(region),
+        false,
     ));
     let upstream = if !mysql_address.is_empty() {
         Some(rt.block_on(MySqlUpstream::connect(mysql_address)).unwrap())
