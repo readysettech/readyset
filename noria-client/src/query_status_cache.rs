@@ -96,8 +96,12 @@ pub enum QueryState {
 pub enum AdmitStatus {
     Allow,
     Deny,
+    // Transient status, indicates that the query has not been successfully installed but we can
+    // attempt to install again
+    Pending,
 }
 
+// TODO(ENG-877): Refactor query status cache to perform state transition checks
 /// Represents all queries that have been seen in the system, along with
 /// metadata about when the query was first seen, and what state it's currently
 /// in. QueryStatusCache is thread safe. It is intended that only one
@@ -145,10 +149,18 @@ impl QueryStatusCache {
     /// If not found we no-op. This function should never be called with a query that
     /// isn't already registered in the cache.
     pub async fn set_successful_migration(&self, query: &Query) {
-        self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::SuccessfulMigration;
-            s
-        });
+        // We can move to the successful migration state from any state other than failed execute
+        self.inner
+            .write()
+            .await
+            .entry(query.clone())
+            .and_modify(|s| match s.state {
+                QueryState::FailedExecute(_) => {}
+                _ => {
+                    s.state = QueryState::SuccessfulMigration;
+                }
+            })
+            .or_insert_with(|| QueryStatus::new(QueryState::SuccessfulMigration));
     }
 
     /// Sets the provided query to have a QueryState of PendingMigration.
@@ -161,10 +173,12 @@ impl QueryStatusCache {
     }
 
     pub async fn set_unsupported_query(&self, query: &Query) {
-        self.inner.write().await.get_mut(query).map(|s| {
-            s.state = QueryState::Unsupported;
-            s
-        });
+        self.inner
+            .write()
+            .await
+            .entry(query.clone())
+            .and_modify(|s| s.state = QueryState::Unsupported)
+            .or_insert_with(|| QueryStatus::new(QueryState::Unsupported));
     }
 
     /// Sets the provided query to have a QueryState of FailedExecute.
@@ -229,10 +243,15 @@ impl QueryStatusCache {
     /// Returns whether we should admit the query for execution in Noria.
     pub async fn admit(&self, query: &Query) -> Option<AdmitStatus> {
         self.inner.read().await.get(query).map(|s| {
-            let QueryStatus { state, .. } = &s;
-
+            let QueryStatus { state, first_seen } = &s;
             match state {
-                QueryState::PendingMigration => AdmitStatus::Deny,
+                QueryState::PendingMigration => {
+                    if first_seen < &self.max_age() {
+                        AdmitStatus::Deny
+                    } else {
+                        AdmitStatus::Pending
+                    }
+                }
                 QueryState::SuccessfulMigration => AdmitStatus::Allow,
                 QueryState::FailedExecute(count) if count < &MAXIMUM_FAILED_EXECUTES => {
                     AdmitStatus::Allow
@@ -278,7 +297,7 @@ mod tests {
         assert_eq!(cache.pending_migration().await, vec![query.clone()]);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
-        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Pending));
 
         cache.set_successful_migration(&query).await;
         assert_eq!(cache.pending_migration().await.len(), 0);
@@ -303,7 +322,7 @@ mod tests {
         let query = select_statement("SELECT * FROM t1").unwrap();
 
         cache.set_pending_migration(&query).await;
-        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Pending));
 
         cache.set_successful_migration(&query).await;
         assert_eq!(cache.pending_migration().await.len(), 0);
@@ -330,6 +349,22 @@ mod tests {
         }
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
         cache.set_failed_execute(&query).await;
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
+    }
+
+    #[tokio::test]
+    async fn add_as_successful() {
+        let cache = test_cache();
+        let query = select_statement("SELECT * FROM t1").unwrap();
+        cache.set_successful_migration(&query).await;
+        assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Allow));
+    }
+
+    #[tokio::test]
+    async fn add_as_unsupported() {
+        let cache = test_cache();
+        let query = select_statement("SELECT * FROM t1").unwrap();
+        cache.set_unsupported_query(&query).await;
         assert_eq!(cache.admit(&query).await, Some(AdmitStatus::Deny));
     }
 }
