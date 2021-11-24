@@ -216,8 +216,8 @@ impl ConsulAuthority {
 
     #[cfg(test)]
     async fn destroy_session(&self) -> Result<(), Error> {
-        let inner = self.read_inner()?;
-        if let Some(session) = &inner.session {
+        let inner_session = self.read_inner()?.session.clone();
+        if let Some(session) = &inner_session {
             // This will not be populated without an id.
             #[allow(clippy::unwrap_used)]
             let id = session.ID.clone().unwrap();

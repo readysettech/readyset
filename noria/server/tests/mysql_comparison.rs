@@ -68,7 +68,7 @@ struct Schema {
 #[derive(Clone)]
 struct PanicState {
     message: String,
-    thread: String,
+    _thread: String,
     file: String,
     line: u32,
     backtrace: backtrace::Backtrace,
@@ -100,7 +100,7 @@ fn set_panic_hook(panic_state: Arc<Mutex<Option<PanicState>>>) {
         };
         *panic_state.lock().unwrap() = Some(PanicState {
             message,
-            thread,
+            _thread: thread,
             file,
             line,
             backtrace,
