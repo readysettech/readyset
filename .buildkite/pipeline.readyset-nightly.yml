@@ -84,7 +84,7 @@ steps:
     key: flaky-finder
     command:
     - 'echo +++ Running flaky-finder'
-    - flaky-finder -j1 -r5 --continue "cargo --locked test --all --exclude clustertest -- --nocapture --skip integration_serial"
+    - flaky-finder -j1 -r5 --continue "cargo --locked test --all --exclude clustertest --exclude aggressive_eviction -- --nocapture --skip integration_serial"
     depends_on:
     - build-image
     plugins:
@@ -94,6 +94,7 @@ steps:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
+          - FLAKY_FINDER=1
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml

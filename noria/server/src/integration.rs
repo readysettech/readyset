@@ -36,6 +36,7 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
+use test_utils::skip_with_flaky_finder;
 use vec1::vec1;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -7135,6 +7136,10 @@ async fn aggressive_eviction_impl() {
 rusty_fork_test! {
     #[test]
     fn aggressive_eviction() {
+        if skip_with_flaky_finder() {
+            return;
+        }
+
         // #[tokio::test] doesn't play well with rusty_fork_test, so have to do this manually
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
