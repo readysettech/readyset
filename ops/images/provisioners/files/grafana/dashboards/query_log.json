@@ -21,7 +21,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "iteration": 1636746998531,
+  "id": 1,
+  "iteration": 1637726518924,
   "links": [],
   "panels": [
     {
@@ -580,7 +581,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.5\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -590,7 +591,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\"}) *1000  ",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.9\", event_type=~\"query|execute\"}) *1000  ",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -601,7 +602,7 @@
         },
         {
           "exemplar": true,
-          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\"}) *1000",
+          "expr": "avg by (query) (query_log_execution_time{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", quantile=\"0.99\", event_type=~\"query|execute\"}) *1000",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -612,7 +613,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\"})",
+          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"noria\",query!=\"\", event_type=~\"query|execute\"})",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -622,7 +623,7 @@
         },
         {
           "exemplar": true,
-          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"mysql\",query!=\"\"})",
+          "expr": "sum by (query) (query_log_execution_time_count{deployment=\"$Deployment\",database_type=\"mysql\",query!=\"\", event_type=~\"query|execute\"})",
           "format": "table",
           "hide": false,
           "instant": true,
@@ -1161,11 +1162,6 @@
     "list": [
       {
         "allValue": null,
-        "current": {
-          "selected": false,
-          "text": "test_deployment",
-          "value": "test_deployment"
-        },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(deployment)",
         "description": null,
@@ -1188,11 +1184,6 @@
       },
       {
         "allValue": null,
-        "current": {
-          "selected": false,
-          "text": "SELECT * FROM `t1` WHERE (`c1` = '<anonymized>')",
-          "value": "SELECT * FROM `t1` WHERE (`c1` = '<anonymized>')"
-        },
         "datasource": "DS_PROMETHEUS",
         "definition": "label_values(query)",
         "description": null,
@@ -1223,5 +1214,5 @@
   "timezone": "",
   "title": "ReadySet Overview",
   "uid": "jAoEkfF7z",
-  "version": 2
+  "version": 1
 }

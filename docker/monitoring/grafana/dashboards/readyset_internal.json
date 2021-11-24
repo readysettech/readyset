@@ -4,9 +4,7 @@
       {
         "builtIn": 1,
         "datasource": "DS_PROMETHEUS",
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
+        "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "target": {
           "limit": 100,
@@ -978,7 +976,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "ReadySet Overview",
-  "uid": "jAoEkfF7z",
+  "title": "ReadySet Internal",
+  "uid": "jAoEkfF7y",
   "version": 2
 }
