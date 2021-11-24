@@ -522,10 +522,10 @@ Outputs:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetPostgreSQLAdapterNLB.DNSName
     Export:
-      Name: ReadySetPostgreSQLAdapterNLBDNSName
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetPostgreSQLAdapterNLBDNSName]]
 
   ReadySetPostgreSQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetPostgreSQLAdapterVPCEndpointService
     Export:
-      Name: ReadySetPostgreSQLVPCEndpointService
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetPostgreSQLVPCEndpointService]]

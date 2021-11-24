@@ -539,10 +539,10 @@ Outputs:
     Description: Host for ReadySet connection string.
     Value: !GetAtt ReadySetMySQLAdapterNLB.DNSName
     Export:
-      Name: ReadySetMySQLAdapterNLBDNSName
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMySQLAdapterNLBDNSName]]
 
   ReadySetMySQLVPCEndpointService:
     Description: VPC Endpoint Service to allow connections from outside the VPC.
     Value: !Ref ReadySetMySQLAdapterVPCEndpointService
     Export:
-      Name: ReadySetMySQLVPCEndpointService
+      Name: !Join ['-', [!Ref "AWS::StackName", ReadySetMySQLVPCEndpointService]]
