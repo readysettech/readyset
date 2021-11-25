@@ -288,7 +288,7 @@ impl TestScript {
                         prev_was_statement = false;
                         // we need to give the statements some time to propagate before we can issue
                         // the next query
-                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        tokio::time::sleep(Duration::from_millis(2000)).await;
                     }
 
                     let timer = if opts.time {
@@ -476,6 +476,13 @@ impl TestScript {
                 // Add the data base name to the url, and set as replication source
                 builder.set_replicator_url(format!("{}/{}", replication_url, run_opts.db_name()));
             }
+
+            let persistence = noria_server::PersistenceParameters {
+                mode: noria_server::DurabilityMode::DeleteOnExit,
+                ..Default::default()
+            };
+
+            builder.set_persistence(persistence);
 
             match builder.start(Arc::clone(&authority)).await {
                 Ok(builder) => return builder,
