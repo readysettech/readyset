@@ -585,7 +585,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             params.async_migration_interval,
         )?;
         // Sleep to give the adapter time to startup.
-        sleep(Duration::from_millis(500)).await;
+        sleep(Duration::from_millis(2000)).await;
         Some(MySQLAdapterHandle {
             conn_str: format!("mysql://127.0.0.1:{}", port),
             process,
