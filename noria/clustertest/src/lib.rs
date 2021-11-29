@@ -350,6 +350,10 @@ impl DeploymentHandle {
         &mut self.noria_server_handles
     }
 
+    pub fn server_handle(&self, url: &Url) -> Option<&ServerHandle> {
+        self.noria_server_handles.get(url)
+    }
+
     pub fn mysql_connection_str(&self) -> Option<String> {
         self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
     }

@@ -23,6 +23,7 @@ nom-sql = { path = "../../nom-sql" }
 noria = { path = "../noria" }
 noria-mysql = { path = "../../noria-mysql" }
 noria-client-adapter = { path = "../../noria-client/adapter" }
+test_utils = { path = "../../test_utils" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

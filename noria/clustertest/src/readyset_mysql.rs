@@ -6,6 +6,7 @@ use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
 use std::time::Duration;
+use test_utils::skip_slow_tests;
 
 const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -318,6 +319,151 @@ async fn query_view_after_failure() {
         get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
         Some(_)
     ));
+
+    deployment.teardown().await.unwrap();
+}
+
+/// Fail the controller 10 times and check if we can execute the query. This
+/// test will pass if we correctly execute queries against fallback.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn end_to_end_with_restarts() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let cluster_name = "ct_repeated_failure";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.set_quorum(2);
+    deployment.add_server(ServerParams::default().with_volume("v1"));
+    deployment.add_server(ServerParams::default().with_volume("v2"));
+    deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let _ = conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut conn,
+            r"SELECT * FROM t1;",
+            (),
+            &[(1, 4)],
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    for _ in 0..10 {
+        let controller_uri = deployment.handle.controller_uri().await.unwrap();
+        let volume_id = deployment
+            .server_handle(&controller_uri)
+            .unwrap()
+            .params
+            .volume_id
+            .clone()
+            .unwrap();
+        println!("Killing server: {}", controller_uri);
+        deployment.kill_server(&controller_uri).await.unwrap();
+        println!("Starting new server");
+        deployment
+            .start_server(ServerParams::default().with_volume(&volume_id))
+            .await
+            .unwrap();
+
+        assert!(
+            query_until_expected(
+                &mut conn,
+                r"SELECT * FROM t1;",
+                (),
+                &[(1, 4)],
+                PROPAGATION_DELAY_TIMEOUT,
+            )
+            .await
+        );
+    }
+
+    deployment.teardown().await.unwrap();
+}
+
+/// Fail the controller 10 times and check if we can query a view following
+/// a restart.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn view_survives_restart() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let cluster_name = "ct_view_survives_restart";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.set_quorum(2);
+    deployment.add_server(ServerParams::default());
+    deployment.add_server(ServerParams::default());
+    deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let _ = conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+    conn.query_drop(r"CREATE QUERY CACHE test AS SELECT * FROM t1 where uid = ?")
+        .await
+        .unwrap();
+
+    loop {
+        let view = deployment.handle.view("test").await;
+        if view.is_ok() {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    for _ in 0..10 {
+        let controller_uri = deployment.handle.controller_uri().await.unwrap();
+        println!("Killing server: {}", controller_uri);
+        deployment.kill_server(&controller_uri).await.unwrap();
+        println!("Starting new server");
+        deployment
+            .start_server(ServerParams::default())
+            .await
+            .unwrap();
+
+        // Request the view until it exists.
+        loop {
+            let view = deployment.handle.view("test").await;
+            if view.is_ok() {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
 
     deployment.teardown().await.unwrap();
 }
