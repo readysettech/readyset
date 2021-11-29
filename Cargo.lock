@@ -3325,7 +3325,6 @@ dependencies = [
  "noria",
  "noria-client-metrics",
  "noria-errors",
- "noria-server",
  "readyset-logging",
  "regex",
  "rust_decimal",
@@ -3378,6 +3377,19 @@ dependencies = [
  "noria",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "noria-client-test-helpers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nom-sql",
+ "noria",
+ "noria-client",
+ "noria-server",
+ "readyset-logging",
+ "tokio",
 ]
 
 [[package]]
@@ -3539,6 +3551,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
+ "noria-client-test-helpers",
  "noria-errors",
  "paste 1.0.6",
  "proptest",
@@ -3568,6 +3581,7 @@ dependencies = [
  "noria",
  "noria-client",
  "noria-client-adapter",
+ "noria-client-test-helpers",
  "noria-errors",
  "noria-server",
  "postgres 0.19.2 (git+https://github.com/readysettech/rust-postgres.git)",

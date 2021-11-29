@@ -41,3 +41,4 @@ test-strategy = "0.1.1"
 tokio = { version = "1.8.4", features = ["full"] }
 zookeeper = "0.5.4"
 launchpad = { path = "../launchpad" }
+noria-client-test-helpers = { path = "../noria-client/test-helpers" }

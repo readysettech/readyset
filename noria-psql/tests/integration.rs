@@ -1,13 +1,13 @@
 use chrono::{NaiveDate, NaiveDateTime};
-use noria_client::test_helpers::{self, sleep};
 use noria_client::BackendBuilder;
+use noria_client_test_helpers::{self, sleep};
 use postgres::{NoTls, SimpleQueryMessage};
 
 mod common;
 use common::{setup_w_fallback, PostgreSQLAdapter};
 
 pub fn setup(partial: bool) -> postgres::Config {
-    test_helpers::setup::<PostgreSQLAdapter>(
+    noria_client_test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         false,
         partial,

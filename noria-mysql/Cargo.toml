@@ -28,6 +28,7 @@ mysql_common = "0.27.5"
 itertools = "0.10.1"
 
 [dev-dependencies]
+noria-client-test-helpers = { path = "../noria-client/test-helpers" }
 chrono = "0.4.19"
 maplit = "1.0.2"
 paste = "1.0.5"

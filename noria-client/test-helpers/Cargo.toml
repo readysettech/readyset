@@ -1,0 +1,16 @@
+[package]
+name = "noria-client-test-helpers"
+version = "0.1.0"
+authors = ["Readyset"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1.49"
+nom-sql = { path = "../../nom-sql" }
+noria = { path = "../../noria/noria/" }
+noria-client = { path = "../" }
+noria-server = { path = "../../noria/server/" }
+readyset-logging = { path = "../../readyset-logging" }
+tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time"] }

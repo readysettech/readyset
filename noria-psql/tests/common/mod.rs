@@ -4,14 +4,14 @@ use postgres::NoTls;
 use std::env;
 use tokio::net::TcpStream;
 
-use noria_client::test_helpers;
 use noria_client::Backend;
+use noria_client_test_helpers;
 
 use noria_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 
 #[allow(dead_code)]
 pub fn setup_w_fallback() -> postgres::Config {
-    test_helpers::setup::<PostgreSQLAdapter>(
+    noria_client_test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
         true,
@@ -21,7 +21,7 @@ pub fn setup_w_fallback() -> postgres::Config {
 
 pub struct PostgreSQLAdapter;
 #[async_trait]
-impl test_helpers::Adapter for PostgreSQLAdapter {
+impl noria_client_test_helpers::Adapter for PostgreSQLAdapter {
     type ConnectionOpts = postgres::Config;
     type Upstream = PostgreSqlUpstream;
     type Handler = PostgreSqlQueryHandler;
@@ -67,7 +67,7 @@ impl test_helpers::Adapter for PostgreSQLAdapter {
             .simple_query("DROP DATABASE IF EXISTS noria")
             .is_err()
         {
-            test_helpers::sleep()
+            noria_client_test_helpers::sleep()
         }
 
         management_db.simple_query("CREATE DATABASE noria").unwrap();

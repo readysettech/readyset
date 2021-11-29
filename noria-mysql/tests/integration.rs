@@ -1,6 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql::prelude::*;
-use noria_client::test_helpers::sleep;
+use noria_client_test_helpers::sleep;
 
 mod common;
 use common::setup;

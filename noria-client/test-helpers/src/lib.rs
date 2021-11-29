@@ -11,13 +11,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nom_sql::SelectStatement;
 use noria::consensus::Authority;
+use noria::consensus::LocalAuthorityStore;
+use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::BackendBuilder;
+use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, LocalAuthority};
 use tokio::net::TcpStream;
-
-use crate::backend::noria_connector::NoriaConnector;
-use crate::backend::BackendBuilder;
-use crate::{Backend, QueryHandler, UpstreamDatabase};
-use noria::consensus::LocalAuthorityStore;
 
 pub fn sleep() {
     thread::sleep(Duration::from_millis(200));

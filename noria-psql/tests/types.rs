@@ -1,12 +1,12 @@
 use noria_client::backend::BackendBuilder;
-use noria_client::test_helpers::{self};
+use noria_client_test_helpers::{self};
 
 mod common;
 use common::PostgreSQLAdapter;
 use postgres::NoTls;
 
 fn setup() -> postgres::Config {
-    test_helpers::setup::<PostgreSQLAdapter>(
+    noria_client_test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
         true,
@@ -24,10 +24,10 @@ mod types {
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
+    use noria_client_test_helpers::sleep;
     use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
     use rust_decimal::Decimal;
-    use test_helpers::sleep;
     use uuid::Uuid;
 
     fn test_type_roundtrip<T, V>(type_name: T, val: V)

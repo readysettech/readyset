@@ -16,7 +16,6 @@ mod query_handler;
 #[allow(dead_code)] // TODO(ENG-685): Remove when utilized in main.
 pub mod query_status_cache;
 pub mod rewrite;
-pub mod test_helpers;
 pub mod upstream_database;
 mod utils;
 
