@@ -1,0 +1,21 @@
+statement ok
+create table t (x int);
+
+statement ok
+insert into t (x) values (1), (1), (1), (2), (3), (3);
+
+query II rowsort
+select x, count(*) from t group by x;
+----
+1
+3
+2
+1
+3
+2
+
+query II nosort
+select x, count(*) from t group by x having count(*) > 2;
+----
+1
+3
