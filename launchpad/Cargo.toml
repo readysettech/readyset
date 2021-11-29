@@ -1,6 +1,7 @@
 [package]
 name = "launchpad"
 version = "0.1.0"
+publish = false
 authors = ["Readyset"]
 edition = "2018"
 description = "Extensions to the Rust standard library"

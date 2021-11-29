@@ -1,6 +1,7 @@
 [package]
 name = "noria-client"
 version = "0.1.0"
+publish = false
 authors = ["Readyset"]
 edition = "2018"
 

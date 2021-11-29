@@ -1,6 +1,7 @@
 [package]
 name = "replicators"
 version = "0.1.0"
+publish = false
 authors = ["Vlad Krasnov <vlad@readyset.io>"]
 edition = "2018"
 
