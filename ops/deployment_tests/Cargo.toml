@@ -1,5 +1,6 @@
 [package]
 name = "deployment-tools"
+publish = false
 version = "0.1.0"
 authors = ["Readyset Technology, Inc."]
 edition = "2018"

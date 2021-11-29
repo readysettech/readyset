@@ -1,6 +1,7 @@
 [package]
 name = "clustertest"
 version = "0.1.0"
+publish = false
 authors = ["justin@readyset.io"]
 edition = "2018"
 

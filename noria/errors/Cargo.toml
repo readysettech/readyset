@@ -1,5 +1,6 @@
 [package]
 name = "noria-errors"
+publish = false
 version = "0.0.1"
 edition = "2018"
 authors = [ "ReadySet Technology, inc." ]

@@ -1,6 +1,7 @@
 [package]
 name = "noria-client-metrics"
 version = "0.1.0"
+publish = false
 authors = ["ReadySet"]
 edition = "2018"
 

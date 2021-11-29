@@ -1,5 +1,6 @@
 [package]
 name = "query_generator"
+publish = false
 version = "0.1.0"
 authors = ["Griffin Smith <root@gws.fyi>"]
 edition = "2018"
