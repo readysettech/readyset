@@ -3,7 +3,7 @@
 //! see: <https://docs.google.com/document/d/1i2HYLxANhJX4BxBnYeEzLO6sTecE4HkLoN31vXDlFCM/edit>
 
 use mysql::prelude::Queryable;
-use noria_client::test_helpers::sleep;
+use noria_client_test_helpers::sleep;
 
 mod common;
 use common::setup;

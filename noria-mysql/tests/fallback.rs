@@ -1,13 +1,13 @@
 use mysql::prelude::*;
-use noria_client::test_helpers::{self, sleep};
 use noria_client::BackendBuilder;
+use noria_client_test_helpers::{self, sleep};
 use serial_test::serial;
 
 mod common;
 use common::MySQLAdapter;
 
 fn setup() -> mysql::Opts {
-    test_helpers::setup::<MySQLAdapter>(
+    noria_client_test_helpers::setup::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
         true,

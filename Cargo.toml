@@ -9,6 +9,7 @@ members = [
     "mysql-time",
     "nom-sql",
     "noria-client",
+    "noria-client/test-helpers",
     "noria-mysql",
     "noria-psql",
     "noria/errors",
