@@ -51,6 +51,9 @@ pub enum WorkerRequestKind {
     /// A new domain should be started on this worker.
     RunDomain(DomainBuilder),
 
+    /// Clear domains.
+    ClearDomains,
+
     /// A set of domains has been started elsewhere in the distributed system.
     ///
     /// The message contains information on how the domain can be reached, in order that
@@ -180,11 +183,15 @@ impl Worker {
         match req {
             WorkerRequestKind::NewController { controller_uri } => {
                 info!(%controller_uri, "worker informed of new controller");
+                self.election_state = Some(WorkerElectionState { controller_uri });
+                Ok(None)
+            }
+            WorkerRequestKind::ClearDomains => {
+                info!("controller requested that this worker clear's it's existing domains");
                 self.domains.clear();
                 for (_, d) in self.domains.drain() {
                     d.join_handle.abort();
                 }
-                self.election_state = Some(WorkerElectionState { controller_uri });
                 Ok(None)
             }
             WorkerRequestKind::RunDomain(builder) => {

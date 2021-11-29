@@ -438,8 +438,17 @@ impl Leader {
             }
         }
 
-        // Can't send this as we are on the controller thread right now and it also
-        // has to receive this.
+        // We currently require that any worker that enters the system has no domains.
+        // If a worker has domains we are unaware of, we may try to perform a duplicate
+        // operation during a migration.
+        if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
+            error!(
+                %worker_uri,
+                %e,
+                "Worker could not be reached to clear its domain.",
+            );
+        }
+
         if let Err(e) = ws
             .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
             .await
