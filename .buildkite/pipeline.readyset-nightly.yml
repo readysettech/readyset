@@ -104,7 +104,7 @@ steps:
     agents:
       queue: r5a-2xlarge
 
-  - label: 'Run clustertests'
+  - label: 'Run clustertests (including slow :snail: tests)'
     key: noria-clustertest
     command:
     - 'echo +++ Building binaries for clustertest'
@@ -124,6 +124,7 @@ steps:
           - CARGO_INCREMENTAL=0
           - BINARY_PATH=/workdir/target/release
           - MYSQL_ROOT_PASSWORD=noria
+          - RUN_SLOW_TESTS=1
           volumes:
           - 'target:/workdir/target'
           config:

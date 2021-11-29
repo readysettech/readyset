@@ -447,6 +447,7 @@ impl Recipe {
                             Ok(ni) => Some(ni),
                             Err(e) => {
                                 error!(
+                                    err = %e,
                                     name = %ctq.table.name,
                                     "failed to remove base whose address could not be resolved",
                                 );

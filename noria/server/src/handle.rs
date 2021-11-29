@@ -59,7 +59,7 @@ impl Handle {
     }
 
     /// Waits for the back-end to return that it is ready to process queries.
-    /// Shold not be used in production.
+    /// Should not be used in production.
     pub async fn backend_ready(&mut self) {
         use std::time;
 

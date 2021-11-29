@@ -28,7 +28,7 @@ where
         if start.elapsed() > timeout {
             return false;
         }
-        let remaining = timeout - start.elapsed();
+        let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
         let result =
             tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone())).await;
 

@@ -1447,6 +1447,7 @@ dependencies = [
  "rand 0.8.4",
  "serde",
  "serial_test",
+ "test_utils",
  "tokio",
  "url",
 ]
