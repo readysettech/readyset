@@ -538,8 +538,7 @@ impl Recipe {
 
         for (n, qid) in &add_rp.aliases {
             if new.aliases.contains_key(n) && new.aliases[n] != *qid {
-                // new.prior is set in `new` when constructed above.
-                #[allow(clippy::unwrap_used)]
+                self.inc = new.inc.take();
                 return Err((
                     self,
                     ReadySetError::RecipeInvariantViolated(format!(
