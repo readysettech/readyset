@@ -181,6 +181,10 @@ pub struct Options {
     /// to fallback.
     #[clap(long, hidden = true)]
     fail_invalidated_queries: bool,
+
+    /// Allow executing, but ignore, unsupported `SET` statements
+    #[clap(long, hidden = true, env = "ALLOW_UNSUPPORTED_SET")]
+    allow_unsupported_set: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -397,7 +401,8 @@ where
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .async_migrations(options.async_migrations)
                 .query_status_cache(query_status_cache.clone())
-                .validate_queries(options.validate_queries, options.fail_invalidated_queries);
+                .validate_queries(options.validate_queries, options.fail_invalidated_queries)
+                .allow_unsupported_set(options.allow_unsupported_set);
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
