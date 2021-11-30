@@ -98,54 +98,6 @@ pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
     }
 }
 
-/// Check whether the set statement is explicitly allowed. All other set
-/// statements should return an error
-pub fn is_allowed_set(set: &nom_sql::SetStatement) -> bool {
-    match set {
-        nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
-            match variable.as_non_user_var() {
-                Some("time_zone") => {
-                    matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
-                }
-                Some("autocommit") => {
-                    matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
-                }
-                Some("sql_mode") => {
-                    if let Expression::Literal(Literal::String(ref s)) = value {
-                        match raw_sql_modes_to_list(&s[..]) {
-                            Ok(sql_modes) => {
-                                let allowed = HashSet::from(ALLOWED_SQL_MODES);
-                                sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
-                            }
-                            Err(e) => {
-                                warn!(
-                                %e,
-                                "unknown sql modes in set"
-                                );
-                                false
-                            }
-                        }
-                    } else {
-                        false
-                    }
-                }
-                Some("names") => {
-                    if let Expression::Literal(Literal::String(ref s)) = value {
-                        matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
-                    } else {
-                        false
-                    }
-                }
-                Some("foreign_key_checks") => true,
-                _ => false,
-            }
-        }),
-        nom_sql::SetStatement::Names(names) => {
-            names.collation.is_none() && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct PreparedStatement {
     noria: Option<u32>,
@@ -169,6 +121,7 @@ pub struct BackendBuilder {
     async_migrations: bool,
     validate_queries: bool,
     fail_invalidated_queries: bool,
+    allow_unsupported_set: bool,
 }
 
 impl Default for BackendBuilder {
@@ -187,6 +140,7 @@ impl Default for BackendBuilder {
             async_migrations: false,
             validate_queries: false,
             fail_invalidated_queries: false,
+            allow_unsupported_set: false,
         }
     }
 }
@@ -224,6 +178,7 @@ impl BackendBuilder {
             async_migrations: self.async_migrations,
             validate_queries: self.validate_queries,
             fail_invalidated_queries: self.fail_invalidated_queries,
+            allow_unsupported_set: self.allow_unsupported_set,
             _query_handler: PhantomData,
         }
     }
@@ -293,6 +248,11 @@ impl BackendBuilder {
         self.fail_invalidated_queries = fail_invalidated_queries;
         self
     }
+
+    pub fn allow_unsupported_set(mut self, allow_unsupported_set: bool) -> Self {
+        self.allow_unsupported_set = allow_unsupported_set;
+        self
+    }
 }
 
 pub struct Backend<DB, Handler> {
@@ -344,6 +304,9 @@ pub struct Backend<DB, Handler> {
     /// Run select statements with query validation.
     validate_queries: bool,
     fail_invalidated_queries: bool,
+
+    /// Allow, but ignore, unsupported SQL `SET` statements.
+    allow_unsupported_set: bool,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -462,6 +425,58 @@ where
             db.is_in_tx()
         } else {
             false
+        }
+    }
+
+    /// Check whether the set statement is explicitly allowed. All other set
+    /// statements should return an error
+    pub fn is_allowed_set(&self, set: &nom_sql::SetStatement) -> bool {
+        if self.allow_unsupported_set {
+            return true;
+        }
+
+        match set {
+            nom_sql::SetStatement::Variable(set) => set.variables.iter().all(|(variable, value)| {
+                match variable.as_non_user_var() {
+                    Some("time_zone") => {
+                        matches!(value, Expression::Literal(Literal::String(ref s)) if s == "+00:00")
+                    }
+                    Some("autocommit") => {
+                        matches!(value, Expression::Literal(Literal::Integer(i)) if *i == 1)
+                    }
+                    Some("sql_mode") => {
+                        if let Expression::Literal(Literal::String(ref s)) = value {
+                            match raw_sql_modes_to_list(&s[..]) {
+                                Ok(sql_modes) => {
+                                    let allowed = HashSet::from(ALLOWED_SQL_MODES);
+                                    sql_modes.iter().all(|sql_mode| allowed.contains(sql_mode))
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        %e,
+                                        "unknown sql modes in set"
+                                    );
+                                    false
+                                }
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    Some("names") => {
+                        if let Expression::Literal(Literal::String(ref s)) = value {
+                            matches!(&s[..], "latin1" | "utf8" | "utf8mb4")
+                        } else {
+                            false
+                        }
+                    }
+                    Some("foreign_key_checks") => true,
+                    _ => false,
+                }
+            }),
+            nom_sql::SetStatement::Names(names) => {
+                names.collation.is_none() && matches!(&names.charset[..], "latin1" | "utf8" | "utf8mb4")
+            }
         }
     }
 
@@ -1190,7 +1205,7 @@ where
         // If no upstream is present we will ignore the statement
         // Disallowed set statements always produce an error
         if let nom_sql::SqlQuery::Set(s) = parsed_query.as_ref() {
-            if !is_allowed_set(s) {
+            if !self.is_allowed_set(s) {
                 warn!(%s, "received unsupported SET statement");
                 let e = ReadySetError::SetDisallowed {
                     statement: parsed_query.to_string(),
