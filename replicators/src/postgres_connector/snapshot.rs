@@ -221,6 +221,16 @@ impl TableDescription {
         transaction: &'a pgsql::Transaction<'a>,
         mut noria_table: noria::Table,
     ) -> ReadySetResult<()> {
+        let mut cnt = 0;
+
+        let nrows = transaction
+            .query_one(
+                format!("SELECT count(*) AS nrows FROM \"{}\"", self.name).as_str(),
+                &[],
+            )
+            .await?
+            .try_get::<_, i64>("nrows")?;
+
         // The most efficient way to copy an entire table is COPY BINARY
         let query = format!("COPY \"{}\" TO stdout BINARY", self.name);
         let rows = transaction.copy_out(query.as_str()).await?;
@@ -232,6 +242,7 @@ impl TableDescription {
 
         let mut noria_rows = Vec::with_capacity(BATCH_SIZE);
 
+        info!(rows = %nrows, "Replication started");
         while let Some(Ok(row)) = binary_rows.next().await {
             let noria_row = type_map
                 .iter()
@@ -266,6 +277,7 @@ impl TableDescription {
                 .collect::<ReadySetResult<Vec<_>>>()?;
 
             noria_rows.push(noria_row);
+            cnt += 1;
 
             // Accumulate as many inserts as possible before calling into noria, as
             // those calls can be quite expensive
@@ -277,11 +289,17 @@ impl TableDescription {
                     ))
                     .await?;
             }
+
+            if cnt % 1_000_000 == 0 {
+                info!(rows_replicated = %cnt, "Replication progress");
+            }
         }
 
         if !noria_rows.is_empty() {
             noria_table.insert_many(noria_rows).await?;
         }
+
+        info!(rows_replicated = %cnt, "Replication finished");
 
         Ok(())
     }
