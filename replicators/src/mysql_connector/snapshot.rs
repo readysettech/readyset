@@ -1,7 +1,7 @@
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::ReadySetResult;
+use noria::{ReadySetResult, ReplicationOffset};
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
@@ -271,7 +271,7 @@ impl MySqlReplicator {
 
         // Although the table dumping happens on a connection pool, and not within our transaction,
         // it doesn't matter because we maintain a read lock on all the tables anyway
-        self.dump_tables(noria, tx).await?;
+        self.dump_tables(noria, &binlog_position, tx).await?;
         noria
             .set_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
@@ -303,7 +303,7 @@ impl MySqlReplicator {
             debug!("Recipe installed");
         }
 
-        self.dump_tables(noria, lock).await?;
+        self.dump_tables(noria, &binlog_position, lock).await?;
         noria
             .set_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
@@ -341,6 +341,7 @@ impl MySqlReplicator {
     async fn dump_tables<L>(
         &mut self,
         noria: &mut noria::ControllerHandle,
+        binlog_position: &BinlogPosition,
         _lock: L,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
@@ -351,18 +352,36 @@ impl MySqlReplicator {
             replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
         }
 
+        let replication_offset = ReplicationOffset::try_from(binlog_position)?;
+
         while let Some(task_result) = replication_tasks.next().await {
             // The unwrap is for the join handle in that case
             match task_result.unwrap() {
                 (table_name, Ok(())) => {
                     let mut noria_table = noria.table(&table_name).await?;
+                    let replication_offset = replication_offset.clone();
                     compacting_tasks.push(tokio::spawn(async move {
                         let span = info_span!("Compacting table", table = %table_name);
+                        span.in_scope(|| info!("Setting replication offset"));
+                        if let Err(error) = noria_table
+                            .set_replication_offset(replication_offset)
+                            .instrument(span.clone())
+                            .await
+                        {
+                            span.in_scope(|| error!(%error, "Error setting replication offset"));
+                            return Err(error);
+                        }
+                        span.in_scope(|| info!("Set replication offset"));
+
                         span.in_scope(|| info!("Compacting table"));
-                        noria_table
+                        if let Err(error) = noria_table
                             .set_snapshot_mode(false)
                             .instrument(span.clone())
-                            .await?;
+                            .await
+                        {
+                            span.in_scope(|| error!(%error, "Error compacting table"));
+                            return Err(error);
+                        };
                         span.in_scope(|| info!("Compacting finished"));
                         ReadySetResult::Ok(())
                     }));
