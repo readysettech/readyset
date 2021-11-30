@@ -1,7 +1,6 @@
 locals {
-  stack_name = "buildkite-${var.buildkite_queue}"
-
-  stack_version = "5.7.2"
+  stack_name    = "buildkite-${var.buildkite_queue}"
+  stack_version = "master"
 }
 
 data "aws_vpc" "vpc" {
@@ -22,16 +21,20 @@ data "aws_subnets" "public_subnets" {
   }
 }
 
+data "aws_s3_bucket" "secrets_bucket" {
+  bucket = var.secrets_bucket
+}
+
 resource "aws_cloudformation_stack" "main" {
   name = local.stack_name
 
-  # TODO: Upgrade this to latest when possible
   template_url = "https://s3.amazonaws.com/buildkite-aws-stack/v${local.stack_version}/aws-stack.yml"
 
   capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
   parameters = {
-    "ArtifactsBucket" = var.artifacts_bucket
-    "SecretsBucket"   = var.secrets_bucket
+    "ArtifactsBucket"     = var.artifacts_bucket
+    "SecretsBucket"       = var.secrets_bucket
+    "SecretsBucketRegion" = data.aws_s3_bucket.secrets_bucket.region
 
     "BuildkiteQueue" = var.buildkite_queue
 
