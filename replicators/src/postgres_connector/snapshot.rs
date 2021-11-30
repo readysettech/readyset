@@ -385,6 +385,17 @@ impl<'a> PostgresReplicator<'a> {
             let mut noria_table = self.noria.table(&table.name).await?;
             compacting.push(async move {
                 let span = info_span!("Compacting table", table = %table.name);
+                span.in_scope(|| info!("Setting replication offset"));
+                if let Err(error) = noria_table
+                    .set_replication_offset(PostgresPosition::default().into())
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.in_scope(|| error!(%error, "Error setting replication offset"));
+                    return Err(error);
+                };
+                span.in_scope(|| info!("Set replication offset"));
+
                 span.in_scope(|| info!("Compacting table"));
                 noria_table.set_snapshot_mode(false).await?;
                 span.in_scope(|| info!("Compacting finished"));
