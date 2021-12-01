@@ -274,7 +274,7 @@ impl MySqlReplicator {
         // it doesn't matter because we maintain a read lock on all the tables anyway
         self.dump_tables(noria, &binlog_position, tx).await?;
         noria
-            .set_replication_offset(Some((&binlog_position).try_into()?))
+            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
 
         Ok(binlog_position)
@@ -306,7 +306,7 @@ impl MySqlReplicator {
 
         self.dump_tables(noria, &binlog_position, lock).await?;
         noria
-            .set_replication_offset(Some((&binlog_position).try_into()?))
+            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
             .await?;
 
         Ok(binlog_position)

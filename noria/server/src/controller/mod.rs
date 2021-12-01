@@ -69,7 +69,7 @@ pub(crate) struct ControllerState {
 
     recipe_version: usize,
     recipes: Vec<String>,
-    replication_offset: Option<ReplicationOffset>,
+    schema_replication_offset: Option<ReplicationOffset>,
     // Serde requires hash map's be keyed by a string, we workaround this by
     // serializing the hashmap as a tuple list.
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
@@ -613,7 +613,7 @@ impl AuthorityLeaderElectionState {
                                 config: self.config.clone(),
                                 recipe_version: 0,
                                 recipes: vec![],
-                                replication_offset: None,
+                                schema_replication_offset: None,
                                 node_restrictions: HashMap::new(),
                             }),
                             Some(mut state) => {
@@ -921,7 +921,7 @@ mod tests {
             };
 
             noria
-                .set_replication_offset(Some(offset.clone()))
+                .set_schema_replication_offset(Some(offset.clone()))
                 .await
                 .unwrap();
             noria
@@ -977,7 +977,7 @@ mod tests {
             };
 
             noria
-                .set_replication_offset(Some(offset.clone()))
+                .set_schema_replication_offset(Some(offset.clone()))
                 .await
                 .unwrap();
 
@@ -992,7 +992,7 @@ mod tests {
             // Check that storing replication offset via the adapter directly works too
             offset.offset = 15;
             noria
-                .set_replication_offset(Some(offset.clone()))
+                .set_schema_replication_offset(Some(offset.clone()))
                 .await
                 .unwrap();
 
@@ -1005,7 +1005,7 @@ mod tests {
             let mut noria = start_simple("replication_offsets").await;
 
             noria
-                .set_replication_offset(Some(ReplicationOffset {
+                .set_schema_replication_offset(Some(ReplicationOffset {
                     offset: 2,
                     replication_log_name: "binlog".to_owned(),
                 }))
@@ -1100,7 +1100,7 @@ mod tests {
         async fn different_log() {
             let mut noria = start_simple("replication_offsets").await;
             noria
-                .set_replication_offset(Some(ReplicationOffset {
+                .set_schema_replication_offset(Some(ReplicationOffset {
                     offset: 2,
                     replication_log_name: "binlog".to_owned(),
                 }))
@@ -1152,7 +1152,7 @@ mod tests {
         async fn missing_in_one_table() {
             let mut noria = start_simple("missing_in_one_table").await;
             noria
-                .set_replication_offset(Some(ReplicationOffset {
+                .set_schema_replication_offset(Some(ReplicationOffset {
                     offset: 1,
                     replication_log_name: "binlog".to_owned(),
                 }))

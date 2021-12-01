@@ -395,7 +395,7 @@ impl<'a> PostgresReplicator<'a> {
         // the exact value is not important, and the default value will just start the next
         // replication from the earlies possible point, which is the point the snapshot was created
         self.noria
-            .set_replication_offset(Some(PostgresPosition::default().into()))
+            .set_schema_replication_offset(Some(PostgresPosition::default().into()))
             .await?;
 
         let mut compacting = FuturesUnordered::new();
