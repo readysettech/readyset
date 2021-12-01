@@ -10,7 +10,7 @@ use mysql_async as mysql;
 use noria::consensus::Authority;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded::{self, SnapshotStatusTag};
-use noria::replication::ReplicationOffset;
+use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::{ControllerHandle, ReadySetError, ReadySetResult, Table, TableOperation};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::convert::TryInto;
@@ -56,6 +56,13 @@ pub struct NoriaAdapter {
     mutator_map: HashMap<String, Table>,
     /// A HashSet of tables we've already warned about not existing
     warned_missing_tables: HashSet<String>,
+    /// The set of replication offsets for the schema and the tables, obtained from the controller
+    /// at startup and maintained during replication.
+    ///
+    /// Since some tables may have lagged behind others due to failed snapshotting, we start
+    /// replication at the *minimum* replication offset, but ignore any replication events that come
+    /// before the offset for that table
+    replication_offsets: ReplicationOffsets,
 }
 
 #[derive(Debug)]
@@ -152,9 +159,9 @@ impl NoriaAdapter {
         server_id: Option<u32>,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
-        // Attempt to retreive the latest replication offset from noria, if none is present
-        // begin the snapshot process
-        let pos = match noria.replication_offset().await?.map(Into::into) {
+        // Load the replication offset for all tables and the schema from Noria
+        let replication_offsets = noria.replication_offsets().await?;
+        let pos = match replication_offsets.max_offset()? {
             None => {
                 let span = info_span!("taking database snapshot");
                 let replicator_options = mysql_options.clone();
@@ -168,12 +175,12 @@ impl NoriaAdapter {
                     "status" => SnapshotStatusTag::Started.value(),
                 );
                 span.in_scope(|| info!("Starting snapshot"));
-                let res = replicator
+                let curr_offset = replicator
                     .snapshot_to_noria(&mut noria, true)
                     .instrument(span.clone())
                     .await;
 
-                let status = if res.is_err() {
+                let status = if curr_offset.is_err() {
                     SnapshotStatusTag::Failed.value()
                 } else {
                     SnapshotStatusTag::Successful.value()
@@ -185,7 +192,22 @@ impl NoriaAdapter {
                     "status" => status
                 );
 
-                let pos = res?;
+                // If we have some offsets in `replication_offsets`, that means some tables were
+                // already snapshot before we started up. But if we're in this block
+                // (`max_offsets()` returned `None`), that means not *all* tables were already
+                // snapshot before we started up. So we've got some tables at an old offset that
+                // need to catch up to the just-snapshotted tables at `curr_offset`. We discard
+                // replication events for offsets < the replication offset of that table, so we can
+                // do this "catching up" by just starting replication at the old offset.
+                //
+                // Otherwise, if we *don't* have any offsets in `replication_offsets` (in which case
+                // `min_present_offset` would return `None`), we know we just did a full snapshot,
+                // in which case we can just start replicating at the current offset
+                let pos = replication_offsets
+                    .min_present_offset()?
+                    .map(|off| Ok(off.clone().into()))
+                    .unwrap_or(curr_offset)?;
+
                 span.in_scope(|| info!("Snapshot finished"));
                 histogram!(
                     recorded::REPLICATOR_SNAPSHOT_DURATION,
@@ -193,7 +215,7 @@ impl NoriaAdapter {
                 );
                 pos
             }
-            Some(pos) => pos,
+            Some(pos) => pos.clone().into(),
         };
 
         info!(binlog_position = ?pos);
@@ -220,6 +242,7 @@ impl NoriaAdapter {
         let mut adapter = NoriaAdapter {
             noria,
             connector,
+            replication_offsets,
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
         };
@@ -234,7 +257,8 @@ impl NoriaAdapter {
     ) -> ReadySetResult<!> {
         // Attempt to retreive the latest replication offset from noria, if none is present
         // begin the snapshot process
-        let pos = noria.replication_offset().await?.map(Into::into);
+        let replication_offsets = noria.replication_offsets().await?;
+        let pos = replication_offsets.max_offset()?.map(Into::into);
 
         if let Some(pos) = pos {
             info!(wal_position = %pos);
@@ -285,6 +309,7 @@ impl NoriaAdapter {
         let mut adapter = NoriaAdapter {
             noria,
             connector,
+            replication_offsets,
             mutator_map: HashMap::new(),
             warned_missing_tables: HashSet::new(),
         };
@@ -297,13 +322,25 @@ impl NoriaAdapter {
         &mut self,
         action: ReplicationAction,
         pos: ReplicationOffset,
-    ) -> Result<(), ReadySetError> {
+    ) -> ReadySetResult<()> {
         match action {
             ReplicationAction::SchemaChange { ddl } => {
+                if let Some(schema_offset) = &self.replication_offsets.schema {
+                    if pos < *schema_offset {
+                        debug!(
+                            ?pos,
+                            ?schema_offset,
+                            "Skipping schema change action from before the schema offset"
+                        );
+                        return Ok(());
+                    }
+                }
+
                 // Send the query to Noria as is
                 self.noria
-                    .extend_recipe_with_offset(&ddl, Some(pos))
+                    .extend_recipe_with_offset(&ddl, Some(pos.clone()))
                     .await?;
+                self.replication_offsets.schema = Some(pos);
                 self.clear_mutator_cache();
             }
 
@@ -312,6 +349,18 @@ impl NoriaAdapter {
                 mut actions,
                 txid,
             } => {
+                if let Some(Some(table_offset)) = self.replication_offsets.tables.get(&table) {
+                    if pos < *table_offset {
+                        debug!(
+                            ?pos,
+                            ?table_offset,
+                            %table,
+                            "Skipping table action from before the table's offset"
+                        );
+                        return Ok(());
+                    }
+                }
+
                 // Send the rows as are
                 let table_mutator =
                     if let Some(table) = self.mutator_for_table(table.clone()).await? {
@@ -326,7 +375,7 @@ impl NoriaAdapter {
                         }
                         return Ok(());
                     };
-                actions.push(TableOperation::SetReplicationOffset(pos));
+                actions.push(TableOperation::SetReplicationOffset(pos.clone()));
                 table_mutator.perform_all(actions).await?;
 
                 // If there was a transaction id associated, propagate the
@@ -338,11 +387,14 @@ impl NoriaAdapter {
                     timestamp.map.insert(table_mutator.node, tx);
                     table_mutator.update_timestamp(timestamp).await?;
                 }
+
+                self.replication_offsets.tables.insert(table, Some(pos));
             }
 
             ReplicationAction::LogPosition => {
                 // Update the log position
-                self.noria.set_replication_offset(Some(pos)).await?;
+                self.noria.set_replication_offset(Some(pos.clone())).await?;
+                self.replication_offsets.set_offset(pos);
             }
         }
 
