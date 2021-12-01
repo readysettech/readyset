@@ -80,7 +80,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::Hash;
 use std::iter::{self, FromIterator};
-use std::ops::Bound;
+use std::ops::{Bound, DerefMut};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -97,6 +97,7 @@ use nom_sql::{
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
 use noria::DataType;
+use parking_lot::Mutex;
 use rand::distributions::Standard;
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -720,11 +721,6 @@ impl UniqueGenerator {
         }
         val
     }
-
-    // Generates a unique value using `index` ignoring the generators internal index.
-    fn gen_with_index(&mut self, index: u32) -> DataType {
-        unique_value_of_type(&self.sql_type, index)
-    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -864,15 +860,20 @@ impl NonRepeatingGenerator {
     }
 }
 
-/// Column data type and data generation information.
-#[derive(Debug, Clone)]
-pub struct ColumnSpec {
-    sql_type: SqlType,
-    pub gen_spec: ColumnGenerator,
+#[derive(Debug)]
+pub struct ColumnDataGeneration {
+    pub generator: ColumnGenerator,
     /// Values per column that should be present in that column at least some of the time.
     ///
     /// This is used to ensure that queries that filter on constant values get at least some results
     expected_values: HashSet<DataType>,
+}
+
+/// Column data type and data generation information.
+#[derive(Debug, Clone)]
+pub struct ColumnSpec {
+    pub sql_type: SqlType,
+    pub gen_spec: Arc<Mutex<ColumnDataGeneration>>,
 }
 
 #[derive(Debug, Clone)]
@@ -897,7 +898,7 @@ impl From<CreateTableStatement> for TableSpec {
                 .iter()
                 .map(|field| {
                     let sql_type = field.sql_type.clone();
-                    let gen_spec = if let Some(d) =
+                    let generator = if let Some(d) =
                         field.has_default().and_then(|l| DataType::try_from(l).ok())
                     {
                         // Prefer the specified default value for a field
@@ -913,8 +914,10 @@ impl From<CreateTableStatement> for TableSpec {
                         field.column.name.clone().into(),
                         ColumnSpec {
                             sql_type,
-                            gen_spec,
-                            expected_values: HashSet::new(),
+                            gen_spec: Arc::new(Mutex::new(ColumnDataGeneration {
+                                generator,
+                                expected_values: HashSet::new(),
+                            })),
                         },
                     )
                 })
@@ -943,7 +946,8 @@ impl From<CreateTableStatement> for TableSpec {
             // Unwrap: Unique key columns come from the CreateTableStatement we just
             // generated the TableSpec from. They should be valid columns.
             let col_spec = spec.columns.get_mut(&col).unwrap();
-            col_spec.gen_spec = ColumnGenerator::Unique(col_spec.sql_type.clone().into());
+            col_spec.gen_spec.lock().generator =
+                ColumnGenerator::Unique(col_spec.sql_type.clone().into());
         }
 
         // Apply annotations in the end
@@ -958,11 +962,11 @@ impl From<CreateTableStatement> for TableSpec {
                     .get_mut(&ColumnName::from(field.column.name.as_str()))
                     .unwrap();
 
-                let gen_spec = d.spec.generator_for_col(field.sql_type.clone());
-                col_spec.gen_spec = if d.unique {
-                    gen_spec.into_unique()
+                let generator = d.spec.generator_for_col(field.sql_type.clone());
+                col_spec.gen_spec.lock().generator = if d.unique {
+                    generator.into_unique()
                 } else {
-                    gen_spec
+                    generator
                 }
             }
         }
@@ -1020,8 +1024,10 @@ impl TableSpec {
             column_name.clone(),
             ColumnSpec {
                 sql_type: col_type.clone(),
-                gen_spec: ColumnGenerator::Constant(col_type.into()),
-                expected_values: HashSet::new(),
+                gen_spec: Arc::new(Mutex::new(ColumnDataGeneration {
+                    generator: ColumnGenerator::Constant(col_type.into()),
+                    expected_values: HashSet::new(),
+                })),
             },
         );
         column_name
@@ -1078,7 +1084,8 @@ impl TableSpec {
     pub fn set_primary_key_column(&mut self, column_name: &ColumnName) {
         assert!(self.columns.contains_key(column_name));
         let col_spec = self.columns.get_mut(column_name).unwrap();
-        col_spec.gen_spec = ColumnGenerator::Unique(col_spec.sql_type.clone().into());
+        col_spec.gen_spec.lock().generator =
+            ColumnGenerator::Unique(col_spec.sql_type.clone().into());
     }
 
     /// Record that the column given by `column_name` should contain `value` at least some of the
@@ -1091,6 +1098,8 @@ impl TableSpec {
         self.columns
             .get_mut(&column_name)
             .unwrap()
+            .gen_spec
+            .lock()
             .expected_values
             .insert(value);
     }
@@ -1103,8 +1112,12 @@ impl TableSpec {
     ) {
         assert!(self.columns.contains_key(&column_name));
         let col_spec = self.columns.get_mut(&column_name).unwrap();
-        self.columns.get_mut(&column_name).unwrap().gen_spec =
-            spec.generator_for_col(col_spec.sql_type.clone());
+        self.columns
+            .get_mut(&column_name)
+            .unwrap()
+            .gen_spec
+            .lock()
+            .generator = spec.generator_for_col(col_spec.sql_type.clone());
     }
 
     /// Overrides the existing `gen_spec` for a set of columns..
@@ -1123,13 +1136,17 @@ impl TableSpec {
                     ColumnSpec {
                         sql_type: col_type,
                         gen_spec: col_spec,
-                        expected_values,
                     },
                 )| {
-                    let value = match col_spec {
+                    let mut spec = col_spec.lock();
+                    let ColumnDataGeneration {
+                        generator,
+                        expected_values,
+                    } = spec.deref_mut();
+                    let value = match generator {
                         // Allow using the `index` for key columns which are specified
                         // as Unique.
-                        ColumnGenerator::Unique(u) => u.gen_with_index(index as u32),
+                        ColumnGenerator::Unique(u) => u.gen(),
                         _ if index % 2 == 0 && !expected_values.is_empty() => expected_values
                             .iter()
                             .nth(index / 2 % expected_values.len())
