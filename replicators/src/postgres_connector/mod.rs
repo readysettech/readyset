@@ -8,6 +8,8 @@ pub use snapshot::PostgresReplicator;
 
 use std::fmt::{self, Display};
 
+use noria::replication::ReplicationOffset;
+
 pub(crate) const REPLICATION_SLOT: &str = "noria";
 pub(crate) const PUBLICATION_NAME: &str = "noria";
 
@@ -17,31 +19,31 @@ pub struct PostgresPosition {
     pub lsn: i64,
 }
 
-impl From<&PostgresPosition> for noria::ReplicationOffset {
+impl From<&PostgresPosition> for ReplicationOffset {
     fn from(value: &PostgresPosition) -> Self {
-        noria::ReplicationOffset {
+        ReplicationOffset {
             replication_log_name: String::new(),
             offset: value.lsn as _,
         }
     }
 }
 
-impl From<PostgresPosition> for noria::ReplicationOffset {
+impl From<PostgresPosition> for ReplicationOffset {
     fn from(value: PostgresPosition) -> Self {
         (&value).into()
     }
 }
 
-impl From<noria::ReplicationOffset> for PostgresPosition {
-    fn from(val: noria::ReplicationOffset) -> Self {
+impl From<ReplicationOffset> for PostgresPosition {
+    fn from(val: ReplicationOffset) -> Self {
         PostgresPosition {
             lsn: val.offset as _,
         }
     }
 }
 
-impl From<&noria::ReplicationOffset> for PostgresPosition {
-    fn from(val: &noria::ReplicationOffset) -> Self {
+impl From<&ReplicationOffset> for PostgresPosition {
+    fn from(val: &ReplicationOffset) -> Self {
         PostgresPosition {
             lsn: val.offset as _,
         }

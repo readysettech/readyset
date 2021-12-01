@@ -1,6 +1,7 @@
 use crate::channel::CONNECTION_FROM_BASE;
 use crate::data::*;
 use crate::internal::*;
+use crate::replication::ReplicationOffset;
 use crate::{consistency, LocalOrNot, Tagged, Tagger};
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;

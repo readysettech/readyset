@@ -16,7 +16,8 @@ use noria::consensus::{
     WorkerDescriptor, WorkerId,
 };
 use noria::metrics::recorded;
-use noria::{ControllerDescriptor, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::ControllerDescriptor;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -907,7 +908,7 @@ mod tests {
         use std::convert::TryInto;
 
         use super::*;
-        use noria::ReplicationOffset;
+        use noria::replication::ReplicationOffset;
         use replicators::BinlogPosition;
 
         #[tokio::test(flavor = "multi_thread")]

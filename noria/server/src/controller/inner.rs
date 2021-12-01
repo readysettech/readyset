@@ -27,7 +27,8 @@ use hyper::Method;
 use lazy_static::lazy_static;
 use metrics::gauge;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::{builders::*, ReplicationOffset, ReplicationOffsets, ViewSchema, WorkerDescriptor};
+use noria::replication::{ReplicationOffset, ReplicationOffsets};
+use noria::{builders::*, ViewSchema, WorkerDescriptor};
 use noria::{
     consensus::{Authority, AuthorityControl},
     metrics::recorded,

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use noria::{KeyComparison, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::KeyComparison;
 use rand::{self, Rng};
 
 use crate::prelude::*;

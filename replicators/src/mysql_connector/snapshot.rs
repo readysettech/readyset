@@ -1,7 +1,8 @@
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::{ReadySetResult, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::ReadySetResult;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};

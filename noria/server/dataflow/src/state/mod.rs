@@ -19,7 +19,8 @@ use ahash::RandomState;
 use common::SizeOf;
 use derive_more::From;
 use hashbag::HashBag;
-use noria::{KeyComparison, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::KeyComparison;
 
 pub use partial_map::PartialMap;
 

@@ -204,6 +204,7 @@ pub(crate) const PENDING_LIMIT: usize = 8192;
 
 use nom_sql::SqlType;
 use petgraph::graph::NodeIndex;
+use replication::ReplicationOffset;
 use std::collections::HashMap;
 use tokio_tower::multiplex;
 
@@ -217,6 +218,7 @@ mod table;
 pub mod util;
 mod view;
 use std::convert::TryFrom;
+pub mod replication;
 
 #[doc(hidden)]
 pub mod channel;
@@ -303,8 +305,8 @@ impl<T> From<T> for Tagged<T> {
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
-    DataType, Modification, Operation, ReplicationOffset, ReplicationOffsets, TableOperation,
-    DATE_FORMAT, TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
+    DataType, Modification, Operation, TableOperation, DATE_FORMAT, TIMESTAMP_FORMAT,
+    TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
 };
 pub use crate::data_text_types::{Text, TinyText};
 pub use crate::table::{Table, TableRequest};

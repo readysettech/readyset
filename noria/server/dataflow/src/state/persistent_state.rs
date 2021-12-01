@@ -33,7 +33,8 @@ use crate::state::{RangeLookupResult, RecordResult, State};
 use bincode::Options;
 use common::SizeOf;
 use itertools::Itertools;
-use noria::{KeyComparison, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::KeyComparison;
 use rocksdb::{
     self, Direction, IteratorMode, PlainTableFactoryOptions, SliceTransform, WriteBatch,
 };

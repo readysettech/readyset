@@ -6,8 +6,8 @@ use mysql_async as mysql;
 use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
-use noria::{DataType, ReplicationOffset};
-use noria::{ReadySetError, ReadySetResult};
+use noria::replication::ReplicationOffset;
+use noria::{DataType, ReadySetError, ReadySetResult};
 use std::convert::{TryFrom, TryInto};
 
 use crate::noria_adapter::Connector;
@@ -74,7 +74,7 @@ impl PartialOrd for BinlogPosition {
     }
 }
 
-impl TryFrom<&BinlogPosition> for noria::ReplicationOffset {
+impl TryFrom<&BinlogPosition> for ReplicationOffset {
     type Error = ReadySetError;
 
     /// `ReplicationOffset` is a filename and a u128 offset
@@ -103,14 +103,14 @@ impl TryFrom<&BinlogPosition> for noria::ReplicationOffset {
             ReadySetError::ReplicationFailed(format!("Invalid binlog suffix {}", value.binlog_file))
         })?;
 
-        Ok(noria::ReplicationOffset {
+        Ok(ReplicationOffset {
             offset: (suffix_len << 123) + (suffix << 64) + (value.position as u128),
             replication_log_name: basename.to_string(),
         })
     }
 }
 
-impl TryFrom<BinlogPosition> for noria::ReplicationOffset {
+impl TryFrom<BinlogPosition> for ReplicationOffset {
     type Error = ReadySetError;
 
     fn try_from(value: BinlogPosition) -> Result<Self, Self::Error> {
@@ -118,8 +118,8 @@ impl TryFrom<BinlogPosition> for noria::ReplicationOffset {
     }
 }
 
-impl From<noria::ReplicationOffset> for BinlogPosition {
-    fn from(val: noria::ReplicationOffset) -> Self {
+impl From<ReplicationOffset> for BinlogPosition {
+    fn from(val: ReplicationOffset) -> Self {
         let suffix_len = (val.offset >> 123) as usize;
         let suffix = (val.offset >> 64) as u32;
         let position = val.offset as u32;

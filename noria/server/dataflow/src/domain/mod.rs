@@ -22,7 +22,8 @@ use vec1::Vec1;
 pub use internal::DomainIndex as Index;
 use noria::channel;
 use noria::metrics::recorded;
-use noria::{internal, KeyComparison, ReadySetError, ReplicationOffset};
+use noria::replication::ReplicationOffset;
+use noria::{internal, KeyComparison, ReadySetError};
 use noria_errors::{internal, internal_err, ReadySetResult};
 
 use crate::node::NodeProcessingResult;
