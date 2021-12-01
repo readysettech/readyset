@@ -274,15 +274,24 @@ mod tests {
 
         assert_eq!(schema.num_rows, 200);
         assert!(matches!(
-            schema.table.columns[&"author_id".into()].gen_spec,
+            schema.table.columns[&"author_id".into()]
+                .gen_spec
+                .lock()
+                .generator,
             ColumnGenerator::Uniform(_)
         ));
         assert!(matches!(
-            schema.table.columns[&"keywords".into()].gen_spec,
+            schema.table.columns[&"keywords".into()]
+                .gen_spec
+                .lock()
+                .generator,
             ColumnGenerator::RandomString(_)
         ));
         assert!(matches!(
-            schema.table.columns[&"title".into()].gen_spec,
+            schema.table.columns[&"title".into()]
+                .gen_spec
+                .lock()
+                .generator,
             ColumnGenerator::NonRepeating(_)
         ));
     }

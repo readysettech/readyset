@@ -4552,6 +4552,7 @@ dependencies = [
  "nom-sql",
  "noria",
  "noria-server",
+ "parking_lot",
  "prettytable-rs",
  "proptest",
  "rand 0.8.4",
