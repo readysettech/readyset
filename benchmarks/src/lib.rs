@@ -91,3 +91,4 @@ mod cache_hit_benchmark;
 mod read_benchmark;
 mod scale_connections;
 mod scale_views;
+mod write_latency_benchmark;

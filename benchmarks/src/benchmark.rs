@@ -17,6 +17,7 @@ use crate::read_benchmark::ReadBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
+use crate::write_latency_benchmark::WriteLatencyBenchmark;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
@@ -33,6 +34,8 @@ pub enum Benchmark {
     CacheHitBenchmark,
     ScaleViews,
     ScaleConnections,
+    /// Measures time required to propagate table writes into Noria views
+    WriteLatencyBenchmark,
 }
 
 impl Benchmark {
@@ -43,6 +46,7 @@ impl Benchmark {
             Self::CacheHitBenchmark(_) => "cache_hit_benchmark",
             Self::ScaleViews(_) => "scale_views",
             Self::ScaleConnections(_) => "scale_connections",
+            Self::WriteLatencyBenchmark(_) => "write_latency",
         }
     }
 }

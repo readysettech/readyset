@@ -32,6 +32,8 @@ metrics-util = "0.10.0"
 metrics-exporter-prometheus = {version = "0.6.0", features = ["push-gateway", "tokio-exporter"]}
 itertools = "0.10.1"
 num-integer = "0.1.44"
+regex = "1.5.4"
+lazy_static = "1.4.0"
 
 # local dependencies
 noria = { path = "../noria/noria/" }
