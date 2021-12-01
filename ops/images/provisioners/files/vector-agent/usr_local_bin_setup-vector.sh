@@ -11,7 +11,6 @@ fi
 cat > /etc/vector.d/vector.toml <<EOF
 [sources.in]
 type = "journald"
-include_units = [ "readyset-mysql-adapter", "readyset-server" ]
 
 [sources.node-exporter]
 type = "prometheus_scrape"
