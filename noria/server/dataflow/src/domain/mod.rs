@@ -1855,6 +1855,9 @@ impl Domain {
             DomainRequest::RequestReplicationOffset => {
                 Ok(Some(bincode::serialize(&self.replication_offset()?)?))
             }
+            DomainRequest::RequestReplicationOffsets => {
+                Ok(Some(bincode::serialize(&self.replication_offsets())?))
+            }
             DomainRequest::RequestSnapshottingTables => {
                 Ok(Some(bincode::serialize(&self.snapshotting_base_nodes())?))
             }
@@ -3826,6 +3829,15 @@ impl Domain {
                 off2.try_max_into(&mut off1)?;
                 Ok(off1)
             })
+    }
+
+    pub fn replication_offsets(&self) -> NodeMap<Option<ReplicationOffset>> {
+        self.state
+            .iter()
+            .filter_map(|(ni, state)| {
+                Some((ni, state.as_persistent()?.replication_offset().cloned()))
+            })
+            .collect()
     }
 
     /// If there is a pending timed purge, return the duration until it needs

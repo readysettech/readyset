@@ -27,7 +27,7 @@ use hyper::Method;
 use lazy_static::lazy_static;
 use metrics::gauge;
 use noria::debug::stats::{DomainStats, GraphStats, NodeStats};
-use noria::{builders::*, ReplicationOffset, ViewSchema, WorkerDescriptor};
+use noria::{builders::*, ReplicationOffset, ReplicationOffsets, ViewSchema, WorkerDescriptor};
 use noria::{
     consensus::{Authority, AuthorityControl},
     metrics::recorded,
@@ -395,6 +395,11 @@ impl Leader {
                 // this method can't be `async` since `Leader` isn't Send because `Graph`
                 // isn't Send :(
                 let res = futures::executor::block_on(self.replication_offset())?;
+                return_serialized!(res);
+            }
+            (Method::POST, "/replication_offsets") => {
+                // see above
+                let res = futures_executor::block_on(self.replication_offsets())?;
                 return_serialized!(res);
             }
             (Method::POST, "/snapshotting_tables") => {
@@ -1824,6 +1829,48 @@ impl Leader {
                             Ok(None)
                         }
                     })
+                },
+            )
+            .await
+    }
+
+    /// Returns a struct containing the set of all replication offsets within the system, including
+    /// the replication offset for the schema stored in the controller and the replication offsets
+    /// of all base tables
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
+        let domains = self.domains_with_base_tables().await?;
+        stream::iter(domains)
+            .map(|domain| {
+                #[allow(clippy::indexing_slicing)] // came from self.domains
+                self.domains[&domain]
+                    .send_to_healthy::<NodeMap<Option<ReplicationOffset>>>(
+                        DomainRequest::RequestReplicationOffsets,
+                        &self.workers,
+                    )
+                    .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
+            })
+            .buffer_unordered(CONCURRENT_REQUESTS)
+            .try_fold(
+                ReplicationOffsets::with_schema_offset(self.replication_offset.clone()),
+                |mut acc, (domain, domain_offs)| async move {
+                    for shard in domain_offs {
+                        for (lni, offset) in shard {
+                            #[allow(clippy::indexing_slicing)] // came from self.domains
+                            let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                                internal_err(format!(
+                                    "Domain {} returned nonexistent local node {}",
+                                    domain, lni
+                                ))
+                            })?;
+                            #[allow(clippy::indexing_slicing)] // internal invariant
+                            let table_name = self.ingredients[*ni].name();
+                            acc.tables.insert(table_name.to_owned(), offset); // TODO min of all shards
+                        }
+                    }
+                    Ok(acc)
                 },
             )
             .await

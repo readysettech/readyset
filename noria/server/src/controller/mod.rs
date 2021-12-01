@@ -911,6 +911,53 @@ mod tests {
         use replicators::BinlogPosition;
 
         #[tokio::test(flavor = "multi_thread")]
+        async fn all_tables() {
+            let mut noria = start_simple("all_tables").await;
+
+            let offset = ReplicationOffset {
+                offset: 1,
+                replication_log_name: "binlog".to_owned(),
+            };
+
+            noria
+                .set_replication_offset(Some(offset.clone()))
+                .await
+                .unwrap();
+            noria
+                .extend_recipe(
+                    "CREATE TABLE t1 (id int);
+                     CREATE TABLE t2 (id int);
+                     CREATE TABLE t3 (id int);",
+                )
+                .await
+                .unwrap();
+
+            let mut t1 = noria.table("t1").await.unwrap();
+            let mut t2 = noria.table("t2").await.unwrap();
+
+            t1.set_replication_offset(ReplicationOffset {
+                offset: 2,
+                ..offset.clone()
+            })
+            .await
+            .unwrap();
+
+            t2.set_replication_offset(ReplicationOffset {
+                offset: 3,
+                ..offset.clone()
+            })
+            .await
+            .unwrap();
+
+            let offsets = noria.replication_offsets().await.unwrap();
+
+            assert_eq!(offsets.schema.unwrap().offset, 1);
+            assert_eq!(offsets.tables["t1"].as_ref().unwrap().offset, 2);
+            assert_eq!(offsets.tables["t2"].as_ref().unwrap().offset, 3);
+            assert_eq!(offsets.tables["t3"], None);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
         async fn same_log() {
             let mut noria = start_simple("replication_offsets").await;
             noria
