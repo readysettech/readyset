@@ -303,8 +303,8 @@ impl<T> From<T> for Tagged<T> {
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
 pub use crate::data::{
-    DataType, Modification, Operation, ReplicationOffset, TableOperation, DATE_FORMAT,
-    TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
+    DataType, Modification, Operation, ReplicationOffset, ReplicationOffsets, TableOperation,
+    DATE_FORMAT, TIMESTAMP_FORMAT, TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
 };
 pub use crate::data_text_types::{Text, TinyText};
 pub use crate::table::{Table, TableRequest};

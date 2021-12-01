@@ -9,6 +9,7 @@ use crate::{Text, TinyText};
 use nom_sql::{Double, Float, Literal, SqlType};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
 
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
@@ -2492,6 +2493,30 @@ impl ReplicationOffset {
         }
 
         Ok(())
+    }
+}
+
+/// Set of replication offsets for the entire system
+#[derive(Default, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ReplicationOffsets {
+    /// Replication offset for the database schema, set as part of the controller metadata stored in
+    /// the authority
+    pub schema: Option<ReplicationOffset>,
+
+    /// Replication offset for each individual table, if any.
+    ///
+    /// A table with [`None`] as its replication offset has not yet been snapshotted successfully
+    pub tables: HashMap<String, Option<ReplicationOffset>>,
+}
+
+impl ReplicationOffsets {
+    /// Create a new [`ReplicationOffset`] with the given [`schema`][Self::schema] offset and an
+    /// empty map of tables
+    pub fn with_schema_offset(schema: Option<ReplicationOffset>) -> Self {
+        Self {
+            schema,
+            tables: HashMap::new(),
+        }
     }
 }
 

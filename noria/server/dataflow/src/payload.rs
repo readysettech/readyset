@@ -172,6 +172,9 @@ pub enum DomainRequest {
     /// Request the max replication offset of all the base table nodes in the domain
     RequestReplicationOffset,
 
+    /// Request a map of all replication offsets of the base table nodes in the domain
+    RequestReplicationOffsets,
+
     /// Request a list of base table nodes that are currently involved in snapshotting.
     RequestSnapshottingTables,
 

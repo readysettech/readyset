@@ -1,3 +1,4 @@
+use crate::data::ReplicationOffsets;
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
@@ -648,6 +649,16 @@ impl ControllerHandle {
         &mut self,
     ) -> impl Future<Output = ReadySetResult<Option<ReplicationOffset>>> + '_ {
         self.rpc("replication_offset", ())
+    }
+
+    /// Get a set of all replication offsets for the entire system.
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    pub fn replication_offsets(
+        &mut self,
+    ) -> impl Future<Output = ReadySetResult<ReplicationOffsets>> + '_ {
+        self.rpc("replication_offsets", ())
     }
 
     /// Get a list of all current tables node indexes that are involved in snapshotting.
