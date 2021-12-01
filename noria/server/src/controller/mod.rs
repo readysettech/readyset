@@ -904,280 +904,50 @@ mod tests {
         assert!(!queries.contains_key("test_query"));
     }
 
-    mod replication_offsets {
-        use std::convert::TryInto;
+    #[tokio::test(flavor = "multi_thread")]
+    async fn replication_offsets() {
+        let mut noria = start_simple("all_tables").await;
 
-        use super::*;
-        use noria::replication::ReplicationOffset;
-        use replicators::BinlogPosition;
+        let offset = ReplicationOffset {
+            offset: 1,
+            replication_log_name: "binlog".to_owned(),
+        };
 
-        #[tokio::test(flavor = "multi_thread")]
-        async fn all_tables() {
-            let mut noria = start_simple("all_tables").await;
-
-            let offset = ReplicationOffset {
-                offset: 1,
-                replication_log_name: "binlog".to_owned(),
-            };
-
-            noria
-                .set_schema_replication_offset(Some(offset.clone()))
-                .await
-                .unwrap();
-            noria
-                .extend_recipe(
-                    "CREATE TABLE t1 (id int);
+        noria
+            .set_schema_replication_offset(Some(offset.clone()))
+            .await
+            .unwrap();
+        noria
+            .extend_recipe(
+                "CREATE TABLE t1 (id int);
                      CREATE TABLE t2 (id int);
                      CREATE TABLE t3 (id int);",
-                )
-                .await
-                .unwrap();
-
-            let mut t1 = noria.table("t1").await.unwrap();
-            let mut t2 = noria.table("t2").await.unwrap();
-
-            t1.set_replication_offset(ReplicationOffset {
-                offset: 2,
-                ..offset.clone()
-            })
+            )
             .await
             .unwrap();
 
-            t2.set_replication_offset(ReplicationOffset {
-                offset: 3,
-                ..offset.clone()
-            })
-            .await
-            .unwrap();
+        let mut t1 = noria.table("t1").await.unwrap();
+        let mut t2 = noria.table("t2").await.unwrap();
 
-            let offsets = noria.replication_offsets().await.unwrap();
+        t1.set_replication_offset(ReplicationOffset {
+            offset: 2,
+            ..offset.clone()
+        })
+        .await
+        .unwrap();
 
-            assert_eq!(offsets.schema.unwrap().offset, 1);
-            assert_eq!(offsets.tables["t1"].as_ref().unwrap().offset, 2);
-            assert_eq!(offsets.tables["t2"].as_ref().unwrap().offset, 3);
-            assert_eq!(offsets.tables["t3"], None);
-        }
+        t2.set_replication_offset(ReplicationOffset {
+            offset: 3,
+            ..offset.clone()
+        })
+        .await
+        .unwrap();
 
-        #[tokio::test(flavor = "multi_thread")]
-        async fn same_log() {
-            let mut noria = start_simple("replication_offsets").await;
-            noria
-                .extend_recipe(
-                    "CREATE TABLE t1 (id int);
-                     CREATE TABLE t2 (id int);",
-                )
-                .await
-                .unwrap();
-            let mut t1 = noria.table("t1").await.unwrap();
-            let mut t2 = noria.table("t2").await.unwrap();
+        let offsets = noria.replication_offsets().await.unwrap();
 
-            let mut offset = ReplicationOffset {
-                offset: 1,
-                replication_log_name: "binlog".to_owned(),
-            };
-
-            noria
-                .set_schema_replication_offset(Some(offset.clone()))
-                .await
-                .unwrap();
-
-            t1.set_replication_offset(offset.clone()).await.unwrap();
-            offset.offset = 7;
-            t2.set_replication_offset(offset.clone()).await.unwrap();
-
-            sleep().await;
-
-            assert_eq!(offset, noria.replication_offset().await.unwrap().unwrap());
-
-            // Check that storing replication offset via the adapter directly works too
-            offset.offset = 15;
-            noria
-                .set_schema_replication_offset(Some(offset.clone()))
-                .await
-                .unwrap();
-
-            sleep().await;
-            assert_eq!(offset, noria.replication_offset().await.unwrap().unwrap());
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn same_log_with_pkey() {
-            let mut noria = start_simple("replication_offsets").await;
-
-            noria
-                .set_schema_replication_offset(Some(ReplicationOffset {
-                    offset: 2,
-                    replication_log_name: "binlog".to_owned(),
-                }))
-                .await
-                .unwrap();
-
-            noria
-                .extend_recipe("CREATE TABLE t1 (id int primary key);")
-                .await
-                .unwrap();
-            let mut t1 = noria.table("t1").await.unwrap();
-
-            t1.perform_all(vec![
-                noria::TableOperation::Insert(vec![noria::DataType::BigInt(10)]),
-                noria::TableOperation::SetReplicationOffset(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "binlog".to_owned(),
-                }),
-                noria::TableOperation::Insert(vec![noria::DataType::BigInt(20)]),
-                noria::TableOperation::SetReplicationOffset(ReplicationOffset {
-                    offset: 6,
-                    replication_log_name: "binlog".to_owned(),
-                }),
-            ])
-            .await
-            .unwrap();
-
-            sleep().await;
-
-            let offset = noria.replication_offset().await.unwrap();
-            assert_eq!(
-                offset,
-                Some(ReplicationOffset {
-                    offset: 6,
-                    replication_log_name: "binlog".to_owned(),
-                })
-            );
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn schema_offset() {
-            let mut noria = start_simple("replication_offsets").await;
-            let mut binlog = BinlogPosition {
-                binlog_file: "mysql-binlog.000006".to_string(),
-                position: 100,
-            };
-
-            noria
-                .extend_recipe_with_offset(
-                    "CREATE TABLE t1 (id int);
-                     CREATE TABLE t2 (id int);",
-                    Some((&binlog).try_into().unwrap()),
-                )
-                .await
-                .unwrap();
-
-            let mut t1 = noria.table("t1").await.unwrap();
-            let mut t2 = noria.table("t2").await.unwrap();
-
-            binlog.position = 200;
-
-            t1.set_replication_offset((&binlog).try_into().unwrap())
-                .await
-                .unwrap();
-
-            binlog.position = 300;
-
-            t2.set_replication_offset((&binlog).try_into().unwrap())
-                .await
-                .unwrap();
-
-            sleep().await;
-
-            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
-            assert_eq!(offset, binlog);
-
-            binlog.position = 400;
-
-            noria
-                .extend_recipe_with_offset(
-                    "CREATE VIEW v AS SELECT * FROM t1 WHERE id = 5;",
-                    Some((&binlog).try_into().unwrap()),
-                )
-                .await
-                .unwrap();
-
-            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
-            assert_eq!(offset, binlog);
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn different_log() {
-            let mut noria = start_simple("replication_offsets").await;
-            noria
-                .set_schema_replication_offset(Some(ReplicationOffset {
-                    offset: 2,
-                    replication_log_name: "binlog".to_owned(),
-                }))
-                .await
-                .unwrap();
-
-            noria
-                .extend_recipe(
-                    "CREATE TABLE t1 (id int);
-                     CREATE TABLE t2 (id int);",
-                )
-                .await
-                .unwrap();
-            let mut t1 = noria.table("t1").await.unwrap();
-            let mut t2 = noria.table("t2").await.unwrap();
-
-            t1.set_replication_offset(ReplicationOffset {
-                offset: 1,
-                replication_log_name: "binlog".to_owned(),
-            })
-            .await
-            .unwrap();
-            t2.set_replication_offset(ReplicationOffset {
-                offset: 7,
-                replication_log_name: "linbog".to_owned(),
-            })
-            .await
-            .unwrap();
-
-            sleep().await;
-
-            let offset = noria.replication_offset().await;
-            assert!(offset.is_err());
-            let err = offset.err().unwrap();
-            assert!(
-                matches!(
-                    err,
-                    ReadySetError::RpcFailed {
-                        source: box ReadySetError::ReplicationOffsetLogDifferent(_, _),
-                        ..
-                    }
-                ),
-                "err = {:?}",
-                err
-            );
-        }
-
-        #[tokio::test(flavor = "multi_thread")]
-        async fn missing_in_one_table() {
-            let mut noria = start_simple("missing_in_one_table").await;
-            noria
-                .set_schema_replication_offset(Some(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "binlog".to_owned(),
-                }))
-                .await
-                .unwrap();
-            noria
-                .extend_recipe(
-                    "CREATE TABLE t1 (id int);
-                     CREATE TABLE t2 (id int);",
-                )
-                .await
-                .unwrap();
-            noria
-                .table("t1")
-                .await
-                .unwrap()
-                .set_replication_offset(ReplicationOffset {
-                    offset: 1,
-                    replication_log_name: "binlog".to_owned(),
-                })
-                .await
-                .unwrap();
-
-            let offset = noria.replication_offset().await.unwrap();
-            assert!(offset.is_none());
-        }
+        assert_eq!(offsets.schema.unwrap().offset, 1);
+        assert_eq!(offsets.tables["t1"].as_ref().unwrap().offset, 2);
+        assert_eq!(offsets.tables["t2"].as_ref().unwrap().offset, 3);
+        assert_eq!(offsets.tables["t3"], None);
     }
 }

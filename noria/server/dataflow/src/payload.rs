@@ -169,9 +169,6 @@ pub enum DomainRequest {
         index: HashSet<Index>,
     },
 
-    /// Request the max replication offset of all the base table nodes in the domain
-    RequestReplicationOffset,
-
     /// Request a map of all replication offsets of the base table nodes in the domain
     RequestReplicationOffsets,
 
