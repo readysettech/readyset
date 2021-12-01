@@ -54,7 +54,7 @@ type = "console"
 target = "stdout"
 encoding.codec = "json"
 
-[sinks.cloudwatch]
+[sinks.cloudwatch_logs]
 type = "aws_cloudwatch_logs"
 inputs = ["in"]
 create_missing_group = true
@@ -64,6 +64,12 @@ compression = "none"
 region = "${AWS_CLOUDFORMATION_REGION}"
 stream_name = "readyset"
 encoding.codec = "json"
+
+[sinks.cloudwatch_metrics]
+type = "aws_cloudwatch_metrics"
+inputs = ["in", "metrics"]
+default_namespace = "${DEPLOYMENT}"
+region = "${AWS_CLOUDFORMATION_REGION}"
 
 [sinks.prometheus]
 type = "prometheus_exporter"
