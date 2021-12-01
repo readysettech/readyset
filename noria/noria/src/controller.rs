@@ -548,14 +548,14 @@ impl ControllerHandle {
         self.rpc("remove_query", name)
     }
 
-    /// Set the replication offset stored with the recipe
+    /// Set the replication offset for the schema, which is stored with the recipe.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn set_replication_offset(
+    pub fn set_schema_replication_offset(
         &mut self,
         replication_offset: Option<ReplicationOffset>,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("set_replication_offset", replication_offset)
+        self.rpc("set_schema_replication_offset", replication_offset)
     }
 
     /// Fetch a graphviz description of the dataflow graph.

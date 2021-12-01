@@ -81,7 +81,7 @@ pub struct Leader {
     /// Current recipe
     recipe: Recipe,
     /// Latest replication position for the schema if from replica or binlog
-    replication_offset: Option<ReplicationOffset>,
+    schema_replication_offset: Option<ReplicationOffset>,
     /// Placement restrictions for nodes and the domains they are placed into.
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
@@ -375,10 +375,11 @@ impl Leader {
                 let ret = futures::executor::block_on(self.remove_query(authority, query_name))?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/set_replication_offset") => {
+            (Method::POST, "/set_schema_replication_offset") => {
                 let body = bincode::deserialize(&body)?;
-                let ret =
-                    futures::executor::block_on(self.set_replication_offset(authority, body))?;
+                let ret = futures::executor::block_on(
+                    self.set_schema_replication_offset(authority, body),
+                )?;
                 return_serialized!(ret);
             }
             (Method::POST, "/replicate_readers") => {
@@ -739,7 +740,7 @@ impl Leader {
             read_addrs: Default::default(),
             controller_uri,
 
-            replication_offset: state.replication_offset,
+            schema_replication_offset: state.schema_replication_offset,
             replicator_url,
             replicator_task: None,
             authority,
@@ -1436,7 +1437,7 @@ impl Leader {
             Ok(new) => match self.apply_recipe(new).await {
                 Ok(x) => {
                     if let Some(offset) = &add_txt_spec.replication_offset {
-                        offset.try_max_into(&mut self.replication_offset)?
+                        offset.try_max_into(&mut self.schema_replication_offset)?
                     }
 
                     let node_restrictions = self.node_restrictions.clone();
@@ -1450,7 +1451,7 @@ impl Leader {
                                 state.recipes.push(add_txt.to_string());
                                 if let Some(offset) = &add_txt_spec.replication_offset {
                                     offset
-                                        .try_max_into(&mut state.replication_offset)
+                                        .try_max_into(&mut state.schema_replication_offset)
                                         .map_err(|_| ())?;
                                 }
                                 Ok(state)
@@ -1491,7 +1492,7 @@ impl Leader {
                 let new = old.replace(r);
                 match self.apply_recipe(new).await {
                     Ok(x) => {
-                        self.replication_offset = r_txt_spec.replication_offset.clone();
+                        self.schema_replication_offset = r_txt_spec.replication_offset.clone();
 
                         let node_restrictions = self.node_restrictions.clone();
                         let recipe_version = self.recipe.version();
@@ -1505,7 +1506,7 @@ impl Leader {
                                         state.recipes = vec![r_txt.to_string()];
                                         // When installing a recipe, the new replication offset overwrites the existing
                                         // offset entirely
-                                        state.replication_offset =
+                                        state.schema_replication_offset =
                                             r_txt_spec.replication_offset.clone();
                                         Ok(state)
                                     }
@@ -1565,17 +1566,17 @@ impl Leader {
         Ok(())
     }
 
-    async fn set_replication_offset(
+    async fn set_schema_replication_offset(
         &mut self,
         authority: &Arc<Authority>,
         offset: Option<ReplicationOffset>,
     ) -> Result<(), ReadySetError> {
-        self.replication_offset = offset.clone();
+        self.schema_replication_offset = offset.clone();
 
         authority
             .update_controller_state::<_, ControllerState, _>(|state| match state {
                 Some(mut state) => {
-                    state.replication_offset = offset.clone();
+                    state.schema_replication_offset = offset.clone();
                     Ok(state)
                 }
                 None => Err(internal_err("Empty state")),
@@ -1814,7 +1815,7 @@ impl Leader {
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
             .try_fold(
-                self.replication_offset.clone(),
+                self.schema_replication_offset.clone(),
                 |acc: Option<ReplicationOffset>, domain_offs| async move {
                     // NOTE(grfn): domain_offs is a vec per-shard here - ostensibly, every time we
                     // do an update to a replication offset that applies to every shard - meaning
@@ -1855,7 +1856,7 @@ impl Leader {
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
             .try_fold(
-                ReplicationOffsets::with_schema_offset(self.replication_offset.clone()),
+                ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
                 |mut acc, (domain, domain_offs)| async move {
                     for shard in domain_offs {
                         for (lni, offset) in shard {

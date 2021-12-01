@@ -395,7 +395,9 @@ impl NoriaAdapter {
                 self.replication_offsets.set_offset(pos.clone());
 
                 // Update the log position for the schema
-                self.noria.set_replication_offset(Some(pos.clone())).await?;
+                self.noria
+                    .set_schema_replication_offset(Some(pos.clone()))
+                    .await?;
 
                 // Update the log position for all tables
                 let tables = self
