@@ -393,20 +393,14 @@ impl Leader {
                 let ret = futures::executor::block_on(self.remove_nodes(vec![body].as_slice()))?;
                 return_serialized!(ret);
             }
-            (Method::POST, "/replication_offset") => {
+            (Method::POST, "/replication_offsets") => {
                 // this method can't be `async` since `Leader` isn't Send because `Graph`
                 // isn't Send :(
-                let res = futures::executor::block_on(self.replication_offset())?;
-                return_serialized!(res);
-            }
-            (Method::POST, "/replication_offsets") => {
-                // see above
                 let res = futures_executor::block_on(self.replication_offsets())?;
                 return_serialized!(res);
             }
             (Method::POST, "/snapshotting_tables") => {
-                // this method can't be `async` since `Leader` isn't Send because `Graph`
-                // isn't Send :(
+                // see above
                 let res = futures::executor::block_on(self.snapshotting_tables())?;
                 return_serialized!(res);
             }
@@ -1792,48 +1786,6 @@ impl Leader {
                 acc
             })
         }
-    }
-
-    /// Returns the maximum replication offset that has been written to any of the tables in this
-    /// Noria instance, or None if either the controller itself does not have the replication offset
-    /// for the schema or any tables do not have a replication offset.
-    ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
-    async fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
-        // Collect a *unique* list of domains that might contain base tables, to avoid sending
-        // multiple requests to a domain that happens to contain multiple base tables
-        let domains = self.domains_with_base_tables().await?;
-
-        stream::iter(domains)
-            .map(|domain| {
-                #[allow(clippy::indexing_slicing)] // validated above
-                self.domains[&domain].send_to_healthy::<Option<ReplicationOffset>>(
-                    DomainRequest::RequestReplicationOffset,
-                    &self.workers,
-                )
-            })
-            .buffer_unordered(CONCURRENT_REQUESTS)
-            .try_fold(
-                self.schema_replication_offset.clone(),
-                |acc: Option<ReplicationOffset>, domain_offs| async move {
-                    // NOTE(grfn): domain_offs is a vec per-shard here - ostensibly, every time we
-                    // do an update to a replication offset that applies to every shard - meaning
-                    // the only case domain_offs *wouldn't* be unique is if we crashed at some
-                    // point. Is that a problem?
-                    domain_offs.into_iter().try_fold(acc, |mut off1, off2| {
-                        if let Some(off2) = off2 {
-                            if off1.is_some() {
-                                off2.try_max_into(&mut off1)?;
-                            }
-                            Ok(off1)
-                        } else {
-                            Ok(None)
-                        }
-                    })
-                },
-            )
-            .await
     }
 
     /// Returns a struct containing the set of all replication offsets within the system, including

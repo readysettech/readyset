@@ -640,17 +640,6 @@ impl ControllerHandle {
         self.rpc("controller_uri", ())
     }
 
-    /// Get the maximum replication offset that has been written to any of the tables in this Noria
-    /// instance
-    ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
-    pub fn replication_offset(
-        &mut self,
-    ) -> impl Future<Output = ReadySetResult<Option<ReplicationOffset>>> + '_ {
-        self.rpc("replication_offset", ())
-    }
-
     /// Get a set of all replication offsets for the entire system.
     ///
     /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for

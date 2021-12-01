@@ -1853,9 +1853,6 @@ impl Domain {
                 self.update_state_sizes();
                 Ok(None)
             }
-            DomainRequest::RequestReplicationOffset => {
-                Ok(Some(bincode::serialize(&self.replication_offset()?)?))
-            }
             DomainRequest::RequestReplicationOffsets => {
                 Ok(Some(bincode::serialize(&self.replication_offsets())?))
             }
@@ -3820,16 +3817,6 @@ impl Domain {
             .values()
             .filter_map(|state| state.as_persistent().map(|s| s.deep_size_of()))
             .sum()
-    }
-
-    pub fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
-        self.state
-            .values()
-            .filter_map(|state| state.replication_offset())
-            .try_fold(None, |mut off1, off2| {
-                off2.try_max_into(&mut off1)?;
-                Ok(off1)
-            })
     }
 
     pub fn replication_offsets(&self) -> NodeMap<Option<ReplicationOffset>> {
