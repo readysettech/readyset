@@ -72,7 +72,7 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
         let mut worker_stats: HashMap<&WorkerIdentifier, WorkerStats> = HashMap::new();
         for (di, dh) in &leader.domains {
             let is_base_table_domain = leader.domain_nodes[di]
-                .iter()
+                .values()
                 .any(|ni| ingredients[*ni].is_base());
             for wi in &dh.shards {
                 let stats = worker_stats.entry(wi).or_default();

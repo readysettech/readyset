@@ -142,7 +142,7 @@ pub struct DomainMigrationPlan {
 pub struct MigrationPlan {
     // Basically all of these fields are just cloned from `Leader`.
     ingredients: Graph,
-    domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
+    domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
     ndomains: usize,
     remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
     materializations: Materializations,
@@ -848,14 +848,17 @@ impl Migration {
                 let n = &ingredients[ni];
                 if ni != source && !n.is_dropped() {
                     let di = n.domain();
-                    domain_nodes.entry(di).or_insert_with(Vec::new).push(ni);
+                    domain_nodes
+                        .entry(di)
+                        .or_default()
+                        .insert(n.local_addr(), ni);
                 }
             }
             let mut uninformed_domain_nodes: HashMap<_, _> = changed_domains
                 .iter()
                 .map(|&di| {
                     let mut m = domain_nodes[&di]
-                        .iter()
+                        .values()
                         .cloned()
                         .map(|ni| (ni, new.contains(&ni)))
                         .collect::<Vec<_>>();
