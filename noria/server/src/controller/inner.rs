@@ -22,6 +22,7 @@ use crate::{ReaderReplicationResult, ReaderReplicationSpec, ViewFilter, ViewRequ
 use dataflow::prelude::*;
 use dataflow::{node, prelude::Packet, DomainBuilder, DomainConfig, DomainRequest};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use futures::FutureExt;
 use hyper::Method;
 use lazy_static::lazy_static;
 use metrics::gauge;
@@ -937,23 +938,6 @@ impl Leader {
             .collect()
     }
 
-    /// Transform a list of node indices into a list of table names.
-    fn tables_from_nodes(&self, nodes: HashSet<usize>) -> HashSet<String> {
-        self.ingredients
-            .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
-            .filter_map(|n| {
-                if nodes.contains(&n.index()) {
-                    #[allow(clippy::indexing_slicing)] // just came from self.ingredients
-                    let base = &self.ingredients[n];
-                    debug_assert!(base.is_base());
-                    Some(base.name().to_owned())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
     /// Get a map of all known output nodes, mapping the name of the node to that node's
     /// [index](NodeIndex)
     ///
@@ -1859,28 +1843,43 @@ impl Leader {
 
     /// Returns a list of all table names that are currently involved in snapshotting.
     pub async fn snapshotting_tables(&self) -> ReadySetResult<HashSet<String>> {
-        // Collect a *unique* list of domains that might contain base tables, to avoid sending
-        // multiple requests to a domain that happens to contain multiple base tables
         let domains = self.domains_with_base_tables().await?;
 
-        let table_indices: Vec<usize> = stream::iter(domains)
+        let table_indices: Vec<(DomainIndex, LocalNodeIndex)> = stream::iter(domains)
             .map(|domain| {
                 #[allow(clippy::indexing_slicing)] // validated above
-                self.domains[&domain].send_to_healthy::<Vec<usize>>(
-                    DomainRequest::RequestSnapshottingTables,
-                    &self.workers,
-                )
+                self.domains[&domain]
+                    .send_to_healthy::<Vec<LocalNodeIndex>>(
+                        DomainRequest::RequestSnapshottingTables,
+                        &self.workers,
+                    )
+                    .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
-            .try_fold(vec![], |acc: Vec<usize>, table_indices| async move {
-                Ok(table_indices
-                    .into_iter()
-                    .flatten()
-                    .chain(acc.into_iter())
-                    .collect())
+            .map_ok(|(di, local_indices)| {
+                stream::iter(
+                    local_indices
+                        .into_iter()
+                        .flatten()
+                        .map(move |li| -> ReadySetResult<_> { Ok((di, li)) }),
+                )
             })
+            .try_flatten()
+            .try_collect()
             .await?;
 
-        Ok(self.tables_from_nodes(table_indices.into_iter().collect()))
+        table_indices
+            .iter()
+            .map(|(di, lni)| -> ReadySetResult<String> {
+                #[allow(clippy::indexing_slicing)] // just came from self.domains
+                let li = *self.domain_nodes[di].get(*lni).ok_or_else(|| {
+                    internal_err(format!("Domain {} returned nonexistent node {}", di, lni))
+                })?;
+                #[allow(clippy::indexing_slicing)] // internal invariant
+                let node = &self.ingredients[li];
+                debug_assert!(node.is_base());
+                Ok(node.name().to_owned())
+            })
+            .collect()
     }
 }

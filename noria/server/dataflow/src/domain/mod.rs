@@ -372,11 +372,11 @@ impl Domain {
         self.shard.unwrap_or(0)
     }
 
-    fn snapshotting_base_nodes(&self) -> Vec<usize> {
+    fn snapshotting_base_nodes(&self) -> Vec<LocalNodeIndex> {
         self.state
             .iter()
             .filter_map(|(idx, s)| match s.as_persistent() {
-                Some(p_state) if p_state.is_snapshotting() => Some(idx.id()),
+                Some(p_state) if p_state.is_snapshotting() => Some(idx),
                 _ => None,
             })
             .collect()
