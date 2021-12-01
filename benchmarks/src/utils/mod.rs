@@ -10,6 +10,10 @@ pub mod query;
 pub mod random;
 pub mod spec;
 
+pub fn us_to_ms(us: u64) -> f64 {
+    us as f64 / 1000.
+}
+
 pub fn seconds_as_str_to_duration(input: &str) -> std::result::Result<Duration, ParseIntError> {
     Ok(Duration::from_secs(u64::from_str(input)?))
 }

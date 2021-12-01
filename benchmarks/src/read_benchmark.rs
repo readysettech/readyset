@@ -17,6 +17,7 @@ use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::query::ArbitraryQueryParameters;
+use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
@@ -92,10 +93,6 @@ impl ReadBenchmarkResultBatch {
             queries: Vec::new(),
         }
     }
-}
-
-fn us_to_ms(us: u64) -> f64 {
-    us as f64 / 1000.
 }
 
 #[async_trait]

@@ -93,6 +93,7 @@ pub mod template;
 pub mod utils;
 
 // Benchmarks
+mod cache_hit_benchmark;
 mod read_benchmark;
 mod scale_connections;
 mod scale_views;
