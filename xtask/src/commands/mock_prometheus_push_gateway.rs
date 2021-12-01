@@ -1,7 +1,15 @@
 use actix_web::http::StatusCode;
 use actix_web::web::{BytesMut, Path, Payload};
 use actix_web::{post, put, App, HttpResponse, HttpServer, Responder};
+use clap::Parser;
 use futures::StreamExt;
+
+#[derive(Debug, Parser)]
+pub struct Opts {
+    /// Port to listen on for Prometheus HTTP requests
+    #[clap(long, default_value = "9091")]
+    port: u16,
+}
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -53,13 +61,13 @@ async fn put_with_labels(params: Path<(String, String)>, payload: Payload) -> im
 }
 
 #[actix_web::main]
-pub async fn run() -> std::io::Result<()> {
+pub async fn run(opts: Opts) -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .service(post_with_labels)
             .service(put_with_labels)
     })
-    .bind("0.0.0.0:9091")?
+    .bind(format!("0.0.0.0:{}", opts.port))?
     .run()
     .await
 }
