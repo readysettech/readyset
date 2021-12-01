@@ -4,17 +4,22 @@
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
+use futures::stream::futures_unordered::FuturesUnordered;
+use futures::StreamExt;
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseConnection;
 use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
+use query_generator::{TableName, TableSpec};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
 
-const MAX_BATCH_ROWS: usize = 10000;
+const MAX_BATCH_ROWS: usize = 1000;
+const MAX_PARTITION_ROWS: usize = 10000;
 
 #[derive(Parser, Clone)]
 pub struct DataGenerator {
@@ -57,6 +62,143 @@ impl DataGenerator {
 
         Ok(())
     }
+}
+
+#[derive(Debug)]
+pub struct TablePartition {
+    rows: usize,
+    index: usize,
+}
+
+pub async fn load_table_part(
+    db_url: DatabaseURL,
+    table_name: TableName,
+    mut spec: TableSpec,
+    partition: TablePartition,
+) -> Result<()> {
+    let mut db = db_url.connect().await?;
+
+    let mut rows_remaining = partition.rows;
+    while rows_remaining > 0 {
+        let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
+        let index = partition.index + partition.rows - rows_remaining;
+        let data = spec.generate_data_from_index(rows_to_generate, index, false);
+        let columns = spec.columns.keys().collect::<Vec<_>>();
+        let insert = nom_sql::InsertStatement {
+            table: table_name.clone().into(),
+            fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
+            data: data
+                .into_iter()
+                .map(|mut row| {
+                    columns
+                        .iter()
+                        .map(|col| row.remove(col).unwrap().try_into().unwrap())
+                        .collect()
+                })
+                .collect(),
+            ignore: false,
+            on_duplicate: None,
+        };
+
+        db.query_drop(insert.to_string())
+            .await
+            .with_context(|| format!("Inserting row into database for {}", table_name))?;
+
+        rows_remaining -= rows_to_generate;
+        let _ = stdout().flush();
+    }
+
+    Ok(())
+}
+
+pub async fn parallel_load(
+    db: DatabaseURL,
+    mut spec: DatabaseGenerationSpec,
+    threads: usize,
+) -> Result<()> {
+    // Iterate over the set of tables in the database for each, generate random
+    // data.
+    for (table_name, table_spec) in spec.tables.iter_mut() {
+        if table_spec.num_rows == 0 {
+            continue;
+        }
+
+        println!(
+            "Generating table '{}', {} rows",
+            table_name, table_spec.num_rows
+        );
+
+        print!("Progress 0.00%");
+        let _ = stdout().flush();
+
+        // Create a queue of table parts that still need to be generated.
+        let num_partitions = table_spec.num_rows / MAX_PARTITION_ROWS
+            + (table_spec.num_rows % MAX_PARTITION_ROWS != 0) as usize;
+        let mut to_load: VecDeque<TablePartition> = (0..num_partitions)
+            .map(|p| {
+                let index = p * MAX_PARTITION_ROWS;
+                let rows = if p == (num_partitions - 1) {
+                    MAX_PARTITION_ROWS
+                        - ((num_partitions * MAX_PARTITION_ROWS) - table_spec.num_rows)
+                } else {
+                    MAX_PARTITION_ROWS
+                };
+
+                TablePartition { rows, index }
+            })
+            .collect();
+
+        // If we have enough partitions to run the maximum, start of with the
+        // maximum number of futures.
+        let mut futures = FuturesUnordered::new();
+        while futures.len() < threads && !to_load.is_empty() {
+            let partition = to_load.pop_back().unwrap();
+            futures.push(tokio::spawn(load_table_part(
+                db.clone(),
+                table_name.clone(),
+                table_spec.table.clone(),
+                partition,
+            )));
+        }
+
+        // Until we get through the entire queue of partitions, poll on a
+        // future completing, when it does, start the next partition.
+        while !to_load.is_empty() || !futures.is_empty() {
+            match futures.next().await {
+                Some(r) => {
+                    if let Err(e) = r {
+                        println!("Error while performing write: {}", e);
+                        break;
+                    }
+
+                    print!(
+                        "\rProgress {:.2}%",
+                        (1.0 - (to_load.len() as f64 + futures.len() as f64)
+                            / num_partitions as f64)
+                            * 100.0
+                    );
+                    let _ = stdout().flush();
+
+                    if !to_load.is_empty() {
+                        let partition = to_load.pop_back().unwrap();
+                        futures.push(tokio::spawn(load_table_part(
+                            db.clone(),
+                            table_name.clone(),
+                            table_spec.table.clone(),
+                            partition,
+                        )));
+                    }
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+
+        println!();
+    }
+
+    Ok(())
 }
 
 pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec) -> Result<()> {

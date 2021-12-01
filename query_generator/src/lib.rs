@@ -720,6 +720,11 @@ impl UniqueGenerator {
         }
         val
     }
+
+    // Generates a unique value using `index` ignoring the generators internal index.
+    fn gen_with_index(&mut self, index: u32) -> DataType {
+        unique_value_of_type(&self.sql_type, index)
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -1122,7 +1127,9 @@ impl TableSpec {
                     },
                 )| {
                     let value = match col_spec {
-                        ColumnGenerator::Unique(u) => u.gen(),
+                        // Allow using the `index` for key columns which are specified
+                        // as Unique.
+                        ColumnGenerator::Unique(u) => u.gen_with_index(index as u32),
                         _ if index % 2 == 0 && !expected_values.is_empty() => expected_values
                             .iter()
                             .nth(index / 2 % expected_values.len())

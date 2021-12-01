@@ -1,4 +1,4 @@
-use benchmarks::utils::generate::load;
+use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
 use noria_logictest::upstream::DatabaseURL;
@@ -21,6 +21,10 @@ struct DataGenerator {
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
     #[clap(long, default_value = "{}")]
     var_overrides: serde_json::Value,
+
+    /// The number of threads to generate data with.
+    #[clap(long, default_value = "1")]
+    threads: usize,
 }
 
 impl DataGenerator {
@@ -36,9 +40,7 @@ impl DataGenerator {
         let schema = DatabaseSchema::try_from((self.schema, user_vars))?;
 
         let database_spec = DatabaseGenerationSpec::new(schema);
-
-        let mut conn = self.database_url.connect().await?;
-        load(&mut conn, database_spec).await?;
+        parallel_load(self.database_url.clone(), database_spec, self.threads).await?;
 
         Ok(())
     }
