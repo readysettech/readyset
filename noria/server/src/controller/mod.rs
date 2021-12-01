@@ -928,6 +928,11 @@ mod tests {
                 replication_log_name: "binlog".to_owned(),
             };
 
+            noria
+                .set_replication_offset(Some(offset.clone()))
+                .await
+                .unwrap();
+
             t1.set_replication_offset(offset.clone()).await.unwrap();
             offset.offset = 7;
             t2.set_replication_offset(offset.clone()).await.unwrap();
@@ -950,6 +955,15 @@ mod tests {
         #[tokio::test(flavor = "multi_thread")]
         async fn same_log_with_pkey() {
             let mut noria = start_simple("replication_offsets").await;
+
+            noria
+                .set_replication_offset(Some(ReplicationOffset {
+                    offset: 2,
+                    replication_log_name: "binlog".to_owned(),
+                }))
+                .await
+                .unwrap();
+
             noria
                 .extend_recipe("CREATE TABLE t1 (id int primary key);")
                 .await
@@ -1000,9 +1014,6 @@ mod tests {
                 .await
                 .unwrap();
 
-            let offset: BinlogPosition = noria.replication_offset().await.unwrap().unwrap().into();
-            assert_eq!(offset, binlog);
-
             let mut t1 = noria.table("t1").await.unwrap();
             let mut t2 = noria.table("t2").await.unwrap();
 
@@ -1040,6 +1051,14 @@ mod tests {
         #[tokio::test(flavor = "multi_thread")]
         async fn different_log() {
             let mut noria = start_simple("replication_offsets").await;
+            noria
+                .set_replication_offset(Some(ReplicationOffset {
+                    offset: 2,
+                    replication_log_name: "binlog".to_owned(),
+                }))
+                .await
+                .unwrap();
+
             noria
                 .extend_recipe(
                     "CREATE TABLE t1 (id int);
@@ -1079,6 +1098,38 @@ mod tests {
                 "err = {:?}",
                 err
             );
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn missing_in_one_table() {
+            let mut noria = start_simple("missing_in_one_table").await;
+            noria
+                .set_replication_offset(Some(ReplicationOffset {
+                    offset: 1,
+                    replication_log_name: "binlog".to_owned(),
+                }))
+                .await
+                .unwrap();
+            noria
+                .extend_recipe(
+                    "CREATE TABLE t1 (id int);
+                     CREATE TABLE t2 (id int);",
+                )
+                .await
+                .unwrap();
+            noria
+                .table("t1")
+                .await
+                .unwrap()
+                .set_replication_offset(ReplicationOffset {
+                    offset: 1,
+                    replication_log_name: "binlog".to_owned(),
+                })
+                .await
+                .unwrap();
+
+            let offset = noria.replication_offset().await.unwrap();
+            assert!(offset.is_none());
         }
     }
 }

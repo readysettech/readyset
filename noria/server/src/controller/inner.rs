@@ -1794,7 +1794,8 @@ impl Leader {
     }
 
     /// Returns the maximum replication offset that has been written to any of the tables in this
-    /// Noria instance
+    /// Noria instance, or None if either the controller itself does not have the replication offset
+    /// for the schema or any tables do not have a replication offset.
     ///
     /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
     /// more information about replication offsets.
@@ -1819,14 +1820,16 @@ impl Leader {
                     // do an update to a replication offset that applies to every shard - meaning
                     // the only case domain_offs *wouldn't* be unique is if we crashed at some
                     // point. Is that a problem?
-                    domain_offs
-                        .into_iter()
-                        .flatten()
-                        .chain(acc.into_iter())
-                        .try_fold(None, |mut off1, off2| {
-                            off2.try_max_into(&mut off1)?;
+                    domain_offs.into_iter().try_fold(acc, |mut off1, off2| {
+                        if let Some(off2) = off2 {
+                            if off1.is_some() {
+                                off2.try_max_into(&mut off1)?;
+                            }
                             Ok(off1)
-                        })
+                        } else {
+                            Ok(None)
+                        }
+                    })
                 },
             )
             .await
