@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use futures::FutureExt;
 use launchpad::select;
-use noria::{ReadySetError, ReadySetResult, ReplicationOffset, TableOperation};
+use noria::replication::ReplicationOffset;
+use noria::{ReadySetError, ReadySetResult, TableOperation};
 use tokio_postgres as pgsql;
 use tracing::{debug, error};
 

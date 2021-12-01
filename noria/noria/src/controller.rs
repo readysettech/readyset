@@ -1,7 +1,7 @@
-use crate::data::ReplicationOffsets;
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
+use crate::replication::ReplicationOffsets;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
