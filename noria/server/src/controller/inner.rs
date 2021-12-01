@@ -84,7 +84,7 @@ pub struct Leader {
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
-    pub(in crate::controller) domain_nodes: HashMap<DomainIndex, Vec<NodeIndex>>,
+    pub(in crate::controller) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
 
     /// Map from worker URI to the address the worker is listening on for reads.
@@ -535,7 +535,7 @@ impl Leader {
                             .ok_or_else(|| {
                                 internal_err(format!("{:?} in domains but not in domain_nodes", di))
                             })?
-                            .iter(),
+                            .values(),
                     )
             }
         }
