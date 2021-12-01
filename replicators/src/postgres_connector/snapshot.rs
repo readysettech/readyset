@@ -371,6 +371,9 @@ impl<'a> PostgresReplicator<'a> {
         debug!(%recipe, "Installing recipe");
 
         self.noria.install_recipe(&recipe).await?;
+        self.noria
+            .set_schema_replication_offset(Some(PostgresPosition::default().into()))
+            .await?;
 
         // Finally copy each table into noria
         for table in &tables {
@@ -390,13 +393,6 @@ impl<'a> PostgresReplicator<'a> {
                 .instrument(span.clone())
                 .await?;
         }
-
-        // Only after the repliation is done, mark that we have a replication offset
-        // the exact value is not important, and the default value will just start the next
-        // replication from the earlies possible point, which is the point the snapshot was created
-        self.noria
-            .set_schema_replication_offset(Some(PostgresPosition::default().into()))
-            .await?;
 
         let mut compacting = FuturesUnordered::new();
         for table in tables {
