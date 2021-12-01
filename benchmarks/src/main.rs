@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use metrics_exporter_prometheus::PrometheusBuilder;
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 
 use benchmarks::benchmark::{Benchmark, BenchmarkControl};
@@ -30,7 +30,7 @@ struct BenchmarkRunner {
 
     /// Address of a push gateway for a benchmark's prometheus metrics.
     #[clap(long)]
-    prometheus_push_gateway: String,
+    prometheus_push_gateway: Option<String>,
 
     #[clap(subcommand)]
     benchmark: Benchmark,
@@ -40,27 +40,40 @@ struct BenchmarkRunner {
 }
 
 impl BenchmarkRunner {
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn init_prometheus(&mut self) -> anyhow::Result<Option<PrometheusHandle>> {
         // Append the full pushgateway config path to the user provided
         // address.
-        self.prometheus_push_gateway = format!(
-            "{}/metrics/job/{}/instance/{}",
-            self.prometheus_push_gateway.replace("//", "/"),
-            self.benchmark.name_label(),
-            self.instance_label
-        );
+        self.prometheus_push_gateway = self.prometheus_push_gateway.as_ref().map(|s| {
+            format!(
+                "{}/metrics/job/{}/instance/{}",
+                s.replace("//", "/"),
+                self.benchmark.name_label(),
+                self.instance_label
+            )
+        });
 
-        let mut builder = PrometheusBuilder::new()
-            .disable_http_listener()
-            .idle_timeout(MetricKindMask::ALL, None)
-            .push_gateway_config(&self.prometheus_push_gateway, PUSH_GATEWAY_PUSH_INTERVAL);
-        for (key, value) in &self.benchmark.labels() {
-            builder = builder.add_global_label(key, value);
-        }
-        let (recorder, exporter) = builder.build_with_exporter()?;
-        let handle = recorder.handle();
-        metrics::set_boxed_recorder(Box::new(recorder))?;
-        tokio::spawn(exporter);
+        let handle = if let Some(prometheus) = &self.prometheus_push_gateway {
+            let mut builder = PrometheusBuilder::new()
+                .disable_http_listener()
+                .idle_timeout(MetricKindMask::ALL, None)
+                .push_gateway_config(prometheus, PUSH_GATEWAY_PUSH_INTERVAL);
+            for (key, value) in &self.benchmark.labels() {
+                builder = builder.add_global_label(key, value);
+            }
+            let (recorder, exporter) = builder.build_with_exporter()?;
+            let handle = recorder.handle();
+            metrics::set_boxed_recorder(Box::new(recorder))?;
+            tokio::spawn(exporter);
+            Some(handle)
+        } else {
+            None
+        };
+
+        Ok(handle)
+    }
+
+    pub async fn run(mut self) -> anyhow::Result<()> {
+        let handle = self.init_prometheus().await?;
 
         if !self.skip_setup && !self.benchmark.is_already_setup().await? {
             self.benchmark.setup().await?;
@@ -78,14 +91,16 @@ impl BenchmarkRunner {
         );
 
         // Push metrics recorded in the push gateway manually before exiting.
-        let client = reqwest::Client::default();
-        let output = handle.render();
-        client
-            .put(&self.prometheus_push_gateway)
-            .body(output)
-            .send()
-            .await?
-            .error_for_status()?;
+        if let (Some(addr), Some(handle)) = (self.prometheus_push_gateway, handle) {
+            let client = reqwest::Client::default();
+            let output = handle.render();
+            client
+                .put(&addr)
+                .body(output)
+                .send()
+                .await?
+                .error_for_status()?;
+        }
 
         Ok(())
     }
