@@ -10,7 +10,7 @@
 
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::state::DataflowStateHandle;
-use crate::controller::{ControllerState, Recipe};
+use crate::controller::{ControllerRequest, ControllerState, Recipe};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
@@ -134,9 +134,9 @@ impl Leader {
 
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
     pub(super) fn external_request(
-        &mut self,
+        &self,
         method: hyper::Method,
-        path: String,
+        path: &str,
         query: Option<String>,
         body: hyper::body::Bytes,
         authority: &Arc<Authority>,
@@ -158,7 +158,7 @@ impl Leader {
         }
 
         {
-            match (&method, path.as_ref()) {
+            match (&method, path) {
                 (&Method::GET, "/simple_graph") => {
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     return Ok(ds.graphviz(false).into_bytes());
@@ -208,7 +208,7 @@ impl Leader {
 
             // *** Read methods that do require quorum ***
 
-            match (&method, path.as_ref()) {
+            match (&method, path) {
                 (&Method::GET | &Method::POST, "/controller_uri") => {
                     return_serialized!(self.controller_uri);
                 }
@@ -326,7 +326,7 @@ impl Leader {
 
         // *** Write methods (all of them require quorum) ***
 
-        match (method, path.as_ref()) {
+        match (method, path) {
             (Method::GET, "/flush_partial") => {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
@@ -608,4 +608,20 @@ impl Leader {
             server_id,
         }
     }
+}
+
+/// Helper method to distinguish if the given [`ControllerRequest`] actually
+/// requires modifying the dataflow graph state.
+pub(super) fn is_write(req: &ControllerRequest) -> bool {
+    matches!(
+        (&req.method, req.path.as_ref()),
+        (&Method::GET, "/flush_partial")
+            | (&Method::GET | &Method::POST, "/controller_uri")
+            | (&Method::POST, "/extend_recipe")
+            | (&Method::POST, "/install_recipe")
+            | (&Method::POST, "/remove_query")
+            | (&Method::POST, "/set_replication_offset")
+            | (&Method::POST, "/replicate_readers")
+            | (&Method::POST, "/remove_node")
+    )
 }

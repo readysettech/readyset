@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{error, info, warn};
 use tracing_futures::Instrument;
 use url::Url;
@@ -76,6 +76,7 @@ pub(crate) struct ControllerState {
     #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 }
+
 impl ControllerState {
     /// This method interates over the recipes currently installed and only keeps
     /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
@@ -214,11 +215,50 @@ pub enum HandleRequest {
     },
 }
 
+/// A structure to hold and manage access to the [`Leader`].
+/// The main purpose of this structure is to implement the interior mutability pattern,
+/// allowing for multiple threads to have an [`Arc`] reference to it, and to read/write/replace
+/// the inner [`Leader`] without having to worry about synchronization.
+struct LeaderHandle {
+    leader: RwLock<Option<Leader>>,
+}
+
+impl LeaderHandle {
+    /// Creates a new, empty [`LeaderHandle`].
+    fn new() -> Self {
+        LeaderHandle {
+            leader: RwLock::new(None),
+        }
+    }
+
+    /// Replaces the current [`Leader`] with a new one.
+    /// This method will block if there's a thread currently waiting to acquire or holding
+    /// the [`Leader`] write lock.
+    async fn replace(&self, leader: Leader) {
+        let mut guard = self.leader.write().await;
+        *guard = Some(leader);
+    }
+
+    /// Acquires a read lock on the [`Leader`].
+    /// This method will block if there's a thread currently waiting to acquire or holding
+    /// the [`Leader`] write lock.
+    async fn read(&self) -> RwLockReadGuard<'_, Option<Leader>> {
+        self.leader.read().await
+    }
+
+    /// Acquires a write lock on the [`Leader`].
+    /// This method will block if there's a thread currently waiting to acquire or holding
+    /// the [`Leader`] write lock.
+    async fn write(&self) -> RwLockWriteGuard<'_, Option<Leader>> {
+        self.leader.write().await
+    }
+}
+
 /// A wrapper for the control plane of the server instance that handles: leader election,
 /// control rpcs, and requests originated from this server's instance's `Handle`.
 pub struct Controller {
     /// If we are the leader, the leader object to use for performing leader operations.
-    pub(crate) inner: Option<Leader>,
+    inner: Arc<LeaderHandle>,
     /// The `Authority` structure used for leadership elections & such state.
     authority: Arc<Authority>,
     /// Channel to the `Worker` running inside this server instance.
@@ -237,10 +277,12 @@ pub struct Controller {
     worker_descriptor: WorkerDescriptor,
     /// A handle to the authority task.
     authority_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+    /// A handle to the write processing task.
+    write_processing_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
     /// The config associated with this controller's server.
     config: Config,
     /// Whether we are the leader and ready to handle requests.
-    leader_ready: bool,
+    leader_ready: RwLock<bool>,
     /// A notify to be passed to leader's when created, used to notify the Controller that the
     /// leader is ready to handle requests.
     leader_ready_notification: Arc<Notify>,
@@ -267,7 +309,7 @@ impl Controller {
         should_reset_state: bool,
     ) -> Self {
         Self {
-            inner: None,
+            inner: Arc::new(LeaderHandle::new()),
             authority,
             worker_tx,
             http_rx: controller_rx,
@@ -276,36 +318,12 @@ impl Controller {
             valve: shutoff_valve,
             worker_descriptor,
             config,
-            leader_ready: false,
+            leader_ready: RwLock::new(false),
             leader_ready_notification: Arc::new(Notify::new()),
             replication_error_channel: ReplicationErrorChannel::new(),
             authority_task: None,
+            write_processing_task: None,
             should_reset_state,
-        }
-    }
-
-    /// Run the provided *blocking* closure with the `Leader` and the `Authority` if this
-    /// server instance is currently the leader.
-    ///
-    /// If it isn't, returns `Err(ReadySetError::NotLeader)`, and doesn't run the closure.
-    async fn with_controller_blocking<F, T>(&mut self, func: F) -> ReadySetResult<T>
-    where
-        F: FnOnce(&mut Leader, Arc<Authority>) -> ReadySetResult<T>,
-    {
-        // FIXME: this is potentially slow, and it's only like this because borrowck sucks
-        let auth = self.authority.clone();
-        if let Some(ref mut ci) = self.inner {
-            Ok(tokio::task::block_in_place(|| func(ci, auth))?)
-        } else {
-            Err(ReadySetError::NotLeader)
-        }
-    }
-
-    fn controller_inner(&mut self) -> ReadySetResult<&mut Leader> {
-        if let Some(ref mut ci) = self.inner {
-            Ok(ci)
-        } else {
-            Err(ReadySetError::NotLeader)
         }
     }
 
@@ -314,7 +332,7 @@ impl Controller {
     ///
     /// Not waiting for the response avoids deadlocking when the controller and worker are in the
     /// same noria-server instance.
-    async fn send_worker_request(&mut self, kind: WorkerRequestKind) -> ReadySetResult<()> {
+    async fn send_worker_request(&self, kind: WorkerRequestKind) -> ReadySetResult<()> {
         let (tx, _rx) = tokio::sync::oneshot::channel();
         self.worker_tx
             .send(WorkerRequest { kind, done_tx: tx })
@@ -323,82 +341,42 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_controller_request(&mut self, req: ControllerRequest) -> ReadySetResult<()> {
-        let ControllerRequest {
-            method,
-            path,
-            query,
-            body,
-            reply_tx,
-        } = req;
-
-        let request_start = Instant::now();
-        let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
-            let resp = self
-                .with_controller_blocking(|ctrl, auth| {
-                    Ok(ctrl.external_request(method.clone(), path.clone(), query, body, &auth))
-                })
-                .await;
-            match resp {
-                // returned from `Leader::external_request`:
-                Ok(Ok(r)) => Ok(Ok(r)),
-                Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
-                Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
-                Ok(Err(e)) => Ok(Err(bincode::serialize(&e)?)),
-                // errors returned by `with_controller_blocking`:
-                Err(ReadySetError::NotLeader) => Err(StatusCode::SERVICE_UNAVAILABLE),
-                Err(e) => Ok(Err(bincode::serialize(&e)?)),
-            }
-        };
-
-        counter!(
-            recorded::CONTROLLER_RPC_OVERALL_TIME,
-            request_start.elapsed().as_micros() as u64,
-            "path" => path.clone()
-        );
-
-        histogram!(
-            recorded::CONTROLLER_RPC_REQUEST_TIME,
-            request_start.elapsed().as_micros() as f64,
-            "path" => path
-        );
-
-        if reply_tx.send(ret).is_err() {
-            warn!("client hung up");
-        }
-        Ok(())
-    }
-
-    async fn handle_handle_request(&mut self, req: HandleRequest) -> ReadySetResult<()> {
+    async fn handle_handle_request(&self, req: HandleRequest) -> ReadySetResult<()> {
         match req {
             HandleRequest::QueryReadiness(tx) => {
-                let done = self.leader_ready
-                    && match self.inner.as_ref() {
-                        None => false,
-                        Some(ctrl) => {
-                            let ds = ctrl.dataflow_state_handle.read().await;
+                let guard = self.inner.read().await;
+                let leader_ready = { self.leader_ready.read().await };
+                let done = *leader_ready
+                    && match guard.as_ref() {
+                        Some(leader) => {
+                            let ds = leader.dataflow_state_handle.read().await;
                             !ds.workers.is_empty()
                         }
+                        None => false,
                     };
                 if tx.send(done).is_err() {
                     warn!("readiness query sender hung up!");
                 }
             }
             HandleRequest::PerformMigration { func, done_tx } => {
-                let inner = self.controller_inner()?;
-                let mut writer = inner.dataflow_state_handle.write().await;
-                let ds = writer.as_mut();
-                let ret = ds.migrate(move |m| func(m)).await?;
-                inner.dataflow_state_handle.commit(writer).await;
-                if done_tx.send(ret).is_err() {
-                    warn!("handle-based migration sender hung up!");
+                let mut guard = self.inner.write().await;
+                if let Some(ref mut inner) = *guard {
+                    let mut writer = inner.dataflow_state_handle.write().await;
+                    let ds = writer.as_mut();
+                    let ret = ds.migrate(move |m| func(m)).await?;
+                    inner.dataflow_state_handle.commit(writer).await;
+                    if done_tx.send(ret).is_err() {
+                        warn!("handle-based migration sender hung up!");
+                    }
+                } else {
+                    return Err(ReadySetError::NotLeader);
                 }
             }
         }
         Ok(())
     }
 
-    async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
+    async fn handle_authority_update(&self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descr) => {
                 self.send_worker_request(WorkerRequestKind::NewController {
@@ -421,31 +399,41 @@ impl Controller {
                         self.replication_error_channel.sender(),
                     )
                     .await;
-                self.leader_ready = false;
 
-                self.inner = Some(leader);
+                {
+                    *self.leader_ready.write().await = false;
+                }
+
+                self.inner.replace(leader).await;
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: self.our_descriptor.controller_uri.clone(),
                 })
                 .await?;
             }
-            AuthorityUpdate::NewWorkers(w) if self.inner.is_some() => {
-                let inner = self.controller_inner()?;
-                for worker in w {
-                    inner.handle_register_from_authority(worker).await?;
+            AuthorityUpdate::NewWorkers(w) => {
+                let mut guard = self.inner.write().await;
+                if let Some(ref mut inner) = *guard {
+                    for worker in w {
+                        inner.handle_register_from_authority(worker).await?;
+                    }
+                } else {
+                    return Err(ReadySetError::NotLeader);
                 }
             }
-            AuthorityUpdate::FailedWorkers(w) if self.inner.is_some() => {
-                let inner = self.controller_inner()?;
-                inner
-                    .handle_failed_workers(w.into_iter().map(|desc| desc.worker_uri).collect())
-                    .await?;
+            AuthorityUpdate::FailedWorkers(w) => {
+                let mut guard = self.inner.write().await;
+                if let Some(ref mut inner) = *guard {
+                    inner
+                        .handle_failed_workers(w.into_iter().map(|desc| desc.worker_uri).collect())
+                        .await?;
+                } else {
+                    return Err(ReadySetError::NotLeader);
+                }
             }
             AuthorityUpdate::AuthorityError(e) => {
                 // the authority won't be restarted, so the controller should hard-exit
                 internal!("controller's authority thread failed: {}", e);
             }
-            _ => {}
         }
         Ok(())
     }
@@ -468,6 +456,17 @@ impl Controller {
             .instrument(tracing::info_span!("authority")),
         ));
 
+        let (writer_tx, writer_rx) = tokio::sync::mpsc::channel(16);
+        self.write_processing_task = Some(tokio::spawn(
+            crate::controller::write_processing_runner(
+                writer_rx,
+                self.authority.clone(),
+                self.inner.clone(),
+                self.valve.clone(),
+            )
+            .instrument(tracing::info_span!("write_processing")),
+        ));
+
         loop {
             // produces a value when the `Valve` is closed
             let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
@@ -484,7 +483,17 @@ impl Controller {
                 }
                 req = self.http_rx.recv() => {
                     if let Some(req) = req {
-                        self.handle_controller_request(req).await?;
+                        // Check if the request is a write request.
+                        // If it's not, then we can handle the request on this thread, since
+                        // it will just read the current dataflow state.
+                        // If it is, we pass the request to the write processing task, which will
+                        // also handle the request in the same way, but on a different thread.
+                        // This is how we avoid blocking reads.
+                        if !crate::controller::inner::is_write(&req) {
+                            crate::controller::handle_controller_request(req, self.authority.clone(), self.inner.clone()).await?;
+                        } else if writer_tx.send(req).await.is_err() {
+                            internal!("write processing handle hung up!")
+                        }
                     }
                     else {
                         info!("Controller shutting down after HTTP handle dropped");
@@ -494,12 +503,18 @@ impl Controller {
                 req = authority_rx.recv() => {
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
-                        None if self.inner.is_some() => info!("leadership campaign terminated normally"),
-                        // this shouldn't ever happen: if the leadership campaign thread fails,
-                        // it should send a `CampaignError` that we handle above first before
-                        // ever hitting this bit
-                        // still, good to be doubly sure
-                        _ => internal!("leadership sender dropped without being elected"),
+                        None => {
+                            let res = self.inner.read().await;
+                            if res.is_some() {
+                                info!("leadership campaign terminated normally");
+                            } else {
+                                // this shouldn't ever happen: if the leadership campaign thread fails,
+                                // it should send a `CampaignError` that we handle above first before
+                                // ever hitting this bit
+                                // still, good to be doubly sure
+                                internal!("leadership sender dropped without being elected");
+                            }
+                        },
                     }
                 }
                 req = self.replication_error_channel.receiver.recv() => {
@@ -510,7 +525,8 @@ impl Controller {
 
                 }
                 _ = self.leader_ready_notification.notified() => {
-                    self.leader_ready = true;
+                    let mut leader_ready = self.leader_ready.write().await;
+                    *leader_ready = true;
                 }
                 _ = shutdown_stream.next() => {
                     info!("Controller shutting down after valve shut");
@@ -519,7 +535,8 @@ impl Controller {
             }
         }
 
-        if let Some(inner) = &mut self.inner {
+        let mut guard = self.inner.write().await;
+        if let Some(ref mut inner) = *guard {
             inner.stop().await;
 
             if let Err(error) = self.authority.surrender_leadership().await {
@@ -863,6 +880,86 @@ pub(crate) async fn authority_runner(
     .await
     {
         let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
+    }
+    Ok(())
+}
+
+/// A task that handles write [`ControllerRequest`]s.
+async fn write_processing_runner(
+    mut request_rx: Receiver<ControllerRequest>,
+    authority: Arc<Authority>,
+    leader_handle: Arc<LeaderHandle>,
+    shutdown_stream: Valve,
+) -> anyhow::Result<()> {
+    loop {
+        let mut shutdown_stream = shutdown_stream.wrap(futures_util::stream::pending::<()>());
+        select! {
+            request = request_rx.recv() => {
+                if let Some(req) = request {
+                        crate::controller::handle_controller_request(req, authority.clone(), leader_handle.clone()).await?;
+                } else {
+                    info!("Controller shutting down after write processing handle dropped");
+                    break;
+                }
+            },
+            _ = shutdown_stream.next() => {
+                info!("Write processing task shutting down after valve shut");
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_controller_request(
+    req: ControllerRequest,
+    authority: Arc<Authority>,
+    leader_handle: Arc<LeaderHandle>,
+) -> ReadySetResult<()> {
+    let ControllerRequest {
+        method,
+        path,
+        query,
+        body,
+        reply_tx,
+    } = req;
+
+    let request_start = Instant::now();
+    let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
+        let guard = leader_handle.read().await;
+        let resp = if let Some(ref ci) = *guard {
+            Ok(tokio::task::block_in_place(|| {
+                ci.external_request(method, path.as_ref(), query, body, &authority)
+            }))
+        } else {
+            Err(ReadySetError::NotLeader)
+        };
+        match resp {
+            // returned from `Leader::external_request`:
+            Ok(Ok(r)) => Ok(Ok(r)),
+            Ok(Err(ReadySetError::NoQuorum)) => Err(StatusCode::SERVICE_UNAVAILABLE),
+            Ok(Err(ReadySetError::UnknownEndpoint)) => Err(StatusCode::NOT_FOUND),
+            Ok(Err(e)) => Ok(Err(bincode::serialize(&e)?)),
+            // something else failed:
+            Err(ReadySetError::NotLeader) => Err(StatusCode::SERVICE_UNAVAILABLE),
+            Err(e) => Ok(Err(bincode::serialize(&e)?)),
+        }
+    };
+
+    counter!(
+        recorded::CONTROLLER_RPC_OVERALL_TIME,
+        request_start.elapsed().as_micros() as u64,
+        "path" => path.clone()
+    );
+
+    histogram!(
+        recorded::CONTROLLER_RPC_REQUEST_TIME,
+        request_start.elapsed().as_micros() as f64,
+        "path" => path
+    );
+
+    if reply_tx.send(ret).is_err() {
+        warn!("client hung up");
     }
     Ok(())
 }
