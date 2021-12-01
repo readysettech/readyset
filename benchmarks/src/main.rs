@@ -84,7 +84,7 @@ impl BenchmarkRunner {
         let duration = start_time.elapsed();
 
         benchmark_gauge!(
-            "benchmark_durations",
+            "benchmark_duration",
             Microseconds,
             "Time, in microseconds, that it took to run the benchmark",
             duration.as_micros() as f64
