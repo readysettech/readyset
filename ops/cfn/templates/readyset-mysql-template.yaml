@@ -382,6 +382,14 @@ Resources:
                 Action:
                   - autoscaling:CompleteLifecycleAction
                 Resource: '*'
+        - PolicyName: ReadySetServerHealthCheckPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetInstanceHealth
+                Resource: '*'
 
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile

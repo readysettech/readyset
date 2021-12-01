@@ -279,6 +279,7 @@ Resources:
             Action:
               - autoscaling:CompleteLifecycleAction
               - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:SetInstanceHealth
             Resource:
               - '*'
       SubnetIds: !Ref VPCPrivateSubnetIds
