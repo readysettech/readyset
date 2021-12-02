@@ -23,6 +23,7 @@ use cache::QueryMetricsCache;
 use metrics_reconciler::MetricsReconciler;
 
 #[derive(Parser)]
+#[clap(name = "metrics-aggregator", version)]
 pub struct Options {
     /// IP:PORT to listen on.
     #[clap(
@@ -68,6 +69,7 @@ pub struct Options {
 
 pub fn run(options: Options) -> anyhow::Result<()> {
     options.logging.init()?;
+    info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
     let prom_address_res: Vec<SocketAddr> = options.prom_address.to_socket_addrs()?.collect();
     if prom_address_res.is_empty() {
