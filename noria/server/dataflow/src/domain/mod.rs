@@ -1366,21 +1366,24 @@ impl Domain {
 
                         #[allow(clippy::indexing_slicing)] // checked node exists above
                         let mut n = self.nodes[node].borrow_mut();
+                        let name = n.name().to_owned();
                         tokio::task::block_in_place(|| {
                             #[allow(clippy::unwrap_used)] // checked it was a reader above
                             let r = n.as_mut_reader().unwrap();
                             r_part.post_lookup = r.post_lookup().clone();
 
+                            let shard = *self.shard.as_ref().unwrap_or(&0);
+                            // TODO(ENG-838): Don't recreate every single node on leader failure.
+                            // This requires us to overwrite the existing reader.
                             #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
-                            #[allow(clippy::panic)]
-                            // registering the same reader twice is really bad
+                            if self
+                                .readers
+                                .lock()
+                                .unwrap()
+                                .insert((gid, name.clone(), shard), r_part)
+                                .is_some()
                             {
-                                assert!(self
-                                    .readers
-                                    .lock()
-                                    .unwrap()
-                                    .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                    .is_none());
+                                warn!(?gid, %name, %shard, "Overwrote existing reader at worker");
                             }
 
                             // make sure Reader is actually prepared to receive state
@@ -1409,18 +1412,26 @@ impl Domain {
                             .get(node)
                             .ok_or_else(|| ReadySetError::NoSuchNode(node.id()))?
                             .borrow_mut();
+                        let name = n.name().to_owned();
 
                         tokio::task::block_in_place(|| {
                             #[allow(clippy::unwrap_used)] // checked it was a reader above
                             let r = n.as_mut_reader().unwrap();
                             r_part.post_lookup = r.post_lookup().clone();
 
-                            assert!(self
+                            let shard = *self.shard.as_ref().unwrap_or(&0);
+                            // TODO(ENG-838): Don't recreate every single node on leader failure.
+                            // This requires us to overwrite the existing reader.
+                            #[allow(clippy::unwrap_used)] // lock poisoning is unrecoverable
+                            if self
                                 .readers
                                 .lock()
                                 .unwrap()
-                                .insert((gid, *self.shard.as_ref().unwrap_or(&0)), r_part)
-                                .is_none());
+                                .insert((gid, name, shard), r_part)
+                                .is_some()
+                            {
+                                warn!(?gid, ?shard, "Overwrote existing reader at worker");
+                            }
 
                             // make sure Reader is actually prepared to receive state
                             r.set_write_handle(w_part)

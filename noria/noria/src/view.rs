@@ -503,20 +503,20 @@ pub enum ReadQuery {
     /// Read from a leaf view
     Normal {
         /// Where to read from
-        target: (NodeIndex, usize),
+        target: (NodeIndex, String, usize),
         /// View query to run
         query: ViewQuery,
     },
     /// Read the size of a leaf view
     Size {
         /// Where to read from
-        target: (NodeIndex, usize),
+        target: (NodeIndex, String, usize),
     },
     /// Read all keys from a leaf view (for debugging)
     /// TODO(alex): queries with this value are not totally implemented, and might not actually work
     Keys {
         /// Where to read from
-        target: (NodeIndex, usize),
+        target: (NodeIndex, String, usize),
     },
 }
 
@@ -534,6 +534,7 @@ pub enum ReadReply<D = ReadReplyBatch> {
 #[doc(hidden)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewBuilder {
+    pub name: String,
     /// Set of replicas for a view, this will only include one element
     /// if there is no reader replication.
     pub replicas: Vec1<ViewReplica>,
@@ -638,6 +639,7 @@ impl ViewBuilder {
         }
 
         Ok(View {
+            name: self.name.clone(),
             node,
             schema,
             columns,
@@ -654,6 +656,7 @@ impl ViewBuilder {
 /// share connections to the Soup workers.
 #[derive(Clone)]
 pub struct View {
+    name: String,
     node: NodeIndex,
     columns: Arc<[String]>,
     schema: Option<ViewSchema>,
@@ -791,7 +794,7 @@ impl Service<ViewQuery> for View {
         let columns = Arc::clone(&self.columns);
         if self.shards.len() == 1 {
             let request = Tagged::from(ReadQuery::Normal {
-                target: (self.node, 0),
+                target: (self.node, self.name.clone(), 0),
                 query,
             });
 
@@ -831,6 +834,7 @@ impl Service<ViewQuery> for View {
         }
 
         let node = self.node;
+        let name = self.name.clone();
         future::Either::Right(
             self.shards
                 .iter_mut()
@@ -849,7 +853,7 @@ impl Service<ViewQuery> for View {
                 })
                 .map(move |((shardi, shard), shard_queries)| {
                     let request = Tagged::from(ReadQuery::Normal {
-                        target: (node, shardi),
+                        target: (node, name.clone(), shardi),
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
@@ -918,13 +922,14 @@ impl View {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         let node = self.node;
+        let name = self.name.clone();
         let mut rsps = self
             .shards
             .iter_mut()
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Tagged::from(ReadQuery::Size {
-                    target: (node, shardi),
+                    target: (node, name.clone(), shardi),
                 }))
             })
             .collect::<FuturesUnordered<_>>();
@@ -951,13 +956,14 @@ impl View {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
         let node = self.node;
+        let name = self.name.clone();
         let mut rsps = self
             .shards
             .iter_mut()
             .enumerate()
             .map(|(shardi, shard)| {
                 shard.call(Tagged::from(ReadQuery::Keys {
-                    target: (node, shardi),
+                    target: (node, name.clone(), shardi),
                 }))
             })
             .collect::<FuturesUnordered<_>>();

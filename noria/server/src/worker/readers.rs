@@ -38,7 +38,7 @@ const TRIGGER_TIMEOUT_MS: u64 = 20;
 
 task_local! {
     static READERS: RefCell<HashMap<
-        (NodeIndex, usize),
+        (NodeIndex, String, usize),
         SingleReadHandle,
     >>;
 }
@@ -178,7 +178,7 @@ fn handle_normal_read_query(
     tag: u32,
     s: &Readers,
     wait: &mut tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
-    target: (NodeIndex, usize),
+    target: (NodeIndex, String, usize),
     query: ViewQuery,
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let ViewQuery {
@@ -189,7 +189,10 @@ fn handle_normal_read_query(
     } = query;
     let immediate = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
-        let reader = readers_cache.entry(target).or_insert_with(|| {
+        // TODO(ENG-845): We currently assume that a reader *must* exist if we have gotten a view
+        // to it. This may not always be true if queries can be removed. A client should not
+        // be able to continue to query with a view.
+        let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
             let readers = s.lock().unwrap();
             readers.get(&target).unwrap().clone()
         });
@@ -348,11 +351,11 @@ fn handle_normal_read_query(
 fn handle_size_query(
     tag: u32,
     s: &Readers,
-    target: (NodeIndex, usize),
+    target: (NodeIndex, String, usize),
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let size = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
-        let reader = readers_cache.entry(target).or_insert_with(|| {
+        let reader = readers_cache.entry(target.clone()).or_insert_with(|| {
             let readers = s.lock().unwrap();
             readers.get(&target).unwrap().clone()
         });
@@ -369,16 +372,12 @@ fn handle_size_query(
 fn handle_keys_query(
     tag: u32,
     s: &Readers,
-    target: (NodeIndex, usize),
+    target: (NodeIndex, String, usize),
 ) -> impl Future<Output = Result<Tagged<ReadReply<SerializedReadReplyBatch>>, ()>> + Send {
     let keys = READERS.with(|readers_cache| {
         let mut readers_cache = readers_cache.borrow_mut();
-        let reader = readers_cache.entry(target).or_insert_with(|| {
-            let readers = s.lock().unwrap();
-            readers.get(&target).unwrap().clone()
-        });
-
-        reader.keys()
+        let read_handle = s.lock().unwrap().get(&target).unwrap().clone();
+        readers_cache.entry(target).or_insert(read_handle).keys()
     });
     future::ready(Ok(Tagged {
         tag,
@@ -432,7 +431,7 @@ fn has_sufficient_timestamp(reader: &SingleReadHandle, timestamp: &Option<Timest
 #[pin_project]
 struct BlockingRead {
     tag: u32,
-    target: (NodeIndex, usize),
+    target: (NodeIndex, String, usize),
     // serialized records for keys we have already read
     read: Vec<SerializedReadReplyBatch>,
     // keys we have yet to read and their corresponding indices in the reader
@@ -469,7 +468,7 @@ impl BlockingRead {
             let mut readers_cache = readers_cache.borrow_mut();
             let s = &self.truth;
             let target = &self.target;
-            let reader = readers_cache.entry(self.target).or_insert_with(|| {
+            let reader = readers_cache.entry(self.target.clone()).or_insert_with(|| {
                 let readers = s.lock().unwrap();
                 readers.get(target).unwrap().clone()
             });
