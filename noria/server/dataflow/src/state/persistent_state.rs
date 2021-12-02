@@ -202,17 +202,22 @@ impl State for PersistentState {
             }
         }
 
+        let mut opts = rocksdb::WriteOptions::default();
+        if self.snapshot_mode.is_enabled()
+            // if we're setting the replication offset, that means we've snapshot the full table, so
+            // set sync to true there even if snapshot_mode is enabled, to make sure that makes it
+            // onto disk (not doing this *will* cause the write to get lost if the server restarts!)
+            && replication_offset.is_none()
+        {
+            opts.disable_wal(true);
+        } else {
+            opts.set_sync(true);
+        }
+
         if let Some(offset) = replication_offset {
             self.set_replication_offset(&mut batch, offset);
         }
 
-        let mut opts = rocksdb::WriteOptions::default();
-        if self.snapshot_mode.is_enabled() {
-            opts.disable_wal(true);
-        } else {
-            // Sync the writes to RocksDB's WAL
-            opts.set_sync(true);
-        }
         tokio::task::block_in_place(|| self.db.write_opt(batch, &opts)).unwrap();
     }
 
