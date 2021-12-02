@@ -68,3 +68,6 @@ systemctl enable ensure-ebs-volume
 systemctl start ensure-ebs-volume
 
 /usr/local/bin/cfn-signal-wrapper.sh 0
+
+# health check will not run for 30 mins
+touch /tmp/.lasthealthcheck -d '-20 minute' # store timstamp for last healthcheck
