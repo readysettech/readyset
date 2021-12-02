@@ -64,8 +64,6 @@ pub enum DatabaseType {
 }
 
 pub struct NoriaAdapter<H> {
-    pub name: &'static str,
-    pub version: &'static str,
     pub description: &'static str,
     pub default_address: SocketAddr,
     pub connection_handler: H,
@@ -206,6 +204,8 @@ where
             },
         ));
         options.logging.init()?;
+        info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
+
         let rt = tokio::runtime::Runtime::new()?;
         let listen_address = options.address.unwrap_or(self.default_address);
         let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
