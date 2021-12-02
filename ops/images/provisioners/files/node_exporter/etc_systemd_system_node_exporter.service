@@ -7,7 +7,14 @@ StartLimitIntervalSec=0
 Type=simple
 User=node_exporter
 Group=node_exporter
-ExecStart=/usr/local/bin/node_exporter
+ExecStart=/usr/local/bin/node_exporter \
+  --collector.disable-defaults \
+  --collector.cpu \
+  --collector.loadavg \
+  --collector.diskstats \
+  --collector.filesystem \
+  --collector.meminfo \
+  --collector.netstat
 
 SyslogIdentifier=node_exporter
 Restart=always
