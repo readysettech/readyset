@@ -1,7 +1,9 @@
 //! Data types for implementing snapshot and streaming replication from an upstream database.
 
-use std::cmp::{min_by_key, Ordering};
+use std::cmp::min_by_key;
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::{borrow::Borrow, cmp::Ordering};
 
 use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -89,7 +91,54 @@ impl ReplicationOffsets {
         self.schema.is_some()
     }
 
-    /// If all replication offsets are present (the schema and all tables), returns the maximum of
+    /// Returns `true` if self has an offset for the table with the given name
+    ///
+    /// # Examples
+    ///
+    /// A completely missing table returns `false`:
+    ///
+    /// ```rust
+    /// use noria::replication::ReplicationOffsets;
+    ///
+    /// let mut replication_offsets = ReplicationOffsets::default();
+    /// assert!(!replication_offsets.has_table("table_1"));
+    /// ```
+    ///
+    /// A table that is present but set to [`None`] also returns `false`:
+    ///
+    /// ```rust
+    /// use noria::replication::ReplicationOffsets;
+    ///
+    /// let mut replication_offsets = ReplicationOffsets::default();
+    /// replication_offsets.tables.insert("table_1".to_string(), None);
+    /// assert!(!replication_offsets.has_table("table_1"));
+    /// ```
+    ///
+    /// A table that is present returns `true`:
+    ///
+    /// ```rust
+    /// use noria::replication::{ReplicationOffsets, ReplicationOffset};
+    ///
+    /// let mut replication_offsets = ReplicationOffsets::default();
+    /// replication_offsets.tables.insert(
+    ///     "table_1".to_string(),
+    ///     Some(ReplicationOffset {
+    ///         replication_log_name: "binlog".to_string(),
+    ///         offset: 1
+    ///     }),
+    /// );
+    /// assert!(replication_offsets.has_table("table_1"));
+    /// ```
+    pub fn has_table<T>(&self, table_name: &T) -> bool
+    where
+        T: ?Sized,
+        String: Borrow<T>,
+        T: Hash + Eq,
+    {
+        self.tables.get(table_name).iter().any(|o| o.is_some())
+    }
+
+    /// If all replication offsets are present (the schema and all tables), returns the minimum of
     /// all replication offsets, from which streaming replication can successfully continue.
     /// Otherwise, returns `Ok(None)`.
     ///

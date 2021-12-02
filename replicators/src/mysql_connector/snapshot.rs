@@ -1,7 +1,7 @@
 use futures::{stream::FuturesUnordered, StreamExt};
 use mysql::prelude::*;
 use mysql_async as mysql;
-use noria::replication::ReplicationOffset;
+use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::ReadySetResult;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -212,20 +212,25 @@ impl MySqlReplicator {
 
     /// This function replicates an entire MySQL database into a clean
     /// noria deployment.
+    ///
     /// # Arguments
+    ///
     /// * `noria`: The target Noria deployment
+    /// * `replication_offsets`: The set of replication offsets for already-snapshotted tables and
+    ///   the schema
     /// * `install_recipe`: Replicate and install the recipe (`CREATE TABLE` ...; `CREATE VIEW` ...;) in addition to the rows
     pub async fn snapshot_to_noria(
         mut self,
         noria: &mut noria::ControllerHandle,
+        replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         let result = match self
-            .replicate_to_noria_with_global_lock(noria, install_recipe)
+            .replicate_to_noria_with_global_lock(noria, replication_offsets, install_recipe)
             .await
         {
             Err(err) if err.to_string().contains("Access denied for user") => {
-                self.replicate_to_noria_with_table_locks(noria, install_recipe)
+                self.replicate_to_noria_with_table_locks(noria, replication_offsets, install_recipe)
                     .await
             }
             result => result,
@@ -244,6 +249,7 @@ impl MySqlReplicator {
     async fn replicate_to_noria_with_table_locks(
         &mut self,
         noria: &mut noria::ControllerHandle,
+        replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         // Start a transaction with `REPEATABLE READ` isolation level
@@ -265,17 +271,22 @@ impl MySqlReplicator {
         let recipe = self.load_recipe(&mut tx).await?;
         debug!(%recipe, "Loaded recipe");
 
-        if install_recipe {
-            noria.install_recipe(&recipe).await?;
-            debug!("Recipe installed");
+        if replication_offsets.has_schema() {
+            info!("Not loading recipe as replication offset already exists for schema");
+        } else {
+            if install_recipe {
+                noria.install_recipe(&recipe).await?;
+                debug!("Recipe installed");
+            }
+            noria
+                .set_schema_replication_offset(Some((&binlog_position).try_into()?))
+                .await?;
         }
-        noria
-            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
-            .await?;
 
         // Although the table dumping happens on a connection pool, and not within our transaction,
         // it doesn't matter because we maintain a read lock on all the tables anyway
-        self.dump_tables(noria, &binlog_position, tx).await?;
+        self.dump_tables(noria, replication_offsets, &binlog_position, tx)
+            .await?;
 
         Ok(binlog_position)
     }
@@ -286,6 +297,7 @@ impl MySqlReplicator {
     async fn replicate_to_noria_with_global_lock(
         &mut self,
         noria: &mut noria::ControllerHandle,
+        replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
         // We must hold the locking connection open until replication is finished,
@@ -299,15 +311,21 @@ impl MySqlReplicator {
         let recipe = self.load_recipe(&mut self.pool.get_conn().await?).await?;
         debug!(%recipe, "Loaded recipe");
 
-        if install_recipe {
-            noria.install_recipe(&recipe).await?;
-            debug!("Recipe installed");
+        if replication_offsets.has_schema() {
+            info!("Not loading recipe as replication offset already exists for schema");
+        } else {
+            if install_recipe {
+                noria.install_recipe(&recipe).await?;
+                debug!("Recipe installed");
+            }
+
+            noria
+                .set_schema_replication_offset(Some((&binlog_position).try_into()?))
+                .await?;
         }
 
-        noria
-            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
+        self.dump_tables(noria, replication_offsets, &binlog_position, lock)
             .await?;
-        self.dump_tables(noria, &binlog_position, lock).await?;
 
         Ok(binlog_position)
     }
@@ -342,6 +360,7 @@ impl MySqlReplicator {
     async fn dump_tables<L>(
         &mut self,
         noria: &mut noria::ControllerHandle,
+        replication_offsets: &ReplicationOffsets,
         binlog_position: &BinlogPosition,
         _lock: L,
     ) -> ReadySetResult<()> {
@@ -350,7 +369,11 @@ impl MySqlReplicator {
 
         // For each table we spawn a new task to parallelize the replication process somewhat
         for table_name in self.tables.clone().unwrap() {
-            replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
+            if replication_offsets.has_table(&table_name) {
+                info!(%table_name, "Replication offset already exists for table, skipping snapshot");
+            } else {
+                replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
+            }
         }
 
         let replication_offset = ReplicationOffset::try_from(binlog_position)?;
