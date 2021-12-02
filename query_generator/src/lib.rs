@@ -1,3 +1,4 @@
+#![feature(never_type)]
 #![warn(clippy::dbg_macro)]
 //! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
 //!
@@ -447,6 +448,13 @@ impl From<&str> for TableName {
     }
 }
 
+impl FromStr for TableName {
+    type Err = !;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
 #[repr(transparent)]
 pub struct ColumnName(String);
@@ -464,6 +472,13 @@ impl From<ColumnName> for Column {
 impl From<&str> for ColumnName {
     fn from(col: &str) -> Self {
         Self(col.into())
+    }
+}
+
+impl FromStr for ColumnName {
+    type Err = !;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(s))
     }
 }
 
