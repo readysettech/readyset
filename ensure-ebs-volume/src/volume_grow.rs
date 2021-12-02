@@ -11,7 +11,9 @@ use tracing::{error, info, instrument, warn};
 use crate::util::run_command;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
-const RESIZE_USAGE_THRESHOLD: f64 = 0.9;
+
+/// Usage ratio threshold at which to grow volumes
+const RESIZE_USAGE_THRESHOLD: f64 = 0.8;
 
 async fn current_volume_size(ec2: &ec2::Client, ebs_volume_id: &str) -> Result<i32> {
     ec2.describe_volumes()
