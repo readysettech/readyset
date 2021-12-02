@@ -176,7 +176,7 @@ impl NoriaAdapter {
                 );
                 span.in_scope(|| info!("Starting snapshot"));
                 let curr_offset = replicator
-                    .snapshot_to_noria(&mut noria, true)
+                    .snapshot_to_noria(&mut noria, &replication_offsets, true)
                     .instrument(span.clone())
                     .await;
 
