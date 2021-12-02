@@ -46,7 +46,7 @@ use thiserror::Error;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
 pub type Readers =
-    Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, usize), backlog::SingleReadHandle>>>;
+    Arc<Mutex<HashMap<(petgraph::graph::NodeIndex, String, usize), backlog::SingleReadHandle>>>;
 pub type DomainConfig = domain::Config;
 
 pub use crate::domain::{Domain, DomainBuilder, Index};

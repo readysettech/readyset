@@ -1124,6 +1124,7 @@ impl Leader {
         }
 
         Ok(Some(ViewBuilder {
+            name: name.to_owned(),
             replicas: Vec1::try_from_vec(replicas)
                 .map_err(|_| ReadySetError::ViewNotFound(view_req.name))?,
         }))
