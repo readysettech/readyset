@@ -4,6 +4,7 @@ version = "0.7.0"
 edition = "2018"
 authors = ["The Noria developers <noria@pdos.csail.mit.edu>"]
 license = "MIT OR Apache-2.0"
+build = "src/build.rs"
 
 readme = "README.md"
 description = "The Noria data-flow database server"
