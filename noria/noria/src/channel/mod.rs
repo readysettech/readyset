@@ -88,6 +88,9 @@ impl<T> DomainConnectionBuilder<Remote, T>
 where
     T: serde::Serialize,
 {
+    /// Establishes a TCP sink for an asynchronous context. The function may block for a long
+    /// time while the connection is being established, be careful not to call it on our main Tokio
+    /// executer, but only from inside a Domain thread.
     pub fn build_async(
         self,
     ) -> io::Result<AsyncBincodeWriter<BufWriter<tokio::net::TcpStream>, T, AsyncDestination>> {
@@ -102,6 +105,9 @@ where
             .map(AsyncBincodeWriter::for_async)
     }
 
+    /// Establishes a TCP sink for a synchronous context. The function may block for a long
+    /// time while the connection is being established, be careful not to call it on our main Tokio
+    /// executer, but only from inside a Domain thread.
     pub fn build_sync(self) -> io::Result<TcpSender<T>> {
         let mut s = TcpSender::connect_from(self.sport, &self.addr)?;
         {

@@ -243,7 +243,7 @@ impl State for PersistentState {
             self.set_replication_offset(&mut batch, offset);
         }
 
-        tokio::task::block_in_place(|| self.db.write_opt(batch, &opts)).unwrap();
+        self.db.write_opt(batch, &opts).unwrap();
     }
 
     fn replication_offset(&self) -> Option<&ReplicationOffset> {
@@ -252,73 +252,71 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let index = self.index(columns);
-        tokio::task::block_in_place(|| LookupResult::Some(self.do_lookup(index, key).into()))
+        LookupResult::Some(self.do_lookup(index, key).into())
     }
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
         let db = &self.db;
         let index = self.index(columns);
 
-        tokio::task::block_in_place(|| {
-            let cf = db.cf_handle(&index.column_family).unwrap();
-            let primary_cf = if !index.is_primary {
-                Some(self.db.cf_handle(PK_CF).unwrap())
-            } else {
-                None
-            };
+        let cf = db.cf_handle(&index.column_family).unwrap();
+        let primary_cf = if !index.is_primary {
+            Some(self.db.cf_handle(PK_CF).unwrap())
+        } else {
+            None
+        };
 
-            let (lower, upper) = Self::serialize_range(key, ((), ()));
+        let (lower, upper) = Self::serialize_range(key, ((), ()));
 
-            let mut opts = rocksdb::ReadOptions::default();
-            // Necessary to override prefix extraction - see
-            // https://github.com/facebook/rocksdb/wiki/Prefix-Seek#how-to-ignore-prefix-bloom-filters-in-read
-            opts.set_total_order_seek(true);
+        let mut opts = rocksdb::ReadOptions::default();
+        // Necessary to override prefix extraction - see
+        // https://github.com/facebook/rocksdb/wiki/Prefix-Seek#how-to-ignore-prefix-bloom-filters-in-read
+        opts.set_total_order_seek(true);
 
-            match upper {
-                Bound::Excluded(k) => {
-                    opts.set_iterate_upper_bound(k);
-                }
-                Bound::Included(mut k) => {
-                    // Rocksdb's iterate_upper_bound is exclusive, so add 1 to the last byte of the
-                    // end value so we get our inclusive last key
-                    if let Some(byte) = k.last_mut() {
-                        *byte += 1;
-                    }
-                    opts.set_iterate_upper_bound(k);
-                }
-                _ => {}
+        match upper {
+            Bound::Excluded(k) => {
+                opts.set_iterate_upper_bound(k);
             }
-
-            let start = match &lower {
-                Bound::Unbounded => None,
-                Bound::Included(k) | Bound::Excluded(k) => Some(k),
-            };
-
-            let mut iterator = db
-                .iterator_cf_opt(
-                    cf,
-                    opts,
-                    match start.as_ref() {
-                        Some(k) => IteratorMode::From(k, Direction::Forward),
-                        None => IteratorMode::Start,
-                    },
-                )
-                .map(|(_, value)| value);
-
-            if matches!(lower, Bound::Excluded(_)) {
-                iterator.next();
+            Bound::Included(mut k) => {
+                // Rocksdb's iterate_upper_bound is exclusive, so add 1 to the last byte of the
+                // end value so we get our inclusive last key
+                if let Some(byte) = k.last_mut() {
+                    *byte += 1;
+                }
+                opts.set_iterate_upper_bound(k);
             }
+            _ => {}
+        }
 
-            let rows = match primary_cf {
-                Some(primary_cf) => iterator
-                    .map(|pk| db.get_pinned_cf(primary_cf, pk).unwrap().unwrap())
-                    .map(deserialize_row)
-                    .collect(),
-                None => iterator.map(deserialize_row).collect(),
-            };
+        let start = match &lower {
+            Bound::Unbounded => None,
+            Bound::Included(k) | Bound::Excluded(k) => Some(k),
+        };
 
-            RangeLookupResult::Some(RecordResult::Owned(rows))
-        })
+        let mut iterator = db
+            .iterator_cf_opt(
+                cf,
+                opts,
+                match start.as_ref() {
+                    Some(k) => IteratorMode::From(k, Direction::Forward),
+                    None => IteratorMode::Start,
+                },
+            )
+            .map(|(_, value)| value);
+
+        if matches!(lower, Bound::Excluded(_)) {
+            iterator.next();
+        }
+
+        let rows = match primary_cf {
+            Some(primary_cf) => iterator
+                .map(|pk| db.get_pinned_cf(primary_cf, pk).unwrap().unwrap())
+                .map(deserialize_row)
+                .collect(),
+            None => iterator.map(deserialize_row).collect(),
+        };
+
+        RangeLookupResult::Some(RecordResult::Owned(rows))
     }
 
     fn as_persistent(&self) -> Option<&PersistentState> {
@@ -347,16 +345,14 @@ impl State for PersistentState {
             return;
         }
 
-        tokio::task::block_in_place(|| {
-            let columns: Box<[usize]> = columns.clone().into();
-            let is_unique = check_if_index_is_unique(&self.unique_keys, &columns);
+        let columns: Box<[usize]> = columns.clone().into();
+        let is_unique = check_if_index_is_unique(&self.unique_keys, &columns);
 
-            if self.indices.is_empty() {
-                self.add_primary_index(columns, is_unique)
-            } else {
-                self.add_secondary_index(columns, is_unique)
-            }
-        });
+        if self.indices.is_empty() {
+            self.add_primary_index(columns, is_unique)
+        } else {
+            self.add_secondary_index(columns, is_unique)
+        }
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
@@ -367,16 +363,14 @@ impl State for PersistentState {
 
     /// Returns a row count estimate from RocksDB.
     fn rows(&self) -> usize {
-        tokio::task::block_in_place(|| {
-            let db = &self.db;
-            let cf = db.cf_handle(PK_CF).unwrap();
-            let total_keys = db
-                .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
-                .unwrap()
-                .unwrap() as usize;
+        let db = &self.db;
+        let cf = db.cf_handle(PK_CF).unwrap();
+        let total_keys = db
+            .property_int_value_cf(cf, "rocksdb.estimate-num-keys")
+            .unwrap()
+            .unwrap() as usize;
 
-            total_keys / self.indices.len()
-        })
+        total_keys / self.indices.len()
     }
 
     fn is_useful(&self) -> bool {
@@ -446,84 +440,82 @@ impl PersistentState {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
-        tokio::task::block_in_place(|| {
-            use rocksdb::{ColumnFamilyDescriptor, DB};
-            let (directory, full_name) = match params.mode {
-                DurabilityMode::Permanent => (None, format!("{}.db", name)),
-                _ => {
-                    let dir = tempdir().unwrap();
-                    let path = dir.path().join(name.clone());
-                    let full_name = format!("{}.db", path.to_str().unwrap());
-                    (Some(dir), full_name)
-                }
-            };
-
-            let opts = Self::build_options(&name, params);
-            // We use a column family for each index, and one for metadata.
-            // When opening the DB the exact same column families needs to be used,
-            // so we'll have to retrieve the existing ones first:
-            let cf_names = match DB::list_cf(&opts, &full_name) {
-                Ok(cfs) => cfs,
-                Err(_err) => vec![DEFAULT_CF.to_string()],
-            };
-
-            // ColumnFamilyDescriptor does not implement Clone, so we have to create a new Vec each time
-            let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
-                cf_names
-                    .iter()
-                    .map(|cf| ColumnFamilyDescriptor::new(cf, opts.clone()))
-                    .collect()
-            };
-
-            let mut retry = 0;
-            let mut db = loop {
-                // TODO: why is this loop even needed?
-                match DB::open_cf_descriptors(&opts, &full_name, make_cfs()) {
-                    Ok(db) => break db,
-                    _ if retry < 100 => {
-                        retry += 1;
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                    }
-                    err => break err.expect("Unable to open RocksDB"),
-                }
-            };
-
-            let meta = increment_epoch(&db);
-            let indices = meta.get_indices(&unique_keys);
-
-            // If there are more column families than indices (+1 to account for the default column
-            // family) we either crashed while trying to build the last index (in Self::add_key), or
-            // something (like failed deserialization) caused us to reset the meta to the default
-            // value.
-            // Either way, we should drop all column families that are in the db but not in the
-            // meta.
-            if cf_names.len() > indices.len() + 1 {
-                for cf_name in cf_names.iter().skip(indices.len() + 1) {
-                    db.drop_cf(cf_name).unwrap();
-                }
+        use rocksdb::{ColumnFamilyDescriptor, DB};
+        let (directory, full_name) = match params.mode {
+            DurabilityMode::Permanent => (None, format!("{}.db", name)),
+            _ => {
+                let dir = tempdir().unwrap();
+                let path = dir.path().join(name.clone());
+                let full_name = format!("{}.db", path.to_str().unwrap());
+                (Some(dir), full_name)
             }
+        };
 
-            let mut state = Self {
-                name,
-                seq: 0,
-                indices,
-                unique_keys,
-                epoch: meta.epoch,
-                replication_offset: meta.replication_offset.map(|ro| ro.into_owned()),
-                db_opts: opts,
-                db,
-                _directory: directory,
-                snapshot_mode: SnapshotMode::SnapshotModeDisabled,
-            };
+        let opts = Self::build_options(&name, params);
+        // We use a column family for each index, and one for metadata.
+        // When opening the DB the exact same column families needs to be used,
+        // so we'll have to retrieve the existing ones first:
+        let cf_names = match DB::list_cf(&opts, &full_name) {
+            Ok(cfs) => cfs,
+            Err(_err) => vec![DEFAULT_CF.to_string()],
+        };
 
-            if let Some(pk) = state.unique_keys.first().cloned() {
-                // This is the first time we're initializing this PersistentState,
-                // so persist the primary key index right away.
-                state.add_primary_index(pk, true);
+        // ColumnFamilyDescriptor does not implement Clone, so we have to create a new Vec each time
+        let make_cfs = || -> Vec<ColumnFamilyDescriptor> {
+            cf_names
+                .iter()
+                .map(|cf| ColumnFamilyDescriptor::new(cf, opts.clone()))
+                .collect()
+        };
+
+        let mut retry = 0;
+        let mut db = loop {
+            // TODO: why is this loop even needed?
+            match DB::open_cf_descriptors(&opts, &full_name, make_cfs()) {
+                Ok(db) => break db,
+                _ if retry < 100 => {
+                    retry += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                err => break err.expect("Unable to open RocksDB"),
             }
+        };
 
-            state
-        })
+        let meta = increment_epoch(&db);
+        let indices = meta.get_indices(&unique_keys);
+
+        // If there are more column families than indices (+1 to account for the default column
+        // family) we either crashed while trying to build the last index (in Self::add_key), or
+        // something (like failed deserialization) caused us to reset the meta to the default
+        // value.
+        // Either way, we should drop all column families that are in the db but not in the
+        // meta.
+        if cf_names.len() > indices.len() + 1 {
+            for cf_name in cf_names.iter().skip(indices.len() + 1) {
+                db.drop_cf(cf_name).unwrap();
+            }
+        }
+
+        let mut state = Self {
+            name,
+            seq: 0,
+            indices,
+            unique_keys,
+            epoch: meta.epoch,
+            replication_offset: meta.replication_offset.map(|ro| ro.into_owned()),
+            db_opts: opts,
+            db,
+            _directory: directory,
+            snapshot_mode: SnapshotMode::SnapshotModeDisabled,
+        };
+
+        if let Some(pk) = state.unique_keys.first().cloned() {
+            // This is the first time we're initializing this PersistentState,
+            // so persist the primary key index right away.
+            state.add_primary_index(pk, true);
+        }
+
+        state
     }
 
     /// Adds a new primary index, assuming there are none present
@@ -812,10 +804,8 @@ impl PersistentState {
             self.db.cf_handle(&pi.column_family).map(|cf| {
                 // If done snapshotting, perform a manual compaction
                 if !snapshot.is_enabled() {
-                    tokio::task::block_in_place(|| {
-                        self.db
-                            .compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
-                    });
+                    self.db
+                        .compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
                 }
                 // Enable/disable auto compaction
                 if let Err(err) = self.db.set_options_cf(cf, opts) {
@@ -905,94 +895,90 @@ impl PersistentState {
     /// families. The insert is performed in a context of a [`rocksdb::WriteBatch`]
     /// operation and is therefore guaranteed to be atomic.
     fn insert(&mut self, batch: &mut WriteBatch, r: &[DataType]) {
-        tokio::task::block_in_place(|| {
-            let primary_index = self.indices.first().expect("Insert on un-indexed state");
-            let primary_key = Self::build_key(r, &primary_index.columns);
-            let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_index = self.indices.first().expect("Insert on un-indexed state");
+        let primary_key = Self::build_key(r, &primary_index.columns);
+        let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
 
-            // Generate a new primary key by extracting the key columns from the provided row
-            // using the primary index and serialize it as RocksDB prefix.
-            let serialized_pk = if primary_index.is_unique && !primary_key.has_null() {
-                Self::serialize_prefix(&primary_key)
+        // Generate a new primary key by extracting the key columns from the provided row
+        // using the primary index and serialize it as RocksDB prefix.
+        let serialized_pk = if primary_index.is_unique && !primary_key.has_null() {
+            Self::serialize_prefix(&primary_key)
+        } else {
+            // The primary index may not be unique so we append a monotonically incremented
+            // counter to make sure the key is unique (prefixes will be shared for non unique keys)
+            self.seq += 1;
+            Self::serialize_raw_key(&primary_key, (self.epoch, self.seq))
+        };
+
+        let serialized_row = bincode::options().serialize(r).unwrap();
+
+        // First store the row for the primary index:
+        batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
+
+        // Then insert the value for all the secondary indices:
+        for index in self.indices[1..].iter() {
+            // Construct a key with the index values, and serialize it with bincode:
+            let cf = self.db.cf_handle(&index.column_family).unwrap();
+
+            let key = Self::build_key(r, &index.columns);
+            if index.is_unique && !key.has_null() {
+                let serialized_key = Self::serialize_prefix(&key);
+                batch.put_cf(cf, &serialized_key, &serialized_pk);
             } else {
-                // The primary index may not be unique so we append a monotonically incremented
-                // counter to make sure the key is unique (prefixes will be shared for non unique keys)
-                self.seq += 1;
-                Self::serialize_raw_key(&primary_key, (self.epoch, self.seq))
+                let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
+                // TODO: Since the primary key is already serialized in here, no reason to store it as value again
+                batch.put_cf(cf, &serialized_key, &serialized_pk);
             };
-
-            let serialized_row = bincode::options().serialize(r).unwrap();
-
-            // First store the row for the primary index:
-            batch.put_cf(primary_cf, &serialized_pk, &serialized_row);
-
-            // Then insert the value for all the secondary indices:
-            for index in self.indices[1..].iter() {
-                // Construct a key with the index values, and serialize it with bincode:
-                let cf = self.db.cf_handle(&index.column_family).unwrap();
-
-                let key = Self::build_key(r, &index.columns);
-                if index.is_unique && !key.has_null() {
-                    let serialized_key = Self::serialize_prefix(&key);
-                    batch.put_cf(cf, &serialized_key, &serialized_pk);
-                } else {
-                    let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
-                    // TODO: Since the primary key is already serialized in here, no reason to store it as value again
-                    batch.put_cf(cf, &serialized_key, &serialized_pk);
-                };
-            }
-        })
+        }
     }
 
     fn remove(&self, batch: &mut WriteBatch, r: &[DataType]) {
-        tokio::task::block_in_place(|| {
-            let primary_index = self.indices.first().expect("Delete on un-indexed state");
-            let primary_key = Self::build_key(r, &primary_index.columns);
-            let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
+        let primary_index = self.indices.first().expect("Delete on un-indexed state");
+        let primary_key = Self::build_key(r, &primary_index.columns);
+        let primary_cf = self.db.cf_handle(&primary_index.column_family).unwrap();
 
-            let prefix = Self::serialize_prefix(&primary_key);
+        let prefix = Self::serialize_prefix(&primary_key);
 
-            let serialized_pk = if primary_index.is_unique && !primary_key.has_null() {
-                // This key is unique, so we can delete it as is
-                prefix
-            } else {
-                // This is key is not unique, therefore we have to iterate over the
-                // the values, looking for the first one that matches the full row
-                // and then return the (full length) unique primary key associated with it
-                let mut iter = self.db.raw_iterator_cf(primary_cf);
-                iter.seek(&prefix); // Find the first key
+        let serialized_pk = if primary_index.is_unique && !primary_key.has_null() {
+            // This key is unique, so we can delete it as is
+            prefix
+        } else {
+            // This is key is not unique, therefore we have to iterate over the
+            // the values, looking for the first one that matches the full row
+            // and then return the (full length) unique primary key associated with it
+            let mut iter = self.db.raw_iterator_cf(primary_cf);
+            iter.seek(&prefix); // Find the first key
 
-                loop {
-                    let key = iter
-                        .key()
-                        .filter(|k| k.starts_with(&prefix))
-                        .expect("tried removing non-existant row");
-                    let val = deserialize_row(iter.value().unwrap());
-                    if val == r {
-                        break key.to_vec();
-                    }
-                    iter.next();
+            loop {
+                let key = iter
+                    .key()
+                    .filter(|k| k.starts_with(&prefix))
+                    .expect("tried removing non-existant row");
+                let val = deserialize_row(iter.value().unwrap());
+                if val == r {
+                    break key.to_vec();
                 }
-            };
-
-            // First delete the row for the primary index:
-            batch.delete_cf(primary_cf, &serialized_pk);
-
-            // Then delete the value for all the secondary indices
-            for index in self.indices[1..].iter() {
-                // Construct a key with the index values, and serialize it with bincode:
-                let key = Self::build_key(r, &index.columns);
-                let serialized_key = if index.is_unique && !key.has_null() {
-                    Self::serialize_prefix(&key)
-                } else {
-                    // For non unique keys, we use the primary key to make sure we delete
-                    // the *exact* same row from each family
-                    Self::serialize_secondary(&key, &serialized_pk)
-                };
-                let cf = self.db.cf_handle(&index.column_family).unwrap();
-                batch.delete_cf(cf, &serialized_key);
+                iter.next();
             }
-        })
+        };
+
+        // First delete the row for the primary index:
+        batch.delete_cf(primary_cf, &serialized_pk);
+
+        // Then delete the value for all the secondary indices
+        for index in self.indices[1..].iter() {
+            // Construct a key with the index values, and serialize it with bincode:
+            let key = Self::build_key(r, &index.columns);
+            let serialized_key = if index.is_unique && !key.has_null() {
+                Self::serialize_prefix(&key)
+            } else {
+                // For non unique keys, we use the primary key to make sure we delete
+                // the *exact* same row from each family
+                Self::serialize_secondary(&key, &serialized_pk)
+            };
+            let cf = self.db.cf_handle(&index.column_family).unwrap();
+            batch.delete_cf(cf, &serialized_key);
+        }
     }
 
     /// Returns the PersistentIndex for the given colums, panicking if it doesn't exist
@@ -1013,50 +999,48 @@ impl PersistentState {
         let index = self.index(columns);
         let is_primary = index.is_primary;
 
-        tokio::task::block_in_place(|| {
-            let cf = self.db.cf_handle(&index.column_family).unwrap();
-            // Create an iterator once, reuse it for each key
-            let mut iter = self.db.raw_iterator_cf(cf);
-            let mut iter_primary = if !is_primary {
-                Some(self.db.raw_iterator_cf(self.db.cf_handle(PK_CF).unwrap()))
-            } else {
-                None
-            };
+        let cf = self.db.cf_handle(&index.column_family).unwrap();
+        // Create an iterator once, reuse it for each key
+        let mut iter = self.db.raw_iterator_cf(cf);
+        let mut iter_primary = if !is_primary {
+            Some(self.db.raw_iterator_cf(self.db.cf_handle(PK_CF).unwrap()))
+        } else {
+            None
+        };
 
-            keys.iter()
-                .map(|k| {
-                    let prefix = Self::serialize_prefix(k);
-                    let mut rows = Vec::new();
+        keys.iter()
+            .map(|k| {
+                let prefix = Self::serialize_prefix(k);
+                let mut rows = Vec::new();
 
-                    let is_unique = index.is_unique && !k.has_null();
+                let is_unique = index.is_unique && !k.has_null();
 
-                    iter.seek(&prefix); // Find the next key
+                iter.seek(&prefix); // Find the next key
 
-                    while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                        let val = match &mut iter_primary {
-                            Some(iter_primary) => {
-                                // If we have a primary iterator, it means this is a secondary index and we need
-                                // to lookup by the primary key next
-                                iter_primary.seek(iter.value().unwrap());
-                                deserialize_row(iter_primary.value().expect("Existing primary key"))
-                            }
-                            None => deserialize_row(iter.value().unwrap()),
-                        };
-
-                        rows.push(val);
-
-                        if is_unique {
-                            // We know that there is only one row for this index
-                            break;
+                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
+                    let val = match &mut iter_primary {
+                        Some(iter_primary) => {
+                            // If we have a primary iterator, it means this is a secondary index and we need
+                            // to lookup by the primary key next
+                            iter_primary.seek(iter.value().unwrap());
+                            deserialize_row(iter_primary.value().unwrap())
                         }
+                        None => deserialize_row(iter.value().unwrap()),
+                    };
 
-                        iter.next();
+                    rows.push(val);
+
+                    if is_unique {
+                        // We know that there is only one row for this index
+                        break;
                     }
 
-                    RecordResult::Owned(rows)
-                })
-                .collect()
-        })
+                    iter.next();
+                }
+
+                RecordResult::Owned(rows)
+            })
+            .collect()
     }
 
     pub fn is_snapshotting(&self) -> bool {

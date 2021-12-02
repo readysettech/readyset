@@ -145,12 +145,13 @@ pub(super) async fn start_instance(
         coord: Arc::new(Default::default()),
         domain_bind: listen_addr,
         domain_external: external_addr.ip(),
-        state_sizes: Arc::new(Mutex::new(Default::default())),
+        state_sizes: Default::default(),
         readers,
         valve: valve.clone(),
         domains: Default::default(),
         memory: MemoryTracker::new()?,
         is_evicting: Default::default(),
+        domain_wait_queue: Default::default(),
     };
 
     tokio::spawn(maybe_abort_on_panic!(worker.run()));
