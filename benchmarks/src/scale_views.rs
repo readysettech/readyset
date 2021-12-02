@@ -20,7 +20,7 @@ use tracing::info;
 const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
 
 #[derive(Parser, Clone)]
-pub struct ScaleViewsParams {
+pub struct ScaleViews {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
     common: BenchmarkParameters,
@@ -32,12 +32,6 @@ pub struct ScaleViewsParams {
     /// The number of parameters in each view.
     #[clap(long, default_value = "1")]
     param_count: usize,
-}
-
-#[derive(Parser, Clone)]
-pub struct ScaleViews {
-    #[clap(flatten)]
-    params: ScaleViewsParams,
 }
 
 // This kind of state would be useful to pass from setup() to benchmark().
@@ -62,10 +56,10 @@ impl BenchmarkControl for ScaleViews {
     /// combination of the columns.
     async fn setup(&self) -> Result<()> {
         info!("Beginning setup");
-        let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
 
-        let columns = get_columns(self.params.num_views, self.params.param_count);
+        let columns = get_columns(self.num_views, self.param_count);
         if columns.len() > MAX_MYSQL_COLUMN_COUNT {
             bail!(
                 "Too many columns required: {}, the max is: {}",
@@ -93,17 +87,15 @@ impl BenchmarkControl for ScaleViews {
     async fn benchmark(&self) -> Result<()> {
         info!(
             "Running benchmark with {} views, {} params per view",
-            self.params.num_views, self.params.param_count
+            self.num_views, self.param_count
         );
-        let columns = get_columns(self.params.num_views, self.params.param_count);
-        let permutations: Vec<Vec<&String>> = columns
-            .iter()
-            .combinations(self.params.param_count)
-            .collect();
+        let columns = get_columns(self.num_views, self.param_count);
+        let permutations: Vec<Vec<&String>> =
+            columns.iter().combinations(self.param_count).collect();
 
-        assert!(permutations.len() >= self.params.num_views);
-        for c in permutations.iter().take(self.params.num_views) {
-            let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+        assert!(permutations.len() >= self.num_views);
+        for c in permutations.iter().take(self.num_views) {
+            let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
 
             let start = Instant::now();
             let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
@@ -154,11 +146,8 @@ impl BenchmarkControl for ScaleViews {
 
     fn labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        labels.insert("num_views".to_string(), self.params.num_views.to_string());
-        labels.insert(
-            "param_count".to_string(),
-            self.params.param_count.to_string(),
-        );
+        labels.insert("num_views".to_string(), self.num_views.to_string());
+        labels.insert("param_count".to_string(), self.param_count.to_string());
         labels
     }
 }

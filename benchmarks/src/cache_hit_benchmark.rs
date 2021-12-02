@@ -21,7 +21,7 @@ use crate::utils::us_to_ms;
 const MAX_RANDOM_GENERATIONS: u32 = 20;
 
 #[derive(Parser, Clone)]
-pub struct CacheHitBenchmarkParams {
+pub struct CacheHitBenchmark {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
     common: BenchmarkParameters,
@@ -29,12 +29,6 @@ pub struct CacheHitBenchmarkParams {
     /// Parameters to handle generating parameters for arbitrary queries.
     #[clap(flatten)]
     query: ArbitraryQueryParameters,
-}
-
-#[derive(Parser, Clone)]
-pub struct CacheHitBenchmark {
-    #[clap(flatten)]
-    params: CacheHitBenchmarkParams,
 
     /// Install and generate from an arbitrary schema.
     #[clap(flatten)]
@@ -120,10 +114,9 @@ impl BenchmarkControl for CacheHitBenchmark {
 
     async fn benchmark(&self) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-        let mut gen =
-            CachingQueryGenerator::from(self.params.query.prepared_statement(&mut conn).await?);
+        let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);
 
         // Generate the cache misses.
         self.run_queries(&mut conn, &mut gen, true).await?;
@@ -134,7 +127,7 @@ impl BenchmarkControl for CacheHitBenchmark {
     }
 
     fn labels(&self) -> HashMap<String, String> {
-        self.params.query.labels()
+        self.query.labels()
     }
 }
 

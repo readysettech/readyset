@@ -8,7 +8,7 @@ use std::time::Instant;
 use tracing::info;
 
 #[derive(Parser, Clone)]
-pub struct ScaleConnectionsParams {
+pub struct ScaleConnections {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
     common: BenchmarkParameters,
@@ -21,12 +21,6 @@ pub struct ScaleConnectionsParams {
     /// each connection before opening the next.
     #[clap(long)]
     parallel: bool,
-}
-
-#[derive(Parser, Clone)]
-pub struct ScaleConnections {
-    #[clap(flatten)]
-    params: ScaleConnectionsParams,
 }
 
 #[async_trait]
@@ -42,19 +36,19 @@ impl BenchmarkControl for ScaleConnections {
     async fn benchmark(&self) -> Result<()> {
         info!(
             "Running benchmark connecting to {} connections.",
-            self.params.num_connections
+            self.num_connections
         );
 
         let mut connections = Vec::new();
-        for _ in 0..self.params.num_connections {
-            let opts = mysql_async::Opts::from_url(&self.params.common.mysql_conn_str).unwrap();
+        for _ in 0..self.num_connections {
+            let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
 
             let start = Instant::now();
             let conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
             let connection_time = start.elapsed();
 
             // Keep the state alive by storing it in the struct.
-            if self.params.parallel {
+            if self.parallel {
                 connections.push(conn);
             }
 
@@ -85,9 +79,9 @@ impl BenchmarkControl for ScaleConnections {
         let mut labels = HashMap::new();
         labels.insert(
             "num_connections".to_string(),
-            self.params.num_connections.to_string(),
+            self.num_connections.to_string(),
         );
-        labels.insert("parallel".to_string(), self.params.parallel.to_string());
+        labels.insert("parallel".to_string(), self.parallel.to_string());
         labels
     }
 }

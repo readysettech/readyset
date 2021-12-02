@@ -15,7 +15,7 @@
 //! use benchmarks::benchmark_gauge;
 //!
 //! #[derive(clap::Parser, Clone)]
-//! pub struct MyBenchmarkParams {
+//! pub struct MyBenchmark {
 //!     #[clap(flatten)]
 //!     common: BenchmarkParameters,
 //!
@@ -26,25 +26,19 @@
 //!     row_count: u32,
 //! }
 //!
-//! #[derive(clap::Parser, Clone)]
-//! pub struct MyBenchmark {
-//!     #[clap(flatten)]
-//!     params: MyBenchmarkParams
-//! }
-//!
 //! #[async_trait::async_trait]
 //! impl BenchmarkControl for MyBenchmark {
 //!     async fn setup(&self) -> Result<()> {
-//!         let mut conn = self.params.common.connect().await?;
+//!         let mut conn = self.common.connect().await?;
 //!         r"CREATE TABLE integers (id INT UNSIGNED NOT NULL)".ignore(&mut conn).await?;
 //!         let stmt = conn.prep(r"INSERT INTO integers VALUES (?), (?), (?), (?)").await?;
-//!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.params.row_count).tuples();
+//!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.row_count).tuples();
 //!         conn.exec_batch(stmt, chunks).await?;
 //!         Ok(())
 //!     }
 //!
 //!     async fn is_already_setup(&self) -> Result<bool> {
-//!         let mut conn = self.params.common.connect().await?;
+//!         let mut conn = self.common.connect().await?;
 //!         match r"DESCRIBE TABLE integers".ignore(&mut conn).await {
 //!             Ok(_) => (),
 //!             // 1146 is a "table doesn't exist" error
@@ -52,20 +46,20 @@
 //!             Err(e) => return Err(e.into())
 //!         };
 //!         let count: u32 = conn.query_first("SELECT COUNT(*) FROM integers").await?.unwrap();
-//!         Ok(count == self.params.row_count)
+//!         Ok(count == self.row_count)
 //!     }
 //!
 //!     async fn benchmark(&self) -> Result<()> {
-//!         let mut conn = self.params.common.connect().await?;
+//!         let mut conn = self.common.connect().await?;
 //!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;
 //!         for _ in 0..10_000_000 {
-//!             let _: Vec<u32> = conn.exec(&stmt, (self.params.where_value,)).await?;
+//!             let _: Vec<u32> = conn.exec(&stmt, (self.where_value,)).await?;
 //!         }
 //!         benchmark_gauge!(
 //!             "my_benchmark.number_of_queries",
 //!             Count,
 //!             "Number of queries executed in this benchmark run",
-//!             self.params.row_count as f64
+//!             self.row_count as f64
 //!         );
 //!         Ok(())
 //!     }
@@ -75,11 +69,11 @@
 //!         // It can be a good practice to add any of this run's parameters as labels
 //!         labels.insert(
 //!             "benchmark.my_benchmark.row_count".into(),
-//!             self.params.row_count.to_string()
+//!             self.row_count.to_string()
 //!         );
 //!         labels.insert(
 //!             "benchmark.my_benchmark.where_value".into(),
-//!             self.params.where_value.to_string()
+//!             self.where_value.to_string()
 //!         );
 //!         labels
 //!     }
