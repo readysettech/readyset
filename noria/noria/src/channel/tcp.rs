@@ -79,20 +79,12 @@ impl<T: Serialize> TcpSender<T> {
     }
 
     pub(crate) fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
-        let f = move || {
-            let s = net2::TcpBuilder::new_v4()?
-                .reuse_address(true)?
-                .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
-                .connect(addr)?;
-            s.set_nodelay(true)?;
-            Self::new(s)
-        };
-
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(f)
-        } else {
-            f()
-        }
+        let s = net2::TcpBuilder::new_v4()?
+            .reuse_address(true)?
+            .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
+            .connect(addr)?;
+        s.set_nodelay(true)?;
+        Self::new(s)
     }
 
     pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
@@ -126,27 +118,19 @@ impl<T: Serialize> TcpSender<T> {
             return Err(SendError::Poisoned);
         }
 
-        let mut f = move || {
-            // NOTE: this *has* to match exactly what the AsyncBincodeReader expects on the other
-            // end, or else we'll silently get the wrong data (but no deserialization errors!)
-            // https://app.clubhouse.io/readysettech/story/437 to fix that
-            let c = bincode::options()
-                .with_limit(u32::max_value() as u64)
-                .allow_trailing_bytes();
-            let size = c
-                .serialized_size(t)
-                .and_then(|s| u32::try_from(s).map_err(|_| Box::new(ErrorKind::SizeLimit)))?;
-            poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
-            poisoning_try!(self, c.serialize_into(&mut self.stream, t));
-            poisoning_try!(self, self.stream.flush());
-            Ok(())
-        };
-
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(f)
-        } else {
-            f()
-        }
+        // NOTE: this *has* to match exactly what the AsyncBincodeReader expects on the other
+        // end, or else we'll silently get the wrong data (but no deserialization errors!)
+        // https://app.clubhouse.io/readysettech/story/437 to fix that
+        let c = bincode::options()
+            .with_limit(u32::max_value() as u64)
+            .allow_trailing_bytes();
+        let size = c
+            .serialized_size(t)
+            .and_then(|s| u32::try_from(s).map_err(|_| Box::new(ErrorKind::SizeLimit)))?;
+        poisoning_try!(self, self.stream.write_u32::<NetworkEndian>(size));
+        poisoning_try!(self, c.serialize_into(&mut self.stream, t));
+        poisoning_try!(self, self.stream.flush());
+        Ok(())
     }
 
     pub fn reader(&mut self) -> impl io::Read + '_ {

@@ -2,6 +2,8 @@ use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::worker::replica::WrappedDomainRequest;
 use crate::ReadySetResult;
 use dataflow::{DomainBuilder, DomainRequest, Packet, Readers};
+use futures::stream::FuturesUnordered;
+use futures::FutureExt;
 use futures_util::{future::TryFutureExt, sink::SinkExt, stream::StreamExt};
 use jemalloc_ctl::stats::allocated_mib;
 use jemalloc_ctl::{epoch, epoch_mib, stats};
@@ -18,20 +20,17 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
-};
-use std::task::{Context, Poll};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use stream_cancel::Valve;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use tokio::sync::{oneshot, Mutex};
+use tokio::task::JoinError;
 use tokio::time::Interval;
 use tracing::{debug, error, info, info_span, trace, warn};
 use url::Url;
+
+use self::replica::Replica;
 
 pub(crate) mod readers;
 mod replica;
@@ -99,7 +98,9 @@ pub struct WorkerElectionState {
 
 pub struct DomainHandle {
     req_tx: Sender<WrappedDomainRequest>,
-    join_handle: JoinHandle<Result<(), anyhow::Error>>,
+    /// Can be used to send an abort signal to the domain
+    /// aborts automatically when dropped
+    _domain_abort: oneshot::Sender<()>,
 }
 
 /// Long-lived struct for tracking the currently allocated heap memory used by the current process
@@ -126,6 +127,18 @@ impl MemoryTracker {
         Ok(self.allocated.read()?)
     }
 }
+
+/// A helper type which is just a map of a JoinHandle, but naming it with no dyn was too hard
+pub(crate) type FinishedDomainFuture = Box<
+    dyn Future<
+            Output = (
+                Result<Result<(), anyhow::Error>, JoinError>,
+                DomainIndex,
+                usize,
+            ),
+        > + Unpin
+        + Send,
+>;
 
 /// A Noria worker, responsible for executing some domains.
 pub struct Worker {
@@ -157,6 +170,7 @@ pub struct Worker {
 
     pub(crate) memory: MemoryTracker,
     pub(crate) is_evicting: Arc<AtomicBool>,
+    pub(crate) domain_wait_queue: FuturesUnordered<FinishedDomainFuture>,
 }
 
 impl Worker {
@@ -191,11 +205,19 @@ impl Worker {
             }
             WorkerRequestKind::ClearDomains => {
                 info!("controller requested that this worker clears its existing domains");
-                self.domains.clear();
                 self.coord.clear();
-                for (_, d) in self.domains.drain() {
-                    d.join_handle.abort();
+                self.domains.clear();
+                while let Some((handle, idx, shard)) = self.domain_wait_queue.next().await {
+                    let index = idx.index();
+                    match handle {
+                        Ok(Err(e)) => error!(index, shard, err = %e, "domain failed during clear"),
+                        Err(e) if !e.is_cancelled() => {
+                            error!(index, shard, err = %e, "domain failed during clear")
+                        }
+                        _ => {}
+                    }
                 }
+
                 Ok(None)
             }
             WorkerRequestKind::RunDomain(builder) => {
@@ -231,7 +253,7 @@ impl Worker {
                 let (local_tx, local_rx) = tokio::sync::mpsc::unbounded_channel();
                 // this channel is used for domain requests; it has a buffer size of 1 to prevent
                 // flooding a domain with requests
-                let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
+                let (req_tx, req_rx) = tokio::sync::mpsc::channel(1);
 
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
@@ -239,30 +261,44 @@ impl Worker {
                 self.coord.insert_local((idx, shard), local_tx)?;
                 self.coord.insert_remote((idx, shard), bind_external)?;
 
-                tokio::task::block_in_place(|| {
-                    self.state_sizes
-                        .lock()
-                        .unwrap()
-                        .insert((idx, shard), state_size)
-                });
+                self.state_sizes
+                    .lock()
+                    .await
+                    .insert((idx, shard), state_size);
 
-                let replica = replica::Replica::new(
-                    domain,
-                    listener,
-                    local_rx,
-                    request_rx,
-                    self.coord.clone(),
-                );
+                let replica = Replica::new(domain, listener, local_rx, req_rx, self.coord.clone());
+                // Each domain is single threaded in nature, so we spawn each one in a separate thread, so
+                // we can avoid running blocking operations on the multi threaded tokio runtime
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .max_blocking_threads(1)
+                    .build()
+                    .unwrap();
 
-                let jh = tokio::spawn(replica.run());
+                let jh = Box::new(runtime.spawn(replica.run()).map(move |jh| (jh, idx, shard)));
+
+                let (_domain_abort, domain_abort_rx) = oneshot::channel::<()>();
+                // Spawn the actual thread to run the domain
+                std::thread::Builder::new()
+                    .name(format!("Domain {}.{}", idx, shard))
+                    .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
+                    .spawn(move || {
+                        // The runtime will run until the abort signal is sent.
+                        // This will happen either if the DomainHandle is dropped (and error is recieved)
+                        // or an actual signal is sent on the channel
+                        let _ = runtime.block_on(domain_abort_rx);
+                        runtime.shutdown_background();
+                    })?;
 
                 self.domains.insert(
                     (idx, shard),
                     DomainHandle {
-                        req_tx: request_tx,
-                        join_handle: jh,
+                        req_tx,
+                        _domain_abort,
                     },
                 );
+
+                self.domain_wait_queue.push(jh);
 
                 span.in_scope(|| info!(%bind_actual, %bind_external, "domain booted",));
                 let resp = RunDomainResponse {
@@ -313,32 +349,6 @@ impl Worker {
     /// This function returns if the worker request sender is dropped.
     pub async fn run(mut self) {
         loop {
-            fn poll_domains<'a>(
-                domains: &'a mut HashMap<(DomainIndex, usize), DomainHandle>,
-            ) -> impl Future<
-                Output = Vec<(
-                    DomainIndex,
-                    usize,
-                    Result<Result<(), anyhow::Error>, tokio::task::JoinError>,
-                )>,
-            > + 'a {
-                // poll all currently running domains, futures 0.1 style!
-                futures_util::future::poll_fn(move |cx: &mut Context<'_>| {
-                    let mut failed_domains = vec![];
-                    for ((idx, shard), dh) in domains.iter_mut() {
-                        if let Poll::Ready(ret) = Pin::new(&mut dh.join_handle).poll(cx) {
-                            // uh oh, a domain failed!
-                            failed_domains.push((*idx, *shard, ret));
-                        }
-                    }
-                    if failed_domains.is_empty() {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(failed_domains)
-                    }
-                })
-            }
-
             // produces a value when the `Valve` is closed
             let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
 
@@ -361,22 +371,20 @@ impl Worker {
                         return;
                     }
                 }
-                failed_domains = poll_domains(&mut self.domains) => {
-                    for (idx, shard, err) in failed_domains {
-                        match err {
-                            Err(e) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
-                            Ok(Err(e)) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
-                            Ok(Ok(())) => error!(domain_index = idx.index(), shard, "domain exited unexpectedly"),
-                        }
-                        self.domains.remove(&(idx, shard));
-                    }
-                }
                 _ = shutdown_stream.next() => {
                     info!("worker shutting down after valve shut");
                     return;
                 }
                 _ = eviction => {
                     self.process_eviction();
+                }
+                Some((res, idx, shard)) = self.domain_wait_queue.next() => {
+                    match res {
+                        Err(e) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
+                        Ok(Err(e)) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
+                        Ok(Ok(())) => error!(domain_index = idx.index(), shard, "domain exited unexpectedly"),
+                    }
+                    self.domains.remove(&(idx, shard));
                 }
             }
         }
@@ -423,8 +431,8 @@ async fn do_eviction(
                 // we are! time to evict.
                 // add current state sizes (could be out of date, as packet sent below is not necessarily
                 // received immediately)
-                let (mut sizes, total_reported) = tokio::task::block_in_place(|| {
-                    let state_sizes = state_sizes.lock().unwrap();
+                let (mut sizes, total_reported) = {
+                    let state_sizes = state_sizes.lock().await;
                     let mut total_reported = 0;
                     let sizes = state_sizes
                         .iter()
@@ -443,7 +451,7 @@ async fn do_eviction(
                         })
                         .collect::<Vec<_>>();
                     (sizes, total_reported)
-                });
+                };
 
                 // state sizes are under actual memory usage, but roughly proportional to actual
                 // memory usage - let's figure out proportionally how much *reported* memory we
@@ -535,5 +543,38 @@ async fn do_eviction(
 
             Ok(())
         }
+    }
+}
+
+impl Drop for Worker {
+    /// This is only implemented for the sake of RockDB that doesn't really
+    /// like having its thread being destroyed while it is still open, so
+    /// we need to join the threads nicely. It doesn't really matter that
+    /// we do this by spawning a thread and blocking a drop, as the Worker
+    /// is only dropped when the process is finished.
+    fn drop(&mut self) {
+        let Worker {
+            domains,
+            domain_wait_queue,
+            ..
+        } = self;
+
+        domains.clear(); // This sends a signal to all the domains on drop
+
+        let mut domain_wait_queue = std::mem::take(domain_wait_queue);
+
+        let rt = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            rt.block_on(async move {
+                while let Some((handle, idx, shard)) = domain_wait_queue.next().await {
+                    match handle {
+                        Ok(Err(e)) => error!(index = idx.index(), shard, err = %e, "domain failed during drop"),
+                        Err(e) if !e.is_cancelled() => error!(index = idx.index(), shard, err = %e, "domain failed during drop"),
+                        _ => {}
+                    }
+                }
+            });
+        })
+        .join().expect("This thread shouldn't panic");
     }
 }
