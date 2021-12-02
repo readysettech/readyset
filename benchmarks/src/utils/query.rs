@@ -184,21 +184,23 @@ impl PreparedStatement {
     /// Returns the query text and a set of parameters that can be used to
     /// execute this prepared statement.
     pub fn generate_query(&self) -> (String, Vec<Value>) {
-        (
-            self.query.clone(),
-            self.params
-                .iter()
-                .map(|t| match &t.annotation {
-                    None => random_value_for_sql_type(&t.column_type),
-                    Some(annotation) => annotation
-                        .spec
-                        .generator_for_col(t.column_type.clone())
-                        .gen()
-                        .try_into()
-                        .unwrap(),
-                })
-                .collect(),
-        )
+        (self.query.clone(), self.generate_parameters())
+    }
+
+    /// Returns just the parameters to execute our prepared statement
+    pub fn generate_parameters(&self) -> Vec<Value> {
+        self.params
+            .iter()
+            .map(|t| match &t.annotation {
+                None => random_value_for_sql_type(&t.column_type),
+                Some(annotation) => annotation
+                    .spec
+                    .generator_for_col(t.column_type.clone())
+                    .gen()
+                    .try_into()
+                    .unwrap(),
+            })
+            .collect()
     }
 }
 
