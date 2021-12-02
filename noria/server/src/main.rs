@@ -56,7 +56,7 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
 }
 
 #[derive(Parser)]
-#[clap(name = "noria-server")]
+#[clap(name = "noria-server", version)]
 struct Opts {
     /// IP address to listen on
     #[clap(
@@ -201,7 +201,10 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts: Opts = Opts::parse();
+
     opts.logging.init()?;
+
+    info!(commit_hash = %env!("CARGO_PKG_VERSION", "version not set"));
 
     let external_addr = if opts.use_aws_external_address {
         Either::Left(get_aws_private_ip())
