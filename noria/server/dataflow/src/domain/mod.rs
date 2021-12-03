@@ -3753,6 +3753,9 @@ impl Domain {
             })
             .sum();
 
+        let domain = self.index.index().to_string();
+        let shard = self.shard.unwrap_or(0).to_string();
+
         let total_node_state: u64 = self
             .state
             .iter()
@@ -3761,8 +3764,8 @@ impl Domain {
                 gauge!(
                     recorded::DOMAIN_NODE_STATE_SIZE_BYTES,
                     ret as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
+                    "domain" => domain.clone(),
+                    "shard" => shard.clone(),
                     "node" => ni.id().to_string()
                 );
                 ret
@@ -3772,23 +3775,36 @@ impl Domain {
         gauge!(
             recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
             total as f64,
-            "domain" => self.index.index().to_string(),
-            "shard" => self.shard.unwrap_or(0).to_string(),
+            "domain" => domain.clone(),
+            "shard" => shard.clone(),
         );
         gauge!(
             recorded::DOMAIN_READER_STATE_SIZE_BYTES,
             reader_size as f64,
-            "domain" => self.index.index().to_string(),
-            "shard" => self.shard.unwrap_or(0).to_string(),
+            "domain" => domain.clone(),
+            "shard" => shard.clone(),
+        );
+        gauge!(
+            recorded::DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES,
+            self.estimated_base_tables_size() as f64,
+            "domain" => domain.clone(),
+            "shard" => shard.clone(),
         );
         gauge!(
             recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES,
             (total_node_state + reader_size) as f64,
-            "domain" => self.index.index().to_string(),
-            "shard" => self.shard.unwrap_or(0).to_string(),
+            "domain" => domain,
+            "shard" => shard,
         );
         self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
+    }
+
+    pub fn estimated_base_tables_size(&self) -> u64 {
+        self.state
+            .values()
+            .filter_map(|state| state.as_persistent().map(|s| s.deep_size_of()))
+            .sum()
     }
 
     pub fn replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {

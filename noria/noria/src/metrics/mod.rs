@@ -271,6 +271,16 @@ pub mod recorded {
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_READER_STATE_SIZE_BYTES: &str = "domain.reader_state_size_bytes";
 
+    /// Gauge: The sum of the amount of bytes used to store a node's base tables
+    /// on disk.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | domain | The index of the domain. |
+    /// | shard | The shard identifier of the domain. |
+    pub const DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES: &str =
+        "domain.base_tables_estimated_size_bytes";
+
     /// Gauge: The sum of a domain's total node state and reader state bytes.
     ///
     /// | Tag | Description |
