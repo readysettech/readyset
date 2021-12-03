@@ -69,10 +69,15 @@ const INDEX_BATCH_SIZE: usize = 100_000;
 fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
     db.get_pinned(META_KEY)
         .unwrap()
-        .map(|data| {
-            bincode::options()
-                .deserialize(&data)
-                .expect("Failed to deserialize metadata from RocksDB")
+        .and_then(|data| {
+            serde_json::from_slice(&data)
+                .map_err(|error| {
+                    error!(
+                        %error,
+                        "Failed to deserialize metadata from RocksDB, marking table as empty"
+                    );
+                })
+                .ok()
         })
         .unwrap_or_default()
 }
@@ -92,7 +97,7 @@ trait Put: Sized {
         V: AsRef<[u8]>;
 
     fn save_meta(self, meta: &PersistentMeta) {
-        self.do_put(META_KEY, bincode::options().serialize(meta).unwrap());
+        self.do_put(META_KEY, serde_json::to_string(meta).unwrap());
     }
 }
 
@@ -533,10 +538,15 @@ impl PersistentState {
             let indices = meta.get_indices(&unique_keys);
 
             // If there are more column families than indices (+1 to account for the default column
-            // family) we probably crashed while trying to build the last index (in Self::add_key), so
-            // we'll throw away our progress and try re-building it again later:
+            // family) we either crashed while trying to build the last index (in Self::add_key), or
+            // something (like failed deserialization) caused us to reset the meta to the default
+            // value.
+            // Either way, we should drop all column families that are in the db but not in the
+            // meta.
             if cf_names.len() > indices.len() + 1 {
-                db.drop_cf(&indices.len().to_string()).unwrap();
+                for cf_name in cf_names.iter().skip(indices.len() + 1) {
+                    db.drop_cf(cf_name).unwrap();
+                }
             }
 
             let mut state = Self {
