@@ -111,6 +111,8 @@ pub struct DeploymentParams {
     noria_binaries: NoriaBinarySource,
     /// Number of shards for dataflow nodes.
     sharding: Option<usize>,
+    /// Number of workers to wait for before starting.
+    quorum: usize,
     /// The primary region of the noria cluster.
     primary_region: Option<String>,
     /// Parameters for the set of noria-server instances in the deployment.
@@ -153,6 +155,7 @@ impl DeploymentParams {
                 noria_mysql: Some(noria_mysql_path),
             },
             sharding: None,
+            quorum: 1,
             primary_region: None,
             servers: vec![],
             mysql_adapter: false,
@@ -171,6 +174,10 @@ impl DeploymentParams {
 
     pub fn set_sharding(&mut self, shards: usize) {
         self.sharding = Some(shards);
+    }
+
+    pub fn set_quorum(&mut self, quorum: usize) {
+        self.quorum = quorum;
     }
 
     pub fn set_primary_region(&mut self, region: &str) {
@@ -244,6 +251,8 @@ pub struct DeploymentHandle {
     noria_binaries: NoriaBinarySource,
     /// Dataflow sharding for new servers.
     sharding: Option<usize>,
+    /// Number of workers to wait for before starting.
+    quorum: usize,
     /// The primary region of the deployment.
     primary_region: Option<String>,
     /// Next new server port.
@@ -263,6 +272,7 @@ impl DeploymentHandle {
             &self.noria_binaries.noria_server,
             &self.name,
             self.sharding,
+            self.quorum,
             self.primary_region.as_ref(),
             &self.authority_addr,
             &self.authority.to_string(),
@@ -276,7 +286,7 @@ impl DeploymentHandle {
         // Wait until the worker has been created and is visible over rpc.
         wait_until_worker_count(
             &mut self.handle,
-            Duration::from_secs(15),
+            Duration::from_secs(90),
             self.noria_server_handles.len(),
         )
         .await?;
@@ -296,7 +306,7 @@ impl DeploymentHandle {
         // Wait until the server is no longer visible in the deployment.
         wait_until_worker_count(
             &mut self.handle,
-            Duration::from_secs(45),
+            Duration::from_secs(90),
             self.noria_server_handles.len(),
         )
         .await?;
@@ -376,7 +386,11 @@ async fn wait_until_worker_count(
             break;
         }
 
-        if let Ok(workers) = handle.healthy_workers().await {
+        // Use a timeout so if the leader died we retry quickly before the `max_wait`
+        // duration.
+        if let Ok(Ok(workers)) =
+            tokio::time::timeout(Duration::from_secs(1), handle.healthy_workers()).await
+        {
             if workers.len() == num_workers {
                 return Ok(());
             }
@@ -399,6 +413,7 @@ fn start_server(
     noria_server_path: &Path,
     deployment_name: &str,
     sharding: Option<usize>,
+    quorum: usize,
     primary_region: Option<&String>,
     authority_addr: &str,
     authority: &str,
@@ -410,9 +425,11 @@ fn start_server(
     runner.set_external_port(port);
     runner.set_authority_addr(authority_addr);
     runner.set_authority(authority);
+    runner.set_quorum(quorum);
     if let Some(shard) = sharding {
         runner.set_shards(shard);
     }
+
     let region = server_params.region.as_ref();
     if let Some(region) = region {
         runner.set_region(region);
@@ -543,6 +560,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             &params.noria_binaries.noria_server,
             &params.name,
             params.sharding,
+            params.quorum,
             params.primary_region.as_ref(),
             &params.authority_address,
             &params.authority.to_string(),
@@ -605,6 +623,7 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
         shutdown: false,
         noria_binaries: params.noria_binaries,
         sharding: params.sharding,
+        quorum: params.quorum,
         primary_region: params.primary_region,
         port,
         mysql_adapter: mysql_adapter_handle,

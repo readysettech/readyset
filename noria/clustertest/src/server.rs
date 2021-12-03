@@ -76,6 +76,11 @@ impl NoriaServerRunner {
         self.args.push(shards.to_string());
     }
 
+    pub fn set_quorum(&mut self, quorum: usize) {
+        self.args.push("--quorum".to_string());
+        self.args.push(quorum.to_string());
+    }
+
     pub fn set_external_port(&mut self, external_port: u16) {
         self.args.push("--external-port".to_string());
         self.args.push(external_port.to_string());
