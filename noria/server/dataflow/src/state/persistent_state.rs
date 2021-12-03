@@ -1000,6 +1000,10 @@ impl SizeOf for PersistentState {
     }
 
     fn deep_size_of(&self) -> u64 {
+        if cfg!(debug_assertions) {
+            // In test mode flush to disk to make sure size is not zero
+            let _ = self.db.flush();
+        }
         self.db
             .property_int_value("rocksdb.estimate-live-data-size")
             .unwrap()
@@ -1527,13 +1531,6 @@ mod tests {
         // rows() is estimated, but we want to make sure we at least don't return
         // self.indices.len() * rows.len() here.
         assert!(count > 0 && count < rows.len() * 2);
-    }
-
-    #[test]
-    fn persistent_state_deep_size_of() {
-        let state = setup_persistent("persistent_state_deep_size_of", None);
-        let size = state.deep_size_of();
-        assert_eq!(size, 0);
     }
 
     #[test]

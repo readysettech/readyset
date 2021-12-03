@@ -163,6 +163,19 @@ pub fn get_counter(metric: &str, metrics_dump: &MetricsDump) -> f64 {
     }
 }
 
+/// Get the gauge value for `metric` from the current process. If tests
+/// are run in the same process this may include values from across several
+/// tests.
+pub fn get_gauge(metric: &str, metrics_dump: &MetricsDump) -> f64 {
+    let dumped_metric: &DumpedMetric = &metrics_dump.metrics.get(metric).unwrap()[0];
+
+    if let DumpedMetricValue::Gauge(v) = dumped_metric.value {
+        v
+    } else {
+        panic!("{} is not a gauge", metric);
+    }
+}
+
 /// Retrieves the value of column of a row, by passing the column name and
 /// the type.
 #[macro_export(local_inner_macros)]
