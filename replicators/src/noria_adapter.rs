@@ -392,9 +392,23 @@ impl NoriaAdapter {
             }
 
             ReplicationAction::LogPosition => {
-                // Update the log position
+                self.replication_offsets.set_offset(pos.clone());
+
+                // Update the log position for the schema
                 self.noria.set_replication_offset(Some(pos.clone())).await?;
-                self.replication_offsets.set_offset(pos);
+
+                // Update the log position for all tables
+                let tables = self
+                    .replication_offsets
+                    .tables
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for table in tables {
+                    if let Some(table) = self.mutator_for_table(table).await? {
+                        table.set_replication_offset(pos.clone()).await?;
+                    }
+                }
             }
         }
 
