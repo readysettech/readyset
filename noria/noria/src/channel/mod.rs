@@ -289,4 +289,10 @@ impl<K: Eq + Hash + Clone, T> ChannelCoordinator<K, T> {
             }),
         }
     }
+
+    pub fn clear(&self) {
+        let mut guard = self.inner.write().expect("poisoned mutex");
+        guard.addrs.clear();
+        guard.locals.clear();
+    }
 }
