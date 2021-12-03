@@ -62,6 +62,15 @@ impl DataGenerator {
 
         Ok(database_spec)
     }
+
+    pub fn labels(&self) -> HashMap<String, String> {
+        let mut labels = HashMap::new();
+        labels.insert(
+            "data_generator_schema".to_string(),
+            self.schema.to_string_lossy().to_string(),
+        );
+        labels
+    }
 }
 
 #[derive(Debug)]

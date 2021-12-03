@@ -77,7 +77,10 @@ impl BenchmarkControl for ReadBenchmark {
     }
 
     fn labels(&self) -> HashMap<String, String> {
-        self.params.query.labels()
+        let mut labels = HashMap::new();
+        labels.extend(self.params.query.labels());
+        labels.extend(self.data_generator.labels());
+        labels
     }
 }
 

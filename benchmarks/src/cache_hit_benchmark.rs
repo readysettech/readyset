@@ -128,7 +128,10 @@ impl BenchmarkControl for CacheHitBenchmark {
     }
 
     fn labels(&self) -> HashMap<String, String> {
-        self.query.labels()
+        let mut labels = HashMap::new();
+        labels.extend(self.query.labels());
+        labels.extend(self.data_generator.labels());
+        labels
     }
 }
 
