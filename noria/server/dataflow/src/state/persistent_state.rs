@@ -211,6 +211,18 @@ impl State for PersistentState {
         {
             opts.disable_wal(true);
         } else {
+            if self.snapshot_mode.is_enabled() && replication_offset.is_some() {
+                // We are setting the replication offset, which is great, but
+                // all of our previous rights are not guranteed to flush to disk even
+                // if the next write is synced. We therefore perform a flush before
+                // handling the next write.
+                // See: https://github.com/facebook/rocksdb/wiki/RocksDB-FAQhttps://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+                // Q: After a write following option.disableWAL=true, I write another record with options.sync=true,
+                //    will it persist the previous write too?
+                // A: No. After the program crashes, writes with option.disableWAL=true will be lost, if they are not flushed
+                //    to SST files.
+                self.db.flush().expect("Flush to disk failed");
+            }
             opts.set_sync(true);
         }
 
