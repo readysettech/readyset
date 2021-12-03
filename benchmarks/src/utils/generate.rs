@@ -46,7 +46,7 @@ impl DataGenerator {
         conn.query_drop(ddl).await
     }
 
-    pub async fn generate(&self) -> anyhow::Result<()> {
+    pub async fn generate(&self) -> anyhow::Result<DatabaseGenerationSpec> {
         let user_vars: HashMap<String, String> = self
             .var_overrides
             .as_object()
@@ -56,11 +56,11 @@ impl DataGenerator {
             .collect();
 
         let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
-        let database_spec = DatabaseGenerationSpec::new(schema);
+        let mut database_spec = DatabaseGenerationSpec::new(schema);
         let mut conn = self.database_url.connect().await?;
-        load(&mut conn, database_spec).await?;
+        load(&mut conn, &mut database_spec).await?;
 
-        Ok(())
+        Ok(database_spec)
     }
 }
 
@@ -113,7 +113,7 @@ pub async fn load_table_part(
 
 pub async fn parallel_load(
     db: DatabaseURL,
-    mut spec: DatabaseGenerationSpec,
+    spec: &mut DatabaseGenerationSpec,
     threads: usize,
 ) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random
@@ -201,7 +201,7 @@ pub async fn parallel_load(
     Ok(())
 }
 
-pub async fn load(db: &mut DatabaseConnection, mut spec: DatabaseGenerationSpec) -> Result<()> {
+pub async fn load(db: &mut DatabaseConnection, spec: &mut DatabaseGenerationSpec) -> Result<()> {
     // Iterate over the set of tables in the database for each, generate random
     // data.
     for (table_name, table_spec) in spec.tables.iter_mut() {

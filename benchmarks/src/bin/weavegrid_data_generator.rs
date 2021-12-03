@@ -105,7 +105,7 @@ impl DataGenerator {
         ]);
 
         let mut conn = self.database_url.connect().await?;
-        load(&mut conn, database_spec).await?;
+        load(&mut conn, &mut database_spec).await?;
 
         Ok(())
     }

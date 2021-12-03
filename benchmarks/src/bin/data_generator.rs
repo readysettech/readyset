@@ -39,8 +39,8 @@ impl DataGenerator {
 
         let schema = DatabaseSchema::try_from((self.schema, user_vars))?;
 
-        let database_spec = DatabaseGenerationSpec::new(schema);
-        parallel_load(self.database_url.clone(), database_spec, self.threads).await?;
+        let mut database_spec = DatabaseGenerationSpec::new(schema);
+        parallel_load(self.database_url.clone(), &mut database_spec, self.threads).await?;
 
         Ok(())
     }

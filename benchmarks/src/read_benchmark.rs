@@ -56,7 +56,8 @@ pub struct ReadBenchmark {
 impl BenchmarkControl for ReadBenchmark {
     async fn setup(&self) -> Result<()> {
         self.data_generator.install().await?;
-        self.data_generator.generate().await
+        self.data_generator.generate().await?;
+        Ok(())
     }
 
     async fn is_already_setup(&self) -> Result<bool> {
