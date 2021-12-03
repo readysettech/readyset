@@ -283,6 +283,23 @@ impl Leader {
                 let ret = futures::executor::block_on(self.get_statistics())?;
                 return_serialized!(ret);
             }
+            (&Method::GET | &Method::POST, "/instances") => {
+                return_serialized!(self.get_instances());
+            }
+            (&Method::GET | &Method::POST, "/controller_uri") => {
+                return_serialized!(self.controller_uri);
+            }
+            (&Method::GET, "/workers") | (&Method::POST, "/workers") => {
+                return_serialized!(&self.workers.keys().collect::<Vec<_>>())
+            }
+            (&Method::GET, "/healthy_workers") | (&Method::POST, "/healthy_workers") => {
+                return_serialized!(&self
+                    .workers
+                    .iter()
+                    .filter(|w| w.1.healthy)
+                    .map(|w| w.0)
+                    .collect::<Vec<_>>());
+            }
             _ => {}
         }
 
@@ -300,23 +317,6 @@ impl Leader {
             (Method::POST, "/inputs") => return_serialized!(self.inputs()),
             (Method::POST, "/outputs") => return_serialized!(self.outputs()),
             (Method::POST, "/verbose_outputs") => return_serialized!(self.verbose_outputs()),
-            (Method::GET | Method::POST, "/instances") => {
-                return_serialized!(self.get_instances());
-            }
-            (Method::GET | Method::POST, "/controller_uri") => {
-                return_serialized!(self.controller_uri);
-            }
-            (Method::GET, "/workers") | (Method::POST, "/workers") => {
-                return_serialized!(&self.workers.keys().collect::<Vec<_>>())
-            }
-            (Method::GET, "/healthy_workers") | (Method::POST, "/healthy_workers") => {
-                return_serialized!(&self
-                    .workers
-                    .iter()
-                    .filter(|w| w.1.healthy)
-                    .map(|w| w.0)
-                    .collect::<Vec<_>>());
-            }
             (Method::GET, "/nodes") => {
                 let nodes = if let Some(query) = &query {
                     let pairs = querystring::querify(query);
