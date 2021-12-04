@@ -187,7 +187,7 @@ impl Worker {
                 Ok(None)
             }
             WorkerRequestKind::ClearDomains => {
-                info!("controller requested that this worker clear's it's existing domains");
+                info!("controller requested that this worker clears its existing domains");
                 self.domains.clear();
                 for (_, d) in self.domains.drain() {
                     d.join_handle.abort();
