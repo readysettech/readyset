@@ -1150,7 +1150,9 @@ async fn it_recovers_persisted_bases() {
     drop(g);
 }
 
+// TODO(ENG-860): Flaky test.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn it_recovers_persisted_bases_with_volume_id() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
