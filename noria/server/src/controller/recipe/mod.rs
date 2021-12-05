@@ -443,7 +443,7 @@ impl Recipe {
                         // not to remove bases while they still have children, or to try removing
                         // them twice.
                         self.inc.as_mut().unwrap().remove_base(&ctq.table.name)?;
-                        match self.prior.as_ref().unwrap().node_addr_for(&ctq.table.name) {
+                        match self.node_addr_for(&ctq.table.name) {
                             Ok(ni) => Some(ni),
                             Err(e) => {
                                 error!(
