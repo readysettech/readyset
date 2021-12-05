@@ -493,6 +493,7 @@ impl Leader {
                     let recipe = self.recipe.clone().extend(&r).map_err(|(_, e)| e)?;
                     self.apply_recipe(recipe).await?;
                 }
+                info!("Finished restoring graph configuration");
             }
         }
 
