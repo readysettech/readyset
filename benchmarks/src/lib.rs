@@ -13,6 +13,7 @@
 //!
 //! use benchmarks::benchmark::{BenchmarkControl, BenchmarkParameters};
 //! use benchmarks::benchmark_gauge;
+//! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
 //!
 //! #[derive(clap::Parser, Clone)]
 //! pub struct MyBenchmark {
@@ -77,9 +78,14 @@
 //!         );
 //!         labels
 //!     }
+//!
+//!     fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+//!         vec![]
+//!     }
 //! }
 //! ```
 
+#![feature(never_type)]
 #![feature(type_alias_impl_trait)]
 
 pub mod benchmark;

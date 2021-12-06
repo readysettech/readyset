@@ -4,19 +4,16 @@ use std::convert::TryInto;
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use clap::Parser;
-use futures::StreamExt;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
-use regex::Regex;
 use tracing::info;
 
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
-use crate::benchmark_gauge;
 use crate::utils::generate::DataGenerator;
-use crate::utils::prometheus::stream_prometheus_lines_with_filter;
+use crate::utils::prometheus::{forward, ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::utils::query::ArbitraryQueryParameters;
 
 #[derive(Parser, Clone)]
@@ -40,7 +37,7 @@ pub struct WriteLatencyBenchmark {
 
     /// Noria metrics endpoint; write latency histogram will be parsed from this
     #[clap(long)]
-    prometheus_endpoint: String,
+    prometheus_endpoint: PrometheusEndpoint,
 }
 
 #[async_trait]
@@ -101,8 +98,6 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         }
         info!("Rows updated");
 
-        self.forward_metrics().await?;
-
         Ok(())
     }
 
@@ -112,45 +107,10 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         labels.insert("updates".to_string(), self.updates.to_string());
         labels
     }
-}
 
-impl WriteLatencyBenchmark {
-    async fn forward_metrics(&self) -> Result<()> {
-        let re_quantile = Regex::new(r#"\bquantile="([0-9.]+)""#)?;
-        let re_sample = Regex::new(r#"^([a-z_]+)\b.* ([0-9.]+)$"#)?;
-
-        let mut summary_lines =
-            stream_prometheus_lines_with_filter(&self.prometheus_endpoint, |s| {
-                s.starts_with("packet_write_propagation_time_us")
-            })
-            .await?;
-        while let Some(line) = summary_lines.next().await {
-            let line = line?;
-            if let Some(sample_matches) = re_sample.captures(&line) {
-                let metric_name = sample_matches.get(1).unwrap().as_str().replace("_us", "");
-                let value = sample_matches.get(2).unwrap().as_str().parse().unwrap();
-                if let Some(quantile_matches) = re_quantile.captures(&line) {
-                    let quantile = quantile_matches.get(1).unwrap().as_str().to_string();
-                    benchmark_gauge!(
-                        metric_name,
-                        Microseconds,
-                        "Write propagation time",
-                        value,
-                        "quantile" => quantile
-                    );
-                } else if metric_name.ends_with("_count") {
-                    benchmark_gauge!(
-                        metric_name.replace("_count", ""),
-                        Count,
-                        "Write propagation time",
-                        value
-                    );
-                } else {
-                    benchmark_gauge!(metric_name, Microseconds, "Write propagation time", value);
-                }
-            }
-        }
-
-        Ok(())
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![forward(self.prometheus_endpoint.clone(), |metric| {
+            metric.name.starts_with("packet_write_propagation_time_us")
+        })]
     }
 }

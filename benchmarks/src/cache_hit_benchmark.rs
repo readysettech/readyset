@@ -11,6 +11,7 @@ use mysql_async::{Row, Value};
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
 use crate::utils::us_to_ms;
 
@@ -132,6 +133,10 @@ impl BenchmarkControl for CacheHitBenchmark {
         labels.extend(self.query.labels());
         labels.extend(self.data_generator.labels());
         labels
+    }
+
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![]
     }
 }
 

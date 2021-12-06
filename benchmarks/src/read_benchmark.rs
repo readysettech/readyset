@@ -16,6 +16,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::query::ArbitraryQueryParameters;
 use crate::utils::us_to_ms;
 use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter};
@@ -81,6 +82,10 @@ impl BenchmarkControl for ReadBenchmark {
         labels.extend(self.params.query.labels());
         labels.extend(self.data_generator.labels());
         labels
+    }
+
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![]
     }
 }
 

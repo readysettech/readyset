@@ -1,4 +1,5 @@
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -83,5 +84,8 @@ impl BenchmarkControl for ScaleConnections {
         );
         labels.insert("parallel".to_string(), self.parallel.to_string());
         labels
+    }
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![]
     }
 }

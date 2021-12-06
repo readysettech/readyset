@@ -1,0 +1,47 @@
+# TYPE base_table_lookup_requests counter
+base_table_lookup_requests{domain="0",node="l0"} 1
+
+# TYPE egress_sent_packets counter
+egress_sent_packets{node="4"} 1001
+egress_sent_packets{node="9"} 4
+egress_sent_packets{node="14"} 4
+
+# TYPE server_external_requests counter
+server_external_requests 21710
+
+# TYPE domain_total_forward_time_us counter
+domain_total_forward_time_us{domain="0",from_node="0",shard="0",to_node="0"} 4310176
+domain_total_forward_time_us{domain="1",from_node="0",shard="0",to_node="1"} 42865
+
+# TYPE server_view_query_result counter
+server_view_query_result{result="replay"} 1
+server_view_query_result{result="served_from_cache"} 2
+
+# TYPE domain_reader_total_replay_request_time_us counter
+domain_reader_total_replay_request_time_us{domain="1",node="0",shard="0"} 31
+
+# TYPE domain_total_finish_replay_time_us counter
+domain_total_finish_replay_time_us{domain="2",shard="0",tag="2"} 35
+domain_total_finish_replay_time_us{domain="3",shard="0",tag="3"} 52
+
+# TYPE domain_node_added counter
+domain_node_added{domain="0",node="4",ntype="Internal (Project)"} 1
+domain_node_added{domain="0",node="1",ntype="Internal (Project)"} 1
+domain_node_added{domain="2",node="1",ntype="Ingress"} 1
+domain_node_added{domain="3",node="0",ntype="Reader"} 1
+domain_node_added{domain="0",node="0",ntype="Base"} 1
+domain_node_added{domain="0",node="7",ntype="Internal (Project)"} 1
+domain_node_added{domain="0",node="5",ntype="Egress"} 1
+domain_node_added{domain="2",node="0",ntype="Reader"} 1
+domain_node_added{domain="1",node="0",ntype="Reader"} 1
+domain_node_added{domain="0",node="2",ntype="Egress"} 1
+domain_node_added{domain="0",node="3",ntype="Internal (Filter)"} 1
+domain_node_added{domain="3",node="1",ntype="Ingress"} 1
+domain_node_added{domain="1",node="1",ntype="Ingress"} 1
+domain_node_added{domain="0",node="8",ntype="Egress"} 1
+domain_node_added{domain="0",node="6",ntype="Internal (Filter)"} 1
+
+# TYPE domain_total_chunked_replay_time_us counter
+domain_total_chunked_replay_time_us{domain="0",from_node="3",shard="0"} 74
+domain_total_chunked_replay_time_us{domain="0",from_node="6",shard="0"} 74
+

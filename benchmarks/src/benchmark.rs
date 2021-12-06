@@ -17,6 +17,7 @@ use crate::read_benchmark::ReadBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::write_latency_benchmark::WriteLatencyBenchmark;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -87,4 +88,8 @@ pub trait BenchmarkControl {
 
     // Has there been a regression in the benchmarks performance?
     // async fn regression_check(&self) -> Result<bool>;
+
+    /// Set of (endpoint, filter predicate) pairs for metrics to pull in from Prometheus URLs and
+    /// re-export as part of the benchmark's metrics
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics>;
 }

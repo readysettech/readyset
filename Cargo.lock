@@ -759,6 +759,7 @@ name = "benchmarks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "atomic-counter",
  "chrono",
@@ -784,11 +785,11 @@ dependencies = [
  "query_generator",
  "rand 0.8.4",
  "readyset-logging",
- "regex",
  "reqwest",
  "rinfluxdb",
  "serde_json",
  "structopt",
+ "thiserror",
  "tokio",
  "tracing",
  "url",

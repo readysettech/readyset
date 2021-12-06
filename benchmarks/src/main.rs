@@ -1,8 +1,12 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tracing::warn;
 
 use benchmarks::benchmark::{Benchmark, BenchmarkControl};
 use benchmarks::benchmark_gauge;
@@ -72,16 +76,54 @@ impl BenchmarkRunner {
         Ok(handle)
     }
 
+    pub fn start_metric_readers(&self) -> Option<(JoinHandle<()>, oneshot::Sender<()>)> {
+        let push_gateway = self.prometheus_push_gateway.clone()?;
+        let forward = self.benchmark.forward_metrics();
+        if forward.is_empty() {
+            return None;
+        }
+
+        let global_labels = Arc::new(self.benchmark.labels().into_iter().collect::<Vec<_>>());
+
+        let (tx, mut rx) = oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(PUSH_GATEWAY_PUSH_INTERVAL);
+            let client = reqwest::Client::new();
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        for item in forward.clone().into_iter() {
+                            let req = client.post(&push_gateway);
+                            if let Err(e) = item.forward(req, global_labels.clone()).await {
+                                warn!("Failed to forward metrics: {}", e);
+                            }
+                        }
+                    },
+                    _ = &mut rx => break
+                }
+            }
+        });
+
+        Some((handle, tx))
+    }
+
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let handle = self.init_prometheus().await?;
+        let prometheus_handle = self.init_prometheus().await?;
 
         if !self.skip_setup && !self.benchmark.is_already_setup().await? {
             self.benchmark.setup().await?;
         }
 
+        let importer = self.start_metric_readers();
+
         let start_time = Instant::now();
         utils::run_for(self.benchmark.benchmark(), self.run_for).await?;
         let duration = start_time.elapsed();
+
+        if let Some((handle, tx)) = importer {
+            drop(tx);
+            handle.await?;
+        }
 
         benchmark_gauge!(
             "benchmark_duration",
@@ -91,9 +133,11 @@ impl BenchmarkRunner {
         );
 
         // Push metrics recorded in the push gateway manually before exiting.
-        if let (Some(addr), Some(handle)) = (self.prometheus_push_gateway, handle) {
+        if let (Some(addr), Some(prometheus_handle)) =
+            (self.prometheus_push_gateway, prometheus_handle)
+        {
             let client = reqwest::Client::default();
-            let output = handle.render();
+            let output = prometheus_handle.render();
             client
                 .put(&addr)
                 .body(output)

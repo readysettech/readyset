@@ -6,6 +6,7 @@ use clap::Parser;
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::benchmark_gauge;
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 
 #[derive(Parser)]
 pub struct Template {
@@ -43,5 +44,8 @@ impl BenchmarkControl for Template {
     }
     fn labels(&self) -> HashMap<String, String> {
         HashMap::new()
+    }
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![]
     }
 }

@@ -7,6 +7,7 @@
 //! `--param_count` can be specified to modify the number of
 //! parameters in the view.
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
@@ -149,5 +150,8 @@ impl BenchmarkControl for ScaleViews {
         labels.insert("num_views".to_string(), self.num_views.to_string());
         labels.insert("param_count".to_string(), self.param_count.to_string());
         labels
+    }
+    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+        vec![]
     }
 }
