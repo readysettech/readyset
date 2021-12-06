@@ -38,7 +38,8 @@ pub(crate) mod migrate; // crate viz for tests
 mod mir_to_flow;
 pub(crate) mod recipe; // crate viz for tests
 pub(crate) mod schema;
-pub(crate) mod sql; // crate viz for tests
+pub(crate) mod sql;
+mod state;
 
 /// Time between leader state change checks without thread parking.
 const LEADER_STATE_CHECK_INTERVAL: Duration = Duration::from_secs(1);
@@ -106,6 +107,7 @@ impl ControllerState {
     }
 }
 
+#[derive(Clone)]
 pub struct Worker {
     healthy: bool,
     uri: Url,

@@ -8,6 +8,7 @@ use tracing::error;
 
 /// A `DomainHandle` is a handle that allows communicating with all of the shards of a given
 /// domain.
+#[derive(Clone)]
 pub(super) struct DomainHandle {
     pub(super) idx: DomainIndex,
     pub(super) shards: Vec<WorkerIdentifier>,

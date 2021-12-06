@@ -432,6 +432,9 @@ pub mod recorded {
     /// propagates to. If the packet does not reach the reader because it hits a
     /// hole, the write propagation time is not recorded.
     pub const PACKET_WRITE_PROPAGATION_TIME: &str = "packet.write_propagation_time_us";
+
+    /// Histogram: The time it takes to clone the dataflow state graph.
+    pub const DATAFLOW_STATE_CLONE_TIME: &str = "dataflow_state.clone_time";
 }
 
 /// A dumped metric's kind.
