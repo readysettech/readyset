@@ -1,7 +1,7 @@
 use crate::utils::query_until_expected;
 use crate::*;
-use mysql::prelude::Queryable;
-use mysql::Value;
+use mysql_async::prelude::Queryable;
+use mysql_async::{Row, Value};
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
@@ -20,8 +20,8 @@ async fn create_table_insert_test() {
     deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql::Conn::new(opts.clone()).unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
         .query_drop(
             r"CREATE TABLE t1 (
@@ -29,8 +29,11 @@ async fn create_table_insert_test() {
         value INT NOT NULL
     );",
         )
+        .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);").unwrap();
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
 
     assert!(
         query_until_expected(
@@ -59,16 +62,18 @@ async fn show_tables_test() {
     deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql::Conn::new(opts.clone()).unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
         .query_drop(r"CREATE TABLE t2a (uid INT NOT NULL, value INT NOT NULL,);")
+        .await
         .unwrap();
     let _ = conn
         .query_drop(r"CREATE TABLE t2b (uid INT NOT NULL, value INT NOT NULL,);")
+        .await
         .unwrap();
 
-    let tables: Vec<String> = conn.query("SHOW TABLES;").unwrap();
+    let tables: Vec<String> = conn.query("SHOW TABLES;").await.unwrap();
     deployment.teardown().await.unwrap();
     assert_eq!(tables, vec!["t2a", "t2b"]);
 }
@@ -86,13 +91,14 @@ async fn describe_table_test() {
     deployment.deploy_mysql_adapter();
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql::Conn::new(opts.clone()).unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
         .query_drop(r"CREATE TABLE t3 (uid INT NOT NULL, value INT NOT NULL,);")
+        .await
         .unwrap();
 
-    let table: Vec<mysql::Row> = conn.query("DESCRIBE t3;").unwrap();
+    let table: Vec<Row> = conn.query("DESCRIBE t3;").await.unwrap();
     let descriptor = table.get(0).unwrap();
     let cols = descriptor.columns_ref();
     let cols = cols
@@ -139,8 +145,8 @@ async fn mirror_prepare_exec_test() {
     let mut deployment = start_multi_process(deployment).await.unwrap();
 
     // Create a table and write to it through the adapter.
-    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql::Conn::new(opts.clone()).unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
         .query_drop(
             r"CREATE TABLE t1 (
@@ -148,13 +154,16 @@ async fn mirror_prepare_exec_test() {
         value INT NOT NULL
     );",
         )
+        .await
         .unwrap();
 
     adapter_conn
         .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
         .unwrap();
     adapter_conn
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
+        .await
         .unwrap();
 
     assert!(
@@ -174,6 +183,7 @@ async fn mirror_prepare_exec_test() {
         .unwrap();
     let result: Vec<(i32, i32)> = adapter_conn
         .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
+        .await
         .unwrap();
     assert_eq!(result, vec![(2, 5)]);
 
@@ -192,8 +202,8 @@ async fn async_migrations_sanity_check() {
     deployment.enable_async_migrations(500);
 
     let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql::Conn::new(opts.clone()).unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
         .query_drop(
             r"CREATE TABLE t1 (
@@ -201,12 +211,15 @@ async fn async_migrations_sanity_check() {
         value INT NOT NULL
     );",
         )
+        .await
         .unwrap();
     adapter_conn
         .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
         .unwrap();
     adapter_conn
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
+        .await
         .unwrap();
 
     assert!(

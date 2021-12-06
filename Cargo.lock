@@ -1184,7 +1184,7 @@ dependencies = [
  "envy",
  "futures 0.3.17",
  "futures-util",
- "mysql",
+ "mysql_async",
  "nom-sql",
  "noria",
  "noria-client-adapter",

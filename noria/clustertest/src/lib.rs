@@ -9,7 +9,7 @@ mod utils;
 
 use anyhow::{anyhow, Result};
 use futures::executor;
-use mysql::prelude::Queryable;
+use mysql_async::prelude::Queryable;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
@@ -322,9 +322,10 @@ impl DeploymentHandle {
 
         // Clean up the existing mysql state.
         if let Some(mysql_addr) = &self.mysql_addr {
-            let opts = mysql::Opts::from_url(mysql_addr).unwrap();
-            let mut conn = mysql::Conn::new(opts).unwrap();
-            conn.query_drop(format!("DROP DATABASE {};", &self.name))?;
+            let opts = mysql_async::Opts::from_url(mysql_addr).unwrap();
+            let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+            conn.query_drop(format!("DROP DATABASE {};", &self.name))
+                .await?;
         }
 
         // Drop any errors on failure to kill so we complete
@@ -543,10 +544,11 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
             "mysql://root:{}@{}:3306",
             &params.mysql_root_password, &params.mysql_host
         );
-        let opts = mysql::Opts::from_url(&addr).unwrap();
-        let mut conn = mysql::Conn::new(opts).unwrap();
+        let opts = mysql_async::Opts::from_url(&addr).unwrap();
+        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
         let _ = conn
             .query_drop(format!("CREATE DATABASE {};", &params.name))
+            .await
             .unwrap();
         mysql_addr = Some(format!("{}/{}", &addr, &params.name));
     }
