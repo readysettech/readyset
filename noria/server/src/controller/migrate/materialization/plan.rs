@@ -8,9 +8,9 @@
     clippy::unreachable
 )]
 
-use crate::controller::inner::graphviz;
 use crate::controller::keys::{self, OptColumnRef};
 use crate::controller::migrate::DomainMigrationPlan;
+use crate::controller::state::graphviz;
 use dataflow::payload::{ReplayPathSegment, SourceSelection, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;

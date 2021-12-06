@@ -43,7 +43,8 @@ use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::{InvalidEdge, Materializations};
 use crate::controller::migrate::scheduling::Scheduler;
-use crate::controller::{Leader, WorkerIdentifier};
+use crate::controller::state::DataflowState;
+use crate::controller::WorkerIdentifier;
 
 pub(crate) mod assignment;
 mod augmentation;
@@ -63,8 +64,9 @@ pub struct StoredDomainRequest {
     /// The request to send.
     pub req: DomainRequest,
 }
+
 impl StoredDomainRequest {
-    pub async fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         let dom = mainline.domains.get_mut(&self.domain).ok_or_else(|| {
             ReadySetError::MigrationUnknownDomain {
                 domain_index: self.domain.index(),
@@ -157,7 +159,7 @@ impl MigrationPlan {
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
     #[instrument(level = "info", name = "apply", skip(self, mainline))]
-    pub async fn apply(self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         let MigrationPlan {
             ingredients,
             domain_nodes,
@@ -210,7 +212,7 @@ impl MigrationPlan {
 impl DomainMigrationPlan {
     /// Make a new `DomainMigrationPlan`, noting which domains are valid based off the provided
     /// controller.
-    pub fn new(mainline: &Leader) -> Self {
+    pub fn new(mainline: &DataflowState) -> Self {
         Self {
             stored: vec![],
             place: vec![],
@@ -251,7 +253,7 @@ impl DomainMigrationPlan {
 
     /// Apply all stored changes using the given controller object, placing new domains and sending
     /// messages added since the last time this method was called.
-    pub async fn apply(&mut self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub async fn apply(&mut self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         for place in self.place.drain(..) {
             let d = mainline
                 .place_domain(place.idx, place.shard_workers, place.nodes)
@@ -628,7 +630,7 @@ impl Migration {
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
-    pub(super) async fn commit(self, mainline: &mut Leader) -> ReadySetResult<()> {
+    pub(super) async fn commit(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         let start = self.start;
 
         let plan = self
@@ -651,7 +653,7 @@ impl Migration {
     ///
     /// See the module-level docs for more information on what a migration entails.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn plan(self, mainline: &Leader) -> ReadySetResult<MigrationPlan> {
+    pub(super) fn plan(self, mainline: &mut DataflowState) -> ReadySetResult<MigrationPlan> {
         let span = info_span!("plan");
         let _g = span.enter();
         debug!(num_nodes = self.added.len(), "finalizing migration");

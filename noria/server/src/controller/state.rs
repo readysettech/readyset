@@ -11,9 +11,7 @@
 //!
 //! This module provides the structures to store the state of the Noria dataflow graph, and
 //! to manipulate it in a thread-safe way.
-// Allow this until the whole state logic is in place.
-// This is an intermediate stage to get ENG-805 into main.
-#![allow(unused)]
+
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::Migration;
@@ -725,9 +723,7 @@ impl DataflowState {
             start: time::Instant::now(),
         };
         let r = f(&mut m);
-        // This will be uncommented once we refactor
-        // the migration `commit` message to take a `DataflowState`.
-        // m.commit(self).await?;
+        m.commit(self).await?;
         info!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)

@@ -6,7 +6,7 @@
 //! module).
 
 use crate::controller::migrate::DomainMigrationPlan;
-use crate::controller::{inner::graphviz, keys};
+use crate::controller::{keys, state::graphviz};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
 use maplit::hashmap;
