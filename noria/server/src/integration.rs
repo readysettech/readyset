@@ -7537,3 +7537,27 @@ async fn forbid_full_materialization() {
         .contains("Creation of fully materialized query is forbidden"));
     assert!(err.caused_by_unsupported());
 }
+
+// This test replicates the `install_recipe` path used when we need to resnapshot. The
+// snapshotted DDL may vary slightly from the DDL propagated through the replicator but
+// should not cause the install_recipe to fail.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn overwrite_with_changed_recipe() {
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+    g.install_recipe("CREATE TABLE t (col INT)").await.unwrap();
+    g.extend_recipe("QUERY q: SELECT * FROM t").await.unwrap();
+    let res = g
+        .install_recipe("CREATE TABLE t (col INT COMMENT 'hi')")
+        .await;
+    assert!(res.is_ok());
+}
