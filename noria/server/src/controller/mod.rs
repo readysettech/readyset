@@ -373,18 +373,23 @@ impl Controller {
         match req {
             HandleRequest::QueryReadiness(tx) => {
                 let done = self.leader_ready
-                    && self
-                        .inner
-                        .as_ref()
-                        .map(|ctrl| !ctrl.workers.is_empty())
-                        .unwrap_or(false);
+                    && match self.inner.as_ref() {
+                        None => false,
+                        Some(ctrl) => {
+                            let ds = ctrl.dataflow_state_handle.read().await;
+                            !ds.workers.is_empty()
+                        }
+                    };
                 if tx.send(done).is_err() {
                     warn!("readiness query sender hung up!");
                 }
             }
             HandleRequest::PerformMigration { func, done_tx } => {
                 let inner = self.controller_inner()?;
-                let ret = inner.migrate(move |m| func(m)).await?;
+                let mut writer = inner.dataflow_state_handle.write().await;
+                let ds = writer.as_mut();
+                let ret = ds.migrate(move |m| func(m)).await?;
+                inner.dataflow_state_handle.commit(writer).await;
                 if done_tx.send(ret).is_err() {
                     warn!("handle-based migration sender hung up!");
                 }
@@ -865,7 +870,7 @@ pub(crate) async fn authority_runner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration_utils::start_simple;
+    use crate::integration_utils::{sleep, start_simple};
     use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]

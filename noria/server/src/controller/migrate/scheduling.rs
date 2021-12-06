@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use dataflow::prelude::*;
 use noria::internal::DomainIndex;
 
-use crate::controller::inner::Leader;
+use crate::controller::state::DataflowState;
 use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};
 
 /// Verifies that the worker `worker` meets the domain placement restrictions of all dataflow nodes
@@ -54,15 +54,15 @@ pub(crate) struct Scheduler<'leader, 'migration> {
     ingredients: &'migration Graph,
 }
 
-impl<'leader, 'migration> Scheduler<'leader, 'migration> {
+impl<'state, 'migration> Scheduler<'state, 'migration> {
     /// Create a new scheduler, taking information from the given `leader`, optionally restricted to
     /// the given `worker`, and assigning nodes from the given graph of `ingredients`.
     pub(crate) fn new(
-        leader: &'leader Leader,
+        dataflow_state: &'state DataflowState,
         worker: &'migration Option<WorkerIdentifier>,
         ingredients: &'migration Graph,
     ) -> ReadySetResult<Self> {
-        let valid_workers = leader
+        let valid_workers = dataflow_state
             .workers
             .iter()
             .filter(|(_, w)| w.healthy)
@@ -70,8 +70,8 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
             .collect();
 
         let mut worker_stats: HashMap<&WorkerIdentifier, WorkerStats> = HashMap::new();
-        for (di, dh) in &leader.domains {
-            let is_base_table_domain = leader.domain_nodes[di]
+        for (di, dh) in &dataflow_state.domains {
+            let is_base_table_domain = dataflow_state.domain_nodes[di]
                 .values()
                 .any(|ni| ingredients[*ni].is_base());
             for wi in &dh.shards {
@@ -85,7 +85,7 @@ impl<'leader, 'migration> Scheduler<'leader, 'migration> {
 
         Ok(Self {
             valid_workers,
-            node_restrictions: &leader.node_restrictions,
+            node_restrictions: &dataflow_state.node_restrictions,
             worker_stats,
             ingredients,
         })
