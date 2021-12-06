@@ -13,7 +13,7 @@ anyhow = "1.0"
 port_scanner = "0.1.5"
 rand = "0.8.3"
 url = "2.2.2"
-mysql = "21.0.1"
+mysql_async = "0.28.0"
 envy = "0.4"
 serde = { version = "1.0.8", features = ["derive"] }
 clap = "3.0.0-beta.5"
