@@ -426,6 +426,7 @@ impl DataType {
             (_, Some(Int(_)), UnsignedInt(_)) => convert_numeric!(self, i32, u32),
             (_, Some(Int(_)), Smallint(_)) => convert_numeric!(self, i32, i16),
             (_, Some(Int(_)), UnsignedSmallint(_)) => convert_numeric!(self, i32, u16),
+            (_, Some(Int(_)), UnsignedBigint(_)) => convert_numeric!(self, i32, u64),
             (_, Some(Bigint(_)), Tinyint(_)) => convert_numeric!(self, i64, i8),
             (_, Some(Bigint(_)), UnsignedTinyint(_)) => convert_numeric!(self, i64, u8),
             (_, Some(Bigint(_)), Smallint(_)) => convert_numeric!(self, i64, i16),
