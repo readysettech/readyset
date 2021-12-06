@@ -14,6 +14,9 @@ trap 'on_error' ERR
 
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/configure-consul-client.sh
+# Build connection string from inputs
+source /usr/local/bin/get-connection-string.sh
+REPLICATION_URL=${DB_URL}
 
 NORIA_MEMORY_BYTES=$((${NORIA_MEMORY_LIMIT_GB}<<30))
 

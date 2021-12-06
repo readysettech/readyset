@@ -38,9 +38,15 @@ Metadata:
           - ReadySetMonitorInstanceType
           - ReadySetMemoryLimitGB
           - ReadySetDeploymentName
-          - MySQLDatabaseURL
-          - ReadySetMySQLAdapterUsername
-          - ReadySetMySQLAdapterPassword
+      - Label:
+          default: DB Configuration
+        Parameters:
+          - DatabaseHostname
+          - DatabasePort
+          - DatabaseName
+          - DatabaseAdapterUsername
+          - SSMParameterKmsKeyArn
+          - SSMPathRDSDatabasePassword
 
 Parameters:
   ReadySetAdapterInstanceType:
@@ -155,29 +161,50 @@ Parameters:
     Default: Server
     ConstraintDescription: Must match EC2 Tag Value requirements.
 
-  MySQLDatabaseURL:
-    Description: Existing Database URL connection string, e.g. mysql://username:password@localhost:3306/mydatabase
+  DatabaseHostname:
+    Description: Hostname of the MySQL server to front with ReadySet.
     Type: String
-    NoEcho: True
 
-  ReadySetMySQLAdapterUsername:
+  DatabasePort:
+    Description: TCP port of the MySQL server to front with ReadySet.
+    Type: Number
+    Default: 5432
+
+  DatabaseProtocol:
+    Description: Database connection protocol prefix for connection strings. Typically mysql.
+    Type: String
+    Default: mysql
+
+  SSMParameterKmsKeyArn:
+    Description: ARN of KMS key that was used to encrypt ssm-secure parameters.
+    Type: String
+
+  DatabaseName:
+    Description: Database name
+    Type: String
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
+
+  DatabaseAdapterUsername:
     Description: Username to use to authenticate to the ReadySet adapter.
     Type: String
-
-  ReadySetMySQLAdapterPassword:
-    Description: Password to use to authenticate to the ReadySet adapter.
-    Type: String
     NoEcho: true
+
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
+    Type: String
 
 # Update this with the latest AMI
 
 Mappings:
   AWSAMIRegionMap:
     us-east-2:
-      # short commit id associated with AMIs: 4a0eb70
-      READYSETMYSQLADAPTER: ami-0ab3b53dbd0b9277c
-      READYSETSERVER: ami-0f98ebeb1d22480fe
-      READYSETMONITOR: ami-08fdcfd8be7d50d0e
+      # short commit id associated with AMIs: 9170793
+      READYSETMYSQLADAPTER: ami-080f030681b853f9a
+      READYSETSERVER: ami-0510827f8cf77da80
+      READYSETMONITOR: ami-05e93d1b01fdc76ca
 
 Resources:
   # --- START MYSQL ADAPTER --- #
@@ -194,6 +221,26 @@ Resources:
               Service: ec2.amazonaws.com
             Effect: Allow
             Sid: ""
+      Policies:
+        - PolicyName: SSMPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter*
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+        - PolicyName: KMSPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt*
+                  - kms:Generate*
+                Resource:
+                  - !Ref SSMParameterKmsKeyArn
 
   ReadySetMySQLAdapterProfile:
     Type: AWS::IAM::InstanceProfile
@@ -240,10 +287,14 @@ Resources:
             export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
             export CONSUL_TAG_KEY="${ConsulEc2RetryJoinTagKey}"
             export CONSUL_TAG_VALUE="${ConsulEc2RetryJoinTagValue}"
-            export UPSTREAM_DB_URL="${MySQLDatabaseURL}"
             export DEPLOYMENT="${ReadySetDeploymentName}"
-            export USERNAME="${ReadySetMySQLAdapterUsername}"
-            export PASSWORD="${ReadySetMySQLAdapterPassword}"
+            # Connection Parameters
+            export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
+            export USERNAME=${DatabaseAdapterUsername}
+            export DB_PROTO=${DatabaseProtocol}
+            export DB_HOST=${DatabaseHostname}
+            export DB_PORT=${DatabasePort}
+            export DB_NAME=${DatabaseName}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
@@ -390,6 +441,25 @@ Resources:
                 Action:
                   - autoscaling:SetInstanceHealth
                 Resource: '*'
+        - PolicyName: SSMPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter*
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SSMPathRDSDatabasePassword}"
+        - PolicyName: KMSPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt*
+                  - kms:Generate*
+                Resource:
+                  - !Ref SSMParameterKmsKeyArn
 
   ReadySetServerProfile:
     Type: AWS::IAM::InstanceProfile
@@ -433,10 +503,16 @@ Resources:
             export NORIA_QUORUM="${ReadySetServerNodes}"
             export NORIA_REGION="${AWS::Region}"
             export NORIA_SHARDS="0"
-            export REPLICATION_URL="${MySQLDatabaseURL}"
             export INITIAL_VOLUME_SIZE_GB="${ReadySetServerInitialVolumeSizeGB}"
             export AUTO_GROW_VOLUME="${ReadySetServerAutoGrowVolume}"
             export MAX_VOLUME_SIZE_GB="${ReadySetServerMaxVolumeSizeGB}"
+            # Connection Parameters
+            export SSM_PATH_DB_PASSWORD=${SSMPathRDSDatabasePassword}
+            export USERNAME=${DatabaseAdapterUsername}
+            export DB_PROTO=${DatabaseProtocol}
+            export DB_HOST=${DatabaseHostname}
+            export DB_PORT=${DatabasePort}
+            export DB_NAME=${DatabaseName}
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - SqsQueueUrl: !Ref ReadySetServerASGLifecycleTerminateSQS

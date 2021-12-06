@@ -41,6 +41,12 @@ Parameters:
     MinValue: 20
     MaxValue: 65536
 
+  DatabaseUsername:
+    Description: Username to log into the MySQL Database
+    Type: String
+    MinLength: 1
+    MaxLength: 16
+
   DatabaseName:
     Description: Database name
     Type: String
@@ -49,18 +55,9 @@ Parameters:
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
     ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.
 
-  DatabaseUsername:
-    Description: Username to log into the MySQL Database
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
-    MinLength: 1
-    MaxLength: 16
-
-  DatabasePassword:
-    Description: Password to log into the MySQL Database
-    Type: String
-    NoEcho: true
-    MinLength: 8
-    MaxLength: 41
 
 Resources:
   DatabaseSecurityGroup:
@@ -106,15 +103,16 @@ Resources:
       StorageType: !Ref DatabaseStorageType
       DBName: !Ref DatabaseName
       MasterUsername: !Ref DatabaseUsername
-      MasterUserPassword: !Ref DatabasePassword
+      MasterUserPassword: !Sub "{{resolve:ssm-secure:${SSMPathRDSDatabasePassword}}}"
       VPCSecurityGroups:
         - !Ref DatabaseSecurityGroup
       DBParameterGroupName: !Ref DatabaseParameterGroup
 
 Outputs:
-  DatabaseURL:
-    Description: Database connection URL for RDS instance
-    Value: !Sub
-      - mysql://${DatabaseUsername}:${DatabasePassword}@${EndpointAddress}:${EndpointPort}/${DatabaseName}
-      - EndpointAddress: !GetAtt DatabaseInstance.Endpoint.Address
-        EndpointPort: !GetAtt DatabaseInstance.Endpoint.Port
+  DatabaseHostname:
+    Description: Hostname of the created RDS instance
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+
+  DatabasePort:
+    Description: TCP port of the RDS instance listener
+    Value: !GetAtt DatabaseInstance.Endpoint.Port

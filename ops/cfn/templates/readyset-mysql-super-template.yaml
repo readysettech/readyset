@@ -38,7 +38,11 @@ Metadata:
           - DatabaseAllocatedStorage
           - DatabaseName
           - DatabaseUsername
-          - DatabasePassword
+      - Label:
+          default: Secret Configuration
+        Parameters:
+          - SSMParameterKmsKeyArn
+          - SSMPathRDSDatabasePassword
       - Label:
           default: ReadySet Configuration
         Parameters:
@@ -206,13 +210,6 @@ Parameters:
     MinLength: 1
     MaxLength: 16
 
-  DatabasePassword:
-    Description: Password to log into the MySQL Database
-    Type: String
-    NoEcho: true
-    MinLength: 8
-    MaxLength: 41
-
   ReadySetMemoryLimitGB:
     Description: Memory limit for readyset server instances, in gigabytes. This should generally be set to around 80% of the memory available on the instance. A memory limit of 0 (the default) disables eviction entirely.
     Type: Number
@@ -240,9 +237,17 @@ Parameters:
     Default: "true"
 
   ReadySetServerMaxVolumeSizeGB:
-    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false
+    Description: Maximum volume size, in gigabytes, to grow the volume to. If set to zero the volume will have no maximum size. Ignored if ReadySetServerAutoGrowVolume is false.
     Type: Number
     Default: 0
+
+  SSMParameterKmsKeyArn:
+    Description: ARN of KMS key that was used to encrypt SSM parameters referenced within this template.
+    Type: String
+
+  SSMPathRDSDatabasePassword:
+    Description: Path to SSM secure string parameter that contains the backend database password.
+    Type: String
 
 Resources:
   # Base VPC to deploy resources into
@@ -329,9 +334,9 @@ Resources:
         DatabaseStorageType: !Ref DatabaseStorageType
         DatabaseInstanceClass: !Ref DatabaseInstanceClass
         DatabaseAllocatedStorage: !Ref DatabaseAllocatedStorage
-        DatabaseName: !Ref DatabaseName
         DatabaseUsername: !Ref DatabaseUsername
-        DatabasePassword: !Ref DatabasePassword
+        DatabaseName: !Ref DatabaseName
+        SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
 
   # ReadySet for MySQL
 
@@ -349,11 +354,8 @@ Resources:
         ConsulEc2RetryJoinTagKey: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagKey
         ConsulEc2RetryJoinTagValue: !GetAtt ReadySetConsulStack.Outputs.ConsulEc2RetryJoinTagValue
         KeyPairName: !Ref KeyPairName
-        MySQLDatabaseURL: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabaseURL
         ReadySetAdapterInstanceType: !Ref ReadySetAdapterInstanceType
         ReadySetAdapterNodes: !Ref ReadySetAdapterNodes
-        ReadySetMySQLAdapterUsername: !Ref DatabaseUsername
-        ReadySetMySQLAdapterPassword: !Ref DatabasePassword
         ReadySetServerInstanceType: !Ref ReadySetServerInstanceType
         ReadySetServerNodes: !Ref ReadySetServerNodes
         ReadySetServerInitialVolumeSizeGB: !Ref ReadySetServerInitialVolumeSizeGB
@@ -366,6 +368,13 @@ Resources:
         ReadySetServerSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetServerSecurityGroupID
         ReadySetAdapterSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetAdapterSecurityGroupID
         ReadySetMonitoringSecurityGroupID: !GetAtt VPCSupplementalStack.Outputs.ReadySetMonitoringSecurityGroupID
+        # Backend DB Inputs
+        SSMParameterKmsKeyArn: !Ref SSMParameterKmsKeyArn
+        SSMPathRDSDatabasePassword: !Ref SSMPathRDSDatabasePassword
+        DatabaseName: !Ref DatabaseName
+        DatabaseHostname: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabaseHostname
+        DatabaseAdapterUsername: !Ref DatabaseUsername
+        DatabasePort: !GetAtt ReadySetRDSMySQLStack.Outputs.DatabasePort
 
 Outputs:
   ReadySetMySQLVPCEndpointService:

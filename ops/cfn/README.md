@@ -15,7 +15,7 @@ should be copied to `templates/dev.yaml` and filled in where appropriate.
 
 
 # Complete ('Super') Stack Setup
-Development stacks are configured using CloudFormation templates in this directory. 
+Development stacks are configured using CloudFormation templates in this directory.
 
 ## How-to
 Items to replace are noted with angle brackets like this: `<Replace Me>`
@@ -34,8 +34,8 @@ Super-stacks are currently limited to the `us-east-2` region, referred to as `<R
  2. Run the stack creation shell script with the command `bash ..//cfn-test/create-mysql-super-stack.sh <EC2 SSH Keypair Name>`
 
 # Testing CloudFormation Template Changes
-[Taskcat](https://github.com/aws-quickstart/taskcat) is a tool for testing AWS CloudFormation templates. 
-We use `taskcat` to validate, launch, and update CloudFormation stacks in AWS. 
+[Taskcat](https://github.com/aws-quickstart/taskcat) is a tool for testing AWS CloudFormation templates.
+We use `taskcat` to validate, launch, and update CloudFormation stacks in AWS.
 
 ## Taskcat Installation
 Taskcat can be installed via pip.
@@ -67,6 +67,9 @@ general:
     ReadySetS3BucketName: <S3 Bucket Name>
     ReadySetDeploymentName: <EC2 SSH Keypair Name>
     DatabaseName: readyset
+    # If deploying in us-east-2 sandbox (should be default)
+    SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
+    SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
   ```
 
 ## Testing Template Changes

@@ -313,6 +313,52 @@ Resources:
       PrivateDnsEnabled: "true"
       VpcId: !Ref VPCID
 
+  # SSM VPC endpoint
+
+  SSMVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: "true"
+      VpcId: !Ref VPCID
+
+  # KMS VPC endpoint
+
+  KMSVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - kms:Decrypt*
+              - kms:Generate*
+            Resource:
+              - '*'
+      SubnetIds: !Ref VPCPrivateSubnetIds
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.kms'
+      SecurityGroupIds:
+        - !Ref VPCEInterfaceSecurityGroup
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: "true"
+      VpcId: !Ref VPCID
+
   # CloudFormation VPC endpoint
 
   CloudFormationVPCEndpoint:

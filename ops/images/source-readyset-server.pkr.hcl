@@ -25,7 +25,6 @@ source "amazon-ebs" "readyset-server" {
   ami_virtualization_type = local.ami_virtualization_type
   ssh_username            = local.ssh_username
 
-
   ami_name                  = local.readyset_server_ami_name
   ssh_clear_authorized_keys = true
 

@@ -58,3 +58,7 @@ sudo install -o root -g root -m 755 \
 sudo install -o root -g root -m 755 \
   /tmp/external-base/aws/usr_local_bin_cfn-signal-wrapper.sh \
   /usr/local/bin/cfn-signal-wrapper.sh
+
+sudo install -o root -g root -m 755 \
+  /tmp/external-base/aws/usr_local_bin_get-connection-string.sh \
+  /usr/local/bin/get-connection-string.sh

@@ -15,6 +15,9 @@ trap 'on_error' ERR
 /usr/local/bin/cfn-init-wrapper.sh
 /usr/local/bin/set-host-description.sh
 /usr/local/bin/configure-consul-client.sh
+# Build connection string from inputs
+source /usr/local/bin/get-connection-string.sh
+UPSTREAM_DB_URL=${DB_URL}
 
 cat > /etc/default/readyset-mysql-adapter <<EOF
 UPSTREAM_DB_URL=${UPSTREAM_DB_URL}

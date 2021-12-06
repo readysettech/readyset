@@ -10,10 +10,12 @@ Resources:
         AvailabilityZones: !Join [',', [us-east-2a, us-east-2b, us-east-2c]]
         DatabaseAllocatedStorage: "20"
         DatabaseName: devtestdb
-        DatabasePassword: testnoria
         DatabaseUsername: root
         ReadySetDeploymentName: <deployment name>
         ReadySetAdapterNodes: 1
         ReadySetS3BucketName: <s3 bucket with templates>
         ReadySetServerNodes: 1
+        # For DB credentials. The backing value is: testnoria
+        SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
+        SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
       TemplateURL: https://<s3 bucket with templates>.s3.<s3 bucket region>.amazonaws.com/readyset/templates/readyset-mysql-super-template.yaml
