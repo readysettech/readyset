@@ -227,7 +227,9 @@ impl State for PersistentState {
                 //    will it persist the previous write too?
                 // A: No. After the program crashes, writes with option.disableWAL=true will be lost, if they are not flushed
                 //    to SST files.
-                self.db.flush().expect("Flush to disk failed");
+                self.db
+                    .flush_cf(self.db.cf_handle(PK_CF).unwrap())
+                    .expect("Flush to disk failed");
             }
             opts.set_sync(true);
         }
