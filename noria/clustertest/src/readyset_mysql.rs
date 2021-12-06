@@ -312,20 +312,12 @@ async fn query_view_after_failure() {
         let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
     }
 
-    // We never actually hit Noria after the restart with the existing view.
+    // After a restart, we hit noria on the same view because we re-retrieve the view.
     let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
-    assert_eq!(
+    assert!(matches!(
         get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
-        None
-    );
-
-    let _: std::result::Result<Vec<Row>, _> =
-        conn.exec("SELECT * FROM t1 where value = ?", (1,)).await;
-    let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
-    assert_eq!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
-        Some(DumpedMetricValue::Counter(1.0))
-    );
+        Some(_)
+    ));
 
     deployment.teardown().await.unwrap();
 }
