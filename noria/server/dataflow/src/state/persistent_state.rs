@@ -1030,6 +1030,17 @@ impl SizeOf for PersistentState {
     }
 }
 
+#[cfg(debug_assertions)]
+impl Drop for PersistentState {
+    // Sometimes during tests we can't reopen the same db because
+    // some background tasks weren't finished so it lingers in the
+    // background. This makes sure everything is stopped before we
+    // drop the inner db
+    fn drop(&mut self) {
+        self.db.cancel_all_background_work(true);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1639,8 +1650,7 @@ mod tests {
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             );
-            let dir = state._directory.unwrap();
-            let path = dir.path();
+            let path = state._directory.as_ref().unwrap().path().clone();
             assert!(path.exists());
             String::from(path.to_str().unwrap())
         };
