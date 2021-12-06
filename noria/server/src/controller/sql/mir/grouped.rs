@@ -6,7 +6,7 @@ use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{self, Expression, FunctionExpression, FunctionExpression::*};
-use noria_errors::{internal, invariant, unsupported};
+use noria_errors::{internal, invariant, unsupported, ReadySetError};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 
@@ -32,7 +32,11 @@ pub(super) fn make_predicates_above_grouped<'a>(
             for over_col in
                 Expression::Call(ccol.function.as_deref().unwrap().clone()).referred_columns()
             {
-                let over_table = over_col.table.as_ref().unwrap().as_str();
+                let over_table = over_col
+                    .table
+                    .as_ref()
+                    .ok_or_else(|| ReadySetError::NoSuchColumn(over_col.name.clone()))?
+                    .as_str();
                 let col = Column::from(over_col.clone());
 
                 if column_to_predicates.contains_key(&col) {
