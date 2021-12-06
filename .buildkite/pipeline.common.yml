@@ -324,8 +324,8 @@ steps:
   - label: ':docker: Build readyset-ops image'
     key: build-ops-image
     commands:
-      - cd ops
-      - ../.buildkite/build_image.sh build/Dockerfile readyset-ops
+      - cd ops/build
+      - ../../.buildkite/build_image.sh ./Dockerfile readyset-ops
     plugins:
       ecr#v2.5.0:
         login: true

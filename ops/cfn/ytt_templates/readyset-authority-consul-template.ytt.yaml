@@ -1,3 +1,5 @@
+#@ load("@ytt:data", "data")
+
 AWSTemplateFormatVersion: "2010-09-09"
 
 Metadata:
@@ -22,8 +24,6 @@ Metadata:
           - ConsulServerNodes
 
 Parameters:
-  # Consul Server
-
   ConsulInstanceType:
     Description: The EC2 instance type for the Consul instances.
     Type: String
@@ -55,14 +55,10 @@ Parameters:
     Description: ID of the security group to apply to ReadySet Consul Server instances.
     Type: AWS::EC2::SecurityGroup::Id
 
-  # SSH
-
   KeyPairName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
-
-  # Networking
 
   PrivateSubnet1ID:
     Description: ID of the private subnet 1 in Availability Zone 1 (e.g., subnet-xxxxxxxx)
@@ -76,12 +72,14 @@ Parameters:
     Description: ID of the private subnet 3 in Availability Zone 3 (e.g., subnet-xxxxxxxx)
     Type: AWS::EC2::Subnet::Id
 
-# Update this with the latest AMI
-
 Mappings:
   AWSAMIRegionMap:
+    us-east-1:
+      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_east_1
     us-east-2:
-      READYSETAUTHORITYCONSUL: ami-0bc5a6a247c2a5455
+      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_east_2
+    us-west-2:
+      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_west_2
 
 Resources:
   ConsulJoinManagedPolicy:

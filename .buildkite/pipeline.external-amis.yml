@@ -81,3 +81,62 @@ steps:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/Packer
     agents:
       queue: ops
+
+  - label: ":python: :yaml: build CFN templates locally"
+    key: packer-cfn-template-ytt
+    depends_on: packer-deploy-external
+    commands:
+      - buildkite-agent artifact download packer-manifest.json --step packer-deploy-external ./ops/image-deploy
+      - python3.8 -m cfn-deploy --infile ops/image-deploy/packer-manifest.json --outfile ops/cfn/templates/values.yaml
+      - cd ops/cfn/templates
+      - ytt_apply.sh -i ../ytt_templates -f values.yaml  -o ./
+      - rm values.yaml
+      - buildkite-agent artifact upload "./*.yaml"
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":rain_cloud: Lint customer facing CFN templates"
+    key: packer-cfn-template-lint
+    depends_on: packer-cfn-template-ytt
+    commands:
+      - cd ops/cfn
+      - mkdir ./rendered_templates
+      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
+      - rain fmt --verify rendered_templates/*
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":aws: Copy CFN Templates to customer facing storage"
+    key: packer-cfn-template-copy
+    depends_on: packer-cfn-template-lint
+    commands:
+      - cd ops/cfn
+      - mkdir ./rendered_templates
+      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
+      - cd ./rendered_templates
+      - aws s3 cp . s3://readysettech-cfn-internal-us-east-2/${BUILDKITE_COMMIT}/readyset/templates/ --exclude "*" --include "*.yaml" --recursive
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InternalArtifactsWrite
+    agents:
+      queue: ops

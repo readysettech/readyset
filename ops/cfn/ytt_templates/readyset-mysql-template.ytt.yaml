@@ -196,19 +196,22 @@ Parameters:
     Description: Path to SSM secure string parameter that contains the backend database password.
     Type: String
 
-# Update this with the latest AMI
-
 Mappings:
   AWSAMIRegionMap:
+    us-east-1:
+      READYSETMYSQLADAPTER: #@ data.values.readyset_mysql_adapter_us_east_1
+      READYSETSERVER: #@ data.values.readyset_server_us_east_1
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_1
     us-east-2:
-      # short commit id associated with AMIs: 9170793
-      READYSETMYSQLADAPTER: ami-080f030681b853f9a
-      READYSETSERVER: ami-0510827f8cf77da80
-      READYSETMONITOR: ami-05e93d1b01fdc76ca
+      READYSETMYSQLADAPTER: #@ data.values.readyset_mysql_adapter_us_east_2
+      READYSETSERVER: #@ data.values.readyset_server_us_east_2
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_2
+    us-west-2:
+      READYSETMYSQLADAPTER: #@ data.values.readyset_mysql_adapter_us_west_2
+      READYSETSERVER: #@ data.values.readyset_server_us_west_2
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_west_2
 
 Resources:
-  # --- START MYSQL ADAPTER --- #
-
   ReadySetMySQLAdapterRole:
     Type: AWS::IAM::Role
     Properties:
@@ -354,11 +357,6 @@ Resources:
     Properties:
       NetworkLoadBalancerArns:
         - !Ref ReadySetMySQLAdapterNLB
-
-  # --- END MYSQL ADAPTER --- #
-
-
-  # --- START SERVER --- #
 
   ReadySetServerASGLifecycleTerminateSQS:
     Type: AWS::SQS::Queue
@@ -554,11 +552,6 @@ Resources:
           Value: !Ref ReadySetDeploymentName
           PropagateAtLaunch: true
 
-  # --- END SERVER --- #
-
-
-  # --- START LOGS AGGREGATOR --- #
-
   ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -634,7 +627,6 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-          # --- END LOGS AGGREGATOR --- #
 
 Outputs:
   ReadySetAdapterNLBDNSName:

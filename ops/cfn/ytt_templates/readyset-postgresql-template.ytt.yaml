@@ -1,3 +1,5 @@
+#@ load("@ytt:data", "data")
+
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: ReadySet for PostgreSQL
@@ -162,15 +164,20 @@ Parameters:
     Type: String
     NoEcho: true
 
-# Update this with the latest AMI
-
 Mappings:
   AWSAMIRegionMap:
+    us-east-1:
+      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_east_1
+      READYSETSERVER: #@ data.values.readyset_server_us_east_1
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_1
     us-east-2:
-      # short commit id associated with AMIs: 9f9c954
-      READYSETPOSTGRESQLADAPTER: ami-06804f129cd35b2f0
-      READYSETSERVER: ami-0f9d500a6eb0391e1
-      READYSETMONITOR: ami-059cccfe54b7b4d06
+      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_east_2
+      READYSETSERVER: #@ data.values.readyset_server_us_east_2
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_2
+    us-west-2:
+      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_west_2
+      READYSETSERVER: #@ data.values.readyset_server_us_west_2
+      READYSETMONITOR: #@ data.values.readyset_monitor_us_west_2
 
 Resources:
   ReadySetPostgreSQLAdapterRole:
@@ -289,11 +296,6 @@ Resources:
     Properties:
       NetworkLoadBalancerArns:
         - !Ref ReadySetPostgreSQLAdapterNLB
-
-  # --- END PostgreSQL ADAPTER --- #
-
-
-  # --- START SERVER --- #
 
   ReadySetServerASGLifecycleTerminateSQS:
     Type: AWS::SQS::Queue
@@ -453,11 +455,6 @@ Resources:
           Value: !Ref ReadySetDeploymentName
           PropagateAtLaunch: true
 
-  # --- END SERVER --- #
-
-
-  # --- START LOGS AGGREGATOR --- #
-
   ReadySetAggregatorCloudWatchLogsManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -533,7 +530,6 @@ Resources:
             exec /usr/local/bin/user-data-init.sh
             --==BOUNDARY==
           - {}
-          # --- END LOGS AGGREGATOR --- #
 
 Outputs:
   ReadySetAdapterNLBDNSName:
