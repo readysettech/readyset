@@ -12,7 +12,7 @@ use nom_sql::{
 use vec1::vec1;
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
@@ -143,12 +143,15 @@ impl NoriaBackendInner {
         Ok(self.inputs.get_mut(table).unwrap())
     }
 
+    /// If `ignore_cache` is passed, the view cache, `outputs` will be ignored and a
+    /// view will be retrieve from noria.
     async fn get_noria_view(
         &mut self,
         view: &str,
         region: Option<&str>,
+        ignore_cache: bool,
     ) -> ReadySetResult<&mut View> {
-        if !self.outputs.contains_key(view) {
+        if ignore_cache || !self.outputs.contains_key(view) {
             let vh = match region {
                 None => noria_await!(self, self.noria.view(view))?,
                 Some(r) => noria_await!(self, self.noria.view_from_region(view, r))?,
@@ -252,6 +255,11 @@ pub struct NoriaConnector {
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
     /// The region to pass to noria for replica selection.
     region: Option<String>,
+
+    /// Set of views that have failed on previous requests. Separate from the backend
+    /// to allow returning references to schemas from views all the way to msql-srv,
+    /// but on subsequent requests, do not use a failed view.
+    failed_views: HashSet<String>,
 }
 
 /// Removes limit and offset params passed in with an execute function. These are not sent to the
@@ -314,6 +322,7 @@ impl Clone for NoriaConnector {
             tl_cached: self.tl_cached.clone(),
             prepared_statement_cache: self.prepared_statement_cache.clone(),
             region: self.region.clone(),
+            failed_views: self.failed_views.clone(),
         }
     }
 }
@@ -339,6 +348,7 @@ impl NoriaConnector {
             tl_cached: HashMap::new(),
             prepared_statement_cache: HashMap::new(),
             region,
+            failed_views: HashSet::new(),
         }
     }
 
@@ -1156,11 +1166,13 @@ impl NoriaConnector {
 
         // we need the schema for the result writer
         trace!(%qname, "query::select::extract schema");
+
+        let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self
             .inner
             .get_mut()
             .await?
-            .get_noria_view(&qname, self.region.as_deref())
+            .get_noria_view(&qname, self.region.as_deref(), view_failed)
             .await?;
 
         let getter_schema = getter
@@ -1175,7 +1187,12 @@ impl NoriaConnector {
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        do_read(getter, &query, keys, &key_column_indices, ticket).await
+        let res = do_read(getter, &query, keys, &key_column_indices, ticket).await;
+        if res.is_err() {
+            self.failed_views.insert(qname.to_owned());
+        }
+
+        res
     }
 
     pub(crate) async fn prepare_select(
@@ -1221,11 +1238,12 @@ impl NoriaConnector {
 
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
+        let view_failed = self.failed_views.take(&qname).is_some();
         let getter_schema = self
             .inner
             .get_mut()
             .await?
-            .get_noria_view(&qname, self.region.as_deref())
+            .get_noria_view(&qname, self.region.as_deref(), view_failed)
             .await?
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
@@ -1270,8 +1288,8 @@ impl NoriaConnector {
     ) -> ReadySetResult<QueryResult<'_>> {
         let NoriaConnector {
             prepared_statement_cache,
-            inner: noria,
             region,
+            failed_views,
             ..
         } = self;
 
@@ -1293,27 +1311,37 @@ impl NoriaConnector {
         // ignore LIMIT and OFFSET params (and return empty resultset according to value)
         let (offset, limit, params) = pop_limit_offset_params(params, ignored_columns);
 
-        let getter = noria
-            .get_mut()
-            .await?
-            .get_noria_view(name, region.as_deref())
-            .await?;
+        let res = {
+            let view_failed = failed_views.take(name).is_some();
+            let getter = self
+                .inner
+                .get_mut()
+                .await?
+                .get_noria_view(name, region.as_deref(), view_failed)
+                .await?;
 
-        // TODO(DAN): These should have been passed as UnsignedBigInt
-        if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
-            || matches!(limit, Some(DataType::BigInt(0)))
-        {
-            short_circuit_empty_resultset(getter).await
-        } else {
-            do_read(
-                getter,
-                statement,
-                processed_query_params.make_keys(params)?,
-                key_column_indices,
-                ticket,
-            )
-            .await
+            // TODO(DAN): These should have been passed as UnsignedBigInt
+            if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
+                || matches!(limit, Some(DataType::BigInt(0)))
+            {
+                short_circuit_empty_resultset(getter).await
+            } else {
+                do_read(
+                    getter,
+                    statement,
+                    processed_query_params.make_keys(params)?,
+                    key_column_indices,
+                    ticket,
+                )
+                .await
+            }
+        };
+
+        if res.is_err() {
+            failed_views.insert(name.to_owned());
         }
+
+        res
     }
 
     pub(crate) async fn handle_create_view(
