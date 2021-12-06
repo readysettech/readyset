@@ -44,19 +44,16 @@ steps:
                 - rust-toolchain
                 - ops/readyset-substrate
 
-            - label: ':docker: Build cargo-deny image'
-              #include:
-              #  - build/Dockerfile.cargo-deny
-              #  - Cargo.lock
-              #  - Cargo.toml
-              #  - rust-toolchain
+            - label: ':docker: Build cargo-audit image'
+              include:
+                - 'Cargo.lock'
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
 
-            - label: ':rust: :lock: Check cargo-deny'
-              #include:
-              #  - build/Dockerfile.cargo-deny
-              #  - Cargo.lock
-              #  - Cargo.toml
-              #  - rust-toolchain
+            - label: ':rust: :lock: Check cargo-audit'
+              include:
+                - 'Cargo.lock'
 
             - label: ':clippy: Check clippy'
               include:

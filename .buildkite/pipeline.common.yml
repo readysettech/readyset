@@ -69,9 +69,9 @@ steps:
         login: true
         retries: 3
 
-  - label: ':docker: Build cargo-deny image'
-    key: cargo-deny-image
-    command: .buildkite/build_image.sh build/Dockerfile.cargo-deny cargo-deny
+  - label: ':docker: Build cargo-audit image'
+    key: cargo-audit-image
+    command: .buildkite/build_image.sh build/Dockerfile.cargo-audit cargo-audit
     plugins:
       ecr#v2.5.0:
         login: true
@@ -112,14 +112,16 @@ steps:
           login: true
           retries: 3
 
-  - label: ':rust: :lock: Check cargo-deny'
+  - label: ':rust: :lock: Check cargo-audit'
     commands:
-    - cargo --locked deny check
+    # We are ignoring RUSTSEC-2020-0159 (`chrono`) and RUSTSEC-2020-0071 (`time` v0.1.x, transitively from `chrono`)
+    # in order to unblock the pipeline.
+    - cargo --locked audit --ignore RUSTSEC-2020-0159 --ignore RUSTSEC-2020-0071
     depends_on:
-    - cargo-deny-image
+    - cargo-audit-image
     plugins:
       - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-audit:latest'
           environment:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
