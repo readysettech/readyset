@@ -4618,6 +4618,17 @@ async fn aggregate_expression() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn aggregate_missing_columns() {
+    let mut g = start_simple_unsharded("aggregate_missing_columns").await;
+
+    g.install_recipe("CREATE TABLE t (id INT);").await.unwrap();
+
+    let res = g.extend_recipe("QUERY q: SELECT max(idd) FROM t").await;
+    assert!(res.is_err());
+    assert!(res.err().unwrap().to_string().contains("idd"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn post_join_filter() {
     let mut g = start_simple("post_join_filter").await;
 
