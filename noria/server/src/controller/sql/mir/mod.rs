@@ -1779,6 +1779,9 @@ impl SqlToMirConverter {
                 _ => {
                     let mut index_type = None;
                     for (pc, op) in qg.parameters() {
+                        if !(matches!(*op, BinaryOperator::Equal)) {
+                            unsupported!("Unsupported binary operator '{}'", *op);
+                        }
                         match IndexType::for_operator(*op) {
                             Some(it) if index_type.is_none() => index_type = Some(it),
                             Some(it) if index_type == Some(it) => {}
