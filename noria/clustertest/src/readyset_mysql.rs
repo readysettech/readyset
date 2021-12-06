@@ -257,3 +257,75 @@ async fn async_migrations_sanity_check() {
 
     deployment.teardown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn query_view_after_failure() {
+    let cluster_name = "ct_query_view_after_failure";
+    let mut deployment = DeploymentParams::new(cluster_name);
+    deployment.add_server(ServerParams::default());
+    deployment.deploy_mysql();
+    deployment.deploy_mysql_adapter();
+
+    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let _ = conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+
+    // Query until we hit noria once.
+    let query = "SELECT * FROM t1 where uid = ?";
+    loop {
+        let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
+        let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+        if Some(DumpedMetricValue::Counter(1.0))
+            == get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT)
+        {
+            break;
+        }
+    }
+
+    // TODO(ENG-862): This is required as propagation of the INSERT must occur
+    // before kill_server or we may panic on recovery.
+    sleep(std::time::Duration::from_secs(10)).await;
+
+    deployment
+        .kill_server(&deployment.server_addrs()[0])
+        .await
+        .unwrap();
+    deployment
+        .start_server(ServerParams::default())
+        .await
+        .unwrap();
+
+    for _ in 0..10 {
+        let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
+    }
+
+    // We never actually hit Noria after the restart with the existing view.
+    let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+    assert_eq!(
+        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
+        None
+    );
+
+    let _: std::result::Result<Vec<Row>, _> =
+        conn.exec("SELECT * FROM t1 where value = ?", (1,)).await;
+    let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+    assert_eq!(
+        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
+        Some(DumpedMetricValue::Counter(1.0))
+    );
+
+    deployment.teardown().await.unwrap();
+}
