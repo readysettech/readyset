@@ -32,7 +32,6 @@ use crate::prelude::*;
 use crate::state::{RangeLookupResult, RecordResult, State};
 use bincode::Options;
 use common::SizeOf;
-use itertools::Itertools;
 use noria::replication::ReplicationOffset;
 use noria::KeyComparison;
 use rocksdb::{
@@ -345,7 +344,7 @@ impl State for PersistentState {
         Some(self)
     }
 
-    ///
+    /// Add a new index to the table, each index contains a copy of the data
     /// Panics if partial is Some
     fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         #[allow(clippy::panic)] // This should definitely never happen!
@@ -369,19 +368,39 @@ impl State for PersistentState {
 
         tokio::task::block_in_place(|| {
             self.create_cf(&index_id);
+
             let db = &mut self.db;
             let cf = db.cf_handle(&index_id).unwrap();
             let is_unique = check_if_index_is_unique(&self.unique_keys, &columns);
+
+            // Prevent autocompactions while we reindex the whole table
+            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
+                error!(%err, "Error setting cf options");
+            }
+
+            let mut opts = rocksdb::WriteOptions::default();
+            opts.disable_wal(true);
 
             if let Some(primary_index) = self.indices.first() {
                 // This is not the first index that we add to this state, and we may already
                 // have some data stored in the table. We use the first index to iterate
                 // over the data and copy it to the newly created column family.
                 let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
-                let iter = db.full_iterator_cf(primary_cf, rocksdb::IteratorMode::Start);
-                for chunk in iter.chunks(INDEX_BATCH_SIZE).into_iter() {
+
+                let mut read_opts = rocksdb::ReadOptions::default();
+                read_opts.set_total_order_seek(true);
+                let mut iter = db.raw_iterator_cf_opt(primary_cf, read_opts);
+
+                iter.seek_to_first();
+
+                while iter.valid() {
                     let mut batch = WriteBatch::default();
-                    for (ref pk, ref value) in chunk {
+
+                    while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
+                        if batch.len() == INDEX_BATCH_SIZE {
+                            break;
+                        }
+
                         let row: Vec<DataType> = deserialize(value);
                         let index_key = Self::build_key(&row, &columns);
                         let key = if is_unique && !index_key.has_null() {
@@ -391,10 +410,20 @@ impl State for PersistentState {
                             Self::serialize_secondary(&index_key, pk)
                         };
                         batch.put_cf(cf, &key, value);
+
+                        iter.next();
                     }
 
-                    db.write(batch).unwrap();
+                    db.write_opt(batch, &opts).unwrap();
                 }
+            }
+            // Manually compact the newly created column family
+            db.compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
+            // Flush just in case
+            db.flush_cf(cf).unwrap();
+            // Reenable auto compactions when done
+            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+                error!(%err, "Error setting cf options");
             }
 
             self.indices.push(PersistentIndex {
