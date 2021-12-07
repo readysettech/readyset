@@ -1,0 +1,15 @@
+---
+ReadWriteBenchmark:
+  read_query:
+    query: data/fastly/fastly_read_query.sql
+    query_spec_file: data/fastly/fastly_read_query.spec
+    query_spec: ~
+  target_read_qps: 10
+  target_update_qps: 10
+  threads: 4
+  update_query: data/fastly/fastly_update_query.sql
+  update_query_spec_file: ~
+  update_query_spec: ~
+  data_generator:
+    schema: data/fastly/fastly_db_tiny.sql
+    var_overrides: {}

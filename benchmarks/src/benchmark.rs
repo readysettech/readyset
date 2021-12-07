@@ -16,6 +16,7 @@ use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
 use crate::migration_benchmark::MigrationBenchmark;
 use crate::query_benchmark::QueryBenchmark;
+use crate::read_write_benchmark::ReadWriteBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
@@ -45,6 +46,7 @@ pub enum Benchmark {
     WriteLatencyBenchmark,
     MigrationBenchmark,
     EvictionBenchmark,
+    ReadWriteBenchmark,
 }
 
 impl Benchmark {
@@ -59,6 +61,7 @@ impl Benchmark {
             Self::WriteLatencyBenchmark(_) => "write_latency",
             Self::MigrationBenchmark(_) => "migration_benchmark",
             Self::EvictionBenchmark(_) => "eviction",
+            Self::ReadWriteBenchmark(_) => "read_write_benchmark",
         }
     }
 }

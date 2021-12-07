@@ -39,11 +39,21 @@ pub struct ArbitraryQueryParameters {
     /// `DistributionAnnotation` for the format for each parameters annotation.
     #[clap(long, conflicts_with = "query-spec-file")]
     query_spec: Option<String>,
-
-    stored_query: Option<String>,
 }
 
 impl ArbitraryQueryParameters {
+    pub fn new(
+        query: PathBuf,
+        query_spec_file: Option<PathBuf>,
+        query_spec: Option<String>,
+    ) -> Self {
+        Self {
+            query,
+            query_spec_file,
+            query_spec,
+        }
+    }
+
     pub async fn prepared_statement(
         &self,
         conn: &mut mysql_async::Conn,
