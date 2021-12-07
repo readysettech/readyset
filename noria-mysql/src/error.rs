@@ -2,6 +2,7 @@ use std::io;
 
 use msql_srv::MsqlSrvError;
 use noria::ReadySetError;
+use noria_client::upstream_database::IsFatalError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -48,5 +49,11 @@ impl Error {
             }
             _ => msql_srv::ErrorKind::ER_UNKNOWN_ERROR,
         }
+    }
+}
+
+impl IsFatalError for Error {
+    fn is_fatal(&self) -> bool {
+        matches!(self, Self::MySql(e) if e.is_fatal())
     }
 }

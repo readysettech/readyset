@@ -129,6 +129,24 @@ impl UpstreamDatabase for MySqlUpstream {
         self.conn.opts().db_name()
     }
 
+    async fn reset(&mut self) -> Result<(), Error> {
+        let opts = self.conn.opts().clone();
+        let conn = Conn::new(opts).await?;
+        let prepared_statements = HashMap::new();
+        let url = self.url.clone();
+        let old_self = std::mem::replace(
+            self,
+            Self {
+                conn,
+                prepared_statements,
+                url,
+                in_transaction: false,
+            },
+        );
+        let _ = old_self.conn.disconnect().await as Result<(), _>;
+        Ok(())
+    }
+
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
     async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>

@@ -7,7 +7,7 @@
 //! response from Noria.
 use crate::backend::{noria_connector, NoriaConnector};
 use crate::query_status_cache::QueryStatusCache;
-use crate::upstream_database::NoriaCompare;
+use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::UpstreamDatabase;
 use metrics::counter;
 use noria::ReadySetResult;
@@ -89,11 +89,31 @@ where
 
     async fn perform_migration(&mut self, stmt: &SelectStatement) {
         let upstream_result = if self.validate_queries {
-            let upstream_result = self.upstream.prepare(stmt.to_string()).await;
+            let mut upstream_result = self.upstream.prepare(stmt.to_string()).await;
 
-            if let Err(u) = upstream_result {
+            // If we returned an error indicating the connection was closed, we will try to
+            // reconnect. If that fails, we have an unrecoverable error and should wait until the
+            // next reconciliation pass.
+            match upstream_result {
+                Err(e) if e.is_fatal() => {
+                    if let Err(e) = self.upstream.reset().await {
+                        error!(
+                            error = %e,
+                            query = %stmt,
+                            "MigrationHandler dropped conn to Upstream and failed to reconnnect",
+                        );
+                        return;
+                    } else {
+                        // Succeeded on reconnecting. Retry prepare.
+                        upstream_result = self.upstream.prepare(stmt.to_string()).await;
+                    }
+                }
+                _ => {}
+            };
+
+            if let Err(e) = upstream_result {
                 error!(
-                    error = %u,
+                    error = %e,
                     query = %stmt,
                     "Query failed to be prepared against upstream",
                 );
