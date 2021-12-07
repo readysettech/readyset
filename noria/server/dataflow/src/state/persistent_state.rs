@@ -63,7 +63,7 @@ const DEFAULT_CF: &str = "default";
 const PK_CF: &str = "0";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
-const INDEX_BATCH_SIZE: usize = 100_000;
+const INDEX_BATCH_SIZE: usize = 10_000;
 
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the `META_KEY`
 fn get_meta(db: &rocksdb::DB) -> PersistentMeta<'static> {
@@ -627,7 +627,7 @@ impl PersistentState {
         }
 
         // Increase a few default limits:
-        opts.set_max_bytes_for_level_base(2048 * 1024 * 1024);
+        opts.set_max_bytes_for_level_base(1024 * 1024 * 1024);
         opts.set_target_file_size_base(256 * 1024 * 1024);
 
         // Keep up to 4 parallel memtables:

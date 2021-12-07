@@ -93,7 +93,7 @@ struct Opts {
     durability: DurabilityMode,
 
     /// Number of background threads used by RocksDB
-    #[clap(long, default_value = "4")]
+    #[clap(long, default_value = "6")]
     persistence_threads: i32,
 
     /// Time to wait before processing a merged packet, in nanoseconds
