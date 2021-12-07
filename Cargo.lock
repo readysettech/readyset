@@ -1033,6 +1033,7 @@ dependencies = [
  "noria-mysql",
  "noria-server",
  "num-integer",
+ "parking_lot",
  "query_generator",
  "rand 0.8.4",
  "readyset-logging",

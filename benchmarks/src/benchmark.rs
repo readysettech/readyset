@@ -19,6 +19,7 @@ use crate::scale_views::ScaleViews;
 use crate::template::Template;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::prometheus::PrometheusEndpoint;
+use crate::write_benchmark::WriteBenchmark;
 use crate::write_latency_benchmark::WriteLatencyBenchmark;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -34,6 +35,7 @@ pub enum Benchmark {
     Template, // Example benchmark that does not execute any commands.
     /// Basic read benchmark
     QueryBenchmark,
+    WriteBenchmark,
     CacheHitBenchmark,
     ScaleViews,
     ScaleConnections,
@@ -46,6 +48,7 @@ impl Benchmark {
         match self {
             Self::Template(_) => "template",
             Self::QueryBenchmark(_) => "query_benchmark",
+            Self::WriteBenchmark(_) => "write_benchmark",
             Self::CacheHitBenchmark(_) => "cache_hit_benchmark",
             Self::ScaleViews(_) => "scale_views",
             Self::ScaleConnections(_) => "scale_connections",
