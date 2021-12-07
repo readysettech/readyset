@@ -23,6 +23,10 @@ pub trait NoriaCompare {
         -> Result<(), Self::Error>;
 }
 
+pub trait IsFatalError {
+    fn is_fatal(&self) -> bool;
+}
+
 /// A connector to some kind of upstream database which can be used for passthrough write queries
 /// and fallback read queries.
 ///
@@ -52,10 +56,13 @@ pub trait UpstreamDatabase: Sized + Send {
     /// This type, which must have at least one enum variant that includes a
     /// [`noria::ReadySetError`], is used as the error type for all return values in the
     /// noria_client backend.
-    type Error: From<ReadySetError> + Error + Send + Sync + 'static;
+    type Error: From<ReadySetError> + IsFatalError + Error + Send + Sync + 'static;
 
     /// Create a new connection to this upstream database
     async fn connect(url: String) -> Result<Self, Self::Error>;
+
+    /// Resets the connection with the upstream database
+    async fn reset(&mut self) -> Result<(), Self::Error>;
 
     /// Return a reference to the URL used when originally constructing this database via
     /// [`connect`]

@@ -130,6 +130,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         &self.url
     }
 
+    async fn reset(&mut self) -> Result<(), Error> {
+        let url = self.url.clone();
+        let old_self = std::mem::replace(self, Self::connect(url).await?);
+        drop(old_self);
+        Ok(())
+    }
+
     async fn prepare<'a, S>(&'a mut self, query: S) -> Result<UpstreamPrepare<Self>, Error>
     where
         S: AsRef<str> + Send + Sync + 'a,
