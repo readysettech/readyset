@@ -18,6 +18,7 @@ use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
+use crate::utils::prometheus::PrometheusEndpoint;
 use crate::write_latency_benchmark::WriteLatencyBenchmark;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -53,16 +54,40 @@ impl Benchmark {
     }
 }
 
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
-pub struct BenchmarkParameters {
-    /// The connection string of a database that accepts MySQL queries.
+#[derive(Parser, Clone, Deserialize, Serialize)]
+pub struct DeploymentParameters {
+    /// Instance label, for metrics.  In CI, it makes sense to set this to the
+    /// CL# or commit hash.
+    #[clap(long, default_value("local"))]
+    pub instance_label: String,
+
+    /// Address of a push gateway for a benchmark's prometheus metrics.
     #[clap(long)]
-    pub mysql_conn_str: String,
+    pub prometheus_push_gateway: Option<String>,
+
+    /// Noria metrics endpoint; Endpoint that can be used to forward metrics from
+    /// the server. If not specified, no metrics will be forwarded.
+    #[clap(long)]
+    pub prometheus_endpoint: Option<PrometheusEndpoint>,
+
+    /// Target database connection string. This is the database in the deployment
+    /// we are benchmarking operations against.
+    #[clap(long, default_value = "")]
+    pub target_conn_str: String,
+
+    /// Setup database connection string.    
+    #[clap(long, default_value = "")]
+    pub setup_conn_str: String,
 }
 
-impl BenchmarkParameters {
-    pub async fn connect(&self) -> Result<Conn> {
-        let opts = Opts::from_url(&self.mysql_conn_str)?;
+impl DeploymentParameters {
+    pub async fn connect_to_target(&self) -> Result<Conn> {
+        let opts = Opts::from_url(&self.target_conn_str)?;
+        Ok(Conn::new(opts).await?)
+    }
+
+    pub async fn connect_to_setup(&self) -> Result<Conn> {
+        let opts = Opts::from_url(&self.setup_conn_str)?;
         Ok(Conn::new(opts).await?)
     }
 }
@@ -75,14 +100,14 @@ pub trait BenchmarkControl {
     /// Any code required to perform setup of the benchmark goes here. This
     /// step may optionally be skipped if setup can be shared with other
     /// benchmarks.
-    async fn setup(&self) -> Result<()>;
+    async fn setup(&self, deployment: &DeploymentParameters) -> Result<()>;
 
     /// In order to support the runner short-circuiting setup, this function is
     /// run to check whether or not setup is already complete.
-    async fn is_already_setup(&self) -> Result<bool>;
+    async fn is_already_setup(&self, deployment: &DeploymentParameters) -> Result<bool>;
 
     /// Perform actual benchmarking, writing results to prometheus.
-    async fn benchmark(&self) -> Result<()>;
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()>;
 
     /// Get Prometheus labels for this benchmark run.
     fn labels(&self) -> HashMap<String, String>;
@@ -91,6 +116,7 @@ pub trait BenchmarkControl {
     // async fn regression_check(&self) -> Result<bool>;
 
     /// Set of (endpoint, filter predicate) pairs for metrics to pull in from Prometheus URLs and
-    /// re-export as part of the benchmark's metrics
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics>;
+    /// re-export as part of the benchmark's metrics. Only called if `deployment` has a
+    /// PrometheusEndpoint.
+    fn forward_metrics(&self, deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics>;
 }

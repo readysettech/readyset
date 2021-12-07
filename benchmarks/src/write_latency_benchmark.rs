@@ -12,16 +12,13 @@ use tracing::info;
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::utils::generate::DataGenerator;
-use crate::utils::prometheus::{forward, ForwardPrometheusMetrics, PrometheusEndpoint};
+use crate::utils::prometheus::{forward, ForwardPrometheusMetrics};
 use crate::utils::query::ArbitraryQueryParameters;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteLatencyBenchmark {
-    #[clap(flatten)]
-    common: BenchmarkParameters,
-
     #[clap(flatten)]
     data_generator: DataGenerator,
 
@@ -35,28 +32,29 @@ pub struct WriteLatencyBenchmark {
     /// Number of updates to issue
     #[clap(long, default_value = "1000")]
     updates: u32,
-
-    /// Noria metrics endpoint; write latency histogram will be parsed from this
-    #[clap(long)]
-    prometheus_endpoint: PrometheusEndpoint,
 }
 
 #[async_trait]
 impl BenchmarkControl for WriteLatencyBenchmark {
-    async fn setup(&self) -> Result<()> {
-        self.data_generator.install().await?;
+    async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
+        self.data_generator
+            .install(&deployment.setup_conn_str)
+            .await?;
         Ok(())
     }
 
-    async fn is_already_setup(&self) -> Result<bool> {
+    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
         // TODO(mc):  Implement
         Ok(false)
     }
 
-    async fn benchmark(&self) -> Result<()> {
-        let mut db = self.common.connect().await?;
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+        let mut db = deployment.connect_to_target().await?;
 
-        let mut data_spec = self.data_generator.generate().await?;
+        let mut data_spec = self
+            .data_generator
+            .generate(&deployment.target_conn_str)
+            .await?;
         info!("Rows inserted");
 
         let prepared_statement = self.update_query.prepared_statement(&mut db).await?;
@@ -109,9 +107,10 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         labels
     }
 
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
-        vec![forward(self.prometheus_endpoint.clone(), |metric| {
-            metric.name.starts_with("packet_write_propagation_time_us")
-        })]
+    fn forward_metrics(&self, deployment: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
+        vec![forward(
+            deployment.prometheus_endpoint.clone().unwrap(),
+            |metric| metric.name.starts_with("packet_write_propagation_time_us"),
+        )]
     }
 }

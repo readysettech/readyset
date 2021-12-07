@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use benchmarks::benchmark::{Benchmark, BenchmarkControl};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
 use benchmarks::benchmark_gauge;
 use benchmarks::utils;
 
@@ -22,20 +22,14 @@ struct BenchmarkRunner {
     #[clap(long)]
     skip_setup: bool,
 
-    /// Instance label, for metrics.  In CI, it makes sense to set this to the
-    /// CL# or commit hash.
-    #[clap(long, default_value("local"))]
-    instance_label: String,
-
     /// The duartion, specified as the number of seconds that the experiment
     /// should be running. If `None` is provided, the experiment will run
     /// until it is interrupted.
     #[clap(long, parse(try_from_str = utils::seconds_as_str_to_duration))]
     pub run_for: Option<Duration>,
 
-    /// Address of a push gateway for a benchmark's prometheus metrics.
-    #[clap(long)]
-    prometheus_push_gateway: Option<String>,
+    #[clap(flatten)]
+    pub deployment: DeploymentParameters,
 
     /// Instead of running the benchmark, write the parameters to a benchmark
     /// specification file, to be run with the from-file subcommand.
@@ -56,16 +50,17 @@ impl BenchmarkRunner {
     pub async fn init_prometheus(&mut self) -> anyhow::Result<Option<PrometheusHandle>> {
         // Append the full pushgateway config path to the user provided
         // address.
-        self.prometheus_push_gateway = self.prometheus_push_gateway.as_ref().map(|s| {
-            format!(
-                "{}/metrics/job/{}/instance/{}",
-                s.replace("//", "/"),
-                self.benchmark.as_ref().unwrap().name_label(),
-                self.instance_label
-            )
-        });
+        self.deployment.prometheus_push_gateway =
+            self.deployment.prometheus_push_gateway.as_ref().map(|s| {
+                format!(
+                    "{}/metrics/job/{}/instance/{}",
+                    s.replace("//", "/"),
+                    self.benchmark.as_ref().unwrap().name_label(),
+                    self.deployment.instance_label
+                )
+            });
 
-        let handle = if let Some(prometheus) = &self.prometheus_push_gateway {
+        let handle = if let Some(prometheus) = &self.deployment.prometheus_push_gateway {
             let mut builder = PrometheusBuilder::new()
                 .disable_http_listener()
                 .idle_timeout(MetricKindMask::ALL, None)
@@ -86,10 +81,16 @@ impl BenchmarkRunner {
     }
 
     pub fn start_metric_readers(&self) -> Option<(JoinHandle<()>, oneshot::Sender<()>)> {
-        let push_gateway = self.prometheus_push_gateway.clone()?;
+        let push_gateway = self.deployment.prometheus_push_gateway.clone()?;
         let benchmark = self.benchmark.as_ref().unwrap();
-        let forward = benchmark.forward_metrics();
+        let forward = benchmark.forward_metrics(&self.deployment);
+
         if forward.is_empty() {
+            return None;
+        }
+
+        if self.deployment.prometheus_endpoint.is_none() {
+            warn!("No prometheus endpoint passed but this benchmark fowards metrics. The benchmark metrics may be incomplete.");
             return None;
         }
 
@@ -131,14 +132,14 @@ impl BenchmarkRunner {
         let prometheus_handle = self.init_prometheus().await?;
 
         let benchmark = self.benchmark.as_ref().unwrap();
-        if !self.skip_setup && !benchmark.is_already_setup().await? {
-            benchmark.setup().await?;
+        if !self.skip_setup && !benchmark.is_already_setup(&self.deployment).await? {
+            benchmark.setup(&self.deployment).await?;
         }
 
         let importer = self.start_metric_readers();
 
         let start_time = Instant::now();
-        utils::run_for(benchmark.benchmark(), self.run_for).await?;
+        utils::run_for(benchmark.benchmark(&self.deployment), self.run_for).await?;
         let duration = start_time.elapsed();
 
         if let Some((handle, tx)) = importer {
@@ -155,7 +156,7 @@ impl BenchmarkRunner {
 
         // Push metrics recorded in the push gateway manually before exiting.
         if let (Some(addr), Some(prometheus_handle)) =
-            (self.prometheus_push_gateway, prometheus_handle)
+            (self.deployment.prometheus_push_gateway, prometheus_handle)
         {
             let client = reqwest::Client::default();
             let output = prometheus_handle.render();

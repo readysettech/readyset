@@ -9,7 +9,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -24,10 +24,6 @@ const MAX_RANDOM_GENERATIONS: u32 = 20;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct CacheHitBenchmark {
-    /// Common shared benchmark parameters.
-    #[clap(flatten)]
-    common: BenchmarkParameters,
-
     /// Parameters to handle generating parameters for arbitrary queries.
     #[clap(flatten)]
     query: ArbitraryQueryParameters,
@@ -103,21 +99,25 @@ impl CachingQueryGenerator {
 
 #[async_trait]
 impl BenchmarkControl for CacheHitBenchmark {
-    async fn setup(&self) -> Result<()> {
-        self.data_generator.install().await?;
-        self.data_generator.generate().await?;
+    async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
+        self.data_generator
+            .install(&deployment.setup_conn_str)
+            .await?;
+        self.data_generator
+            .generate(&deployment.setup_conn_str)
+            .await?;
         Ok(())
     }
 
-    async fn is_already_setup(&self) -> Result<bool> {
+    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
         // TODO(mc):  If this uses a constant schema, implement a check here.  If not, keep
         // returning false.
         Ok(false)
     }
 
-    async fn benchmark(&self) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);
 
@@ -136,7 +136,7 @@ impl BenchmarkControl for CacheHitBenchmark {
         labels
     }
 
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+    fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
 }

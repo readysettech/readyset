@@ -6,7 +6,7 @@
 //! it takes to create the connection and the number of views.
 //! `--param_count` can be specified to modify the number of
 //! parameters in the view.
-use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::{bail, Result};
@@ -23,10 +23,6 @@ const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleViews {
-    /// Common shared benchmark parameters.
-    #[clap(flatten)]
-    common: BenchmarkParameters,
-
     /// The number of views to create in the experiment.
     #[clap(long, default_value = "1")]
     num_views: usize,
@@ -56,9 +52,9 @@ fn get_columns(num_views: usize, param_count: usize) -> Vec<String> {
 impl BenchmarkControl for ScaleViews {
     /// Creates a table with enough columns that we can create `num_views` off a
     /// combination of the columns.
-    async fn setup(&self) -> Result<()> {
+    async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!("Beginning setup");
-        let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&deployment.setup_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
 
         let columns = get_columns(self.num_views, self.param_count);
@@ -82,11 +78,11 @@ impl BenchmarkControl for ScaleViews {
         Ok(())
     }
 
-    async fn is_already_setup(&self) -> Result<bool> {
+    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
         Ok(false)
     }
 
-    async fn benchmark(&self) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!(
             "Running benchmark with {} views, {} params per view",
             self.num_views, self.param_count
@@ -97,7 +93,7 @@ impl BenchmarkControl for ScaleViews {
 
         assert!(permutations.len() >= self.num_views);
         for c in permutations.iter().take(self.num_views) {
-            let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
+            let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
             let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
@@ -152,7 +148,8 @@ impl BenchmarkControl for ScaleViews {
         labels.insert("param_count".to_string(), self.param_count.to_string());
         labels
     }
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+
+    fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
 }

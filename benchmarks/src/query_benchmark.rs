@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::error;
 
-use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -26,11 +26,7 @@ use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter}
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
-pub struct QueryBenchmarkParams {
-    /// Common shared benchmark parameters.
-    #[clap(flatten)]
-    common: BenchmarkParameters,
-
+pub struct QueryBenchmark {
     /// Parameters to handle generating parameters for arbitrary queries.
     #[clap(flatten)]
     query: ArbitraryQueryParameters,
@@ -43,50 +39,61 @@ pub struct QueryBenchmarkParams {
     /// The number of threads to execute the read benchmark across.
     #[clap(long, default_value = "1")]
     threads: u64,
-}
-
-#[derive(Parser, Clone, Default, Serialize, Deserialize)]
-pub struct QueryBenchmark {
-    #[clap(flatten)]
-    params: QueryBenchmarkParams,
 
     /// Install and generate from an arbitrary schema.
     #[clap(flatten)]
     data_generator: DataGenerator,
 }
 
+#[derive(Clone)]
+pub struct QueryBenchmarkThreadParams {
+    query: ArbitraryQueryParameters,
+    target_qps: Option<u64>,
+    threads: u64,
+    mysql_conn_str: String,
+}
+
 #[async_trait]
 impl BenchmarkControl for QueryBenchmark {
-    async fn setup(&self) -> Result<()> {
-        self.data_generator.install().await?;
-        self.data_generator.generate().await?;
+    async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
+        self.data_generator
+            .install(&deployment.setup_conn_str)
+            .await?;
+        self.data_generator
+            .generate(&deployment.setup_conn_str)
+            .await?;
         Ok(())
     }
 
-    async fn is_already_setup(&self) -> Result<bool> {
+    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
         // TODO(mc):  If this uses a constant schema, implement a check here.  If not, keep
         // returning false.
         Ok(false)
     }
 
-    async fn benchmark(&self) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+        let thread_data = QueryBenchmarkThreadParams {
+            query: self.query.clone(),
+            target_qps: self.target_qps,
+            threads: self.threads,
+            mysql_conn_str: deployment.target_conn_str.clone(),
+        };
         benchmark_counter!(
-            "read_benchmark.queries_executed",
+            "query_benchmark.queries_executed",
             Count,
             "Number of queries executed in this benchmark run"
         );
-        multi_thread::run_multithread_benchmark::<Self>(self.params.threads, self.params.clone())
-            .await
+        multi_thread::run_multithread_benchmark::<Self>(self.threads, thread_data.clone()).await
     }
 
     fn labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        labels.extend(self.params.query.labels());
+        labels.extend(self.query.labels());
         labels.extend(self.data_generator.labels());
         labels
     }
 
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+    fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
 }
@@ -109,7 +116,7 @@ impl QueryBenchmarkResultBatch {
 #[async_trait]
 impl MultithreadBenchmark for QueryBenchmark {
     type BenchmarkResult = QueryBenchmarkResultBatch;
-    type Parameters = QueryBenchmarkParams;
+    type Parameters = QueryBenchmarkThreadParams;
 
     async fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
@@ -122,7 +129,7 @@ impl MultithreadBenchmark for QueryBenchmark {
             for l in u.queries {
                 hist.record(u64::try_from(l).unwrap()).unwrap();
                 benchmark_histogram!(
-                    "read_benchmark.query_duration",
+                    "query_benchmark.query_duration",
                     Microseconds,
                     "Duration of queries executed",
                     l as f64
@@ -130,12 +137,12 @@ impl MultithreadBenchmark for QueryBenchmark {
             }
         }
         benchmark_increment_counter!(
-            "read_benchmark.queries_executed",
+            "query_benchmark.queries_executed",
             Count,
             queries_this_interval
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
-        benchmark_histogram!("read_benchmark.qps", Count, "Queries per second", qps);
+        benchmark_histogram!("query_benchmark.qps", Count, "Queries per second", qps);
         println!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,
@@ -152,7 +159,7 @@ impl MultithreadBenchmark for QueryBenchmark {
         sender: UnboundedSender<Self::BenchmarkResult>,
     ) -> Result<()> {
         // Prepare the query to retrieve the query schema.
-        let opts = mysql_async::Opts::from_url(&params.common.mysql_conn_str).unwrap();
+        let opts = mysql_async::Opts::from_url(&params.mysql_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         let prepared_statement = params.query.prepared_statement(&mut conn).await?;
 

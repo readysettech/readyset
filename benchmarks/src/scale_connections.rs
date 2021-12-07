@@ -1,4 +1,4 @@
-use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
+use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::Result;
@@ -11,10 +11,6 @@ use tracing::info;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleConnections {
-    /// Common shared benchmark parameters.
-    #[clap(flatten)]
-    common: BenchmarkParameters,
-
     /// The number of views to create in the experiment.
     #[clap(long, default_value = "1")]
     num_connections: usize,
@@ -27,15 +23,15 @@ pub struct ScaleConnections {
 
 #[async_trait]
 impl BenchmarkControl for ScaleConnections {
-    async fn setup(&self) -> Result<()> {
+    async fn setup(&self, _: &DeploymentParameters) -> Result<()> {
         Ok(())
     }
 
-    async fn is_already_setup(&self) -> Result<bool> {
+    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
         Ok(false)
     }
 
-    async fn benchmark(&self) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!(
             "Running benchmark connecting to {} connections.",
             self.num_connections
@@ -43,7 +39,7 @@ impl BenchmarkControl for ScaleConnections {
 
         let mut connections = Vec::new();
         for _ in 0..self.num_connections {
-            let opts = mysql_async::Opts::from_url(&self.common.mysql_conn_str).unwrap();
+            let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
             let conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
@@ -86,7 +82,8 @@ impl BenchmarkControl for ScaleConnections {
         labels.insert("parallel".to_string(), self.parallel.to_string());
         labels
     }
-    fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+
+    fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }
 }

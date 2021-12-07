@@ -1,12 +1,9 @@
 ---
 CacheHitBenchmark:
-  common:
-    mysql_conn_str: "mysql://127.0.0.1:3307"
   query:
     query: src/data/fastly/fastly_read_query.sql
     query_spec_file: ~
     query_spec: ~
   data_generator:
     schema: src/data/fastly/fastly_db.sql
-    database_url: "mysql://root:noria@127.0.0.1:3306/test"
     var_overrides: {}

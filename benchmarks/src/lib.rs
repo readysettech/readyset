@@ -11,15 +11,12 @@
 //! use metrics::Unit;
 //! use mysql_async::prelude::*;
 //!
-//! use benchmarks::benchmark::{BenchmarkControl, BenchmarkParameters};
+//! use benchmarks::benchmark::{BenchmarkControl, DeploymentParameters};
 //! use benchmarks::benchmark_gauge;
 //! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
 //!
 //! #[derive(clap::Parser, Clone)]
 //! pub struct MyBenchmark {
-//!     #[clap(flatten)]
-//!     common: BenchmarkParameters,
-//!
 //!     #[clap(long, default_value = "10")]
 //!     where_value: u32,
 //!
@@ -29,8 +26,8 @@
 //!
 //! #[async_trait::async_trait]
 //! impl BenchmarkControl for MyBenchmark {
-//!     async fn setup(&self) -> Result<()> {
-//!         let mut conn = self.common.connect().await?;
+//!     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()> {
+//!         let mut conn = deployment.connect_to_setup().await?;
 //!         r"CREATE TABLE integers (id INT UNSIGNED NOT NULL)".ignore(&mut conn).await?;
 //!         let stmt = conn.prep(r"INSERT INTO integers VALUES (?), (?), (?), (?)").await?;
 //!         let chunks: Tuples<Range<u32>, (_, _, _, _)> = (0..self.row_count).tuples();
@@ -38,8 +35,8 @@
 //!         Ok(())
 //!     }
 //!
-//!     async fn is_already_setup(&self) -> Result<bool> {
-//!         let mut conn = self.common.connect().await?;
+//!     async fn is_already_setup(&self, deployment: &DeploymentParameters) -> Result<bool> {
+//!         let mut conn = deployment.connect_to_setup().await?;
 //!         match r"DESCRIBE TABLE integers".ignore(&mut conn).await {
 //!             Ok(_) => (),
 //!             // 1146 is a "table doesn't exist" error
@@ -50,8 +47,8 @@
 //!         Ok(count == self.row_count)
 //!     }
 //!
-//!     async fn benchmark(&self) -> Result<()> {
-//!         let mut conn = self.common.connect().await?;
+//!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+//!         let mut conn = deployment.connect_to_target().await?;
 //!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;
 //!         for _ in 0..10_000_000 {
 //!             let _: Vec<u32> = conn.exec(&stmt, (self.where_value,)).await?;
@@ -79,7 +76,7 @@
 //!         labels
 //!     }
 //!
-//!     fn forward_metrics(&self) -> Vec<ForwardPrometheusMetrics> {
+//!     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
 //!         vec![]
 //!     }
 //! }

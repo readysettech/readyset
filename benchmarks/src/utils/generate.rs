@@ -29,12 +29,6 @@ pub struct DataGenerator {
     #[clap(long, value_hint = ValueHint::AnyPath)]
     schema: PathBuf,
 
-    /// MySQL database connection string. This parameter is kept separate
-    /// from other benchmarks MySQL parameter as data generation typically
-    /// will go directly to the upstream MySQL database.
-    #[clap(long)]
-    database_url: String,
-
     /// Change or assign values to user variables in the provided schema.
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
     #[clap(long, default_value = "{}")]
@@ -42,13 +36,13 @@ pub struct DataGenerator {
 }
 
 impl DataGenerator {
-    pub async fn install(&self) -> anyhow::Result<()> {
-        let mut conn = DatabaseURL::from_str(&self.database_url)?.connect().await?;
+    pub async fn install(&self, conn_str: &str) -> anyhow::Result<()> {
+        let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
         conn.query_drop(ddl).await
     }
 
-    pub async fn generate(&self) -> anyhow::Result<DatabaseGenerationSpec> {
+    pub async fn generate(&self, conn_str: &str) -> anyhow::Result<DatabaseGenerationSpec> {
         let user_vars: HashMap<String, String> = self
             .var_overrides
             .as_object()
@@ -59,7 +53,7 @@ impl DataGenerator {
 
         let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
         let mut database_spec = DatabaseGenerationSpec::new(schema);
-        let mut conn = DatabaseURL::from_str(&self.database_url)?.connect().await?;
+        let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
         load(&mut conn, &mut database_spec).await?;
 
         Ok(database_spec)
