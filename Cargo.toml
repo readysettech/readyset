@@ -39,6 +39,7 @@ members = [
     "ensure-ebs-volume",
     "metrics-aggregator",
     "test_utils",
+    "installer",
 ]
 [profile.release]
 debug=true

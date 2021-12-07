@@ -1,0 +1,19 @@
+[package]
+name = "readyset-installer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = "3.0.0-beta.5"
+console = "0.15.0"
+dialoguer = "0.9.0"
+indicatif = "0.16.2"
+lazy_static = "1.4.0"
+rusoto = "0.24.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.14", features = ["fs", "macros", "rt", "rt-multi-thread", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3.2"
