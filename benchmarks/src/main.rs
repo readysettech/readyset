@@ -123,6 +123,11 @@ impl BenchmarkRunner {
             self.benchmark = Some(serde_yaml::from_str(&std::fs::read_to_string(f)?)?);
         }
 
+        println!(
+            "{}",
+            serde_yaml::to_string(&self.benchmark.as_ref().unwrap())?
+        );
+
         if let Some(f) = &self.only_to_spec {
             let f = std::fs::File::create(f)?;
             serde_yaml::to_writer(f, &self.benchmark.as_ref().unwrap())?;
