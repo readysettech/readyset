@@ -17,6 +17,9 @@
 //! For keys that are not unique, we either append (epoch, seq) for the primary index, or the primary key
 //! itself if it is a secondary index.
 //!
+//! The data is only stored in the primary index (index 0), while all other indices only store the primary
+//! key for each row, and require an additional lookup into the primary index.
+//!
 //! # Replication Offsets
 //!
 //! When running in a read-replica configuration, where a thread is run as part of the controller
@@ -41,7 +44,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::ops::Bound;
 use tempfile::{tempdir, TempDir};
-use tracing::error;
+use tracing::{error, info};
 
 // Incremented on each PersistentState initialization so that IndexSeq
 // can be used to create unique identifiers for rows.
@@ -146,10 +149,12 @@ struct PersistentIndex {
     column_family: String,
     columns: Box<[usize]>,
     is_unique: bool,
+    is_primary: bool,
 }
 
 /// PersistentState stores data in RocksDB.
 pub struct PersistentState {
+    name: String,
     db_opts: rocksdb::Options,
     db: rocksdb::DB,
     // The lookup indices stored for this table. The first element is always considered the primary index
@@ -178,6 +183,7 @@ impl<'a> PersistentMeta<'a> {
                 is_unique: check_if_index_is_unique(unique_keys, columns),
                 column_family: i.to_string(),
                 columns: columns.clone(),
+                is_primary: i == 0,
             })
             .collect()
     }
@@ -246,36 +252,7 @@ impl State for PersistentState {
 
     fn lookup(&self, columns: &[usize], key: &KeyType) -> LookupResult {
         let index = self.index(columns);
-
-        tokio::task::block_in_place(|| {
-            let cf = self.db.cf_handle(&index.column_family).unwrap();
-            let prefix = Self::serialize_prefix(key);
-            let data = if index.is_unique && !key.has_null() {
-                // This is a unique key, so we know there's only one row to retrieve
-                // (no need to use prefix_iterator).
-                let raw_row = self.db.get_pinned_cf(cf, &prefix).unwrap();
-                if let Some(raw) = raw_row {
-                    vec![bincode::options().deserialize(&raw).unwrap()]
-                } else {
-                    vec![]
-                }
-            } else {
-                // This could correspond to more than one value, so we'll use a prefix_iterator:
-                let mut rows = Vec::new();
-                let mut iter = self.db.raw_iterator_cf(cf);
-                iter.seek(&prefix); // Find the first key
-
-                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                    let val = deserialize(iter.value().unwrap());
-                    rows.push(val);
-                    iter.next(); // Find the next row for this key
-                }
-
-                rows
-            };
-
-            LookupResult::Some(RecordResult::Owned(data))
-        })
+        tokio::task::block_in_place(|| LookupResult::Some(self.do_lookup(index, key).into()))
     }
 
     fn lookup_range<'a>(&'a self, columns: &[usize], key: &RangeKey) -> RangeLookupResult<'a> {
@@ -284,6 +261,12 @@ impl State for PersistentState {
 
         tokio::task::block_in_place(|| {
             let cf = db.cf_handle(&index.column_family).unwrap();
+            let primary_cf = if !index.is_primary {
+                Some(self.db.cf_handle(PK_CF).unwrap())
+            } else {
+                None
+            };
+
             let (lower, upper) = Self::serialize_range(key, ((), ()));
 
             let mut opts = rocksdb::ReadOptions::default();
@@ -311,28 +294,30 @@ impl State for PersistentState {
                 Bound::Included(k) | Bound::Excluded(k) => Some(k),
             };
 
-            let mut iterator = db.iterator_cf_opt(
-                cf,
-                opts,
-                match start.as_ref() {
-                    Some(k) => IteratorMode::From(k, Direction::Forward),
-                    None => IteratorMode::Start,
-                },
-            );
+            let mut iterator = db
+                .iterator_cf_opt(
+                    cf,
+                    opts,
+                    match start.as_ref() {
+                        Some(k) => IteratorMode::From(k, Direction::Forward),
+                        None => IteratorMode::Start,
+                    },
+                )
+                .map(|(_, value)| value);
 
             if matches!(lower, Bound::Excluded(_)) {
                 iterator.next();
             }
 
-            RangeLookupResult::Some(RecordResult::Owned(
-                iterator
-                    .map(|(_, value)| {
-                        bincode::options()
-                            .deserialize(&*value)
-                            .expect("Error deserializing data from rocksdb")
-                    })
+            let rows = match primary_cf {
+                Some(primary_cf) => iterator
+                    .map(|pk| db.get_pinned_cf(primary_cf, pk).unwrap().unwrap())
+                    .map(deserialize_row)
                     .collect(),
-            ))
+                None => iterator.map(deserialize_row).collect(),
+            };
+
+            RangeLookupResult::Some(RecordResult::Owned(rows))
         })
     }
 
@@ -344,7 +329,8 @@ impl State for PersistentState {
         Some(self)
     }
 
-    /// Add a new index to the table, each index contains a copy of the data
+    /// Add a new index to the table, the first index we add will contain the data
+    /// each additional index we add, will contain pointers to the primary index
     /// Panics if partial is Some
     fn add_key(&mut self, index: Index, partial: Option<Vec<Tag>>) {
         #[allow(clippy::panic)] // This should definitely never happen!
@@ -361,84 +347,21 @@ impl State for PersistentState {
             return;
         }
 
-        let columns: Box<[usize]> = columns.clone().into();
-
-        // We'll store all the values for this index in its own column family:
-        let index_id = self.indices.len().to_string();
-
         tokio::task::block_in_place(|| {
-            self.create_cf(&index_id);
-
-            let db = &mut self.db;
-            let cf = db.cf_handle(&index_id).unwrap();
+            let columns: Box<[usize]> = columns.clone().into();
             let is_unique = check_if_index_is_unique(&self.unique_keys, &columns);
 
-            // Prevent autocompactions while we reindex the whole table
-            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
-                error!(%err, "Error setting cf options");
+            if self.indices.is_empty() {
+                self.add_primary_index(columns, is_unique)
+            } else {
+                self.add_secondary_index(columns, is_unique)
             }
-
-            let mut opts = rocksdb::WriteOptions::default();
-            opts.disable_wal(true);
-
-            if let Some(primary_index) = self.indices.first() {
-                // This is not the first index that we add to this state, and we may already
-                // have some data stored in the table. We use the first index to iterate
-                // over the data and copy it to the newly created column family.
-                let primary_cf = db.cf_handle(&primary_index.column_family).unwrap();
-
-                let mut read_opts = rocksdb::ReadOptions::default();
-                read_opts.set_total_order_seek(true);
-                let mut iter = db.raw_iterator_cf_opt(primary_cf, read_opts);
-
-                iter.seek_to_first();
-
-                while iter.valid() {
-                    let mut batch = WriteBatch::default();
-
-                    while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
-                        if batch.len() == INDEX_BATCH_SIZE {
-                            break;
-                        }
-
-                        let row: Vec<DataType> = deserialize(value);
-                        let index_key = Self::build_key(&row, &columns);
-                        let key = if is_unique && !index_key.has_null() {
-                            // We know this key to be unique, so we just use it as is
-                            Self::serialize_prefix(&index_key)
-                        } else {
-                            Self::serialize_secondary(&index_key, pk)
-                        };
-                        batch.put_cf(cf, &key, value);
-
-                        iter.next();
-                    }
-
-                    db.write_opt(batch, &opts).unwrap();
-                }
-            }
-            // Manually compact the newly created column family
-            db.compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
-            // Flush just in case
-            db.flush_cf(cf).unwrap();
-            // Reenable auto compactions when done
-            if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
-                error!(%err, "Error setting cf options");
-            }
-
-            self.indices.push(PersistentIndex {
-                columns,
-                column_family: index_id,
-                is_unique,
-            });
-
-            self.persist_meta();
         });
     }
 
     fn cloned_records(&self) -> Vec<Vec<DataType>> {
         self.all_rows()
-            .map(|(_, ref value)| deserialize(value))
+            .map(|(_, ref value)| deserialize_row(value))
             .collect()
     }
 
@@ -503,14 +426,14 @@ impl State for PersistentState {
     }
 }
 
-fn serialize<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
+fn serialize_key<K: serde::Serialize, E: serde::Serialize>(k: K, extra: E) -> Vec<u8> {
     let size: u64 = bincode::options().serialized_size(&k).unwrap();
     bincode::options().serialize(&(size, k, extra)).unwrap()
 }
 
-fn deserialize<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> T {
+fn deserialize_row<T: AsRef<[u8]>>(bytes: T) -> Vec<DataType> {
     bincode::options()
-        .deserialize(bytes)
+        .deserialize(bytes.as_ref())
         .expect("Deserializing from rocksdb")
 }
 
@@ -581,6 +504,7 @@ impl PersistentState {
             }
 
             let mut state = Self {
+                name,
                 seq: 0,
                 indices,
                 unique_keys,
@@ -593,24 +517,167 @@ impl PersistentState {
             };
 
             if let Some(pk) = state.unique_keys.first().cloned() {
-                if state.indices.is_empty() {
-                    // This is the first time we're initializing this PersistentState,
-                    // so persist the primary key index right away.
-                    state.create_cf(PK_CF);
-
-                    let persistent_index = PersistentIndex {
-                        column_family: PK_CF.to_string(),
-                        columns: pk,
-                        is_unique: true,
-                    };
-
-                    state.indices.push(persistent_index);
-                    state.persist_meta();
-                }
+                // This is the first time we're initializing this PersistentState,
+                // so persist the primary key index right away.
+                state.add_primary_index(pk, true);
             }
 
             state
         })
+    }
+
+    /// Adds a new primary index, assuming there are none present
+    fn add_primary_index(&mut self, columns: Box<[usize]>, is_unique: bool) {
+        if self.indices.is_empty() {
+            info!(base = %self.name, index = ?columns, is_unique, "Base creating primary index");
+
+            self.create_cf(PK_CF);
+
+            let persistent_index = PersistentIndex {
+                column_family: PK_CF.to_string(),
+                columns,
+                is_unique,
+                is_primary: true,
+            };
+
+            self.indices.push(persistent_index);
+            self.persist_meta();
+        }
+    }
+
+    /// Adds a new secondary index, secondary indices point to the primary index
+    /// and don't store values on their own
+    fn add_secondary_index(&mut self, columns: Box<[usize]>, is_unique: bool) {
+        info!(base = %self.name, index = ?columns, is_unique, "Base creating secondary index");
+
+        // We'll store all the values for this index in its own column family:
+        let index_id = self.indices.len().to_string();
+        self.create_cf(&index_id);
+
+        let db = &self.db;
+        let cf = db.cf_handle(&index_id).unwrap();
+
+        // Prevent autocompactions while we reindex the table
+        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "true")]) {
+            error!(%err, "Error setting cf options");
+        }
+
+        let mut opts = rocksdb::WriteOptions::default();
+        opts.disable_wal(true);
+
+        // We know a primary index exists, which is why unwrap is fine
+        let primary_cf = db.cf_handle(PK_CF).unwrap();
+        // Because we aren't doing a prefix seek, we must set total order first
+        let mut read_opts = rocksdb::ReadOptions::default();
+        read_opts.set_total_order_seek(true);
+
+        let mut iter = db.raw_iterator_cf_opt(primary_cf, read_opts);
+        iter.seek_to_first();
+        // We operate in batches to improve performance
+        while iter.valid() {
+            let mut batch = WriteBatch::default();
+
+            while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
+                if batch.len() == INDEX_BATCH_SIZE {
+                    break;
+                }
+
+                let row = deserialize_row(value);
+                let index_key = Self::build_key(&row, &columns);
+                if is_unique && !index_key.has_null() {
+                    // We know this key to be unique, so we just use it as is
+                    let key = Self::serialize_prefix(&index_key);
+                    batch.put_cf(cf, &key, pk);
+                } else {
+                    let key = Self::serialize_secondary(&index_key, pk);
+                    // TODO: avoid storing pk as the value, since it is already serialized in
+                    // the key, seems wasteful
+                    batch.put_cf(cf, &key, pk);
+                };
+
+                iter.next();
+            }
+
+            db.write_opt(batch, &opts).unwrap();
+        }
+
+        info!("Base compacting secondary index");
+
+        // Flush just in case
+        db.flush_cf(cf).unwrap();
+        // Manually compact the newly created column family
+        db.compact_range_cf(cf, Option::<&[u8]>::None, Option::<&[u8]>::None);
+        // Reenable auto compactions when done
+        if let Err(err) = db.set_options_cf(cf, &[("disable_auto_compactions", "false")]) {
+            error!(%err, "Error setting cf options");
+        }
+
+        info!("Base finished compacting secondary index");
+
+        self.indices.push(PersistentIndex {
+            columns,
+            column_family: index_id,
+            is_unique,
+            is_primary: false,
+        });
+
+        self.persist_meta();
+    }
+
+    /// Looks up rows in an index
+    /// If the index is the primary index, the lookup get the rows from the primary index
+    /// directly, if the index is a secondary index, we will first lookup up the primary
+    /// index keys, then perform a primary index lookup
+    fn do_lookup(&self, index: &PersistentIndex, key: &KeyType) -> Vec<Vec<DataType>> {
+        let db = &self.db;
+        let cf = db.cf_handle(&index.column_family).unwrap();
+        let primary_cf = if !index.is_primary {
+            Some(self.db.cf_handle(PK_CF).unwrap())
+        } else {
+            None
+        };
+
+        let prefix = Self::serialize_prefix(key);
+
+        if index.is_unique && !key.has_null() {
+            // This is a unique key, so we know there's only one row to retrieve
+            let value = db.get_pinned_cf(cf, &prefix).unwrap();
+            match (value, primary_cf) {
+                (None, _) => vec![],
+                (Some(value), None) => vec![deserialize_row(value)],
+                (Some(pk), Some(primary_cf)) => vec![deserialize_row(
+                    db.get_pinned_cf(primary_cf, pk)
+                        .unwrap()
+                        .expect("Existing primary key"),
+                )],
+            }
+        } else {
+            // This could correspond to more than one value, so we'll use a prefix_iterator,
+            // for each row
+            let mut rows = Vec::new();
+            let mut opts = rocksdb::ReadOptions::default();
+            opts.set_prefix_same_as_start(true);
+
+            let mut iter = db.raw_iterator_cf_opt(cf, opts);
+            let mut iter_primary = primary_cf.map(|pcf| db.raw_iterator_cf(pcf));
+
+            iter.seek(&prefix);
+
+            while let Some(value) = iter.value() {
+                let raw_row = match &mut iter_primary {
+                    Some(iter_primary) => {
+                        iter_primary.seek(value);
+                        iter_primary.value().expect("Existing primary key")
+                    }
+                    None => value,
+                };
+
+                rows.push(deserialize_row(raw_row));
+                iter.next();
+            }
+
+            rows
+        }
     }
 
     /// Create a new column family
@@ -692,7 +759,7 @@ impl PersistentState {
     /// Save metadata about this [`PersistentState`] to the db.
     ///
     /// See [Self::meta] for more information about what is saved to the db
-    fn persist_meta(&mut self) {
+    fn persist_meta(&self) {
         self.db.save_meta(&self.meta());
     }
 
@@ -776,13 +843,13 @@ impl PersistentState {
     // (without the enum variant), plus any extra information as described above.
     fn serialize_raw_key<S: serde::Serialize>(key: &KeyType, extra: S) -> Vec<u8> {
         match key {
-            KeyType::Single(k) => serialize(k, extra),
-            KeyType::Double(k) => serialize(k, extra),
-            KeyType::Tri(k) => serialize(k, extra),
-            KeyType::Quad(k) => serialize(k, extra),
-            KeyType::Quin(k) => serialize(k, extra),
-            KeyType::Sex(k) => serialize(k, extra),
-            KeyType::Multi(k) => serialize(k, extra),
+            KeyType::Single(k) => serialize_key(k, extra),
+            KeyType::Double(k) => serialize_key(k, extra),
+            KeyType::Tri(k) => serialize_key(k, extra),
+            KeyType::Quad(k) => serialize_key(k, extra),
+            KeyType::Quin(k) => serialize_key(k, extra),
+            KeyType::Sex(k) => serialize_key(k, extra),
+            KeyType::Multi(k) => serialize_key(k, extra),
         }
     }
 
@@ -812,8 +879,8 @@ impl PersistentState {
             T: serde::Serialize,
         {
             (
-                range.0.map(|k| serialize(k, &extra.0)),
-                range.1.map(|k| serialize(k, &extra.1)),
+                range.0.map(|k| serialize_key(k, &extra.0)),
+                range.1.map(|k| serialize_key(k, &extra.1)),
             )
         }
         match key {
@@ -862,14 +929,17 @@ impl PersistentState {
             // Then insert the value for all the secondary indices:
             for index in self.indices[1..].iter() {
                 // Construct a key with the index values, and serialize it with bincode:
-                let key = Self::build_key(r, &index.columns);
-                let serialized_key = if index.is_unique && !key.has_null() {
-                    Self::serialize_prefix(&key)
-                } else {
-                    Self::serialize_secondary(&key, &serialized_pk)
-                };
                 let cf = self.db.cf_handle(&index.column_family).unwrap();
-                batch.put_cf(cf, &serialized_key, &serialized_row);
+
+                let key = Self::build_key(r, &index.columns);
+                if index.is_unique && !key.has_null() {
+                    let serialized_key = Self::serialize_prefix(&key);
+                    batch.put_cf(cf, &serialized_key, &serialized_pk);
+                } else {
+                    let serialized_key = Self::serialize_secondary(&key, &serialized_pk);
+                    // TODO: Since the primary key is already serialized in here, no reason to store it as value again
+                    batch.put_cf(cf, &serialized_key, &serialized_pk);
+                };
             }
         })
     }
@@ -897,7 +967,7 @@ impl PersistentState {
                         .key()
                         .filter(|k| k.starts_with(&prefix))
                         .expect("tried removing non-existant row");
-                    let val: Vec<DataType> = deserialize(iter.value().unwrap());
+                    let val = deserialize_row(iter.value().unwrap());
                     if val == r {
                         break key.to_vec();
                     }
@@ -941,10 +1011,17 @@ impl PersistentState {
         keys: &[KeyType],
     ) -> Vec<RecordResult<'a>> {
         let index = self.index(columns);
+        let is_primary = index.is_primary;
+
         tokio::task::block_in_place(|| {
             let cf = self.db.cf_handle(&index.column_family).unwrap();
             // Create an iterator once, reuse it for each key
             let mut iter = self.db.raw_iterator_cf(cf);
+            let mut iter_primary = if !is_primary {
+                Some(self.db.raw_iterator_cf(self.db.cf_handle(PK_CF).unwrap()))
+            } else {
+                None
+            };
 
             keys.iter()
                 .map(|k| {
@@ -956,7 +1033,16 @@ impl PersistentState {
                     iter.seek(&prefix); // Find the next key
 
                     while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                        let val = deserialize(iter.value().unwrap());
+                        let val = match &mut iter_primary {
+                            Some(iter_primary) => {
+                                // If we have a primary iterator, it means this is a secondary index and we need
+                                // to lookup by the primary key next
+                                iter_primary.seek(iter.value().unwrap());
+                                deserialize_row(iter_primary.value().expect("Existing primary key"))
+                            }
+                            None => deserialize_row(iter.value().unwrap()),
+                        };
+
                         rows.push(val);
 
                         if is_unique {
@@ -1654,7 +1740,7 @@ mod tests {
 
         let actual_rows: Vec<Vec<DataType>> = state
             .all_rows()
-            .map(|(_key, value)| deserialize(&value))
+            .map(|(_key, value)| deserialize_row(&value))
             .collect();
 
         assert_eq!(actual_rows, rows);
