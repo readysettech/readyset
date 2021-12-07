@@ -14,13 +14,14 @@ use async_trait::async_trait;
 use clap::Parser;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::info;
 
 const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleViews {
     /// Common shared benchmark parameters.
     #[clap(flatten)]

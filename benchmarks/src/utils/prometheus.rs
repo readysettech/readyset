@@ -5,6 +5,7 @@ use anyhow::Error;
 use futures::future::ready;
 use futures::io::AsyncBufReadExt;
 use futures::stream::{Stream, TryStreamExt};
+use serde::{Deserialize, Serialize};
 
 pub mod metric;
 use metric::Metric;
@@ -70,7 +71,7 @@ impl ForwardPrometheusMetrics {
 /// Newtype wrapper around a string containing a URL that provides functions, used internally by
 /// the benchmark framework, to stream metrics; implements `FromStr`, so it can be used in a
 /// [clap::Parser].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrometheusEndpoint {
     metrics_url: String,
 }

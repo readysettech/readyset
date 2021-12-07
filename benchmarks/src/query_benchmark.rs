@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::error;
 
@@ -24,7 +25,7 @@ use crate::{benchmark_counter, benchmark_histogram, benchmark_increment_counter}
 
 const REPORT_RESULTS_INTERVAL: Duration = Duration::from_secs(2);
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct QueryBenchmarkParams {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
@@ -44,7 +45,7 @@ pub struct QueryBenchmarkParams {
     threads: u64,
 }
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct QueryBenchmark {
     #[clap(flatten)]
     params: QueryBenchmarkParams,

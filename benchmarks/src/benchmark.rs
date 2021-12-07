@@ -24,10 +24,11 @@ use async_trait::async_trait;
 use clap::Parser;
 use enum_dispatch::enum_dispatch;
 use mysql_async::{Conn, Opts};
+use serde::{Deserialize, Serialize};
 
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]
-#[derive(clap::Subcommand)]
+#[derive(clap::Subcommand, Serialize, Deserialize)]
 pub enum Benchmark {
     Template, // Example benchmark that does not execute any commands.
     /// Basic read benchmark
@@ -52,7 +53,7 @@ impl Benchmark {
     }
 }
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct BenchmarkParameters {
     /// The connection string of a database that accepts MySQL queries.
     #[clap(long)]

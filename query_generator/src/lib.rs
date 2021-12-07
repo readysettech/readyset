@@ -455,7 +455,9 @@ impl FromStr for TableName {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone)]
+#[derive(
+    Debug, Eq, PartialEq, Ord, PartialOrd, Hash, From, Into, Display, Clone, Serialize, Deserialize,
+)]
 #[repr(transparent)]
 pub struct ColumnName(String);
 

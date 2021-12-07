@@ -15,6 +15,7 @@ use mysql_async::Statement;
 use mysql_async::Value;
 use nom_sql::SqlType;
 use query_generator::DistributionAnnotation;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -23,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::random::random_value_for_sql_type;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct ArbitraryQueryParameters {
     /// A path to the query that we are benchmarking.
     #[clap(long)]

@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::benchmark_gauge;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 
-#[derive(Parser)]
+#[derive(Parser, Serialize, Deserialize)]
 pub struct Template {
     /// Common shared benchmark parameters.
     #[clap(flatten)]

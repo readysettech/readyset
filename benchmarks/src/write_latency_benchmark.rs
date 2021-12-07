@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use nom_sql::{parse_query, Dialect, SqlQuery};
@@ -16,7 +17,7 @@ use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::{forward, ForwardPrometheusMetrics, PrometheusEndpoint};
 use crate::utils::query::ArbitraryQueryParameters;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteLatencyBenchmark {
     #[clap(flatten)]
     common: BenchmarkParameters,

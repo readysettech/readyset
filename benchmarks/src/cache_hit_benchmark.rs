@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
+use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, BenchmarkParameters};
 use crate::benchmark_histogram;
@@ -21,7 +22,7 @@ use crate::utils::us_to_ms;
 /// generate misses.
 const MAX_RANDOM_GENERATIONS: u32 = 20;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct CacheHitBenchmark {
     /// Common shared benchmark parameters.
     #[clap(flatten)]

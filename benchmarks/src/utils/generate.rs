@@ -11,17 +11,19 @@ use noria_logictest::upstream::DatabaseConnection;
 use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::{TableName, TableSpec};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 const MAX_BATCH_ROWS: usize = 1000;
 const MAX_PARTITION_ROWS: usize = 10000;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct DataGenerator {
     /// Path to the desired database SQL schema.
     #[clap(long, value_hint = ValueHint::AnyPath)]
@@ -31,7 +33,7 @@ pub struct DataGenerator {
     /// from other benchmarks MySQL parameter as data generation typically
     /// will go directly to the upstream MySQL database.
     #[clap(long)]
-    database_url: DatabaseURL,
+    database_url: String,
 
     /// Change or assign values to user variables in the provided schema.
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
@@ -41,7 +43,7 @@ pub struct DataGenerator {
 
 impl DataGenerator {
     pub async fn install(&self) -> anyhow::Result<()> {
-        let mut conn = self.database_url.connect().await?;
+        let mut conn = DatabaseURL::from_str(&self.database_url)?.connect().await?;
         let ddl = std::fs::read_to_string(self.schema.as_path())?;
         conn.query_drop(ddl).await
     }
@@ -57,7 +59,7 @@ impl DataGenerator {
 
         let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
         let mut database_spec = DatabaseGenerationSpec::new(schema);
-        let mut conn = self.database_url.connect().await?;
+        let mut conn = DatabaseURL::from_str(&self.database_url)?.connect().await?;
         load(&mut conn, &mut database_spec).await?;
 
         Ok(database_spec)

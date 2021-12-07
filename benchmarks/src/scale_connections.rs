@@ -4,11 +4,12 @@ use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::info;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct ScaleConnections {
     /// Common shared benchmark parameters.
     #[clap(flatten)]
