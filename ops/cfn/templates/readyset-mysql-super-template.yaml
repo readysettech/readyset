@@ -274,7 +274,7 @@ Resources:
       TemplateURL: !Sub >-
         https://${QSS3BucketName}.s3.amazonaws.com/quickstart-linux-bastion/templates/linux-bastion.template
       Parameters:
-        BastionAMIOS: Ubuntu-Server-20.04-LTS-HVM
+        BastionAMIOS: Amazon-Linux2-HVM
         BastionInstanceType: t3.medium
         KeyPairName: !Ref KeyPairName
         PublicSubnet1ID: !GetAtt VPCStack.Outputs.PublicSubnet1ID
