@@ -149,9 +149,12 @@ impl NoriaBackendInner {
         &mut self,
         view: &str,
         region: Option<&str>,
-        ignore_cache: bool,
+        invalidate_cache: bool,
     ) -> ReadySetResult<&mut View> {
-        if ignore_cache || !self.outputs.contains_key(view) {
+        if invalidate_cache {
+            self.outputs.remove(view);
+        }
+        if !self.outputs.contains_key(view) {
             let vh = match region {
                 None => noria_await!(self, self.noria.view(view))?,
                 Some(r) => noria_await!(self, self.noria.view_from_region(view, r))?,
