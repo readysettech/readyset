@@ -13,7 +13,7 @@ pub fn rewind_until_columns_found(leaf: MirNodeRef, columns: &[Column]) -> Optio
             return None;
         }
         // silly, but the borrow checker doesn't let us do this in a single line
-        let next = cur.borrow().ancestors().first()?.clone();
+        let next = cur.borrow().ancestors().first()?.clone().upgrade().unwrap();
 
         cur = next;
 
@@ -138,11 +138,11 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
             .borrow()
             .ancestors()
             .iter()
-            .map(|a| match reuse.get(&a.borrow().versioned_name()) {
+            .map(|n| n.upgrade().unwrap())
+            .map(|a| match reuse.get(&a.clone().borrow().versioned_name()) {
                 None => a,
-                Some(reused) => reused,
+                Some(reused) => reused.clone(),
             })
-            .cloned()
             .collect();
         let original_children = n.borrow().children().to_vec();
         let children: Vec<_> = n
@@ -170,7 +170,7 @@ pub fn merge_mir_for_queries(new_query: &MirQuery, old_query: &MirQuery) -> (Mir
             rewritten_leaf = real_n.clone();
         }
 
-        real_n.borrow_mut().ancestors = ancestors;
+        real_n.borrow_mut().ancestors = ancestors.iter().map(MirNodeRef::downgrade).collect();
         real_n.borrow_mut().children = children;
 
         for c in original_children {
@@ -306,7 +306,7 @@ mod tests {
                 expressions: vec![],
                 literals: vec![],
             },
-            vec![c.clone()],
+            vec![MirNodeRef::downgrade(&c)],
             vec![d.clone()],
         );
         a.borrow_mut().add_child(c.clone());
