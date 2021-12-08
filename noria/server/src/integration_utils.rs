@@ -11,7 +11,7 @@ use noria::{
 };
 
 use crate::metrics::{
-    get_global_recorder_opt, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
+    get_global_recorder, install_global_recorder, CompositeMetricsRecorder, MetricsRecorder,
     NoriaMetricsRecorder,
 };
 use crate::{Builder, Handle};
@@ -135,7 +135,7 @@ pub async fn sleep() {
 /// in parallel that depends on metrics, this may cause flaky metrics results.
 pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
     unsafe {
-        if get_global_recorder_opt().is_none() {
+        if get_global_recorder().is_none() {
             let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
                 NoriaMetricsRecorder::new(),
             )]);

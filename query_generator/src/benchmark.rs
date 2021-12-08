@@ -360,7 +360,9 @@ impl Benchmark {
                 .unwrap_or(0f64);
             let forward_time = Duration::from_micros(forward_time.round() as u64);
 
-            get_global_recorder().clear();
+            if let Some(r) = get_global_recorder() {
+                r.clear();
+            }
             Ok(QueryBenchmarkResult {
                 query: format!("{}", query.statement),
                 rows_per_table: self.rows_per_table,

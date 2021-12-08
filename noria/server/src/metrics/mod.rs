@@ -45,20 +45,9 @@ pub unsafe fn install_global_recorder(rec: GlobalRecorder) -> Result<(), Recorde
     metrics::set_recorder_racy(METRICS_RECORDER.as_ref().unwrap()).map_err(|e| e.into())
 }
 
-/// Gets a static reference to the installed metrics recorder.
-///
-/// # Panics
-///
-/// This method panics if `install()` has not been called yet.
-pub fn get_global_recorder() -> &'static GlobalRecorder {
-    // SAFETY: no data races possible, since METRICS_RECORDER is only mutated once (and the
-    // `install()` function is marked `unsafe`).
-    get_global_recorder_opt().expect("metrics recorder not installed yet")
-}
-
 /// Gets an [`Option`] with the static reference to the installed metrics recorder.
 /// This method returns [`None`] if `install()` has not been called yet.
-pub fn get_global_recorder_opt() -> Option<&'static GlobalRecorder> {
+pub fn get_global_recorder() -> Option<&'static GlobalRecorder> {
     // SAFETY: no data races possible, since METRICS_RECORDER is only mutated once (and the
     // `install()` function is marked `unsafe`).
     unsafe { METRICS_RECORDER.as_ref() }
