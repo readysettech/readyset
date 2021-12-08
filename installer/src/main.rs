@@ -5,11 +5,16 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
+use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
+use aws_types::credentials::{CredentialsError, ProvideCredentials};
+use aws_types::region::Region;
+use aws_types::Credentials;
 use clap::Parser;
 use console::style;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
 use lazy_static::lazy_static;
+use rusoto_credential::ProfileProvider;
 use serde::{Deserialize, Serialize};
 use tokio::fs::{read_dir, DirBuilder, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,6 +22,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 lazy_static! {
     static ref DIALOG_THEME: ColorfulTheme = ColorfulTheme::default();
 }
+
+/// List of regions where we deploy AMIs.
+///
+/// Should match `destination_regions` in `//ops/image-deploy/locals.pkr.hcl`
+const REGIONS: &[&str] = &["us-east-1", "us-east-2", "us-west-2"];
 
 fn confirm() -> Confirm<'static> {
     let mut confirm = Confirm::with_theme(&*DIALOG_THEME);
@@ -64,6 +74,32 @@ impl Options {
         state_home.push("readyset");
 
         Ok(Cow::Owned(state_home))
+    }
+}
+
+#[derive(Debug)]
+struct RusotoAWSWrapper<T>(T);
+
+impl<T> ProvideCredentials for RusotoAWSWrapper<T>
+where
+    T: rusoto_credential::ProvideAwsCredentials + Send + Sync + Debug,
+{
+    fn provide_credentials<'a>(&'a self) -> ProvideCredentialsFut<'a>
+    where
+        Self: 'a,
+    {
+        ProvideCredentialsFut::new(async {
+            let creds = rusoto_credential::ProvideAwsCredentials::credentials(&self.0)
+                .await
+                .map_err(|e| CredentialsError::provider_error(Box::new(e)))?;
+            Ok(Credentials::new(
+                creds.aws_access_key_id(),
+                creds.aws_secret_access_key(),
+                creds.token().clone(),
+                creds.expires_at().as_ref().map(|t| (*t).into()),
+                "profile",
+            ))
+        })
     }
 }
 
@@ -134,12 +170,15 @@ mod maybe_set {
 }
 
 /// A (potentially partially-completed) deployment of a readyset cluster
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Deployment {
     name: String,
 
     #[serde(with = "maybe_set", default)]
     aws_credentials_profile: Option<String>,
+
+    #[serde(with = "maybe_set", default)]
+    aws_region: Option<String>,
 }
 
 impl Deployment {
@@ -150,7 +189,7 @@ impl Deployment {
     {
         Deployment {
             name: name.into(),
-            aws_credentials_profile: None,
+            ..Default::default()
         }
     }
 
@@ -204,6 +243,9 @@ impl Deployment {
 struct Installer {
     options: Options,
     deployment: Deployment,
+
+    // Runtime state
+    aws_config: Option<aws_config::Config>,
 }
 
 impl Installer {
@@ -211,6 +253,7 @@ impl Installer {
         Self {
             options,
             deployment,
+            aws_config: None,
         }
     }
 
@@ -224,22 +267,43 @@ impl Installer {
     /// Run the install process, picking up where the user left off if necessary
     pub async fn run(&mut self) -> Result<()> {
         self.save().await?;
-
-        if let Some(aws_credentials_profile) = &self.deployment.aws_credentials_profile {
-            println!(
-                "Using AWS profile: {}",
-                style(aws_credentials_profile).bold()
-            );
-        } else {
-            self.prompt_for_aws_credentials_profile().await?;
-        }
-
+        self.load_aws_config().await?;
         self.save().await?;
 
         Ok(())
     }
 
-    async fn prompt_for_aws_credentials_profile(&mut self) -> Result<()> {
+    async fn load_aws_config(&mut self) -> Result<&aws_config::Config> {
+        let mut loader = aws_config::from_env();
+
+        let profile =
+            if let Some(aws_credentials_profile) = &self.deployment.aws_credentials_profile {
+                println!(
+                    "Using AWS profile: {}",
+                    style(aws_credentials_profile).bold()
+                );
+                aws_credentials_profile
+            } else {
+                self.prompt_for_aws_credentials_profile()?
+            };
+
+        loader = loader.credentials_provider(RusotoAWSWrapper(
+            ProfileProvider::with_default_credentials(profile)?,
+        ));
+
+        let region = if let Some(aws_region) = &self.deployment.aws_region {
+            println!("Using AWS region: {}", style(aws_region).bold());
+            aws_region
+        } else {
+            self.prompt_for_aws_region()?
+        };
+
+        loader = loader.region(Region::new(region.to_owned()));
+
+        Ok(self.aws_config.insert(loader.load().await))
+    }
+
+    fn prompt_for_aws_credentials_profile(&mut self) -> Result<&str> {
         println!(
             "We'll use your AWS credentials (stored in {}) throughout the install process.",
             style("~/.aws/credentials").bold()
@@ -249,17 +313,31 @@ impl Installer {
             .with_prompt("Which AWS profile should we use?")
             .default("default".to_owned())
             .validate_with(|input: &String| {
-                match rusoto_credential::ProfileProvider::with_default_credentials(input) {
+                match ProfileProvider::with_default_credentials(input) {
                     Ok(_) => Ok(()),
                     Err(e) => Err(e.message),
                 }
             })
             .interact_text()?;
-
-        self.deployment.aws_credentials_profile = Some(profile);
         println!();
 
-        Ok(())
+        Ok(self.deployment.aws_credentials_profile.insert(profile))
+    }
+
+    fn prompt_for_aws_region(&mut self) -> Result<&str> {
+        let mut prompt = select();
+        prompt.with_prompt("Which AWS region should we deploy to?");
+        prompt.items(REGIONS);
+
+        if let Ok(default_region) = env::var("AWS_DEFAULT_REGION") {
+            if let Some(idx) = REGIONS.iter().position(|r| r == &default_region) {
+                prompt.default(idx);
+            }
+        }
+
+        let idx = prompt.interact()?;
+
+        Ok(self.deployment.aws_region.insert(REGIONS[idx].to_owned()))
     }
 }
 
