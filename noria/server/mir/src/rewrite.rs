@@ -7,8 +7,8 @@ fn has_column(n: &MirNodeRef, column: &Column) -> bool {
     if n.borrow().columns().contains(column) {
         return true;
     } else {
-        for a in n.borrow().ancestors() {
-            if has_column(a, column) {
+        for a in n.borrow().ancestors().iter().map(|n| n.upgrade().unwrap()) {
+            if has_column(&a, column) {
                 return true;
             }
         }
@@ -31,18 +31,19 @@ pub(super) fn pull_required_base_columns(q: &mut MirQuery) -> ReadySetResult<()>
                 !mn.borrow()
                     .ancestors()
                     .iter()
+                    .map(|n| n.upgrade().unwrap())
                     .any(|a| a.borrow().columns().iter().any(|ac| ac == c))
             })
             .collect();
 
         let mut found: Vec<&Column> = Vec::new();
-        for ancestor in mn.borrow().ancestors() {
+        for ancestor in mn.borrow().ancestors().iter().map(|n| n.upgrade().unwrap()) {
             if ancestor.borrow().ancestors().is_empty() {
                 // base, do nothing
                 continue;
             }
             for c in &needed_columns {
-                if !found.contains(&c) && has_column(ancestor, c) {
+                if !found.contains(&c) && has_column(&ancestor, c) {
                     ancestor.borrow_mut().add_column(c.clone())?;
                     found.push(c);
                 }
@@ -150,7 +151,7 @@ mod tests {
                     group_by: vec![],
                     kind: Aggregation::Sum,
                 },
-                vec![base.clone()],
+                vec![MirNodeRef::downgrade(&base)],
                 vec![],
             );
 
@@ -168,7 +169,7 @@ mod tests {
                 MirNodeInner::Filter {
                     conditions: condition_expression_1.clone(),
                 },
-                vec![grp.clone()],
+                vec![MirNodeRef::downgrade(&grp)],
                 vec![],
             );
 
@@ -191,7 +192,7 @@ mod tests {
                     )],
                     literals: vec![],
                 },
-                vec![fil.clone()],
+                vec![MirNodeRef::downgrade(&fil)],
                 vec![],
             );
 

@@ -119,8 +119,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref kind,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_grouped_node(
                         &name,
                         parent,
@@ -158,8 +158,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref kind,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_grouped_node(
                         &name,
                         parent,
@@ -172,9 +172,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::Filter { ref conditions } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
-
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_filter_node(
                         &name,
                         parent,
@@ -185,8 +184,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::Identity => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_identity_node(&name, parent, mir_node.columns.as_slice(), mig)?
                 }
                 MirNodeInner::Join {
@@ -195,10 +194,10 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref project,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let left = mir_node.ancestors[0].clone();
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let right = mir_node.ancestors[1].clone();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let left = mir_node.ancestors[0].upgrade().unwrap();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_node(
                         &name,
                         left,
@@ -213,10 +212,10 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::JoinAggregates => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let left = mir_node.ancestors[0].clone();
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let right = mir_node.ancestors[1].clone();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let left = mir_node.ancestors[0].upgrade().unwrap();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
                 }
                 MirNodeInner::ParamFilter {
@@ -225,8 +224,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref operator,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_param_filter_node(
                         &name,
                         parent,
@@ -239,8 +238,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                 }
                 MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_latest_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
                 MirNodeInner::Leaf {
@@ -253,8 +252,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     let post_lookup = make_post_lookup(
                         &parent,
                         order_by,
@@ -280,10 +279,10 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref project,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 2);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let left = mir_node.ancestors[0].clone();
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let right = mir_node.ancestors[1].clone();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let left = mir_node.ancestors[0].upgrade().unwrap();
+                    #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+                    let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_node(
                         &name,
                         left,
@@ -302,8 +301,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref expressions,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_project_node(
                         &name,
                         parent,
@@ -332,19 +331,24 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     duplicate_mode,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), emit.len());
+                    #[allow(clippy::unwrap_used)]
                     make_union_node(
                         &name,
                         mir_node.columns.as_slice(),
                         emit,
-                        mir_node.ancestors(),
+                        &mir_node
+                            .ancestors()
+                            .iter()
+                            .map(|n| n.upgrade().unwrap())
+                            .collect::<Vec<_>>(),
                         duplicate_mode,
                         mig,
                     )?
                 }
                 MirNodeInner::Distinct { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_distinct_node(&name, parent, mir_node.columns.as_slice(), group_by, mig)?
                 }
                 MirNodeInner::TopK {
@@ -354,8 +358,8 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     ref offset,
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::indexing_slicing)] // checked by above invariant
-                    let parent = mir_node.ancestors[0].clone();
+                    #[allow(clippy::unwrap_used)] // checked by above invariant
+                    let parent = mir_node.first_ancestor().unwrap();
                     make_topk_node(
                         &name,
                         parent,

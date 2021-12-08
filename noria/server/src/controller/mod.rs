@@ -863,7 +863,7 @@ pub(crate) async fn authority_runner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integration_utils::{sleep, start_simple};
+    use crate::integration_utils::start_simple;
     use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]

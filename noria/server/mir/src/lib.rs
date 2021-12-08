@@ -4,7 +4,7 @@
 #![feature(stmt_expr_attributes)]
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use petgraph::graph::NodeIndex;
 
@@ -18,6 +18,7 @@ mod rewrite;
 pub mod visualize;
 
 pub type MirNodeRef = Rc<RefCell<node::MirNode>>;
+pub type MirNodeWeakRef = Weak<RefCell<node::MirNode>>;
 
 #[derive(Clone, Debug)]
 pub enum FlowNode {

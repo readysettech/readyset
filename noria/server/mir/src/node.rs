@@ -10,7 +10,7 @@ use petgraph::graph::NodeIndex;
 use std::rc::Rc;
 
 use crate::column::Column;
-use crate::{FlowNode, MirNodeRef};
+use crate::{FlowNode, MirNodeRef, MirNodeWeakRef};
 use noria_errors::{internal, internal_err, ReadySetResult};
 
 pub mod node_inner;
@@ -26,7 +26,7 @@ pub struct MirNode {
     pub from_version: usize,
     pub columns: Vec<Column>,
     pub inner: MirNodeInner,
-    pub ancestors: Vec<MirNodeRef>,
+    pub ancestors: Vec<MirNodeWeakRef>,
     pub children: Vec<MirNodeRef>,
     pub flow_node: Option<FlowNode>,
 }
@@ -37,7 +37,7 @@ impl MirNode {
         v: usize,
         columns: Vec<Column>,
         inner: MirNodeInner,
-        ancestors: Vec<MirNodeRef>,
+        ancestors: Vec<MirNodeWeakRef>,
         children: Vec<MirNodeRef>,
     ) -> MirNodeRef {
         let mn = MirNode {
@@ -53,7 +53,7 @@ impl MirNode {
         let rc_mn = Rc::new(RefCell::new(mn));
 
         // register as child on ancestors
-        for ancestor in &ancestors {
+        for ancestor in ancestors.iter().map(|n| n.upgrade().unwrap()) {
             ancestor.borrow_mut().add_child(rc_mn.clone());
         }
 
@@ -152,13 +152,14 @@ impl MirNode {
     // currently unused
     #[allow(dead_code)]
     pub fn add_ancestor(&mut self, a: MirNodeRef) {
-        self.ancestors.push(a)
+        self.ancestors.push(MirNodeRef::downgrade(&a))
     }
 
     pub fn remove_ancestor(&mut self, a: MirNodeRef) {
         match self
             .ancestors
             .iter()
+            .map(|n| n.upgrade().unwrap())
             .position(|x| x.borrow().versioned_name() == a.borrow().versioned_name())
         {
             None => (),
@@ -201,7 +202,15 @@ impl MirNode {
                 MirNodeInner::Filter { .. } | MirNodeInner::TopK { .. } => {
                     // Filters and topk follow the column positioning rules of their parents
                     #[allow(clippy::unwrap_used)] // filters and topk both must have a parent
-                    column_pos(&node.ancestors().first().unwrap().borrow())
+                    column_pos(
+                        &node
+                            .ancestors()
+                            .first()
+                            .unwrap()
+                            .upgrade()
+                            .unwrap()
+                            .borrow(),
+                    )
                 }
                 _ => None,
             }
@@ -220,7 +229,11 @@ impl MirNode {
         Ok(pos)
     }
 
-    pub fn ancestors(&self) -> &[MirNodeRef] {
+    pub fn first_ancestor(&self) -> Option<MirNodeRef> {
+        self.ancestors().first()?.upgrade()
+    }
+
+    pub fn ancestors(&self) -> &[MirNodeWeakRef] {
         self.ancestors.as_slice()
     }
 
@@ -333,7 +346,9 @@ impl MirNode {
                 }
             }
             MirNodeInner::Filter { .. } => {
-                let parent = self.ancestors.first().unwrap();
+                // Parents are guarenteed to exist.
+                #[allow(clippy::unwrap_used)]
+                let parent = self.first_ancestor().unwrap();
                 // need all parent columns
                 for c in parent.borrow().columns() {
                     if !columns.contains(c) {
@@ -403,6 +418,7 @@ impl Debug for MirNode {
             self.ancestors.len(),
             self.ancestors
                 .iter()
+                .map(|n| n.upgrade().unwrap())
                 .map(|a| a.borrow().versioned_name())
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -582,7 +598,7 @@ mod tests {
         use dataflow::ops::grouped::aggregate::Aggregation as AggregationKind;
         use nom_sql::{BinaryOperator, Expression, Literal};
 
-        fn setup_filter(cond: (usize, Expression)) -> MirNodeRef {
+        fn setup_filter(cond: (usize, Expression)) -> (MirNodeRef, MirNodeRef) {
             let cols: Vec<nom_sql::Column> = vec!["x".into(), "agg".into()];
 
             let condition_expression = Expression::BinaryOp {
@@ -605,21 +621,23 @@ mod tests {
             );
 
             // σ [x = 1]
-            MirNode::new(
+            let filter = MirNode::new(
                 "filter",
                 0,
                 vec!["x".into(), "agg".into()],
                 MirNodeInner::Filter {
                     conditions: condition_expression,
                 },
-                vec![parent],
+                vec![MirNodeRef::downgrade(&parent)],
                 vec![],
-            )
+            );
+
+            (filter, parent)
         }
 
         #[test]
         fn filter_reorders_condition_lhs() {
-            let node = setup_filter((1, Expression::Literal(Literal::Integer(1))));
+            let (node, _parent) = setup_filter((1, Expression::Literal(Literal::Integer(1))));
 
             let condition_expression = Expression::BinaryOp {
                 lhs: Box::new(Expression::Column("agg".into())),
@@ -643,7 +661,7 @@ mod tests {
 
         #[test]
         fn filter_reorders_condition_comparison_rhs() {
-            let node = setup_filter((0, Expression::Column("y".into())));
+            let (node, _parent) = setup_filter((0, Expression::Column("y".into())));
 
             let condition_expression = Expression::BinaryOp {
                 lhs: Box::new(Expression::Column("x".into())),
@@ -692,7 +710,7 @@ mod tests {
                     k: 3,
                     offset: 0,
                 },
-                vec![parent],
+                vec![MirNodeRef::downgrade(&parent)],
                 vec![],
             );
 

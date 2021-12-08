@@ -331,7 +331,8 @@ impl SqlIncorporator {
                             .iter()
                             .next()
                             .unwrap()
-                            .clone();
+                            .upgrade()
+                            .unwrap();
 
                         // If the existing leaf's parent contains all required parameter columns,
                         // reuse based on this parent.

@@ -182,7 +182,7 @@ impl SqlToMirConverter {
                     literals: vec![],
                     expressions: vec![],
                 },
-                vec![parent.clone()],
+                vec![MirNodeRef::downgrade(&parent)],
                 vec![],
             )
         } else {
@@ -192,7 +192,7 @@ impl SqlToMirConverter {
                 self.schema_version,
                 columns.clone(),
                 MirNodeInner::Identity,
-                vec![parent.clone()],
+                vec![MirNodeRef::downgrade(&parent)],
                 vec![],
             )
         };
@@ -208,7 +208,7 @@ impl SqlToMirConverter {
                 })
                 .collect(),
             MirNodeInner::leaf(n.clone(), Vec::from(params), index_type),
-            vec![n],
+            vec![MirNodeRef::downgrade(&n)],
             vec![],
         );
 
@@ -290,7 +290,7 @@ impl SqlToMirConverter {
                     // TODO: is this right?
                     IndexType::HashMap,
                 ),
-                vec![final_node],
+                vec![MirNodeRef::downgrade(&final_node)],
                 vec![],
             )
         } else {
@@ -371,7 +371,7 @@ impl SqlToMirConverter {
 
         while let Some(mnr) = q.pop_front() {
             let n = mnr.borrow_mut();
-            q.extend(n.ancestors.clone());
+            q.extend(n.ancestors.iter().map(|n| n.upgrade().unwrap()));
             // node may not be registered, so don't bother checking return
             match n.inner {
                 MirNodeInner::Reuse { .. } | MirNodeInner::Base { .. } => (),
@@ -684,7 +684,7 @@ impl SqlToMirConverter {
                 emit,
                 duplicate_mode,
             },
-            ancestors.to_vec(),
+            ancestors.iter().map(MirNodeRef::downgrade).collect(),
             vec![],
         ))
     }
@@ -708,7 +708,7 @@ impl SqlToMirConverter {
                 emit,
                 duplicate_mode,
             },
-            ancestors,
+            ancestors.iter().map(MirNodeRef::downgrade).collect(),
             vec![],
         ))
     }
@@ -726,7 +726,7 @@ impl SqlToMirConverter {
             self.schema_version,
             fields,
             MirNodeInner::Filter { conditions },
-            vec![parent],
+            vec![MirNodeRef::downgrade(&parent)],
             vec![],
         )
     }
@@ -901,7 +901,7 @@ impl SqlToMirConverter {
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: agg,
                 },
-                vec![parent_node],
+                vec![MirNodeRef::downgrade(&parent_node)],
                 vec![],
             ),
             GroupedNodeType::Extremum(extr) => MirNode::new(
@@ -913,7 +913,7 @@ impl SqlToMirConverter {
                     group_by: group_by.into_iter().cloned().collect(),
                     kind: extr,
                 },
-                vec![parent_node],
+                vec![MirNodeRef::downgrade(&parent_node)],
                 vec![],
             ),
         }
@@ -1003,7 +1003,10 @@ impl SqlToMirConverter {
             self.schema_version,
             fields,
             inner,
-            vec![left_node, right_node],
+            vec![
+                MirNodeRef::downgrade(&left_node),
+                MirNodeRef::downgrade(&right_node),
+            ],
             vec![],
         ))
     }
@@ -1027,7 +1030,7 @@ impl SqlToMirConverter {
             self.schema_version,
             fields,
             inner,
-            aggregates.to_vec(),
+            aggregates.iter().map(MirNodeRef::downgrade).collect(),
             vec![],
         ))
     }
@@ -1098,7 +1101,7 @@ impl SqlToMirConverter {
                 literals,
                 expressions,
             },
-            vec![parent_node],
+            vec![MirNodeRef::downgrade(&parent_node)],
             vec![],
         )
     }
@@ -1129,7 +1132,7 @@ impl SqlToMirConverter {
                 emit_key: emit_key.clone(),
                 operator: *operator,
             },
-            vec![parent_node],
+            vec![MirNodeRef::downgrade(&parent_node)],
             vec![],
         )
     }
@@ -1159,7 +1162,7 @@ impl SqlToMirConverter {
             self.schema_version,
             columns,
             MirNodeInner::Distinct { group_by },
-            vec![parent],
+            vec![MirNodeRef::downgrade(&parent)],
             vec![],
         )
     }
@@ -1204,7 +1207,7 @@ impl SqlToMirConverter {
                 k,
                 offset: 0,
             },
-            vec![parent],
+            vec![MirNodeRef::downgrade(&parent)],
             vec![],
         ))
     }
@@ -1899,7 +1902,7 @@ impl SqlToMirConverter {
                         }),
                         default_row: default_row_for_select(st),
                     },
-                    vec![leaf_project_node],
+                    vec![MirNodeRef::downgrade(&leaf_project_node)],
                     vec![],
                 );
                 nodes_added.push(leaf_node);
