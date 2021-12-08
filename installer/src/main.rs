@@ -67,10 +67,79 @@ impl Options {
     }
 }
 
+/// `#[serde(with = "...")]`-compatible module for serializing an option as either the string
+/// "unset", or a value, rather than using `null` for [`None`].
+///
+/// In the fields of [`Deployment`], this allows explicitly differentiating between unset values and
+/// set-to-null values.
+mod maybe_set {
+    use std::fmt;
+    use std::marker::PhantomData;
+
+    use serde::de::value::BorrowedStrDeserializer;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T, S>(val: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        match val {
+            Some(val) => val.serialize(serializer),
+            None => serializer.serialize_str("unset"),
+        }
+    }
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        struct UnsetVisitor<T> {
+            _marker: PhantomData<T>,
+        }
+
+        impl<'de, T> serde::de::Visitor<'de> for UnsetVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Option<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "the string \"unset\", or a value")
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                T::deserialize(deserializer).map(Some)
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v == "unset" {
+                    return Ok(None);
+                }
+                T::deserialize(BorrowedStrDeserializer::new(v)).map(Some)
+            }
+        }
+
+        deserializer.deserialize_any(UnsetVisitor {
+            _marker: PhantomData,
+        })
+    }
+}
+
 /// A (potentially partially-completed) deployment of a readyset cluster
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Deployment {
     name: String,
+
+    #[serde(with = "maybe_set", default)]
+    aws_credentials_profile: Option<String>,
 }
 
 impl Deployment {
@@ -79,7 +148,10 @@ impl Deployment {
     where
         S: Into<String>,
     {
-        Deployment { name: name.into() }
+        Deployment {
+            name: name.into(),
+            aws_credentials_profile: None,
+        }
     }
 
     /// Returns a reference to the name of the given deployment
@@ -135,10 +207,59 @@ struct Installer {
 }
 
 impl Installer {
+    fn new(options: Options, deployment: Deployment) -> Self {
+        Self {
+            options,
+            deployment,
+        }
+    }
+
+    /// Save this installer's deployment to the configured state directory
     pub async fn save(&self) -> Result<()> {
         self.deployment
             .save_to_directory(self.options.state_directory()?)
             .await
+    }
+
+    /// Run the install process, picking up where the user left off if necessary
+    pub async fn run(&mut self) -> Result<()> {
+        self.save().await?;
+
+        if let Some(aws_credentials_profile) = &self.deployment.aws_credentials_profile {
+            println!(
+                "Using AWS profile: {}",
+                style(aws_credentials_profile).bold()
+            );
+        } else {
+            self.prompt_for_aws_credentials_profile().await?;
+        }
+
+        self.save().await?;
+
+        Ok(())
+    }
+
+    async fn prompt_for_aws_credentials_profile(&mut self) -> Result<()> {
+        println!(
+            "We'll use your AWS credentials (stored in {}) throughout the install process.",
+            style("~/.aws/credentials").bold()
+        );
+
+        let profile = input()
+            .with_prompt("Which AWS profile should we use?")
+            .default("default".to_owned())
+            .validate_with(|input: &String| {
+                match rusoto_credential::ProfileProvider::with_default_credentials(input) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e.message),
+                }
+            })
+            .interact_text()?;
+
+        self.deployment.aws_credentials_profile = Some(profile);
+        println!();
+
+        Ok(())
     }
 }
 
@@ -207,6 +328,7 @@ where
     };
 
     if let Some(deployment) = deployment {
+        println!();
         Ok(deployment)
     } else {
         println!("\nOk, we'll create a new deployment\n");
@@ -226,12 +348,9 @@ async fn main() -> Result<()> {
         .await?;
 
     let deployment = create_or_load_existing_deployment(options.state_directory()?).await?;
-    let installer = Installer {
-        options,
-        deployment,
-    };
-    installer.save().await?;
-    Ok(())
+    let mut installer = Installer::new(options, deployment);
+
+    installer.run().await
 }
 
 #[cfg(test)]
