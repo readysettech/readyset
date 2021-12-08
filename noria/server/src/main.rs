@@ -168,7 +168,7 @@ struct Opts {
     reader_only: bool,
 
     /// Output prometheus metrics
-    #[clap(long)]
+    #[clap(long, env = "PROMETHEUS_METRICS")]
     prometheus_metrics: bool,
 
     /// Output noria metrics

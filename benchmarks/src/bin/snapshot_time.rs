@@ -72,7 +72,7 @@ fn init_metrics_recorder() {
 }
 
 fn tables_size_metric_mib() -> f64 {
-    let metrics_handle = get_global_recorder();
+    let metrics_handle = get_global_recorder().unwrap();
 
     let metrics: MetricsDump =
         serde_json::from_str(&metrics_handle.render(RecorderType::Noria).unwrap()).unwrap();
