@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::env;
 use std::fmt::{Debug, Display};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -17,6 +18,7 @@ use dialoguer::{Confirm, Input, Select};
 use lazy_static::lazy_static;
 use rusoto_credential::ProfileProvider;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 use tokio::fs::{read_dir, DirBuilder, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -104,86 +106,72 @@ where
     }
 }
 
-/// `#[serde(with = "...")]`-compatible module for serializing an option as either the string
-/// "unset", or a value, rather than using `null` for [`None`].
-///
-/// In the fields of [`Deployment`], this allows explicitly differentiating between unset values and
-/// set-to-null values.
-mod maybe_set {
-    use std::fmt;
-    use std::marker::PhantomData;
+/// An enum encapsulating the user selection to either use an existing entity (represented by the
+/// `T` type argument) or create a new one
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
+enum MaybeExisting<T> {
+    /// Create a new entity
+    CreateNew,
 
-    use serde::de::value::BorrowedStrDeserializer;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    /// Use an existing entity
+    Existing(T),
+}
 
-    pub fn serialize<T, S>(val: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: Serialize,
-    {
-        match val {
-            Some(val) => val.serialize(serializer),
-            None => serializer.serialize_str("unset"),
+use MaybeExisting::{CreateNew, Existing};
+
+impl<T> From<Option<T>> for MaybeExisting<T> {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(val) => Self::Existing(val),
+            None => Self::CreateNew,
         }
     }
+}
 
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+impl<T> From<MaybeExisting<T>> for Option<T> {
+    fn from(val: MaybeExisting<T>) -> Self {
+        match val {
+            CreateNew => None,
+            Existing(x) => Some(x),
+        }
+    }
+}
+
+impl<T> Default for MaybeExisting<T> {
+    fn default() -> Self {
+        Self::CreateNew
+    }
+}
+
+impl<T> MaybeExisting<T> {
+    /// Converts from `MaybeExisting<T>` (or `&MaybeExisting<T>`) to `MaybeExisting<&T::Target>`.
+    ///
+    /// Equivalent to [`Option::as_deref`]
+    fn as_deref(&self) -> MaybeExisting<&T::Target>
     where
-        D: Deserializer<'de>,
-        T: Deserialize<'de>,
+        T: Deref,
     {
-        struct UnsetVisitor<T> {
-            _marker: PhantomData<T>,
+        match self {
+            CreateNew => CreateNew,
+            Existing(x) => Existing(&*x),
         }
-
-        impl<'de, T> serde::de::Visitor<'de> for UnsetVisitor<T>
-        where
-            T: Deserialize<'de>,
-        {
-            type Value = Option<T>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "the string \"unset\", or a value")
-            }
-
-            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                T::deserialize(deserializer).map(Some)
-            }
-
-            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                if v == "unset" {
-                    return Ok(None);
-                }
-                T::deserialize(BorrowedStrDeserializer::new(v)).map(Some)
-            }
-        }
-
-        deserializer.deserialize_any(UnsetVisitor {
-            _marker: PhantomData,
-        })
     }
 }
 
 /// A (potentially partially-completed) deployment of a readyset cluster
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
     name: String,
 
-    #[serde(with = "maybe_set", default)]
+    #[serde(default)]
     aws_credentials_profile: Option<String>,
 
-    #[serde(with = "maybe_set", default)]
+    #[serde(default)]
     aws_region: Option<String>,
 
-    /// VPC to deploy to. If Some(None), will create a new VPC as part of the deployment process.
-    #[serde(with = "maybe_set", default)]
-    vpc_id: Option<Option<String>>,
+    /// VPC to deploy to
+    #[serde(default)]
+    vpc_id: Option<MaybeExisting<String>>,
 }
 
 impl Deployment {
@@ -280,8 +268,8 @@ impl Installer {
 
         let _vpc_id = if let Some(vpc_id) = &self.deployment.vpc_id {
             match vpc_id {
-                Some(vpc_id) => println!("Using existing AWS VPC: {}", style(vpc_id).bold()),
-                None => println!("Deploying to a {} AWS VPC", style("new").bold()),
+                Existing(vpc_id) => println!("Using existing AWS VPC: {}", style(vpc_id).bold()),
+                CreateNew => println!("Deploying to a {} AWS VPC", style("new").bold()),
             }
             vpc_id.as_deref()
         } else {
@@ -292,7 +280,7 @@ impl Installer {
         Ok(())
     }
 
-    async fn prompt_for_vpc(&mut self) -> Result<Option<&str>> {
+    async fn prompt_for_vpc(&mut self) -> Result<MaybeExisting<&str>> {
         let vpc_id = if confirm()
             .with_prompt("Would you like to deploy to an existing AWS VPC?")
             .default(false)
@@ -333,10 +321,10 @@ impl Installer {
                 .items(&vpc_names)
                 .interact()?;
 
-            Some(vpcs[idx].0.to_owned())
+            Existing(vpcs[idx].0.to_owned())
         } else {
             println!("OK, we'll create a new AWS VPC as part of the deployment process");
-            None
+            CreateNew
         };
 
         Ok(self.deployment.vpc_id.insert(vpc_id).as_deref())
@@ -530,6 +518,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -569,5 +558,13 @@ mod tests {
             Deployment::list(state_dir.path()).await.unwrap(),
             vec!["list_deployments_1", "list_deployments_2"]
         );
+    }
+
+    #[proptest]
+    fn deployment_serialize_round_trip(deployment: Deployment) {
+        let serialized = serde_json::to_string(&deployment).unwrap();
+        eprintln!("JSON: {}", serialized);
+        let rt = serde_json::from_str::<Deployment>(&serialized).unwrap();
+        assert_eq!(rt, deployment);
     }
 }

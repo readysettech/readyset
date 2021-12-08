@@ -5140,10 +5140,12 @@ dependencies = [
  "dialoguer",
  "indicatif 0.16.2",
  "lazy_static",
+ "proptest",
  "rusoto_credential",
  "serde",
  "serde_json",
  "tempfile",
+ "test-strategy",
  "tokio",
 ]
 
