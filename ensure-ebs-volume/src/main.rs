@@ -731,7 +731,11 @@ impl Opts {
             .wait()
             .await?;
         if !result.success() {
-            bail!("mount {} {} failed")
+            bail!(
+                "mount {} {} failed",
+                block_device_path.display(),
+                self.mountpoint.display()
+            );
         }
 
         info!("Done");

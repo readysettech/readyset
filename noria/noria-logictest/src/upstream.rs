@@ -27,7 +27,10 @@ impl FromStr for DatabaseType {
         match s {
             "mysql" => Ok(Self::MySQL),
             "postgresql" => Ok(Self::PostgreSQL),
-            _ => bail!("Invalid upstream type `{}`, expected one of `mysql` or `postgresql`"),
+            _ => bail!(
+                "Invalid upstream type `{}`, expected one of `mysql` or `postgresql`",
+                s
+            ),
         }
     }
 }
