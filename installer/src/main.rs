@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
+use aws_sdk_ec2 as ec2;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use console::style;
+use console::{style, Emoji};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
 use lazy_static::lazy_static;
@@ -179,6 +180,10 @@ pub struct Deployment {
 
     #[serde(with = "maybe_set", default)]
     aws_region: Option<String>,
+
+    /// VPC to deploy to. If Some(None), will create a new VPC as part of the deployment process.
+    #[serde(with = "maybe_set", default)]
+    vpc_id: Option<Option<String>>,
 }
 
 impl Deployment {
@@ -246,6 +251,7 @@ struct Installer {
 
     // Runtime state
     aws_config: Option<aws_config::Config>,
+    ec2_client: Option<ec2::Client>,
 }
 
 impl Installer {
@@ -254,6 +260,7 @@ impl Installer {
             options,
             deployment,
             aws_config: None,
+            ec2_client: None,
         }
     }
 
@@ -267,10 +274,91 @@ impl Installer {
     /// Run the install process, picking up where the user left off if necessary
     pub async fn run(&mut self) -> Result<()> {
         self.save().await?;
+
         self.load_aws_config().await?;
         self.save().await?;
 
+        let _vpc_id = if let Some(vpc_id) = &self.deployment.vpc_id {
+            match vpc_id {
+                Some(vpc_id) => println!("Using existing AWS VPC: {}", style(vpc_id).bold()),
+                None => println!("Deploying to a {} AWS VPC", style("new").bold()),
+            }
+            vpc_id.as_deref()
+        } else {
+            self.prompt_for_vpc().await?
+        };
+        self.save().await?;
+
         Ok(())
+    }
+
+    async fn prompt_for_vpc(&mut self) -> Result<Option<&str>> {
+        let vpc_id = if confirm()
+            .with_prompt("Would you like to deploy to an existing AWS VPC?")
+            .default(false)
+            .interact()?
+        {
+            let vpcs = self.ec2_client().await?.describe_vpcs().send().await?;
+            let vpcs = vpcs
+                .vpcs()
+                .into_iter()
+                .flatten()
+                .flat_map(|vpc| {
+                    let vpc_id = vpc.vpc_id.as_ref()?;
+                    let vpc_name = vpc
+                        .tags()
+                        .into_iter()
+                        .flatten()
+                        .find_map(|tag| {
+                            if tag.key() == Some("Name") {
+                                tag.value()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(vpc_id);
+                    Some((vpc_id, vpc_name))
+                })
+                .collect::<Vec<_>>();
+
+            let vpc_names = vpcs.iter().map(|(_, name)| name).collect::<Vec<_>>();
+
+            println!(
+                "Found {} VPCs in {}",
+                style(vpcs.len()).bold(),
+                style(self.deployment.aws_region.as_ref().unwrap()).bold()
+            );
+            let idx = select()
+                .with_prompt("Which VPC should we deploy to?")
+                .items(&vpc_names)
+                .interact()?;
+
+            Some(vpcs[idx].0.to_owned())
+        } else {
+            println!("OK, we'll create a new AWS VPC as part of the deployment process");
+            None
+        };
+
+        Ok(self.deployment.vpc_id.insert(vpc_id).as_deref())
+    }
+
+    async fn ec2_client(&mut self) -> Result<&ec2::Client> {
+        if self.ec2_client.is_none() {
+            self.init_ec2_client().await?;
+        }
+        Ok(self.ec2_client.as_ref().unwrap())
+    }
+
+    async fn init_ec2_client(&mut self) -> Result<&ec2::Client> {
+        let ec2_client = ec2::Client::new(self.aws_config().await?);
+        Ok(self.ec2_client.insert(ec2_client))
+    }
+
+    async fn aws_config(&mut self) -> Result<&aws_config::Config> {
+        if self.aws_config.is_none() {
+            self.load_aws_config().await?;
+        }
+        Ok(self.aws_config.as_ref().unwrap())
     }
 
     async fn load_aws_config(&mut self) -> Result<&aws_config::Config> {
@@ -300,7 +388,15 @@ impl Installer {
 
         loader = loader.region(Region::new(region.to_owned()));
 
-        Ok(self.aws_config.insert(loader.load().await))
+        let config = loader.load().await;
+
+        println!(
+            "\n{} {}\n",
+            style(Emoji("✔", "")).green(),
+            style("Loaded AWS credentials").bold(),
+        );
+
+        Ok(self.aws_config.insert(config))
     }
 
     fn prompt_for_aws_credentials_profile(&mut self) -> Result<&str> {
