@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use crate::cache_hit_benchmark::CacheHitBenchmark;
-use crate::read_benchmark::ReadBenchmark;
+use crate::query_benchmark::QueryBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
 use crate::template::Template;
@@ -31,7 +31,7 @@ use mysql_async::{Conn, Opts};
 pub enum Benchmark {
     Template, // Example benchmark that does not execute any commands.
     /// Basic read benchmark
-    ReadBenchmark,
+    QueryBenchmark,
     CacheHitBenchmark,
     ScaleViews,
     ScaleConnections,
@@ -43,7 +43,7 @@ impl Benchmark {
     pub fn name_label(&self) -> &'static str {
         match self {
             Self::Template(_) => "template",
-            Self::ReadBenchmark(_) => "read_benchmark",
+            Self::QueryBenchmark(_) => "query_benchmark",
             Self::CacheHitBenchmark(_) => "cache_hit_benchmark",
             Self::ScaleViews(_) => "scale_views",
             Self::ScaleConnections(_) => "scale_connections",

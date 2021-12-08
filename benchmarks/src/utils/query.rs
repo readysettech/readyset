@@ -92,7 +92,7 @@ impl TryFrom<String> for DistributionAnnotations {
     type Error = anyhow::Error;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         Ok(DistributionAnnotations(
-            s.split(&[',', '\n'][..])
+            s.split(&[';', '\n'][..])
                 .filter_map(|m| {
                     if m.trim().is_empty() {
                         return None;
