@@ -19,3 +19,4 @@ eui48 = "0.4"
 uuid = { version = "0.8", features = ["v4"] }
 serde_json = "1"
 bit-vec = { version = "0.6", features = ["serde"] }
+test-strategy = "0.1.2"

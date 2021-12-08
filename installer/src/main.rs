@@ -1,11 +1,12 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::env;
 use std::fmt::{Debug, Display};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use aws_sdk_ec2 as ec2;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
@@ -15,6 +16,8 @@ use clap::Parser;
 use console::{style, Emoji};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
+use ec2::model::Filter;
+use launchpad::display::EnglishList;
 use lazy_static::lazy_static;
 use rusoto_credential::ProfileProvider;
 use serde::{Deserialize, Serialize};
@@ -30,6 +33,9 @@ lazy_static! {
 ///
 /// Should match `destination_regions` in `//ops/image-deploy/locals.pkr.hcl`
 const REGIONS: &[&str] = &["us-east-1", "us-east-2", "us-west-2"];
+
+/// Minimum number of availability zones in which we can deploy a cluster
+const MIN_AVAILABILITY_ZONES: usize = 3;
 
 fn confirm() -> Confirm<'static> {
     let mut confirm = Confirm::with_theme(&*DIALOG_THEME);
@@ -47,6 +53,24 @@ where
 
 fn select() -> Select<'static> {
     Select::with_theme(&*DIALOG_THEME)
+}
+
+macro_rules! success {
+    ($($format_args:tt)*) => {
+        println!(
+            "\n{}{}\n",
+            style(Emoji("✔ ", "")).green(),
+            style(format_args!($($format_args)*)).bold()
+        )
+    };
+}
+
+fn filter<K, V>(key: K, value: V) -> Filter
+where
+    K: Into<String>,
+    V: Into<String>,
+{
+    Filter::builder().name(key).values(value).build()
 }
 
 /// Install and configure a ReadySet cluster in AWS
@@ -266,16 +290,126 @@ impl Installer {
         self.load_aws_config().await?;
         self.save().await?;
 
-        let _vpc_id = if let Some(vpc_id) = &self.deployment.vpc_id {
+        if let Some(vpc_id) = &self.deployment.vpc_id {
             match vpc_id {
                 Existing(vpc_id) => println!("Using existing AWS VPC: {}", style(vpc_id).bold()),
                 CreateNew => println!("Deploying to a {} AWS VPC", style("new").bold()),
             }
-            vpc_id.as_deref()
         } else {
-            self.prompt_for_vpc().await?
+            self.prompt_for_vpc().await?;
         };
         self.save().await?;
+
+        if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
+            self.validate_vpc(vpc_id).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn validate_vpc(&mut self, mut vpc_id: String) -> Result<()> {
+        // First, check that the VPC actually exists
+        let vpcs = self
+            .ec2_client()
+            .await?
+            .describe_vpcs()
+            .filters(filter("vpc-id", &vpc_id))
+            .send()
+            .await?;
+        if vpcs.vpcs.unwrap_or_default().is_empty() {
+            println!(
+                "The previously configured VPC {} no longer exists, or you're missing the required \
+                 permissions to view it",
+                style(&vpc_id).bold()
+            );
+            if confirm()
+                .with_prompt("Would you like to change the configured VPC?")
+                .interact()?
+            {
+                self.prompt_for_vpc().await?;
+                self.save().await?;
+
+                match self.deployment.vpc_id.as_ref().unwrap() {
+                    CreateNew => return Ok(()),
+                    Existing(new_vpc_id) => vpc_id = new_vpc_id.clone(),
+                }
+            } else {
+                bail!("Could not successfully access the configured VPC");
+            }
+        }
+
+        let subnets = self
+            .ec2_client()
+            .await?
+            .describe_subnets()
+            .filters(filter("vpc-id", &vpc_id))
+            .send()
+            .await?
+            .subnets
+            .unwrap_or_default();
+
+        let subnet_azs = &subnets
+            .iter()
+            .filter_map(|subnet| subnet.availability_zone())
+            .collect::<HashSet<_>>();
+        if subnet_azs.len() < MIN_AVAILABILITY_ZONES {
+            let other_azs = self
+                .ec2_client()
+                .await?
+                .describe_availability_zones()
+                .filters(filter(
+                    "region-name",
+                    self.deployment.aws_region.as_ref().unwrap(),
+                ))
+                .send()
+                .await?
+                .availability_zones
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|az| az.zone_name)
+                .filter(|zone_name| !subnet_azs.contains(zone_name.as_str()))
+                .take(MIN_AVAILABILITY_ZONES - subnet_azs.len())
+                .collect::<Vec<_>>();
+
+            println!(
+                "ReadySet needs to deploy into at least 3 subnets in different availability zones"
+            );
+            print!("The selected VPC {} ", style(vpc_id).bold(),);
+            match subnet_azs.len() {
+                0 => println!("has no subnets"),
+                1 => println!(
+                    "only has one subnet, in {}",
+                    style(subnet_azs.iter().next().unwrap()).bold()
+                ),
+                _ => println!(
+                    "only has subnets in {}",
+                    subnet_azs.iter().map(|az| style(az).bold()).into_and_list()
+                ),
+            }
+
+            println!(
+                "If you like, I can automatically create new subnets for the VPC in {}",
+                other_azs.iter().map(|az| style(az).bold()).into_and_list()
+            );
+
+            if confirm()
+                .with_prompt("Create subnets?")
+                .default(true)
+                .interact()?
+            {
+                bail!("TODO: create missing subnets");
+            } else {
+                bail!(
+                    "Please create subnets in the missing availability zones in your VPC, then \
+                     re-run this installer to continue"
+                );
+            }
+        } else {
+            success!(
+                "VPC has subnets in at least {} availability zones",
+                MIN_AVAILABILITY_ZONES
+            );
+        }
 
         Ok(())
     }
@@ -378,11 +512,7 @@ impl Installer {
 
         let config = loader.load().await;
 
-        println!(
-            "\n{} {}\n",
-            style(Emoji("✔", "")).green(),
-            style("Loaded AWS credentials").bold(),
-        );
+        success!("Loaded AWS credentials");
 
         Ok(self.aws_config.insert(config))
     }
