@@ -1300,10 +1300,10 @@ where
                         // If this is the first time this adapter has seen the query, we should
                         // set the queries status in the cache and send it to fallback.
                         status @ None | status @ Some(AdmitStatus::Pending) => {
+                            if matches!(status, None) {
+                                query_status_cache.set_pending_migration(stmt).await;
+                            }
                             if async_migrations {
-                                if matches!(status, None) {
-                                    query_status_cache.set_pending_migration(stmt).await;
-                                }
                                 let handle = event.start_timer();
                                 let res = upstream.query(&query).await.map(QueryResult::Upstream);
                                 handle.set_upstream_duration();
