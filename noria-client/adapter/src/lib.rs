@@ -36,6 +36,7 @@ use nom_sql::{Dialect, SelectStatement, SqlQuery};
 use noria::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
 use noria::{ControllerHandle, ReadySetError};
 use noria_client::backend::noria_connector::NoriaConnector;
+use noria_client::backend::MigrationMode;
 use noria_client::rewrite::anonymize_literals;
 use noria_client::{Backend, BackendBuilder};
 
@@ -112,7 +113,7 @@ pub struct Options {
     ///
     /// Defaults to 15 minutes.
     #[clap(long, env = "MAX_PROCESSING_MINUTES", default_value = "15")]
-    max_processing_minutes: i64,
+    max_processing_minutes: u64,
 
     /// Sets the migration handlers's loop interval in milliseconds.
     #[clap(long, env = "MIGRATION_TASK_INTERVAL", default_value = "20000")]
@@ -297,9 +298,7 @@ where
             None
         };
 
-        let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(
-            options.max_processing_minutes,
-        )));
+        let query_status_cache = Arc::new(QueryStatusCache::new());
 
         if options.async_migrations {
             #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
@@ -308,6 +307,7 @@ where
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
             let shutdown_recv = shutdown_sender.subscribe();
             let loop_interval = options.migration_task_interval;
+            let max_retry = options.max_processing_minutes;
             let validate_queries = options.validate_queries;
             let cache = query_status_cache.clone();
 
@@ -328,7 +328,6 @@ where
                         auto_increments.clone(),
                         query_cache.clone(),
                         None,
-                        false,
                     )
                     .instrument(connection.in_scope(|| {
                         span!(Level::DEBUG, "Building migration task noria connector")
@@ -341,6 +340,7 @@ where
                     cache,
                     validate_queries,
                     std::time::Duration::from_millis(loop_interval),
+                    std::time::Duration::from_secs(max_retry * 60),
                     shutdown_recv,
                 );
                 migration_handler.run().await
@@ -387,6 +387,12 @@ where
             handle
         };
 
+        let migration_mode = if options.async_migrations || options.explicit_migrations {
+            MigrationMode::OutOfBand
+        } else {
+            MigrationMode::InRequestPath
+        };
+
         // Spin up async thread that is in charge of creating a session with the authority,
         // regularly updating the heartbeat to keep the session live, and registering the adapters
         // http endpoint.
@@ -405,6 +411,7 @@ where
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
+            let migration_mode = migration_mode.clone();
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();
@@ -415,13 +422,12 @@ where
                 .dialect(self.dialect)
                 .mirror_ddl(self.mirror_ddl)
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
-                .async_migrations(options.async_migrations)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
-                .allow_unsupported_set(options.allow_unsupported_set);
+                .allow_unsupported_set(options.allow_unsupported_set)
+                .migration_mode(migration_mode);
 
             // can't move query_status_cache into the async move block
             let query_status_cache = query_status_cache.clone();
-            let explicit_migrations = options.explicit_migrations;
             let fut = async move {
                 let connection = span!(Level::INFO, "connection", addr = ?s.peer_addr().unwrap());
                 connection.in_scope(|| info!("Accepted new connection"));
@@ -431,7 +437,6 @@ where
                     auto_increments.clone(),
                     query_cache.clone(),
                     region.clone(),
-                    explicit_migrations,
                 )
                 .instrument(connection.in_scope(|| span!(Level::DEBUG, "Building noria connector")))
                 .await;

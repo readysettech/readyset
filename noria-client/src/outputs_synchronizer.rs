@@ -1,4 +1,4 @@
-use crate::query_status_cache::QueryStatusCache;
+use crate::query_status_cache::{MigrationState, QueryStatusCache};
 use noria::ControllerHandle;
 use noria::ReadySetResult;
 
@@ -48,7 +48,7 @@ impl OutputsSynchronizer {
                             //some timestamp. Also consider using query hashes instead of SqlQuery
                             for (_, query) in outputs {
                                 if let nom_sql::SqlQuery::Select(stmt) = query {
-                                    self.query_status_cache.set_successful_migration(&stmt).await;
+                                    self.query_status_cache.update_query_migration_state(&stmt, MigrationState::Successful).await;
                                 }
                             }
                         }

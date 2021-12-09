@@ -22,10 +22,10 @@ async fn main() -> Result<()> {
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
+    let query_status_cache = Arc::new(QueryStatusCache::new());
 
     let upstream: Option<MySqlUpstream> = None;
-    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None, false).await;
+    let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
     let slowlog = false;
     let users: &'static HashMap<String, String> = Box::leak(Box::new(hashmap! {
         "user".to_owned() => "pw".to_owned()

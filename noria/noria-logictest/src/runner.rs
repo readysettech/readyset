@@ -529,8 +529,8 @@ impl TestScript {
         let task = tokio::spawn(async move {
             let (s, _) = listener.accept().await.unwrap();
 
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None, false).await;
-            let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
+            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
+            let query_status_cache = Arc::new(QueryStatusCache::new());
 
             macro_rules! make_backend {
                 ($upstream:ty, $handler:ty) => {{

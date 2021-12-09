@@ -6,17 +6,18 @@
 //! The migration handler may change a queries state based on the
 //! response from Noria.
 use crate::backend::{noria_connector, NoriaConnector};
-use crate::query_status_cache::QueryStatusCache;
+use crate::query_status_cache::{MigrationState, QueryStatusCache};
 use crate::upstream_database::{IsFatalError, NoriaCompare};
 use crate::UpstreamDatabase;
 use metrics::counter;
+use nom_sql::SelectStatement;
 use noria::ReadySetResult;
 use noria_client_metrics::recorded;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::select;
 use tracing::{error, info, instrument, warn};
-
-use nom_sql::SelectStatement;
-use std::sync::Arc;
 
 pub struct MigrationHandler<DB> {
     /// Connection used to issue prepare requests to Noria.
@@ -38,8 +39,17 @@ pub struct MigrationHandler<DB> {
     /// that require processing take longer than `min_poll_interval`.
     min_poll_interval: std::time::Duration,
 
+    /// The maximum amount of time the migration handler will retry a
+    /// query for before marking it as Unsupported.
+    max_retry: std::time::Duration,
+
     /// Reciever to return the broadcast signal on.
     shutdown_recv: tokio::sync::broadcast::Receiver<()>,
+
+    /// The time that we began performing migrations on the query.
+    /// Queries are removed when a migration yields success or unsupported
+    /// and re-added when they are found in the pending migration list.
+    start_time: HashMap<SelectStatement, Instant>,
 }
 
 impl<DB> MigrationHandler<DB>
@@ -52,6 +62,7 @@ where
         query_status_cache: Arc<QueryStatusCache>,
         validate_queries: bool,
         min_poll_interval: std::time::Duration,
+        max_retry: std::time::Duration,
         shutdown_recv: tokio::sync::broadcast::Receiver<()>,
     ) -> MigrationHandler<DB> {
         MigrationHandler {
@@ -60,7 +71,9 @@ where
             query_status_cache,
             validate_queries,
             min_poll_interval,
+            max_retry,
             shutdown_recv,
+            start_time: HashMap::new(),
         }
     }
 
@@ -88,6 +101,12 @@ where
     }
 
     async fn perform_migration(&mut self, stmt: &SelectStatement) {
+        // If this is the first migration we are performing, add the query to the
+        // start_time map.
+        if !self.start_time.contains_key(stmt) {
+            self.start_time.insert(stmt.clone(), Instant::now());
+        }
+
         let upstream_result = if self.validate_queries {
             let mut upstream_result = self.upstream.prepare(stmt.to_string()).await;
 
@@ -144,6 +163,11 @@ where
                             .compare(schema, params)
                         {
                             warn!(error = %e, query = %stmt, "Query compare failed");
+                            // TODO(justin): Fix setting migration state to unsupported with
+                            // validate_queries.
+                            /*self.query_status_cache
+                            .update_query_migration_state(stmt, MigrationState::Unsupported)
+                            .await;*/
                             return;
                         }
                     } else {
@@ -151,13 +175,19 @@ where
                     }
                 }
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
-                self.query_status_cache.set_successful_migration(stmt).await;
+                self.start_time.remove(stmt);
+                self.query_status_cache
+                    .update_query_migration_state(stmt, MigrationState::Successful)
+                    .await;
             }
             Err(e) if e.caused_by_unsupported() => {
                 error!(error = %e,
                         query = %stmt,
                         "Select query is unsupported in ReadySet");
-                self.query_status_cache.set_unsupported_query(stmt).await;
+                self.start_time.remove(stmt);
+                self.query_status_cache
+                    .update_query_migration_state(stmt, MigrationState::Unsupported)
+                    .await;
             }
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
@@ -165,6 +195,12 @@ where
                 warn!(error = %e,
                       query = %stmt,
                       "Select query may have transiently failed");
+                if Instant::now() - *self.start_time.get(stmt).unwrap() > self.max_retry {
+                    // Query failed for long enough, it is unsupported.
+                    self.query_status_cache
+                        .update_query_migration_state(stmt, MigrationState::Unsupported)
+                        .await;
+                }
             }
         }
     }

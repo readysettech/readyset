@@ -42,8 +42,8 @@ async fn main() {
     let mysql_url = String::from(mysql_url);
     let upstream = Some(MySqlUpstream::connect(mysql_url.clone()).await.unwrap());
 
-    let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None, false).await;
-    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
+    let noria = NoriaConnector::new(ch.clone(), auto_increments, query_cache, None).await;
+    let query_status_cache = Arc::new(QueryStatusCache::new());
 
     let mut b: Backend<_, MySqlQueryHandler> = BackendBuilder::new()
         .require_authentication(false)

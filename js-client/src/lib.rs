@@ -85,14 +85,13 @@ fn connect(mut cx: FunctionContext) -> JsResult<BoxedClient> {
     });
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
     let query_cache: Arc<RwLock<HashMap<SelectStatement, String>>> = Arc::default();
-    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(15)));
+    let query_status_cache = Arc::new(QueryStatusCache::new());
 
     let noria = rt.block_on(NoriaConnector::new(
         ch,
         auto_increments,
         query_cache,
         Some(region),
-        false,
     ));
     let upstream = if !mysql_address.is_empty() {
         Some(rt.block_on(MySqlUpstream::connect(mysql_address)).unwrap())

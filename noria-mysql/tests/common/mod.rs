@@ -5,7 +5,7 @@ use std::fmt::Display;
 use tokio::net::TcpStream;
 
 use msql_srv::MysqlIntermediary;
-use noria_client::backend::BackendBuilder;
+use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_client_test_helpers;
 
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
@@ -88,6 +88,7 @@ pub fn setup(partial: bool) -> mysql::Opts {
 pub fn query_cache_setup(
     query_status_cache: std::sync::Arc<noria_client::query_status_cache::QueryStatusCache>,
     fallback: bool,
+    migration_mode: MigrationMode,
 ) -> mysql::Opts {
     noria_client_test_helpers::setup_inner::<MySQLAdapter>(
         BackendBuilder::new().require_authentication(false),
@@ -95,5 +96,6 @@ pub fn query_cache_setup(
         true,
         true,
         query_status_cache,
+        migration_mode,
     )
 }
