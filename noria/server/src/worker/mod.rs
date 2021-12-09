@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -155,6 +156,7 @@ pub struct Worker {
     pub(crate) domains: HashMap<(DomainIndex, usize), DomainHandle>,
 
     pub(crate) memory: MemoryTracker,
+    pub(crate) is_evicting: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -164,6 +166,7 @@ impl Worker {
             self.coord.clone(),
             self.memory,
             Arc::clone(&self.state_sizes),
+            Arc::clone(&self.is_evicting),
         ));
     }
 
@@ -396,7 +399,17 @@ async fn do_eviction(
     coord: Arc<ChannelCoordinator>,
     memory_tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<(DomainIndex, usize), Arc<AtomicUsize>>>>,
+    is_evicting: Arc<AtomicBool>,
 ) -> ReadySetResult<()> {
+    if is_evicting.swap(true, Ordering::Relaxed) {
+        // Already evicting, nothing to do
+        return Ok(());
+    }
+
+    let _guard = scopeguard::guard((), move |_| {
+        is_evicting.store(false, Ordering::Relaxed);
+    });
+
     let span = info_span!("evicting");
     let start = std::time::Instant::now();
 

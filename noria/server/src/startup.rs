@@ -150,6 +150,7 @@ pub(super) async fn start_instance(
         valve: valve.clone(),
         domains: Default::default(),
         memory: MemoryTracker::new()?,
+        is_evicting: Default::default(),
     };
 
     tokio::spawn(maybe_abort_on_panic!(worker.run()));

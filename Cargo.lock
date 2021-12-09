@@ -4079,6 +4079,7 @@ dependencies = [
  "replicators",
  "reqwest",
  "rusty-fork",
+ "scopeguard",
  "serde",
  "serde_json",
  "serde_with",
