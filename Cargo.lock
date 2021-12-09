@@ -2809,6 +2809,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68f2d64f2edebec4ce84ad108148e67e1064789bee435edc5b60ad398714a3a9"
 
 [[package]]
+name = "iprange"
+version = "0.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c35c37d40904e85813524129c09edb700f9f4c9eef5a5de03fb7e22e4d5efe7f"
+dependencies = [
+ "ipnet",
+]
+
+[[package]]
 name = "irl_demo"
 version = "0.1.0"
 dependencies = [
@@ -5139,7 +5148,10 @@ dependencies = [
  "clap 3.0.0-beta.5",
  "console",
  "dialoguer",
+ "futures 0.3.17",
  "indicatif 0.16.2",
+ "ipnet",
+ "iprange",
  "launchpad",
  "lazy_static",
  "proptest",

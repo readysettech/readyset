@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 083c9350a27b1257ae455983bada0ad230e7406e9654d93abb57630a90cb287b # shrinks to input = _SubnetCidrsReturnsValidSubnetsArgs { vpc_cidr: ArbitraryIpv4Cidr(0.0.0.0/0), needed_total_subnets: 1 }

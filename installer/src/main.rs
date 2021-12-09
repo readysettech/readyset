@@ -17,7 +17,9 @@ use console::{style, Emoji};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
 use ec2::model::Filter;
-use launchpad::display::EnglishList;
+use futures::stream::{FuturesUnordered, StreamExt};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use ipnet::Ipv4Net;
 use lazy_static::lazy_static;
 use rusoto_credential::ProfileProvider;
 use serde::{Deserialize, Serialize};
@@ -25,8 +27,13 @@ use test_strategy::Arbitrary;
 use tokio::fs::{read_dir, DirBuilder, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+mod aws;
+
 lazy_static! {
     static ref DIALOG_THEME: ColorfulTheme = ColorfulTheme::default();
+    static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
+        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+        .template("{prefix:.bold.dim} {spinner} {wide_msg}");
 }
 
 /// List of regions where we deploy AMIs.
@@ -316,7 +323,11 @@ impl Installer {
             .filters(filter("vpc-id", &vpc_id))
             .send()
             .await?;
-        if vpcs.vpcs.unwrap_or_default().is_empty() {
+        let vpc_cidr: Ipv4Net = if let Some(vpc) = vpcs.vpcs.unwrap_or_default().first() {
+            vpc.cidr_block()
+                .ok_or_else(|| anyhow!("VPC with id {} doesn't have any CIDR blocks", vpc_id))?
+                .parse()?
+        } else {
             println!(
                 "The previously configured VPC {} no longer exists, or you're missing the required \
                  permissions to view it",
@@ -331,12 +342,29 @@ impl Installer {
 
                 match self.deployment.vpc_id.as_ref().unwrap() {
                     CreateNew => return Ok(()),
-                    Existing(new_vpc_id) => vpc_id = new_vpc_id.clone(),
+                    Existing(new_vpc_id) => {
+                        vpc_id = new_vpc_id.clone();
+                        self.ec2_client()
+                            .await?
+                            .describe_vpcs()
+                            .filters(filter("vpc-id", &vpc_id))
+                            .send()
+                            .await?
+                            .vpcs
+                            .unwrap()
+                            .first()
+                            .unwrap()
+                            .cidr_block()
+                            .ok_or_else(|| {
+                                anyhow!("VPC with id {} doesn't have any CIDR blocks!", vpc_id)
+                            })?
+                            .parse()?
+                    }
                 }
             } else {
                 bail!("Could not successfully access the configured VPC");
             }
-        }
+        };
 
         let subnets = self
             .ec2_client()
@@ -368,36 +396,55 @@ impl Installer {
                 .into_iter()
                 .filter_map(|az| az.zone_name)
                 .filter(|zone_name| !subnet_azs.contains(zone_name.as_str()))
-                .take(MIN_AVAILABILITY_ZONES - subnet_azs.len())
-                .collect::<Vec<_>>();
+                .take(MIN_AVAILABILITY_ZONES - subnet_azs.len());
 
             println!(
                 "ReadySet needs to deploy into at least 3 subnets in different availability zones"
             );
-            print!("The selected VPC {} ", style(vpc_id).bold(),);
-            match subnet_azs.len() {
-                0 => println!("has no subnets"),
-                1 => println!(
-                    "only has one subnet, in {}",
-                    style(subnet_azs.iter().next().unwrap()).bold()
-                ),
-                _ => println!(
-                    "only has subnets in {}",
-                    subnet_azs.iter().map(|az| style(az).bold()).into_and_list()
-                ),
+            println!(
+                "The selected VPC {} only has the following subnets:",
+                style(&vpc_id).bold(),
+            );
+            for subnet in &subnets {
+                println!(
+                    " • {}, in {}",
+                    style(subnet.cidr_block().unwrap()).blue(),
+                    style(subnet.availability_zone().unwrap()).bold()
+                );
             }
 
-            println!(
-                "If you like, I can automatically create new subnets for the VPC in {}",
-                other_azs.iter().map(|az| style(az).bold()).into_and_list()
-            );
+            let new_cidrs = aws::subnets::subnet_cidrs(
+                vpc_cidr,
+                subnets
+                    .iter()
+                    .map(|subnet| {
+                        Ok(subnet
+                            .cidr_block()
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "Subnet {} is missing a CIDR block!",
+                                    subnet.subnet_id().unwrap()
+                                )
+                            })?
+                            .parse()?)
+                    })
+                    .collect::<Result<Vec<Ipv4Net>>>()?,
+                MIN_AVAILABILITY_ZONES,
+            )?;
+
+            let subnet_az_cidrs = other_azs.zip(new_cidrs).collect::<Vec<_>>();
+
+            println!("If you like, I can automatically create the following new subnets:",);
+            for (az, cidr) in &subnet_az_cidrs {
+                println!(" • {}, in {}", style(cidr).blue(), style(az).bold());
+            }
 
             if confirm()
                 .with_prompt("Create subnets?")
                 .default(true)
                 .interact()?
             {
-                bail!("TODO: create missing subnets");
+                self.create_subnets(vpc_id, subnet_az_cidrs).await?;
             } else {
                 bail!(
                     "Please create subnets in the missing availability zones in your VPC, then \
@@ -412,6 +459,63 @@ impl Installer {
         }
 
         Ok(())
+    }
+
+    async fn create_subnets(
+        &mut self,
+        vpc_id: String,
+        subnet_az_cidrs: Vec<(String, Ipv4Net)>,
+    ) -> Result<()> {
+        let multi_bar = MultiProgress::new();
+        let ec2_client = self.ec2_client().await?;
+        let mut futures = FuturesUnordered::new();
+        for (az, cidr) in subnet_az_cidrs {
+            let bar = multi_bar.add(
+                ProgressBar::new_spinner()
+                    .with_style(SPINNER_STYLE.clone())
+                    .with_message(format!("Creating subnet {} in {}", cidr, az)),
+            );
+            bar.enable_steady_tick(50);
+            let ec2 = ec2_client.clone();
+            let vpc_id = vpc_id.to_owned();
+            futures.push(async move {
+                let res = ec2
+                    .create_subnet()
+                    .vpc_id(vpc_id)
+                    .availability_zone(az)
+                    .cidr_block(cidr.to_string())
+                    .send()
+                    .await;
+                match &res {
+                    Ok(subnet) => bar.finish_with_message(format!(
+                        "{}Created {}",
+                        style(Emoji("✔ ", "")).green(),
+                        style(subnet.subnet().unwrap().subnet_id().unwrap()).bold()
+                    )),
+                    Err(e) => bar.finish_with_message(format!(
+                        "{}Failed: {}",
+                        style(Emoji("✘ ", "")).red(),
+                        e
+                    )),
+                }
+                res
+            })
+        }
+
+        let mut err = None;
+        while let Some(res) = futures.next().await {
+            if let Err(e) = res {
+                err = Some(e);
+            }
+        }
+
+        multi_bar.join()?;
+
+        if let Some(e) = err {
+            Err(e.into())
+        } else {
+            Ok(())
+        }
     }
 
     async fn prompt_for_vpc(&mut self) -> Result<MaybeExisting<&str>> {
