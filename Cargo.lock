@@ -569,6 +569,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-rds"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64e7e724ecd3bf833fffeac1774f6befa2e24a71c56ffa3db76824f0700c4dbe"
+dependencies = [
+ "aws-endpoint 0.2.0",
+ "aws-http 0.2.0",
+ "aws-hyper 0.2.0",
+ "aws-sig-auth 0.2.0",
+ "aws-smithy-async 0.32.0",
+ "aws-smithy-client 0.32.0",
+ "aws-smithy-http 0.32.0",
+ "aws-smithy-query 0.32.0",
+ "aws-smithy-types 0.32.0",
+ "aws-smithy-xml 0.32.0",
+ "aws-types 0.2.0",
+ "bytes 1.1.0",
+ "http",
+]
+
+[[package]]
 name = "aws-sdk-s3"
 version = "0.0.26-alpha"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5144,6 +5165,7 @@ dependencies = [
  "anyhow",
  "aws-config 0.2.0",
  "aws-sdk-ec2 0.2.0",
+ "aws-sdk-rds",
  "aws-types 0.2.0",
  "clap 3.0.0-beta.5",
  "console",

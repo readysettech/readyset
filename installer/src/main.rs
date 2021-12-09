@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
 use aws_sdk_ec2 as ec2;
+use aws_sdk_rds as rds;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use ec2::model::Filter;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indicatif::{MultiProgress, ProgressBar};
 use ipnet::Ipv4Net;
@@ -24,9 +24,10 @@ mod deployment;
 #[macro_use]
 mod console;
 
+use crate::aws::filter;
 use crate::console::{confirm, input, select, SPINNER_STYLE};
 pub use crate::deployment::Deployment;
-use crate::deployment::{CreateNew, Existing, MaybeExisting};
+use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
 
 /// List of regions where we deploy AMIs.
 ///
@@ -35,14 +36,6 @@ const REGIONS: &[&str] = &["us-east-1", "us-east-2", "us-west-2"];
 
 /// Minimum number of availability zones in which we can deploy a cluster
 const MIN_AVAILABILITY_ZONES: usize = 3;
-
-fn filter<K, V>(key: K, value: V) -> Filter
-where
-    K: Into<String>,
-    V: Into<String>,
-{
-    Filter::builder().name(key).values(value).build()
-}
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -108,6 +101,7 @@ struct Installer {
     // Runtime state
     aws_config: Option<aws_config::Config>,
     ec2_client: Option<ec2::Client>,
+    rds_client: Option<rds::Client>,
 }
 
 impl Installer {
@@ -117,6 +111,7 @@ impl Installer {
             deployment,
             aws_config: None,
             ec2_client: None,
+            rds_client: None,
         }
     }
 
@@ -147,6 +142,22 @@ impl Installer {
         if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
             self.validate_vpc(vpc_id).await?;
         }
+
+        if let Some(rds_db) = &self.deployment.rds_db {
+            match &rds_db.db_id {
+                CreateNew => println!(
+                    "Will create a new {} RDS database",
+                    style(rds_db.engine).bold()
+                ),
+                Existing(rds_db_id) => println!(
+                    "Deploying in front of existing RDS database: {}",
+                    style(rds_db_id).bold()
+                ),
+            }
+        } else {
+            self.prompt_for_rds_database().await?;
+        }
+        self.save().await?;
 
         Ok(())
     }
@@ -355,6 +366,69 @@ impl Installer {
         }
     }
 
+    async fn prompt_for_rds_database(&mut self) -> Result<()> {
+        let rds_db = if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
+            if confirm()
+                .with_prompt("Would you like to deploy in front of an existing RDS database?")
+                .default(false)
+                .interact()?
+            {
+                let mut instances = aws::rds_dbs_in_vpc(self.rds_client().await?, &vpc_id).await?;
+                if instances.is_empty() {
+                    bail!("No RDS database instances found in {}", vpc_id);
+                }
+                println!(
+                    "Found {} RDS database instances in {}",
+                    style(instances.len()).bold(),
+                    style(&vpc_id).bold()
+                );
+                let idx = select()
+                    .with_prompt("Which RDS database would you like to use?")
+                    .items(
+                        &instances
+                            .iter()
+                            .map(|db_instance| db_instance.db_instance_identifier().unwrap())
+                            .collect::<Vec<_>>(),
+                    )
+                    .interact()?;
+
+                let instance = instances.remove(idx);
+                let engine = Engine::from_aws_engine(
+                    instance
+                        .engine()
+                        .ok_or_else(|| anyhow!("RDS instance missing engine"))?,
+                )?;
+                Some(RdsDb {
+                    db_id: Existing(
+                        instance
+                            .db_instance_identifier
+                            .ok_or_else(|| anyhow!("RDS instance missing identifier"))?,
+                    ),
+                    engine,
+                })
+            } else {
+                println!("OK, I'll create a new RDS database in {}", vpc_id);
+                None
+            }
+        } else {
+            None
+        }
+        .map::<Result<_>, _>(Ok)
+        .unwrap_or_else(|| {
+            let engine =
+                Engine::select("Which database engine should I create the database with?")?;
+
+            Ok(RdsDb {
+                db_id: CreateNew,
+                engine,
+            })
+        })?;
+
+        self.deployment.rds_db = Some(rds_db);
+
+        Ok(())
+    }
+
     async fn prompt_for_vpc(&mut self) -> Result<MaybeExisting<&str>> {
         let vpc_id = if confirm()
             .with_prompt("Would you like to deploy to an existing AWS VPC?")
@@ -415,6 +489,18 @@ impl Installer {
     async fn init_ec2_client(&mut self) -> Result<&ec2::Client> {
         let ec2_client = ec2::Client::new(self.aws_config().await?);
         Ok(self.ec2_client.insert(ec2_client))
+    }
+
+    async fn rds_client(&mut self) -> Result<&rds::Client> {
+        if self.rds_client.is_none() {
+            self.init_rds_client().await?;
+        }
+        Ok(self.rds_client.as_ref().unwrap())
+    }
+
+    async fn init_rds_client(&mut self) -> Result<&rds::Client> {
+        let rds_client = rds::Client::new(self.aws_config().await?);
+        Ok(self.rds_client.insert(rds_client))
     }
 
     async fn aws_config(&mut self) -> Result<&aws_config::Config> {

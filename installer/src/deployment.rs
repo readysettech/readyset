@@ -1,8 +1,9 @@
+use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::path::Path;
 
 use ::console::style;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 use tokio::fs::{read_dir, File};
@@ -61,6 +62,54 @@ impl<T> MaybeExisting<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub(crate) enum Engine {
+    MySQL,
+    PostgreSQL,
+}
+
+impl Display for Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Engine::MySQL => f.write_str("MySQL"),
+            Engine::PostgreSQL => f.write_str("PostgreSQL"),
+        }
+    }
+}
+
+impl Engine {
+    pub(crate) fn select<S>(prompt: S) -> Result<Self>
+    where
+        S: Into<String>,
+    {
+        const ENGINES: &[Engine] = &[Engine::MySQL, Engine::PostgreSQL];
+        let idx = select().with_prompt(prompt).items(ENGINES).interact()?;
+        Ok(ENGINES[idx])
+    }
+
+    pub(crate) fn from_aws_engine<S>(name: S) -> Result<Self>
+    where
+        S: AsRef<str>,
+    {
+        match name.as_ref() {
+            "mysql" | "mariadb" => Ok(Self::MySQL),
+            // TODO: check if we support aurora-postgresql out of the box
+            "postgres" => Ok(Self::PostgreSQL),
+            engine => bail!(
+                "Unsupported database engine {}; ReadySet only supports mysql/mariadb or postgres",
+                engine
+            ),
+        }
+    }
+}
+
+/// Information about the RDS database to deploy in front of
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub(crate) struct RdsDb {
+    pub(crate) db_id: MaybeExisting<String>,
+    pub(crate) engine: Engine,
+}
+
 /// A (potentially partially-completed) deployment of a readyset cluster
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
@@ -75,6 +124,10 @@ pub struct Deployment {
     /// VPC to deploy to
     #[serde(default)]
     pub(crate) vpc_id: Option<MaybeExisting<String>>,
+
+    /// RDS database to deploy in front of
+    #[serde(default)]
+    pub(crate) rds_db: Option<RdsDb>,
 }
 
 impl Deployment {
