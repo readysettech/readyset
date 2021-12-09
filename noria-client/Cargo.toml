@@ -43,6 +43,7 @@ tokio-stream = { version = "0.1.5", features = [ "net" ] }
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
 time = { version = "0.3", features = ["local-offset"] }
+dashmap = "4.0.2"
 
 [lib]
 path = "src/lib.rs"

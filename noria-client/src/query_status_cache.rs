@@ -5,9 +5,9 @@
 //! TODO(ENG-698): Track transient failure metadata to allow the adapter to
 //! make decisions about when to mark failing queries as unsupported.
 use crate::rewrite::anonymize_literals;
+use dashmap::DashMap;
 use nom_sql::SelectStatement;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
-use std::collections::HashMap;
 
 /// Each query is uniquely identifier by its select statement
 type Query = SelectStatement;
@@ -82,13 +82,13 @@ impl Serialize for QueryList {
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each query
     /// that is cached.
-    inner: tokio::sync::RwLock<HashMap<Query, QueryStatus>>,
+    inner: DashMap<Query, QueryStatus>,
 }
 
 impl QueryStatusCache {
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
-            inner: tokio::sync::RwLock::new(HashMap::new()),
+            inner: DashMap::new(),
         }
     }
 
@@ -96,19 +96,11 @@ impl QueryStatusCache {
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
     pub async fn query_migration_state(&self, q: &Query) -> MigrationState {
-        let query_state = self
-            .inner
-            .read()
-            .await
-            .get(q)
-            .map(|m| m.migration_state.clone());
+        let query_state = self.inner.get(q).map(|m| m.migration_state.clone());
         match query_state {
             Some(s) => s,
             None => {
-                self.inner
-                    .write()
-                    .await
-                    .insert(q.clone(), QueryStatus::new());
+                self.inner.insert(q.clone(), QueryStatus::new());
                 MigrationState::Pending
             }
         }
@@ -118,15 +110,16 @@ impl QueryStatusCache {
     /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
     /// again.
     pub async fn update_query_migration_state(&self, q: &Query, m: MigrationState) {
-        let mut inner = self.inner.write().await;
-        match inner.get_mut(q) {
-            Some(s) if s.migration_state != MigrationState::Unsupported => {
+        match self.inner.get_mut(q) {
+            Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 // Once a query is determined to be unsupported, there is currently no going back.
                 // In the future when we can support this in the query path this check should change.
                 s.migration_state = m;
             }
             None => {
-                let _ = inner.insert(q.clone(), QueryStatus { migration_state: m });
+                let _ = self
+                    .inner
+                    .insert(q.clone(), QueryStatus { migration_state: m });
             }
             _ => {}
         }
@@ -136,22 +129,18 @@ impl QueryStatusCache {
     /// if they should be allowed (are supported by Noria).
     pub async fn pending_migration(&self) -> Vec<Query> {
         self.inner
-            .read()
-            .await
             .iter()
-            .filter(|(_, status)| matches!(status.migration_state, MigrationState::Pending))
-            .map(|(q, _)| q.clone())
+            .filter(|r| matches!(r.value().migration_state, MigrationState::Pending))
+            .map(|r| r.key().clone())
             .collect()
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
     pub async fn allow_list(&self) -> QueryList {
         self.inner
-            .read()
-            .await
             .iter()
-            .filter(|(_, status)| matches!(status.migration_state, MigrationState::Successful))
-            .map(|(q, _)| q.clone())
+            .filter(|r| matches!(r.value().migration_state, MigrationState::Successful))
+            .map(|r| r.key().clone())
             .collect::<Vec<Query>>()
             .into()
     }
@@ -159,11 +148,9 @@ impl QueryStatusCache {
     /// Returns a list of queries that are in the deny list.
     pub async fn deny_list(&self) -> QueryList {
         self.inner
-            .read()
-            .await
             .iter()
-            .filter(|(_, status)| matches!(status.migration_state, MigrationState::Unsupported))
-            .map(|(q, _)| q.clone())
+            .filter(|r| matches!(r.value().migration_state, MigrationState::Unsupported))
+            .map(|r| r.key().clone())
             .collect::<Vec<Query>>()
             .into()
     }
