@@ -551,6 +551,16 @@ impl ReadySetError {
         self.any_cause(|e| e.is_unsupported())
     }
 
+    /// Returns `true` if self is ['ViewNotFound'].
+    pub fn is_view_not_found(&self) -> bool {
+        matches!(self, Self::ViewNotFound(..))
+    }
+
+    /// Returns `true` if self either *is* [`ViewNotFound`], or was *caused by* [`ViewNotFound`].
+    pub fn caused_by_view_not_found(&self) -> bool {
+        self.any_cause(|e| e.is_view_not_found())
+    }
+
     /// Returns `true` if self is [`TableNotFound`].
     pub fn is_table_not_found(&self) -> bool {
         matches!(self, Self::TableNotFound(..))

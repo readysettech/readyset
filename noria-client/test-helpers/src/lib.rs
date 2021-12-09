@@ -13,7 +13,7 @@ use nom_sql::SelectStatement;
 use noria::consensus::Authority;
 use noria::consensus::LocalAuthorityStore;
 use noria_client::backend::noria_connector::NoriaConnector;
-use noria_client::backend::BackendBuilder;
+use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, LocalAuthority};
@@ -54,13 +54,14 @@ pub fn setup<A>(
 where
     A: Adapter + 'static,
 {
-    let query_status_cache = Arc::new(QueryStatusCache::new(chrono::Duration::minutes(1)));
+    let query_status_cache = Arc::new(QueryStatusCache::new());
     setup_inner::<A>(
         backend_builder,
         fallback,
         partial,
         wait_for_backend,
         query_status_cache,
+        MigrationMode::InRequestPath,
     )
 }
 
@@ -70,6 +71,7 @@ pub fn setup_inner<A>(
     partial: bool,
     wait_for_backend: bool,
     query_status_cache: Arc<QueryStatusCache>,
+    mode: MigrationMode,
 ) -> A::ConnectionOpts
 where
     A: Adapter + 'static,
@@ -123,7 +125,7 @@ where
             let s = TcpStream::from_std(s).unwrap();
 
             let ch = ControllerHandle::new(authority).await;
-            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None, false).await;
+            let noria = NoriaConnector::new(ch, auto_increments, query_cache, None).await;
             // backend either has upstream or noria writer
             let upstream = if fallback {
                 Some(A::make_upstream().await)
@@ -134,6 +136,7 @@ where
             let backend = backend_builder
                 .dialect(A::DIALECT)
                 .mirror_ddl(A::MIRROR_DDL)
+                .migration_mode(mode)
                 .build(noria, upstream, query_status_cache);
 
             A::run_backend(backend, s).await;

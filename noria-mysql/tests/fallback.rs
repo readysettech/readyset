@@ -127,17 +127,21 @@ fn range_query() {
 fn aggregate_in() {
     let mut conn = mysql::Conn::new(setup()).unwrap();
 
+    println!("yay");
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .unwrap();
+    println!("1");
     conn.query_drop("INSERT INTO cats (id, cuteness) values (1, 10), (2, 8)")
         .unwrap();
     sleep();
 
+    println!("Made it here");
     let rows: Vec<(i32,)> = conn
         .exec(
             "SELECT sum(cuteness) FROM cats WHERE id IN (?, ?)",
             vec![1, 2],
         )
         .unwrap();
+    println!("done");
     assert_eq!(rows, vec![(18,)]);
 }
