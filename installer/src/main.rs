@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::env;
-use std::fmt::{Debug, Display};
-use std::ops::Deref;
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
+use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
 use aws_sdk_ec2 as ec2;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
@@ -13,28 +12,21 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use console::{style, Emoji};
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Confirm, Input, Select};
 use ec2::model::Filter;
 use futures::stream::{FuturesUnordered, StreamExt};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar};
 use ipnet::Ipv4Net;
-use lazy_static::lazy_static;
 use rusoto_credential::ProfileProvider;
-use serde::{Deserialize, Serialize};
-use test_strategy::Arbitrary;
-use tokio::fs::{read_dir, DirBuilder, File};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::fs::DirBuilder;
 
 mod aws;
+mod deployment;
+#[macro_use]
+mod console;
 
-lazy_static! {
-    static ref DIALOG_THEME: ColorfulTheme = ColorfulTheme::default();
-    static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
-        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-        .template("{prefix:.bold.dim} {spinner} {wide_msg}");
-}
+use crate::console::{confirm, input, select, SPINNER_STYLE};
+pub use crate::deployment::Deployment;
+use crate::deployment::{CreateNew, Existing, MaybeExisting};
 
 /// List of regions where we deploy AMIs.
 ///
@@ -43,34 +35,6 @@ const REGIONS: &[&str] = &["us-east-1", "us-east-2", "us-west-2"];
 
 /// Minimum number of availability zones in which we can deploy a cluster
 const MIN_AVAILABILITY_ZONES: usize = 3;
-
-fn confirm() -> Confirm<'static> {
-    let mut confirm = Confirm::with_theme(&*DIALOG_THEME);
-    confirm.wait_for_newline(true);
-    confirm
-}
-
-fn input<T>() -> Input<'static, T>
-where
-    T: Clone + FromStr + Display,
-    T::Err: Display + Debug,
-{
-    Input::with_theme(&*DIALOG_THEME)
-}
-
-fn select() -> Select<'static> {
-    Select::with_theme(&*DIALOG_THEME)
-}
-
-macro_rules! success {
-    ($($format_args:tt)*) => {
-        println!(
-            "\n{}{}\n",
-            style(Emoji("✔ ", "")).green(),
-            style(format_args!($($format_args)*)).bold()
-        )
-    };
-}
 
 fn filter<K, V>(key: K, value: V) -> Filter
 where
@@ -134,133 +98,6 @@ where
                 "profile",
             ))
         })
-    }
-}
-
-/// An enum encapsulating the user selection to either use an existing entity (represented by the
-/// `T` type argument) or create a new one
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
-enum MaybeExisting<T> {
-    /// Create a new entity
-    CreateNew,
-
-    /// Use an existing entity
-    Existing(T),
-}
-
-use MaybeExisting::{CreateNew, Existing};
-
-impl<T> From<Option<T>> for MaybeExisting<T> {
-    fn from(opt: Option<T>) -> Self {
-        match opt {
-            Some(val) => Self::Existing(val),
-            None => Self::CreateNew,
-        }
-    }
-}
-
-impl<T> From<MaybeExisting<T>> for Option<T> {
-    fn from(val: MaybeExisting<T>) -> Self {
-        match val {
-            CreateNew => None,
-            Existing(x) => Some(x),
-        }
-    }
-}
-
-impl<T> Default for MaybeExisting<T> {
-    fn default() -> Self {
-        Self::CreateNew
-    }
-}
-
-impl<T> MaybeExisting<T> {
-    /// Converts from `MaybeExisting<T>` (or `&MaybeExisting<T>`) to `MaybeExisting<&T::Target>`.
-    ///
-    /// Equivalent to [`Option::as_deref`]
-    fn as_deref(&self) -> MaybeExisting<&T::Target>
-    where
-        T: Deref,
-    {
-        match self {
-            CreateNew => CreateNew,
-            Existing(x) => Existing(&*x),
-        }
-    }
-}
-
-/// A (potentially partially-completed) deployment of a readyset cluster
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct Deployment {
-    name: String,
-
-    #[serde(default)]
-    aws_credentials_profile: Option<String>,
-
-    #[serde(default)]
-    aws_region: Option<String>,
-
-    /// VPC to deploy to
-    #[serde(default)]
-    vpc_id: Option<MaybeExisting<String>>,
-}
-
-impl Deployment {
-    /// Create a new Deployment with the given name
-    pub fn new<S>(name: S) -> Self
-    where
-        S: Into<String>,
-    {
-        Deployment {
-            name: name.into(),
-            ..Default::default()
-        }
-    }
-
-    /// Returns a reference to the name of the given deployment
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Save this deployment to the path in the given state directory
-    pub async fn save_to_directory<P>(&self, dir: P) -> Result<()>
-    where
-        P: AsRef<Path>,
-    {
-        let path = dir.as_ref().join(self.name());
-        let mut file = File::create(path).await?;
-        file.write_all(&serde_json::to_vec(self)?).await?;
-        Ok(())
-    }
-
-    /// Load the Deployment with the given name from the given state directory
-    pub async fn load<P, N>(state_dir: P, name: N) -> Result<Self>
-    where
-        P: AsRef<Path>,
-        N: AsRef<str>,
-    {
-        let path = state_dir.as_ref().join(name.as_ref());
-        let mut file = File::open(path).await?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).await?;
-        Ok(serde_json::from_slice::<Self>(&buf)?)
-    }
-
-    /// Returns a list of all available deployments in the given state directory
-    pub async fn list<P>(dir: P) -> Result<Vec<String>>
-    where
-        P: AsRef<Path>,
-    {
-        let mut dir = read_dir(dir).await?;
-        let mut res = Vec::new();
-        while let Some(entry) = dir.next_entry().await? {
-            if entry.file_type().await?.is_file() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    res.push(name);
-                }
-            }
-        }
-        Ok(res)
     }
 }
 
@@ -659,79 +496,6 @@ impl Installer {
     }
 }
 
-fn prompt_for_and_create_deployment() -> Result<Deployment> {
-    let deployment_name: String = input().with_prompt("Deployment name").interact_text()?;
-    Ok(Deployment::new(deployment_name))
-}
-
-async fn select_deployment<P>(
-    state_dir: P,
-    mut deployments: Vec<String>,
-) -> Result<Option<Deployment>>
-where
-    P: AsRef<Path>,
-{
-    let index = match select()
-        .with_prompt("Select a deployment")
-        .items(&deployments)
-        .interact_opt()?
-    {
-        Some(idx) => idx,
-        None => return Ok(None),
-    };
-
-    Ok(Some(
-        Deployment::load(state_dir, deployments.remove(index)).await?,
-    ))
-}
-
-async fn create_or_load_existing_deployment<P>(state_dir: P) -> Result<Deployment>
-where
-    P: AsRef<Path>,
-{
-    let deployments = Deployment::list(state_dir.as_ref()).await?;
-    let deployment = match deployments.as_slice() {
-        [] => {
-            println!("To get started, enter a name for your ReadySet deployment.");
-            println!(
-                "We'll use this name to save your progress during the ReadySet cluster setup process.\n"
-            );
-            Some(prompt_for_and_create_deployment()?)
-        }
-        [deployment] => {
-            println!(
-                "I found an existing deployment named {}\n",
-                style(&deployment).bold()
-            );
-            if confirm()
-                .with_prompt("Would you like to continue where you left off?")
-                .default(true)
-                .wait_for_newline(true)
-                .interact()?
-            {
-                Some(Deployment::load(state_dir.as_ref(), deployment).await?)
-            } else {
-                None
-            }
-        }
-        _ => {
-            println!("I found multiple existing deployments.");
-            println!(
-                "Would you like to continue where we left off with one of those deployments?\n"
-            );
-            select_deployment(state_dir, deployments).await?
-        }
-    };
-
-    if let Some(deployment) = deployment {
-        println!();
-        Ok(deployment)
-    } else {
-        println!("\nOk, we'll create a new deployment\n");
-        prompt_for_and_create_deployment()
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let options = Options::parse();
@@ -743,62 +507,8 @@ async fn main() -> Result<()> {
         .create(options.state_directory()?)
         .await?;
 
-    let deployment = create_or_load_existing_deployment(options.state_directory()?).await?;
+    let deployment = deployment::create_or_load_existing(options.state_directory()?).await?;
     let mut installer = Installer::new(options, deployment);
 
     installer.run().await
-}
-
-#[cfg(test)]
-mod tests {
-    use tempfile::TempDir;
-    use test_strategy::proptest;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn deployment_save_and_load() {
-        let state_dir = TempDir::new().unwrap();
-        let deployment = Deployment::new("deployment_save_and_load");
-        deployment
-            .save_to_directory(state_dir.path())
-            .await
-            .unwrap();
-        let res = Deployment::load(state_dir.path(), "deployment_save_and_load")
-            .await
-            .unwrap();
-        assert_eq!(res, deployment);
-    }
-
-    #[tokio::test]
-    async fn list_deployments() {
-        let state_dir = TempDir::new().unwrap();
-        assert!(Deployment::list(state_dir.path()).await.unwrap().is_empty());
-
-        Deployment::new("list_deployments_1")
-            .save_to_directory(state_dir.path())
-            .await
-            .unwrap();
-        assert_eq!(
-            Deployment::list(state_dir.path()).await.unwrap(),
-            vec!["list_deployments_1"]
-        );
-
-        Deployment::new("list_deployments_2")
-            .save_to_directory(state_dir.path())
-            .await
-            .unwrap();
-        assert_eq!(
-            Deployment::list(state_dir.path()).await.unwrap(),
-            vec!["list_deployments_1", "list_deployments_2"]
-        );
-    }
-
-    #[proptest]
-    fn deployment_serialize_round_trip(deployment: Deployment) {
-        let serialized = serde_json::to_string(&deployment).unwrap();
-        eprintln!("JSON: {}", serialized);
-        let rt = serde_json::from_str::<Deployment>(&serialized).unwrap();
-        assert_eq!(rt, deployment);
-    }
 }
