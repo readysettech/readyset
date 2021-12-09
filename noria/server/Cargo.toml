@@ -68,6 +68,7 @@ regex = "1.5.4"
 tracing-futures = "0.2.5"
 parking_lot = "0.11.2"
 jemalloc-ctl = "0.3.3"
+scopeguard = "1.1.0"
 
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
