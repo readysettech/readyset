@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
@@ -13,9 +13,11 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use futures::stream::{FuturesUnordered, StreamExt};
+use ec2::model::Subnet;
+use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::{MultiProgress, ProgressBar};
 use ipnet::Ipv4Net;
+use launchpad::display::EnglishList;
 use rusoto_credential::ProfileProvider;
 use tokio::fs::DirBuilder;
 
@@ -140,7 +142,16 @@ impl Installer {
         self.save().await?;
 
         if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
-            self.validate_vpc(vpc_id).await?;
+            match &self.deployment.subnet_ids {
+                Some(subnet_ids) => println!(
+                    "Deploying to subnets: {}",
+                    subnet_ids
+                        .iter()
+                        .map(|subnet_id| style(subnet_id).bold())
+                        .into_and_list()
+                ),
+                None => self.validate_vpc(vpc_id).await?,
+            }
         }
 
         if let Some(rds_db) = &self.deployment.rds_db {
@@ -224,11 +235,28 @@ impl Installer {
             .subnets
             .unwrap_or_default();
 
-        let subnet_azs = &subnets
-            .iter()
-            .filter_map(|subnet| subnet.availability_zone())
-            .collect::<HashSet<_>>();
-        if subnet_azs.len() < MIN_AVAILABILITY_ZONES {
+        let mut subnets_by_az: HashMap<String, Vec<&Subnet>> = HashMap::new();
+        for subnet in &subnets {
+            subnets_by_az
+                .entry(
+                    subnet
+                        .availability_zone
+                        .clone()
+                        .ok_or_else(|| anyhow!("Subnet missing availability zone"))?,
+                )
+                .or_default()
+                .push(subnet)
+        }
+
+        // Just use the first subnet we find in each AZ, for now.
+        //
+        // Later, we can modify this to prefer private / public subnets
+        let existing_subnet_ids = subnets_by_az
+            .values()
+            .map(|subnets| subnets.first().unwrap().subnet_id.clone().unwrap())
+            .collect::<Vec<_>>();
+
+        if existing_subnet_ids.len() < MIN_AVAILABILITY_ZONES {
             let other_azs = self
                 .ec2_client()
                 .await?
@@ -243,8 +271,8 @@ impl Installer {
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|az| az.zone_name)
-                .filter(|zone_name| !subnet_azs.contains(zone_name.as_str()))
-                .take(MIN_AVAILABILITY_ZONES - subnet_azs.len());
+                .filter(|zone_name| !subnets_by_az.contains_key(zone_name.as_str()))
+                .take(MIN_AVAILABILITY_ZONES - existing_subnet_ids.len());
 
             println!(
                 "ReadySet needs to deploy into at least 3 subnets in different availability zones"
@@ -292,7 +320,9 @@ impl Installer {
                 .default(true)
                 .interact()?
             {
-                self.create_subnets(vpc_id, subnet_az_cidrs).await?;
+                let mut subnet_ids = self.create_subnets(vpc_id, subnet_az_cidrs).await?;
+                subnet_ids.extend(existing_subnet_ids);
+                self.deployment.subnet_ids = Some(subnet_ids);
             } else {
                 bail!(
                     "Please create subnets in the missing availability zones in your VPC, then \
@@ -304,6 +334,7 @@ impl Installer {
                 "VPC has subnets in at least {} availability zones",
                 MIN_AVAILABILITY_ZONES
             );
+            self.deployment.subnet_ids = Some(existing_subnet_ids)
         }
 
         Ok(())
@@ -313,10 +344,10 @@ impl Installer {
         &mut self,
         vpc_id: String,
         subnet_az_cidrs: Vec<(String, Ipv4Net)>,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let multi_bar = MultiProgress::new();
         let ec2_client = self.ec2_client().await?;
-        let mut futures = FuturesUnordered::new();
+        let futures = FuturesUnordered::new();
         for (az, cidr) in subnet_az_cidrs {
             let bar = multi_bar.add(
                 ProgressBar::new_spinner()
@@ -346,24 +377,13 @@ impl Installer {
                         e
                     )),
                 }
-                res
+                res.map(|subnet| subnet.subnet.unwrap().subnet_id.unwrap())
             })
         }
 
-        let mut err = None;
-        while let Some(res) = futures.next().await {
-            if let Err(e) = res {
-                err = Some(e);
-            }
-        }
-
+        let res = futures.try_collect().await;
         multi_bar.join()?;
-
-        if let Some(e) = err {
-            Err(e.into())
-        } else {
-            Ok(())
-        }
+        Ok(res?)
     }
 
     async fn prompt_for_rds_database(&mut self) -> Result<()> {

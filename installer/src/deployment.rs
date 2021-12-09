@@ -125,6 +125,10 @@ pub struct Deployment {
     #[serde(default)]
     pub(crate) vpc_id: Option<MaybeExisting<String>>,
 
+    /// Subnet IDs to use for instances
+    #[serde(default)]
+    pub(crate) subnet_ids: Option<Vec<String>>,
+
     /// RDS database to deploy in front of
     #[serde(default)]
     pub(crate) rds_db: Option<RdsDb>,
