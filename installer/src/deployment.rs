@@ -132,6 +132,10 @@ pub struct Deployment {
     /// RDS database to deploy in front of
     #[serde(default)]
     pub(crate) rds_db: Option<RdsDb>,
+
+    /// EC2 key pair name to use to allow the user to SSH into instances
+    #[serde(default)]
+    pub(crate) key_pair_name: Option<String>,
 }
 
 impl Deployment {

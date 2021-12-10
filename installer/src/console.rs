@@ -55,5 +55,7 @@ macro_rules! warning {
 }
 
 pub(crate) fn spinner() -> ProgressBar {
-    ProgressBar::new_spinner().with_style(SPINNER_STYLE.clone())
+    let spinner = ProgressBar::new_spinner().with_style(SPINNER_STYLE.clone());
+    spinner.enable_steady_tick(50);
+    spinner
 }

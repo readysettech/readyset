@@ -13,14 +13,15 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
-use ec2::model::Subnet;
+use ec2::model::{KeyType, Subnet};
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
 use launchpad::display::EnglishList;
 use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use rusoto_credential::ProfileProvider;
-use tokio::fs::DirBuilder;
+use tokio::fs::{DirBuilder, OpenOptions};
+use tokio::io::AsyncWriteExt;
 
 mod aws;
 mod deployment;
@@ -175,6 +176,64 @@ impl Installer {
         if let Existing(db_id) = rds_db.db_id {
             self.validate_rds_database(db_id, rds_db.engine).await?;
         }
+
+        if let Some(key_pair_name) = &self.deployment.key_pair_name {
+            success!("Using SSH key pair: {}", key_pair_name)
+        } else {
+            self.create_and_install_key_pair().await?;
+        }
+        self.save().await?;
+
+        Ok(())
+    }
+
+    async fn create_and_install_key_pair(&mut self) -> Result<()> {
+        println!("Creating and installing a new SSH key pair to allow you to log in to the ReadySet cluster");
+        let key_pair_name: String = input()
+            .with_prompt("SSH key pair name")
+            .default("readyset".to_owned())
+            .interact_text()?;
+        let key_pair_pb = spinner().with_message(format!(
+            "Creating SSH key pair {}",
+            style(&key_pair_name).bold()
+        ));
+        let key_pair = self
+            .ec2_client()
+            .await?
+            .create_key_pair()
+            .key_name(&key_pair_name)
+            .key_type(KeyType::Ed25519)
+            .send()
+            .await?;
+        key_pair_pb.finish_with_message(format!(
+            "{}Created SSH key pair {}",
+            *GREEN_CHECK,
+            style(&key_pair_name).bold(),
+        ));
+
+        let default_key_pair_path = PathBuf::from(env::var("HOME").unwrap())
+            .join(".ssh")
+            .join(format!("{}.pem", key_pair_name))
+            .to_string_lossy()
+            .into_owned();
+        let key_pair_path = PathBuf::from(
+            input()
+                .with_prompt("Path to save key pair to")
+                .default(default_key_pair_path)
+                .interact()?,
+        );
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .append(true)
+            .open(&key_pair_path)
+            .await?;
+        file.write_all(key_pair.key_material().unwrap().as_bytes())
+            .await?;
+
+        self.deployment.key_pair_name = Some(key_pair_name);
+
+        success!("Configured SSH key");
 
         Ok(())
     }
