@@ -1,9 +1,10 @@
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
 
+use console::{style, Emoji, StyledObject};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
-use indicatif::ProgressStyle;
+use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -11,6 +12,8 @@ lazy_static! {
     pub(crate) static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
         .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
         .template("{prefix:.bold.dim} {spinner} {wide_msg}");
+    pub(crate) static ref GREEN_CHECK: StyledObject<::console::Emoji<'static, 'static>> =
+        style(Emoji("✔ ", "")).green();
 }
 
 pub(crate) fn confirm() -> Confirm<'static> {
@@ -35,8 +38,22 @@ macro_rules! success {
     ($($format_args:tt)*) => {
         println!(
             "\n{}{}\n",
-            style(::console::Emoji("✔ ", "")).green(),
+            *crate::console::GREEN_CHECK,
             style(format_args!($($format_args)*)).bold()
         )
     };
+}
+
+macro_rules! warning {
+	($($format_args:tt)*) => {
+	    println!(
+            "{}{}",
+            style(::console::Emoji("⚠ ", "")).yellow(),
+            format_args!($($format_args)*)
+        )
+	};
+}
+
+pub(crate) fn spinner() -> ProgressBar {
+    ProgressBar::new_spinner().with_style(SPINNER_STYLE.clone())
 }

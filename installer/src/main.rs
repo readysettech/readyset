@@ -1,8 +1,8 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::env;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+use std::{env, iter};
 
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
@@ -15,9 +15,10 @@ use aws_types::Credentials;
 use clap::Parser;
 use ec2::model::Subnet;
 use futures::stream::{FuturesUnordered, TryStreamExt};
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
 use launchpad::display::EnglishList;
+use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use rusoto_credential::ProfileProvider;
 use tokio::fs::DirBuilder;
 
@@ -27,7 +28,7 @@ mod deployment;
 mod console;
 
 use crate::aws::filter;
-use crate::console::{confirm, input, select, SPINNER_STYLE};
+use crate::console::{confirm, input, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
 
@@ -157,11 +158,11 @@ impl Installer {
         if let Some(rds_db) = &self.deployment.rds_db {
             match &rds_db.db_id {
                 CreateNew => println!(
-                    "Will create a new {} RDS database",
+                    "Will create a new {} RDS database instance",
                     style(rds_db.engine).bold()
                 ),
                 Existing(rds_db_id) => println!(
-                    "Deploying in front of existing RDS database: {}",
+                    "Deploying in front of existing RDS database instance: {}",
                     style(rds_db_id).bold()
                 ),
             }
@@ -169,6 +170,11 @@ impl Installer {
             self.prompt_for_rds_database().await?;
         }
         self.save().await?;
+
+        let rds_db = self.deployment.rds_db.clone().unwrap();
+        if let Existing(db_id) = rds_db.db_id {
+            self.validate_rds_database(db_id, rds_db.engine).await?;
+        }
 
         Ok(())
     }
@@ -349,11 +355,8 @@ impl Installer {
         let ec2_client = self.ec2_client().await?;
         let futures = FuturesUnordered::new();
         for (az, cidr) in subnet_az_cidrs {
-            let bar = multi_bar.add(
-                ProgressBar::new_spinner()
-                    .with_style(SPINNER_STYLE.clone())
-                    .with_message(format!("Creating subnet {} in {}", cidr, az)),
-            );
+            let bar = multi_bar
+                .add(spinner().with_message(format!("Creating subnet {} in {}", cidr, az)));
             bar.enable_steady_tick(50);
             let ec2 = ec2_client.clone();
             let vpc_id = vpc_id.to_owned();
@@ -368,14 +371,10 @@ impl Installer {
                 match &res {
                     Ok(subnet) => bar.finish_with_message(format!(
                         "{}Created {}",
-                        style(Emoji("✔ ", "")).green(),
+                        *GREEN_CHECK,
                         style(subnet.subnet().unwrap().subnet_id().unwrap()).bold()
                     )),
-                    Err(e) => bar.finish_with_message(format!(
-                        "{}Failed: {}",
-                        style(Emoji("✘ ", "")).red(),
-                        e
-                    )),
+                    Err(e) => bar.finish_with_message(format!("{}Failed: {}", *GREEN_CHECK, e)),
                 }
                 res.map(|subnet| subnet.subnet.unwrap().subnet_id.unwrap())
             })
@@ -386,10 +385,341 @@ impl Installer {
         Ok(res?)
     }
 
+    async fn validate_rds_database(&mut self, mut db_id: String, mut engine: Engine) -> Result<()> {
+        let instance = match self
+            .rds_client()
+            .await?
+            .describe_db_instances()
+            .db_instance_identifier(&db_id)
+            .send()
+            .await?
+            .db_instances
+            .unwrap_or_default()
+            .first()
+        {
+            Some(instance) => instance.clone(),
+            None => {
+                println!(
+                    "The previously configured RDS db instance {} no longer exists, or you're \
+                          missing the required permissions to view it",
+                    style(&db_id).bold()
+                );
+                if confirm()
+                    .with_prompt("Would you like to change the configured RDS database instance?")
+                    .interact()?
+                {
+                    self.prompt_for_rds_database().await?;
+                    self.save().await?;
+
+                    let rds_db = self.deployment.rds_db.as_ref().unwrap();
+                    match &rds_db.db_id {
+                        CreateNew => return Ok(()),
+                        Existing(new_db_id) => {
+                            db_id = new_db_id.clone();
+                            engine = rds_db.engine;
+                            self.rds_client()
+                                .await?
+                                .describe_db_instances()
+                                .db_instance_identifier(&db_id)
+                                .send()
+                                .await?
+                                .db_instances
+                                .unwrap_or_default()
+                                .remove(0)
+                        }
+                    }
+                } else {
+                    bail!("Could not successfully access the configured RDS database instance");
+                }
+            }
+        };
+
+        match engine {
+            Engine::MySQL => self.validate_rds_database_mysql(db_id, instance).await,
+            Engine::PostgreSQL => self.validate_rds_database_postgresql(db_id, instance).await,
+        }
+    }
+
+    async fn validate_rds_database_mysql(
+        &mut self,
+        db_id: String,
+        db_instance: DbInstance,
+    ) -> Result<()> {
+        let mut wrong_binlog_format = false;
+        let parameters = aws::db_parameters(self.rds_client().await?, &db_instance).await?;
+        if parameters
+            .iter()
+            .filter(|p| p.parameter_name() == Some("binlog_format"))
+            .any(|p| p.parameter_value() != Some("ROW"))
+        {
+            warning!(
+                "ReadySet requires the MySQL {} parameter to be set to {}",
+                style("binlog_format").blue(),
+                style("ROW").blue()
+            );
+            wrong_binlog_format = true;
+        }
+
+        let mut wrong_backup_retention_period = false;
+        if db_instance.backup_retention_period() == 0 {
+            warning!(
+                "ReadySet requires the RDS {} to be greater than 0",
+                style("backup_retention_period").blue()
+            );
+            wrong_backup_retention_period = true;
+        }
+
+        if !(wrong_binlog_format || wrong_backup_retention_period) {
+            success!("RDS database {} has the correct configuration", db_id);
+            return Ok(());
+        }
+
+        println!(
+            "I can automatically fix the configuration of the RDS database instance {} to be \
+             compatible with ReadySet",
+            style(&db_id).bold()
+        );
+        println!(
+            "{}{}{}",
+            Emoji("🚨  ", ""),
+            style("WARNING: This will reboot your database instance!")
+                .bold()
+                .red(),
+            Emoji(" 🚨", ""),
+        );
+
+        if !confirm()
+            .with_prompt("Automatically fix database configuration?")
+            .interact()?
+        {
+            bail!("Please ensure your database configuration is correct, then re-run the installer")
+        }
+
+        let parameter_group_name = if wrong_binlog_format {
+            let existing_parameter_group = self
+                .rds_client()
+                .await?
+                .describe_db_parameter_groups()
+                .db_parameter_group_name(
+                    db_instance
+                        .db_parameter_groups
+                        .unwrap_or_default()
+                        .first()
+                        .cloned()
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Could not find existing db parameter group for RDS database {}",
+                                db_id
+                            )
+                        })?
+                        .db_parameter_group_name()
+                        .unwrap(),
+                )
+                .send()
+                .await?
+                .db_parameter_groups
+                .unwrap_or_default()
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Could not find existing db parameter group for RDS database {}",
+                        db_id
+                    )
+                })?;
+
+            Some(
+                self.create_mysql_parameter_group(existing_parameter_group, parameters)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        let mut updates = vec![];
+        if let Some(parameter_group_name) = &parameter_group_name {
+            updates.push(format!(
+                "{}={}",
+                style("db_parameter_group_name").blue(),
+                style(&parameter_group_name).blue(),
+            ))
+        }
+        if wrong_backup_retention_period {
+            updates.push(format!(
+                "{}={}",
+                style("backup_retention_period").blue(),
+                style(1).blue()
+            ))
+        }
+
+        let modify_db_desc = format!(
+            "RDS database instance {}: {}",
+            style(&db_id).bold(),
+            updates.into_and_list()
+        );
+        let modify_db_pb = spinner().with_message(format!("Modifying {}", &modify_db_desc));
+        modify_db_pb.enable_steady_tick(50);
+
+        let mut req = self
+            .rds_client()
+            .await?
+            .modify_db_instance()
+            .db_instance_identifier(&db_id);
+        if let Some(parameter_group_name) = &parameter_group_name {
+            req = req.db_parameter_group_name(parameter_group_name);
+        }
+        if wrong_backup_retention_period {
+            req = req.backup_retention_period(1);
+        }
+        req.send().await?;
+        modify_db_pb.finish_with_message(format!("{}Modified {}", *GREEN_CHECK, modify_db_desc));
+
+        let reboot_db_desc = format!("RDS database instance {}", style(&db_id).bold());
+        let reboot_db_pb = spinner().with_message(format!("Rebooting {}", &reboot_db_desc));
+        reboot_db_pb.enable_steady_tick(50);
+        self.rds_client()
+            .await?
+            .reboot_db_instance()
+            .db_instance_identifier(&db_id)
+            .send()
+            .await?;
+        reboot_db_pb.finish_with_message(format!("{}Rebooted {}", *GREEN_CHECK, reboot_db_desc));
+
+        Ok(())
+    }
+
+    /// Create a new MySQL parameter group based on the given existing parameter group, and with the
+    /// given set of parameters, except with `binlog_format` set to `ROW`.
+    ///
+    /// Returns the `parameter_group_name` of the created db parameter group
+    async fn create_mysql_parameter_group(
+        &mut self,
+        existing_parameter_group: DbParameterGroup,
+        parameters: Vec<Parameter>,
+    ) -> Result<String> {
+        // first, check if a parameter group named "readyset-mysql" already exists
+        let existing = self
+            .rds_client()
+            .await?
+            .describe_db_parameter_groups()
+            .db_parameter_group_name("readyset-mysql")
+            .send()
+            .await?
+            .db_parameter_groups
+            .unwrap_or_default();
+        let (parameter_group_name, do_create) = if existing.is_empty() {
+            (Cow::Borrowed("readyset-mysql"), true)
+        } else {
+            println!(
+                "Found an existing RDS DB parameter group named {}",
+                style("readyset-mysql").bold()
+            );
+            if confirm()
+                .with_prompt(
+                    "Would you like to update that parameter group to set the correct parameters?",
+                )
+                .interact()?
+            {
+                (Cow::Borrowed("readyset-mysql"), false)
+            } else {
+                let parameter_group_name = input()
+                    .with_prompt("Please enter a name for a DB parameter group to create")
+                    .interact()?;
+                (Cow::Owned(parameter_group_name), true)
+            }
+        };
+
+        let (verbing, verbed) = if do_create {
+            ("Creating new", "Created new")
+        } else {
+            ("Updating", "Updated")
+        };
+        let pb_desc = format!(
+            "RDS parameter group {} based on {} with {}={}",
+            style("readyset").bold(),
+            style(existing_parameter_group.db_parameter_group_name().unwrap()).bold(),
+            style("binlog_format").blue(),
+            style("ROW").blue()
+        );
+        let parameter_group_pb = spinner().with_message(format!("{} {}", verbing, pb_desc));
+        parameter_group_pb.enable_steady_tick(50);
+
+        if do_create {
+            self.rds_client()
+                .await?
+                .create_db_parameter_group()
+                .db_parameter_group_name(parameter_group_name.as_ref())
+                .db_parameter_group_family(
+                    existing_parameter_group
+                        .db_parameter_group_family()
+                        .unwrap(),
+                )
+                .description("Automatically-created DB parameter group for ReadySet with MySQL")
+                .send()
+                .await?
+                .db_parameter_group
+                .unwrap();
+        }
+
+        // Figure out the default parameters that group gets created with
+        let default_parameters = self
+            .rds_client()
+            .await?
+            .describe_db_parameters()
+            .db_parameter_group_name(parameter_group_name.as_ref())
+            .send()
+            .await?
+            .parameters
+            .unwrap_or_default()
+            .into_iter()
+            .map(|param| (param.parameter_name, param.parameter_value))
+            .collect::<HashSet<_>>();
+
+        self.rds_client()
+            .await?
+            .modify_db_parameter_group()
+            .db_parameter_group_name(parameter_group_name.as_ref())
+            .set_parameters(Some(
+                parameters
+                    .into_iter()
+                    .filter(|param| {
+                        param.parameter_name() != Some("binlog_format")
+                            && !default_parameters.contains(&(
+                                param.parameter_name.clone(),
+                                param.parameter_value.clone(),
+                            ))
+                    })
+                    .chain(iter::once(
+                        Parameter::builder()
+                            .parameter_name("binlog_format")
+                            .parameter_value("ROW")
+                            .apply_method(ApplyMethod::Immediate)
+                            .build(),
+                    ))
+                    .collect::<Vec<_>>(),
+            ))
+            .send()
+            .await?;
+
+        parameter_group_pb.finish_with_message(format!("{}{} {}", *GREEN_CHECK, verbed, &pb_desc,));
+
+        Ok(parameter_group_name.into_owned())
+    }
+
+    async fn validate_rds_database_postgresql(
+        &mut self,
+        _db_id: String,
+        _db_instance: DbInstance,
+    ) -> Result<()> {
+        bail!("Sorry, the installer doesn't support PostgreSQL databases yet");
+    }
+
     async fn prompt_for_rds_database(&mut self) -> Result<()> {
         let rds_db = if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
             if confirm()
-                .with_prompt("Would you like to deploy in front of an existing RDS database?")
+                .with_prompt(
+                    "Would you like to deploy in front of an existing RDS database instance?",
+                )
                 .default(false)
                 .interact()?
             {
@@ -403,7 +733,7 @@ impl Installer {
                     style(&vpc_id).bold()
                 );
                 let idx = select()
-                    .with_prompt("Which RDS database would you like to use?")
+                    .with_prompt("Which RDS database instance would you like to use?")
                     .items(
                         &instances
                             .iter()
@@ -427,7 +757,7 @@ impl Installer {
                     engine,
                 })
             } else {
-                println!("OK, I'll create a new RDS database in {}", vpc_id);
+                println!("OK, I'll create a new RDS database instance in {}", vpc_id);
                 None
             }
         } else {
