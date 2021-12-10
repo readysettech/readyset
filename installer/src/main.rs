@@ -13,6 +13,7 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
+use directories::ProjectDirs;
 use ec2::model::{KeyType, Subnet};
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::MultiProgress;
@@ -54,21 +55,10 @@ impl Options {
             return Ok(Cow::Borrowed(state_directory));
         }
 
-        let mut state_home = match env::var("XDG_STATE_HOME") {
-            Ok(state_home) => PathBuf::from(state_home),
-            Err(_) => {
-                let home = env::var("HOME")
-                    .map_err(|_| anyhow!("HOME not set, and --state-directory not passed"))?;
-                let mut path = PathBuf::from(home);
-                path.push(".local");
-                path.push("state");
-                path
-            }
-        };
-
-        state_home.push("readyset");
-
-        Ok(Cow::Owned(state_home))
+        let project_dirs = ProjectDirs::from("io", "readyset", "ReadySet").ok_or_else(|| {
+            anyhow!("Could not determine HOME directory, and --state-directory not passed")
+        })?;
+        Ok(Cow::Owned(project_dirs.data_dir().to_owned()))
     }
 }
 
