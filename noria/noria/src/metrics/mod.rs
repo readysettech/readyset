@@ -605,6 +605,18 @@ impl MetricsDump {
     }
 }
 
+impl DumpedMetricValue {
+    /// Get the encapsulated floating point value for the metric
+    /// if it is not of the Histrogram type
+    pub fn value(&self) -> Option<f64> {
+        match self {
+            DumpedMetricValue::Counter(v) => Some(*v),
+            DumpedMetricValue::Gauge(v) => Some(*v),
+            DumpedMetricValue::Histogram(_) => None,
+        }
+    }
+}
+
 /// Checks a metrics dump for a specified metric with a set of labels.
 /// If the metric exists, returns Some(DumpedMetricValue), otherwise returns
 /// None.
