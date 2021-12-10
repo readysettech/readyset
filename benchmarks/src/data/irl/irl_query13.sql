@@ -1,0 +1,1 @@
+select external_calendars.*, external_invites.invite_id from external_calendars inner join external_invites on external_invites.external_calendar_id = external_calendars.id where external_invites.invite_id in ( ?, ?, ?, ?, ? );
