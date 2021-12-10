@@ -79,6 +79,9 @@ async fn it_works_basic() {
     .await
     .unwrap();
 
+    // Force the table to flush so we get a non zero table size metric
+    muta.set_snapshot_mode(false).await.unwrap();
+
     // give it some time to propagate
     sleep().await;
 

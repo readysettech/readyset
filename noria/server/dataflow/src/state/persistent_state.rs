@@ -1128,14 +1128,17 @@ impl SizeOf for PersistentState {
     }
 
     fn deep_size_of(&self) -> u64 {
-        if cfg!(debug_assertions) {
-            // In test mode flush to disk to make sure size is not zero
-            let _ = self.db.flush();
-        }
-        self.db
-            .property_int_value("rocksdb.estimate-live-data-size")
-            .unwrap()
-            .unwrap()
+        self.indices
+            .iter()
+            .map(|idx| {
+                let cf = self.db.cf_handle(&idx.column_family).unwrap();
+
+                self.db
+                    .property_int_value_cf(cf, "rocksdb.estimate-live-data-size")
+                    .unwrap()
+                    .unwrap()
+            })
+            .sum()
     }
 
     fn is_empty(&self) -> bool {
@@ -1144,17 +1147,6 @@ impl SizeOf for PersistentState {
             .unwrap()
             .unwrap()
             == 0
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for PersistentState {
-    // Sometimes during tests we can't reopen the same db because
-    // some background tasks weren't finished so it lingers in the
-    // background. This makes sure everything is stopped before we
-    // drop the inner db
-    fn drop(&mut self) {
-        self.db.cancel_all_background_work(true);
     }
 }
 
