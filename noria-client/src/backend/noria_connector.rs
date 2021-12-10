@@ -820,7 +820,12 @@ impl NoriaConnector {
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,
     ) -> ReadySetResult<()> {
-        let name = name.map_or_else(|| Cow::Owned(generate_query_name(statement)), Cow::Borrowed);
+        let mut statement = statement.clone();
+        rewrite::process_query(&mut statement)?;
+        let name = name.map_or_else(
+            || Cow::Owned(generate_query_name(&statement)),
+            Cow::Borrowed,
+        );
         noria_await!(
             self.inner.get_mut().await?,
             self.inner
