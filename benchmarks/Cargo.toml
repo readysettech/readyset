@@ -44,6 +44,7 @@ nom-sql = { path = "../nom-sql" }
 query_generator = { path = "../query_generator" }
 noria-logictest = { path = "../noria/noria-logictest" }
 noria-client = { path = "../noria-client" }
+noria-server = { path = "../noria/server" }
 noria-mysql = { path = "../noria-mysql" }
 readyset-logging = { path = "../readyset-logging" }
 
@@ -81,6 +82,10 @@ path = "src/bin/write_propagation.rs"
 [[bin]]
 name = "weavegrid_data_generator"
 path = "src/bin/weavegrid_data_generator.rs"
+
+[[bin]]
+name = "snapshot_time"
+path = "src/bin/snapshot_time.rs"
 
 [features]
 

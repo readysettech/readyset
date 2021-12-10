@@ -1031,6 +1031,7 @@ dependencies = [
  "noria-client",
  "noria-logictest",
  "noria-mysql",
+ "noria-server",
  "num-integer",
  "query_generator",
  "rand 0.8.4",
