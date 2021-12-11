@@ -271,7 +271,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${QSS3BucketName}.s3.amazonaws.com/quickstart-linux-bastion/templates/linux-bastion.template
+        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/bastion.yaml
       Parameters:
         BastionAMIOS: Ubuntu-Server-20.04-LTS-HVM
         BastionInstanceType: t3.medium

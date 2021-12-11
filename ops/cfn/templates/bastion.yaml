@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Readyset EC2 Linux Bastion
+
+Metadata:
+  LICENSE: Apache License, Version 2.0
+
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network configuration
+        Parameters:
+          - VPCID
+          - PublicSubnet1ID
+          - PublicSubnet2ID
+          - RemoteAccessCIDR
+      - Label:
+          default: Amazon EC2 configuration
+        Parameters:
+          - KeyPairName
+          - BastionInstanceType
+          - ReadySetBastionAmiId
+    ParameterLabels:
+      BastionInstanceType:
+        default: Bastion instance type
+      KeyPairName:
+        default: Key pair name
+      PublicSubnet1ID:
+        default: Public subnet 1 ID
+      PublicSubnet2ID:
+        default: Public subnet 2 ID
+      RemoteAccessCIDR:
+        default: Allowed bastion external access CIDR
+      VPCID:
+        default: VPC ID
+
+Parameters:
+  ReadySetBastionAmiId:
+    Description: AMI for the bastion image
+    Type: AWS::EC2::Image::Id
+    Default: ami-00f92a30f943cdf43
+
+  BastionInstanceType:
+    Description: Amazon EC2 instance type for the bastion instances.
+    Type: String
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t2.large
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+      - t4g.nano
+      - t4g.micro
+      - t4g.small
+      - t4g.medium
+      - t4g.large
+      - t4g.xlarge
+      - t4g.2xlarge
+      - m4.large
+      - m4.xlarge
+      - m4.2xlarge
+      - m4.4xlarge
+    Default: t2.micro
+
+  KeyPairName:
+    Description: Name of an existing public/private key pair. If you do not have one in this AWS Region, please create it before continuing.
+    Type: AWS::EC2::KeyPair::KeyName
+
+  PublicSubnet1ID:
+    Description: ID of the public subnet 1 that you want to provision the first bastion into (e.g., subnet-a0246dcd).
+    Type: AWS::EC2::Subnet::Id
+
+  PublicSubnet2ID:
+    Description: ID of the public subnet 2 that you want to provision the second bastion into (e.g., subnet-e3246d8e).
+    Type: AWS::EC2::Subnet::Id
+
+  RemoteAccessCIDR:
+    Description: Allowed CIDR block for external SSH access to the bastions.
+    Type: String
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/x
+
+  VPCID:
+    Description: ID of the VPC (e.g., vpc-0343606e).
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+  BastionMainLogGroup:
+    Type: AWS::Logs::LogGroup
+
+  SSHMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref BastionMainLogGroup
+      FilterPattern: ON FROM USER PWD
+      MetricTransformations:
+        - MetricName: SSHCommandCount
+          MetricValue: "1"
+          MetricNamespace: !Sub "ReadysetBastion/${AWS::StackName}"
+
+  BastionHostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub 'ec2.${AWS::URLSuffix}'
+            Effect: Allow
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy'
+
+  BastionHostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BastionHostRole
+      Path: /
+
+  EIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  BastionAutoScalingGroup:
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT20M
+      AutoScalingCreationPolicy:
+        MinSuccessfulInstancesPercent: 100
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: true
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchConfigurationName: !Ref BastionLaunchConfiguration
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1ID
+        - !Ref PublicSubnet2ID
+      MinSize: 1
+      MaxSize: 1
+      Cooldown: "900"
+      DesiredCapacity: 1
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref "AWS::StackName", Readyset-Bastion]]
+          PropagateAtLaunch: true
+
+  BastionLaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref BastionHostProfile
+      ImageId: !Ref ReadySetBastionAmiId
+      SecurityGroups:
+        - !Ref BastionSecurityGroup
+      InstanceType: !Ref BastionInstanceType
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 10
+            VolumeType: gp2
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData: !Base64
+        Fn::Sub:
+          - |
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+            MIME-Version: 1.0
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            #!/bin/bash -v
+            set -eu -o pipefail
+            export AWS_CLOUDFORMATION_STACK="${AWS::StackName}"
+            export AWS_CLOUDFORMATION_RESOURCE="BastionAutoScalingGroup"
+            export AWS_CLOUDFORMATION_REGION="${AWS::Region}"
+            exec /usr/local/bin/user-data-init.sh
+            --==BOUNDARY==
+          - {}
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enables SSH Access to Bastion Hosts
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref RemoteAccessCIDR
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: !Ref RemoteAccessCIDR
+
+Outputs:
+  BastionAutoScalingGroup:
+    Description: Auto Scaling group reference ID.
+    Value: !Ref BastionAutoScalingGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionAutoScalingGroup'
+
+  EIP1:
+    Description: Elastic IP 1 for bastion.
+    Value: !Ref EIP1
+    Export:
+      Name: !Sub '${AWS::StackName}-EIP1'
+
+  CloudWatchLogs:
+    Description: CloudWatch Logs GroupName. Your SSH logs will be stored here.
+    Value: !Ref BastionMainLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudWatchLogs'
+
+  BastionSecurityGroupID:
+    Description: Bastion security group ID.
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionSecurityGroupID'
+
+  BastionHostRole:
+    Description: Bastion IAM role name.
+    Value: !Ref BastionHostRole
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionHostRole'
+
+Rules:
+  SubnetsInVPC:
+    Assertions:
+      - Assert:
+          Fn::EachMemberIn:
+            - Fn::ValueOfAll:
+                - AWS::EC2::Subnet::Id
+                - VpcId
+            - Fn::RefAll: AWS::EC2::VPC::Id
+        AssertDescription: All subnets must exist in the VPC.

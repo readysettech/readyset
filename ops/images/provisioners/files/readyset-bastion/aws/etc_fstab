@@ -1,0 +1,5 @@
+# Harden instance drive against:
+# user-swapping (nosuid)
+# block/character devices (nodev)
+# process leaking (hidepid)
+proc /proc proc rw,nosuid,nodev,exec,auto,nouser,async,relatime,hidepid=2 0 0
