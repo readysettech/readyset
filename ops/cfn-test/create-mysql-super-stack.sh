@@ -22,9 +22,10 @@ parameters=(
   "ParameterKey=AccessCIDR,ParameterValue=${external_ip_address}/32"
   "ParameterKey=ReadySetS3BucketName,ParameterValue=${CFN_BUCKET}"
   "ParameterKey=DatabaseUsername,ParameterValue=readyset"
-  "ParameterKey=DatabasePassword,ParameterValue=readyset"
   "ParameterKey=DatabaseName,ParameterValue=readyset"
   "ParameterKey=ReadySetDeploymentName,ParameterValue=${key_pair_name}"
+  "ParameterKey=SSMParameterKmsKeyArn,ParameterValue=arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b"
+  "ParameterKey=SSMPathRDSDatabasePassword,ParameterValue=/readyset/sandbox/dbPassword"
 )
 
 aws cloudformation create-stack \

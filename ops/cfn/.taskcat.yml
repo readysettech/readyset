@@ -12,6 +12,8 @@ tests:
       DatabaseName: readyset
       DatabaseStorageType: gp2
       DatabaseAllocatedStorage: 20
+      SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
+      SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
     template: templates/readyset-mysql-super-template.yaml
   readyset-postgres-with-vpc:
     parameters:
@@ -23,4 +25,6 @@ tests:
       DatabaseName: readyset
       DatabaseStorageType: gp2
       DatabaseAllocatedStorage: 20
+      SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
+      SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
     template: templates/readyset-postgresql-super-template.yaml

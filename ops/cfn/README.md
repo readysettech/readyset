@@ -53,7 +53,7 @@ pip3 install taskcat --user
  3. Set the `CFN_BUCKET` environment variable in your shell to `<S3 Bucket Name>`
  4. Get your local IP by running: `curl ifconfig.me`
    * We'll refer to this as `<Access IP>`
- 5. Create a local `taskcat` configuration file
+ 5. Create a local `taskcat` configuration file with your user-specific details
     a. Create a file at `~/.taskcat.yml`
     b. The file contents should be as follows:
 ```
@@ -66,10 +66,6 @@ general:
     KeyPairName: <EC2 SSH Keypair name>
     ReadySetS3BucketName: <S3 Bucket Name>
     ReadySetDeploymentName: <EC2 SSH Keypair Name>
-    DatabaseName: readyset
-    # If deploying in us-east-2 sandbox (should be default)
-    SSMParameterKmsKeyArn: arn:aws:kms:us-east-2:069491470376:key/5cb3afeb-e9dd-40df-98cf-a82bb53ee78b
-    SSMPathRDSDatabasePassword: /readyset/sandbox/dbPassword
   ```
 
 ## Testing Template Changes
