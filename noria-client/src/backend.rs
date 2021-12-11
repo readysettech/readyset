@@ -27,6 +27,7 @@ use noria_errors::{
 use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 
 use crate::query_status_cache::{AdmitStatus, QueryStatusCache};
+use crate::rewrite;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
@@ -177,6 +178,7 @@ impl BackendBuilder {
             validate_queries: self.validate_queries,
             fail_invalidated_queries: self.fail_invalidated_queries,
             allow_unsupported_set: self.allow_unsupported_set,
+            rewritten_queries: HashMap::new(),
             _query_handler: PhantomData,
         }
     }
@@ -300,6 +302,11 @@ pub struct Backend<DB, Handler> {
 
     /// Allow, but ignore, unsupported SQL `SET` statements.
     allow_unsupported_set: bool,
+
+    /// Map of prepared statement ids to the corresponding rewritten query (rewritten by
+    /// rewrite::process_query). Rewritten queries are used in execute_inner() to check the query
+    /// status cache
+    rewritten_queries: HashMap<u32, nom_sql::SelectStatement>,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -569,6 +576,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query: &str,
+        rewritten_q: &nom_sql::SelectStatement,
         event: &mut QueryExecutionEvent,
         create_view_in_noria: bool,
     ) -> Result<PrepareResult<DB>, DB::Error> {
@@ -590,18 +598,24 @@ where
             Ok(_) => {
                 // No need to mark successful if we aren't performing the migration
                 if create_view_in_noria {
-                    self.query_status_cache.set_successful_migration(&q).await;
+                    self.query_status_cache
+                        .set_successful_migration(rewritten_q)
+                        .await;
                 }
             }
             Err(ref e) if e.caused_by_unsupported() => {
                 error!(error = %e,
                                 query = %&q,
                                 "Select query is unsupported in ReadySet");
-                self.query_status_cache.set_unsupported_query(&q).await;
+                self.query_status_cache
+                    .set_unsupported_query(rewritten_q)
+                    .await;
             }
             _ => {
                 // Sets to pending so that query can fall back or retry if the view dies
-                self.query_status_cache.set_failed_prepare(&q).await;
+                self.query_status_cache
+                    .set_failed_prepare(rewritten_q)
+                    .await;
             }
         }
         let upstream_res = upstream_res?;
@@ -722,6 +736,7 @@ where
         &mut self,
         q: nom_sql::SelectStatement,
         query_str: &str,
+        rewritten_q: &nom_sql::SelectStatement,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
         create_if_not_exists: bool,
@@ -739,7 +754,7 @@ where
             Ok(r) => {
                 if create_if_not_exists {
                     self.query_status_cache
-                        .set_successful_migration(&query)
+                        .set_successful_migration(rewritten_q)
                         .await;
                 }
                 Ok(QueryResult::Noria(r))
@@ -749,11 +764,13 @@ where
                     error!(error = %e,
                                 query = %query,
                                 "Select query is unsupported in ReadySet");
-                    self.query_status_cache.set_unsupported_query(&query).await;
+                    self.query_status_cache
+                        .set_unsupported_query(rewritten_q)
+                        .await;
                 } else {
                     // Allow query to fallback or be retried if view dies
                     // TODO(DAN): make better failure handling
-                    self.query_status_cache.set_failed_execute(&query).await;
+                    self.query_status_cache.set_failed_query(rewritten_q).await;
                 }
 
                 event.set_noria_error(&e);
@@ -829,16 +846,31 @@ where
             }
         };
 
+        // statement will be set to Some() and stored when rewriting succeeds
+        let mut stored_rewritten_stmt: Option<nom_sql::SelectStatement> = None;
         let res = match parsed_query {
             nom_sql::SqlQuery::Select(ref stmt) => {
                 event.sql_type = SqlQueryType::Read;
                 if self.upstream.is_some() {
-                    match self.query_status_cache.admit(stmt).await {
+                    // Query status cache must hold post-rewrite queries so that they match
+                    // expressions in Recipe
+                    // TODO(DAN): avoid rewriting twice in the adapter (once here and once in noria
+                    // connector)
+                    let mut rewritten_stmt = stmt.clone();
+                    let admit_status = if rewrite::process_query(&mut rewritten_stmt).is_ok() {
+                        stored_rewritten_stmt = Some(rewritten_stmt.clone());
+                        self.query_status_cache.admit(&rewritten_stmt).await
+                    } else {
+                        Some(AdmitStatus::Deny)
+                    };
+                    match admit_status {
                         // Register the query if this is the first time the
                         // adapter has seen it.
                         status @ None | status @ Some(AdmitStatus::Pending) => {
                             if matches!(status, None) {
-                                self.query_status_cache.set_pending_migration(stmt).await;
+                                self.query_status_cache
+                                    .set_pending_migration(&rewritten_stmt)
+                                    .await;
                             }
                             let result = if self.async_migrations {
                                 let handle = event.start_timer();
@@ -850,7 +882,14 @@ where
                                 result
                             } else {
                                 // if pending this is an re-attempt to get view or migrate
-                                self.mirror_prepare(stmt.clone(), query, event, true).await
+                                self.mirror_prepare(
+                                    stmt.clone(),
+                                    query,
+                                    &rewritten_stmt,
+                                    event,
+                                    true,
+                                )
+                                .await
                             };
                             result
                         }
@@ -867,12 +906,16 @@ where
                             // Prepare allowed queries on both noria and fallback so that
                             // if there are errors during execute we can still fallback
                             // correctly.
-                            self.mirror_prepare(stmt.clone(), query, event, false).await
+                            self.mirror_prepare(stmt.clone(), query, &rewritten_stmt, event, false)
+                                .await
                         }
                     }
                 } else {
-                    let q = stmt.clone();
-                    let status = self.query_status_cache.admit(stmt).await;
+                    let mut rewritten_stmt = stmt.clone();
+                    rewrite::process_query(&mut rewritten_stmt)?;
+                    stored_rewritten_stmt = Some(rewritten_stmt.clone());
+
+                    let status = self.query_status_cache.admit(&rewritten_stmt).await;
                     let res = self
                         .noria
                         .prepare_select(stmt.clone(), self.prepared_count, true)
@@ -883,17 +926,23 @@ where
                         Ok(_) => {
                             // Set successful if not already set
                             if !matches!(status, Some(AdmitStatus::Allow)) {
-                                self.query_status_cache.set_successful_migration(&q).await;
+                                self.query_status_cache
+                                    .set_successful_migration(&rewritten_stmt)
+                                    .await;
                             }
                         }
                         Err(ref e) if e.caused_by_unsupported() => {
                             error!(error = %e,
                                 query = %stmt,
                                 "Select query is unsupported in ReadySet");
-                            self.query_status_cache.set_unsupported_query(stmt).await;
+                            self.query_status_cache
+                                .set_unsupported_query(&rewritten_stmt)
+                                .await;
                         }
                         _ => {
-                            self.query_status_cache.set_failed_prepare(&q).await;
+                            self.query_status_cache
+                                .set_failed_prepare(&rewritten_stmt)
+                                .await;
                         }
                     }
                     res.map_err(|e| e.into())
@@ -977,6 +1026,9 @@ where
             self.prepared_queries
                 .insert(self.prepared_count, Arc::new(parsed_query));
             self.store_prep_statement(self.prepared_count, result);
+            if let Some(stmt) = stored_rewritten_stmt {
+                self.rewritten_queries.insert(self.prepared_count, stmt);
+            }
         }
         res
     }
@@ -1074,10 +1126,13 @@ where
             Some(prep) => {
                 match prep.as_ref() {
                     SqlQuery::Select(ref stmt) => {
-                        let stmt = stmt.clone();
-                        // ignore query status cache in this case
-                        if self.upstream.is_none() {}
-                        match self.query_status_cache.admit(&stmt).await {
+                        let rewritten_stmt = self.rewritten_queries.get(&id).cloned();
+                        let admit_status = if let Some(rewritten_stmt) = rewritten_stmt.as_ref() {
+                            self.query_status_cache.admit(rewritten_stmt).await
+                        } else {
+                            Some(AdmitStatus::Deny)
+                        };
+                        match admit_status {
                             // If prepare was called for this query prior, it should be in the
                             // query status cache.
                             None => Err(PreparedStatementMissing { statement_id: id })
@@ -1101,7 +1156,10 @@ where
                                     if let Ok(ref result) = res {
                                         self.store_prep_statement(id, result);
                                     } else {
-                                        self.query_status_cache.set_failed_prepare(&stmt).await;
+                                        #[allow(clippy::unwrap_used)] // must exist if not in Deny
+                                        self.query_status_cache
+                                            .set_failed_prepare(rewritten_stmt.as_ref().unwrap())
+                                            .await;
                                     }
                                 }
 
@@ -1111,7 +1169,9 @@ where
                                 let res = self.cascade_execute(id, params, &prep, event).await;
 
                                 if event.noria_error.is_some() {
-                                    qsc.set_failed_execute(&stmt).await;
+                                    #[allow(clippy::unwrap_used)] // must exist if not in Deny
+                                    qsc.set_failed_execute(rewritten_stmt.as_ref().unwrap())
+                                        .await;
                                 }
 
                                 res
@@ -1134,6 +1194,7 @@ where
                             }
                         }
                     }
+
                     SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
                         event.sql_type = SqlQueryType::Write;
                         if self.upstream.is_some() {
@@ -1296,12 +1357,26 @@ where
                         event.query = Some(parsed_query.clone());
                     }
                     let query_status_cache = self.query_status_cache.clone();
-                    let res = match query_status_cache.admit(stmt).await {
+
+                    // Query status cache must hold post-rewrite queries so that they match
+                    // expressions in Recipe
+                    // TODO(DAN): avoid rewriting twice in the adapter (once here and once in noria
+                    // connector)
+                    let mut rewritten_stmt = stmt.clone();
+                    let res = rewrite::process_query(&mut rewritten_stmt);
+                    let admit_status = if res.is_ok() {
+                        self.query_status_cache.admit(&rewritten_stmt).await
+                    } else {
+                        Some(AdmitStatus::Deny)
+                    };
+                    let res = match admit_status {
                         // If this is the first time this adapter has seen the query, we should
                         // set the queries status in the cache and send it to fallback.
                         status @ None | status @ Some(AdmitStatus::Pending) => {
                             if matches!(status, None) {
-                                query_status_cache.set_pending_migration(stmt).await;
+                                query_status_cache
+                                    .set_pending_migration(&rewritten_stmt)
+                                    .await;
                             }
                             if async_migrations {
                                 let handle = event.start_timer();
@@ -1312,13 +1387,20 @@ where
                                 // If we are validating the schema, explicitely compare the
                                 // prepare results for this select before we proceed.
                                 if self.validate_queries {
-                                    self.mirror_prepare(stmt.clone(), query, event, true)
-                                        .await?;
+                                    self.mirror_prepare(
+                                        stmt.clone(),
+                                        query,
+                                        &rewritten_stmt,
+                                        event,
+                                        true,
+                                    )
+                                    .await?;
                                 }
                                 // retry extend_recipe if pending for non-explicit migrations
                                 self.cascade_read(
                                     stmt.clone(),
                                     query,
+                                    &rewritten_stmt,
                                     self.ticket.clone(),
                                     event,
                                     true,
@@ -1333,19 +1415,15 @@ where
                             res
                         }
                         Some(AdmitStatus::Allow) => {
-                            let res = self
-                                .cascade_read(
-                                    stmt.clone(),
-                                    query,
-                                    self.ticket.clone(),
-                                    event,
-                                    false,
-                                )
-                                .await;
-                            if res.is_err() {
-                                query_status_cache.set_failed_query(stmt).await;
-                            }
-                            res
+                            self.cascade_read(
+                                stmt.clone(),
+                                query,
+                                &rewritten_stmt,
+                                self.ticket.clone(),
+                                event,
+                                false,
+                            )
+                            .await
                         }
                     };
                     res
@@ -1458,9 +1536,11 @@ where
                 // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                 SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
                 SqlQuery::CreateTable(q) => self.noria.handle_create_table(q).await,
-
                 SqlQuery::Select(q) => {
-                    let status = self.query_status_cache.admit(q).await;
+                    let mut rewritten_q = q.clone();
+                    rewrite::process_query(&mut rewritten_q)?;
+
+                    let status = self.query_status_cache.admit(&rewritten_q).await;
                     let res = self
                         .noria
                         .handle_select(q.clone(), self.ticket.clone(), true)
@@ -1469,17 +1549,23 @@ where
                     match res {
                         Ok(_) => {
                             if matches!(status, None) {
-                                self.query_status_cache.set_successful_migration(q).await;
+                                self.query_status_cache
+                                    .set_successful_migration(&rewritten_q)
+                                    .await;
                             }
                         }
                         Err(ref e) if e.caused_by_unsupported() => {
                             error!(error = %e,
                                 query = %q,
                                 "Select query is unsupported in ReadySet");
-                            self.query_status_cache.set_unsupported_query(q).await;
+                            self.query_status_cache
+                                .set_unsupported_query(&rewritten_q)
+                                .await;
                         }
                         _ => {
-                            self.query_status_cache.set_failed_execute(q).await;
+                            self.query_status_cache
+                                .set_failed_execute(&rewritten_q)
+                                .await;
                         }
                     }
                     res
