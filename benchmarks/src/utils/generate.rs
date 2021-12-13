@@ -171,10 +171,7 @@ pub async fn parallel_load(
         while !to_load.is_empty() || !futures.is_empty() {
             match futures.next().await {
                 Some(r) => {
-                    if let Err(e) = r {
-                        println!("Error while performing write: {}", e);
-                        break;
-                    }
+                    r??;
 
                     print!(
                         "\rProgress {:.2}%",
