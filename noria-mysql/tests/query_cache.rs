@@ -137,11 +137,11 @@ fn in_request_path_prep_without_fallback() {
     .unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
-    let res: Result<_> = conn.prep("SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
-    let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW()");
+    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t WHERE a = NOW()", ());
     assert!(res.is_err()); // Unable to handle this unsupported query.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
@@ -164,11 +164,11 @@ fn out_of_band_prep_with_fallback() {
     .unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
-    let res: Result<_> = conn.prep("SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
-    let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW()");
+    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t WHERE a = NOW()", ());
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
@@ -176,7 +176,7 @@ fn out_of_band_prep_with_fallback() {
     let res: Result<Vec<Row>> = conn.query("CREATE QUERY CACHE test AS SELECT * FROM t");
     assert!(res.is_ok());
 
-    let res: Result<_> = conn.prep("SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
