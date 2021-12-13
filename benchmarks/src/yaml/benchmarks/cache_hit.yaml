@@ -1,9 +1,0 @@
----
-CacheHitBenchmark:
-  query:
-    query: src/data/fastly/fastly_read_query.sql
-    query_spec_file: ~
-    query_spec: ~
-  data_generator:
-    schema: src/data/fastly/fastly_db.sql
-    var_overrides: {}

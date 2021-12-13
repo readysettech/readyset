@@ -1,0 +1,11 @@
+---
+QueryBenchmark:
+  query:
+    query: src/data/fastly/fastly_read_query.sql
+    query_spec_file: src/data/fastly/fastly_read_query.spec
+    query_spec: ~
+  target_qps: 1000
+  threads: 4
+  data_generator:
+    schema: src/data/fastly/fastly_db_tiny.sql
+    var_overrides: {}

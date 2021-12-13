@@ -31,6 +31,10 @@ pub struct CacheHitBenchmark {
     /// Install and generate from an arbitrary schema.
     #[clap(flatten)]
     data_generator: DataGenerator,
+
+    /// The number of cache hits and cache misses to perform.
+    #[clap(long, default_value = "1000")]
+    num_queries_each: u32,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -153,7 +157,7 @@ impl CacheHitBenchmark {
     ) -> Result<()> {
         // Generates 1000 cache misses.
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
-        for _ in 0..1000 {
+        for _ in 0..self.num_queries_each {
             let Query { prep, params } = if cache_miss {
                 gen.generate_cache_miss()?
             } else {

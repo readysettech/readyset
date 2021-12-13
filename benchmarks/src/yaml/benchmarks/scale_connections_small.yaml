@@ -1,0 +1,4 @@
+---
+ScaleConnections:
+  num_connections: 20
+  parallel: false

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::{Parser, ValueHint};
+use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 use tokio::sync::oneshot;
@@ -16,7 +16,7 @@ use benchmarks::utils;
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Parser)]
-#[clap(name = "benchmark_cmd_runner")]
+#[clap(name = "benchmark_cmd_runner", global_setting = AppSettings::SubcommandsNegateReqs)]
 struct BenchmarkRunner {
     /// Skips the setup setup when executing the `benchmark_cmd`.
     #[clap(long)]
@@ -39,7 +39,7 @@ struct BenchmarkRunner {
     #[clap(flatten)]
     deployment_params: DeploymentParameters,
 
-    /// Pass in the deployment parameters as a YAML formatted file. This ovewrites
+    /// Pass in the deployment parameters as a YAML formatted file. This overwrites
     /// any deployment_params passed manually.
     #[clap(long, value_hint = ValueHint::AnyPath)]
     deployment: Option<PathBuf>,
@@ -47,9 +47,9 @@ struct BenchmarkRunner {
     #[clap(subcommand)]
     benchmark_cmd: Option<Benchmark>,
 
-    /// Pass in the benchmark_cmd parameters as a YAML formatted file. This ovewrites
+    /// Pass in the benchmark_cmd parameters as a YAML formatted file. This overwrites
     /// any benchmark_cmd subcommand passed in.
-    #[clap(long, value_hint = ValueHint::AnyPath)]
+    #[clap(long, value_hint = ValueHint::AnyPath, required(true))]
     benchmark: Option<PathBuf>,
 }
 

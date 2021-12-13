@@ -57,7 +57,7 @@ impl Benchmark {
     }
 }
 
-#[derive(Parser, Clone, Deserialize, Serialize)]
+#[derive(Parser, Default, Clone, Deserialize, Serialize)]
 pub struct DeploymentParameters {
     /// Instance label, for metrics.  In CI, it makes sense to set this to the
     /// CL# or commit hash.
@@ -75,11 +75,21 @@ pub struct DeploymentParameters {
 
     /// Target database connection string. This is the database in the deployment
     /// we are benchmarking operations against.
-    #[clap(long, env = "TARGET_CONN_STR", default_value = "")]
+    #[clap(
+        long,
+        env = "TARGET_CONN_STR",
+        default_value = "",
+        required_unless_present("deployment")
+    )]
     pub target_conn_str: String,
 
     /// Setup database connection string.
-    #[clap(long, env = "SETUP_CONN_STR", default_value = "")]
+    #[clap(
+        long,
+        env = "SETUP_CONN_STR",
+        default_value = "",
+        required_unless_present("deployment")
+    )]
     pub setup_conn_str: String,
 }
 
