@@ -112,6 +112,7 @@ steps:
     - 'echo +++ Running Clustertests'
     - cargo --locked test -p clustertest
     timeout_in_minutes: 60
+    soft_fail: true
 
     depends_on:
     - build-image
