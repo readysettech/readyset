@@ -291,7 +291,8 @@ impl TableDescription {
             }
 
             if cnt % 1_000_000 == 0 {
-                info!(rows_replicated = %cnt, "Replication progress");
+                let progress = format!("{:.2}%", (cnt as f64 / nrows as f64) * 100.);
+                info!(rows_replicated = %cnt, %progress, "Replication progress");
             }
         }
 

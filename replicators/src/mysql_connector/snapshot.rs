@@ -196,8 +196,9 @@ impl MySqlReplicator {
                     .map_err(log_err)?;
             }
 
-            if cnt % 1_000_000 == 0 {
-                info!(rows_replicated = %cnt, "Replication progress");
+            if cnt % 1_000_000 == 0 && nrows > 0 {
+                let progress = format!("{:.2}%", (cnt as f64 / nrows as f64) * 100.);
+                info!(rows_replicated = %cnt, %progress, "Replication progress");
             }
         }
 
