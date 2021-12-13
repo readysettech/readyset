@@ -21,21 +21,29 @@ pub async fn query_until_expected<S, T, P>(
 where
     S: StatementLike + Clone,
     P: Into<Params> + Clone + std::marker::Send,
-    T: FromRow + std::cmp::PartialEq + std::marker::Send + 'static,
+    T: FromRow + std::cmp::PartialEq + std::marker::Send + std::fmt::Debug + Clone + 'static,
 {
+    let mut last: Option<Vec<T>> = None;
     let start = Instant::now();
     loop {
         if start.elapsed() > timeout {
+            println!("query_until_expected timed out, last: {:?}", last);
             return false;
         }
         let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
         let result =
             tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone())).await;
-
-        if let Ok(Ok(r)) = result {
-            if equal_rows(&r, expected) {
-                return true;
+        match result {
+            Ok(Ok(r)) => {
+                if equal_rows(&r, expected) {
+                    return true;
+                }
+                last = Some(r.clone());
             }
+            Err(_) => {
+                println!("Timed out when querying conn.");
+            }
+            _ => {}
         }
 
         sleep(Duration::from_millis(10)).await;
