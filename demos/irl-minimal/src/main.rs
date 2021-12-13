@@ -48,7 +48,7 @@ impl IrlQueryTest {
 
         evaluate!(
              (r"SELECT * FROM users WHERE users.id = ? LIMIT ?", (2, 3));
-             (r"SELECT * FROM user_auth_tokens WHERE auth_token = ? LIMIT ?", (2, 3));
+             (r"SELECT * FROM user_auth_tokens WHERE auth_token = ? LIMIT ?", ("2", 3));
              (r"SELECT * FROM users WHERE id = ? LIMIT ?", (1, 2));
              (r"SELECT * FROM users WHERE users.id in (?, ?, ?)", (2,3,4));
              (r"SELECT hashtags.*, invites_hashtags.invite_id, invites_hashtags.hashtag_id, invites_hashtags.created_at, invites_hashtags.updated_at
