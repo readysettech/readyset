@@ -142,6 +142,9 @@ impl Leader {
         authority: &Arc<Authority>,
         leader_ready: bool,
     ) -> ReadySetResult<Vec<u8>> {
+        #[cfg(feature = "failure_injection")]
+        fail::fail_point!("controller-request");
+
         macro_rules! return_serialized {
             ($expr:expr) => {{
                 return Ok(::bincode::serialize(&$expr)?);

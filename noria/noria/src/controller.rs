@@ -680,4 +680,13 @@ impl ControllerHandle {
     pub fn leader_ready(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
         self.rpc("leader_ready", ())
     }
+
+    #[cfg(feature = "failure_injection")]
+    pub fn failpoint(
+        &mut self,
+        name: String,
+        action: String,
+    ) -> impl Future<Output = ReadySetResult<()>> + '_ {
+        self.rpc("failpoint", (name, action))
+    }
 }

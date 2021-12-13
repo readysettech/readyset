@@ -10,6 +10,7 @@ current leader.
 
 `view_checker`: Issues a view query to a specific view.
 
+`failpoint`: Toggle failpoint behavior within a controller.
 
 Many of these tools take in an authority, authority-address, and deployment
 as parameters. Below is an example of how to pass these parameters:

@@ -155,6 +155,7 @@ mod utils;
 
 use anyhow::{anyhow, Result};
 use futures::executor;
+use hyper::Client;
 use mysql_async::prelude::Queryable;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;
@@ -517,6 +518,21 @@ pub struct ServerHandle {
     pub params: ServerParams,
     /// The local process the server is running in.
     pub process: ProcessHandle,
+}
+
+impl ServerHandle {
+    pub async fn set_failpoint(&self, name: &str, action: &str) {
+        let data = bincode::serialize(&(name, action)).unwrap();
+        let string_url = self.addr.to_string() + "failpoint";
+        let r = hyper::Request::get(string_url)
+            .body(hyper::Body::from(data))
+            .unwrap();
+
+        let client = Client::new();
+        let res = client.request(r).await.unwrap();
+        let status = res.status();
+        assert!(status == hyper::StatusCode::OK);
+    }
 }
 
 /// A handle to a mysql-adapter instance in the deployment.
@@ -1018,6 +1034,36 @@ mod tests {
                 .len(),
             2
         );
+        deployment.teardown().await.unwrap();
+    }
+
+    /// Test that setting a failpoint triggers a panic on RPC.
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn clustertest_with_set_failpoint() {
+        let cluster_name = "ct_with_set_failpoint";
+        let mut deployment = DeploymentBuilder::new(cluster_name)
+            .add_server(ServerParams::default())
+            .start()
+            .await
+            .unwrap();
+
+        // Verify we can issue an RPC.
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 1);
+
+        let controller_uri = deployment.handle.controller_uri().await.unwrap();
+        let server_handle = deployment.server_handle(&controller_uri).unwrap();
+        server_handle
+            .set_failpoint("controller-request", "panic")
+            .await;
+
+        // Request times out because the server panics.
+        assert!(tokio::time::timeout(
+            Duration::from_millis(300),
+            deployment.handle.healthy_workers()
+        )
+        .await
+        .is_err());
         deployment.teardown().await.unwrap();
     }
 }
