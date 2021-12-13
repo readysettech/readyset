@@ -2,9 +2,9 @@
 
 resource "aws_instance" "subnet-router" {
   # General
-  ami           = var.ami_id
-  instance_type = var.instance_type
-  monitoring    = var.enable_detailed_monitoring
+  ami              = local.effective_ami_id
+  instance_type    = var.instance_type
+  monitoring       = var.enable_detailed_monitoring
   user_data_base64 = base64encode(data.template_file.launch-script.rendered)
   tags = merge(var.resource_tags, {
     Name = local.subnet_router_ec2_name,

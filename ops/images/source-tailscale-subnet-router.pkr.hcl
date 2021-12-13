@@ -36,5 +36,5 @@ source "amazon-ebs" "tailscale-subnet-router" {
   ami_regions = local.destination_regions
 
   # This is only used for building and has no bearing on how it is deployed
-  instance_type = "t2.small"
+  instance_type = "t3.small"
 }

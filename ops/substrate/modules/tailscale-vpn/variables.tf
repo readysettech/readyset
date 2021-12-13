@@ -18,12 +18,26 @@ variable "resource_tags" {
 
 variable "aws_region" {
   description = "The AWS region to create resources in."
+  type        = string
+}
+
+variable "ami_owner_id" {
+  description = "AWS account ID that owns the Tailscale subnet router AMI identified by ami_name_filter."
+  default     = "716876017850"
+  type        = string
+}
+
+variable "ami_name_filter" {
+  description = "The name filter to apply when searching for Tailscale subnet router AMI. Ignored if ami_id is provided."
+  default     = "readyset/images/hvm-ssd/tailscale-subnet-router-*"
+  type        = string
 }
 
 #-------------- [ Systems ] ------------------------------------------- #
 
 variable "ami_id" {
-  description = "AMI to use for Tailscale subnet router EC2 instances."
+  description = "AMI to use for Tailscale subnet router EC2 instances. If blank, ami_name_filter logic will be used instead."
+  default     = ""
   type        = string
 }
 

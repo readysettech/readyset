@@ -29,20 +29,17 @@ data "aws_iam_policy_document" "subnet-router" {
     resources = [var.iam_authorized_secrets_manager_arn]
   }
 
-  dynamic "statement" {
-    for_each = length(var.iam_authorized_secrets_manager_kms_key_arn) > 0 ? ["enabled"] : []
-    content {
-      sid    = "kmsDecrypt"
-      effect = "Allow"
+  statement {
+    sid    = "kmsDecrypt"
+    effect = "Allow"
 
-      actions = [
-        "kms:Decrypt*",
-        "kms:Generate*",
-      ]
+    actions = [
+      "kms:Decrypt*",
+      "kms:Generate*",
+    ]
 
-      # ARN of KMS key that was used to encrypt Secrets Manager secrets
-      resources = [var.iam_authorized_secrets_manager_kms_key_arn]
-    }
+    # ARN of KMS key that was used to encrypt Secrets Manager secrets
+    resources = [local.secrets_manager_kms_key]
   }
 }
 
@@ -55,5 +52,27 @@ data "template_file" "launch-script" {
   vars = {
     advertised_routes   = join(",", var.ts_cfg_advertised_routes)
     auth_key_secret_arn = var.iam_authorized_secrets_manager_arn
+    machine_hostname    = local.subnet_router_hostname
   }
+}
+
+data "aws_ami" "latest-ts" {
+  count       = length(var.ami_name_filter) > 0 ? 1 : 0
+  most_recent = true
+  owners      = [var.ami_owner_id]
+
+  filter {
+    name   = "name"
+    values = [var.ami_name_filter]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Default secrets manager key for when a KMS key arn isn't supplied.
+data "aws_kms_key" "default-sm" {
+  key_id = "alias/aws/secretsmanager"
 }

@@ -7,10 +7,9 @@ module "tailscale" {
   quality       = var.quality
 
   # Instance Configs
-  aws_region    = var.aws_region
   ami_id        = var.tailscale_ami_id
+  aws_region    = var.aws_region
   instance_type = var.tailscale_instance_type
-
   root_volume_configs = {
     volume_size           = var.tailscale_root_volume_size
     delete_on_termination = var.tailscale_root_volume_del_on_term

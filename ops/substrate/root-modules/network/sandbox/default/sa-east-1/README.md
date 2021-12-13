@@ -1,4 +1,4 @@
-# Networking for EU-WEST-1 in Sandbox AWS Account
+# Networking for SA-EAST-1 in Sandbox AWS Account
 
 This is the Terraform/Substrate root module by which VPC components and ancillary networking components, such as Tailscale are provisioned.
 

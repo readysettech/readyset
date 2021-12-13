@@ -4,6 +4,9 @@ set -eux -o pipefail
 # https://aws.amazon.com/premiumsupport/knowledge-center/ec2-linux-log-user-data/
 exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
+# Set the hostname before starting tailscale
+sudo hostnamectl set-hostname ${machine_hostname}
+
 # Setup environment file for systemd service to consume configurations from
 echo "Beginning Tailscale subnet router configuration process."
 cat > /etc/default/tailscale <<EOF
