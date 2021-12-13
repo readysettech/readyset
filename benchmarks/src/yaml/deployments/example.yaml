@@ -1,0 +1,6 @@
+---
+# Label and prometheus_push_gateway can be ignored for most local testing.
+instance_label: local
+prometheus_push_gateway: ~
+target_conn_str: "mysql://<adapter connection str>"
+setup_conn_str: "mysql://<rds connection str>"
