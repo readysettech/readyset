@@ -248,10 +248,9 @@ mod tests {
             .save_to_directory(state_dir.path())
             .await
             .unwrap();
-        assert_eq!(
-            Deployment::list(state_dir.path()).await.unwrap(),
-            vec!["list_deployments_1", "list_deployments_2"]
-        );
+        let mut list = Deployment::list(state_dir.path()).await.unwrap();
+        list.sort();
+        assert_eq!(list, vec!["list_deployments_1", "list_deployments_2"]);
     }
 
     #[proptest]
