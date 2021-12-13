@@ -60,6 +60,13 @@ impl<T> MaybeExisting<T> {
             Existing(x) => Existing(&*x),
         }
     }
+
+    /// Returns `true` if this value is [`Existing`].
+    ///
+    /// [`Existing`]: MaybeExisting::Existing
+    pub(crate) fn is_existing(&self) -> bool {
+        matches!(self, Self::Existing(..))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -110,6 +117,13 @@ pub(crate) struct RdsDb {
     pub(crate) engine: Engine,
 }
 
+/// Credentials to use for ReadySet to connect to the RDS database
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub(crate) struct DatabaseCredentials {
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
 /// A (potentially partially-completed) deployment of a readyset cluster
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct Deployment {
@@ -136,6 +150,10 @@ pub struct Deployment {
     /// EC2 key pair name to use to allow the user to SSH into instances
     #[serde(default)]
     pub(crate) key_pair_name: Option<String>,
+
+    /// Database credentials to use for ReadySet to connect to the RDS database
+    #[serde(default)]
+    pub(crate) database_credentials: Option<DatabaseCredentials>,
 }
 
 impl Deployment {

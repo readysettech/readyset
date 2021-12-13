@@ -13,6 +13,7 @@ use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
 use clap::Parser;
+use deployment::DatabaseCredentials;
 use directories::ProjectDirs;
 use ec2::model::{KeyType, Subnet};
 use futures::stream::{FuturesUnordered, TryStreamExt};
@@ -30,7 +31,7 @@ mod deployment;
 mod console;
 
 use crate::aws::filter;
-use crate::console::{confirm, input, select, spinner, GREEN_CHECK};
+use crate::console::{confirm, input, password, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
 
@@ -167,12 +168,48 @@ impl Installer {
             self.validate_rds_database(db_id, rds_db.engine).await?;
         }
 
+        if self.deployment.database_credentials.is_some() {
+            success!("Using previously-configured database credentials");
+        } else {
+            self.prompt_for_database_credentials().await?;
+            self.save().await?;
+        }
+
         if let Some(key_pair_name) = &self.deployment.key_pair_name {
             success!("Using SSH key pair: {}", key_pair_name)
         } else {
             self.create_and_install_key_pair().await?;
         }
         self.save().await?;
+
+        Ok(())
+    }
+
+    async fn prompt_for_database_credentials(&mut self) -> Result<()> {
+        let rds_db = self.deployment.rds_db.as_ref().unwrap();
+        if rds_db.db_id.is_existing() {
+            println!("ReadySet needs credentials to connect to your RDS database.");
+            println!("This user needs to have at least the following permissions:");
+            let permissions = match rds_db.engine {
+                Engine::MySQL => &[
+                    "SELECT",
+                    "RELOAD",
+                    "LOCK TABLES",
+                    "SHOW DATABASES",
+                    "REPLICATION SLAVE",
+                    "REPLICATION CLIENT",
+                ][..],
+                Engine::PostgreSQL => &["REPLICATION", "SELECT", "CREATE"][..],
+            };
+            for permission in permissions {
+                println!(" • {}", style(permission).blue())
+            }
+        } else {
+            println!("Enter credentials for the root user account in the new RDS database");
+        }
+        let username = input().with_prompt("Database username").interact_text()?;
+        let password = password().with_prompt("Database password").interact()?;
+        self.deployment.database_credentials = Some(DatabaseCredentials { username, password });
 
         Ok(())
     }

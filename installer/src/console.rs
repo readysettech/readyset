@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use console::{style, Emoji, StyledObject};
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Confirm, Input, Select};
+use dialoguer::{Confirm, Input, Password, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
 
@@ -28,6 +28,10 @@ where
     T::Err: Display + Debug,
 {
     Input::with_theme(&*DIALOG_THEME)
+}
+
+pub(crate) fn password() -> Password<'static> {
+    Password::with_theme(&*DIALOG_THEME)
 }
 
 pub(crate) fn select() -> Select<'static> {
