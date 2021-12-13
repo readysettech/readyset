@@ -8,7 +8,7 @@ use serial_test::serial;
 use std::time::Duration;
 use test_utils::skip_slow_tests;
 
-const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(2);
+const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
