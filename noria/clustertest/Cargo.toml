@@ -16,6 +16,8 @@ url = "2.2.2"
 mysql_async = "0.28.0"
 envy = "0.4"
 serde = { version = "1.0.8", features = ["derive"] }
+hyper = "0.14.10"
+bincode = "1.3.3"
 
 # local deps
 nom-sql = { path = "../../nom-sql" }

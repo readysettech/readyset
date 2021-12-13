@@ -941,13 +941,31 @@ async fn handle_controller_request(
     let request_start = Instant::now();
     let ret: Result<Result<Vec<u8>, Vec<u8>>, StatusCode> = {
         let guard = leader_handle.read().await;
-        let resp = if let Some(ref ci) = *guard {
-            Ok(tokio::task::block_in_place(|| {
-                ci.external_request(method, path.as_ref(), query, body, &authority, leader_ready)
-            }))
-        } else {
-            Err(ReadySetError::NotLeader)
+        let resp = match (&method, path.as_str()) {
+            // Requests that do not need to be handled by the leader.
+            #[cfg(feature = "failure_injection")]
+            (&Method::GET, "/failpoint") => {
+                let (name, action): (String, String) = bincode::deserialize(&body)?;
+                Ok(Ok(::bincode::serialize(&fail::cfg(name, &action))?))
+            }
+            _ => {
+                if let Some(ref ci) = *guard {
+                    Ok(tokio::task::block_in_place(|| {
+                        ci.external_request(
+                            method,
+                            path.as_ref(),
+                            query,
+                            body,
+                            &authority,
+                            leader_ready,
+                        )
+                    }))
+                } else {
+                    Err(ReadySetError::NotLeader)
+                }
+            }
         };
+
         match resp {
             // returned from `Leader::external_request`:
             Ok(Ok(r)) => Ok(Ok(r)),

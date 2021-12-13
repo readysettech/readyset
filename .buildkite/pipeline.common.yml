@@ -271,7 +271,7 @@ steps:
     key: noria-clustertest
     command:
     - 'echo +++ Building binaries for clustertest'
-    - cargo --locked build --bin noria-server --bin noria-mysql
+    - cargo --locked build --bin noria-server --bin noria-mysql --features failure_injection
     - 'echo +++ Running Clustertests'
     - cargo --locked test -p clustertest
     timeout_in_minutes: 60

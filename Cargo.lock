@@ -1479,10 +1479,12 @@ name = "clustertest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "clustertest-macros",
  "envy",
  "futures 0.3.17",
  "futures-util",
+ "hyper",
  "mysql_async",
  "nom-sql",
  "noria",
@@ -2213,6 +2215,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c4cf866e4d3e5e773691f5f61615a224a7b0b72b7daf994fc56d1b82dab0b6b"
 dependencies = [
  "rustc-serialize",
+]
+
+[[package]]
+name = "fail"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec3245a0ca564e7f3c797d20d833a6870f57a728ac967d5225b3ffdef4465011"
+dependencies = [
+ "lazy_static",
+ "log",
+ "rand 0.8.4",
 ]
 
 [[package]]
@@ -4122,6 +4135,7 @@ dependencies = [
  "clap 3.0.0-beta.5",
  "criterion",
  "diff",
+ "fail",
  "futures 0.3.17",
  "futures-core",
  "futures-executor",
@@ -4188,7 +4202,9 @@ name = "noria-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "clap 3.0.0-beta.5",
+ "hyper",
  "noria",
  "noria-server",
  "serde_json",

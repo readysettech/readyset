@@ -10,3 +10,8 @@ a ControllerHandle and the MetricsClient.
 
 ## [Proptest](./proptest.md)
 A framework for generative property testing in code
+
+## [Buildkite](./buildkite.md)
+
+## [Failure Injection](./failure_injection.md)
+Using failpoints to inject and test failures programatically.
