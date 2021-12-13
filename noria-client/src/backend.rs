@@ -1215,7 +1215,13 @@ where
                                 // during our prepare we either encountered a transient noria
                                 // failure or the migration was pending. Prepare it now as we
                                 // should be able to succeed.
-                                if prepared_statement.noria.is_none() {
+                                let should_prepare = match self.migration_mode {
+                                    MigrationMode::InRequestPath => {
+                                        prepared_statement.noria.is_none()
+                                    }
+                                    MigrationMode::OutOfBand => s == MigrationState::Successful,
+                                };
+                                if should_prepare {
                                     // TODO(justin): Refactor prepared statement cache to wrap preparing and storing
                                     // prepared statements in a thread-local cache.
                                     let res = self
