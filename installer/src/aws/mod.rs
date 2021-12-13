@@ -1,6 +1,8 @@
 use anyhow::Result;
+use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
+use cfn::model::Parameter as CfnParameter;
 use ec2::model::Filter;
 use futures::{
     stream::{self, FuturesUnordered},
@@ -16,6 +18,17 @@ where
     V: Into<String>,
 {
     Filter::builder().name(key).values(value).build()
+}
+
+pub(crate) fn cfn_parameter<K, V>(key: K, value: V) -> CfnParameter
+where
+    K: Into<String>,
+    V: Into<String>,
+{
+    CfnParameter::builder()
+        .parameter_key(key)
+        .parameter_value(value)
+        .build()
 }
 
 pub(crate) async fn rds_dbs_in_vpc(

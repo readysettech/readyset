@@ -2,16 +2,19 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{env, iter};
 
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
+use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
 use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
+use cfn::model::StackStatus;
 use clap::Parser;
 use deployment::DatabaseCredentials;
 use directories::ProjectDirs;
@@ -19,19 +22,21 @@ use ec2::model::{KeyType, Subnet};
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
+use itertools::Itertools;
 use launchpad::display::EnglishList;
 use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use rusoto_credential::ProfileProvider;
 use tokio::fs::{DirBuilder, OpenOptions};
 use tokio::io::AsyncWriteExt;
+use tokio::time::sleep;
 
 mod aws;
 mod deployment;
 #[macro_use]
 mod console;
 
-use crate::aws::filter;
-use crate::console::{confirm, input, password, select, spinner, GREEN_CHECK};
+use crate::aws::{cfn_parameter, filter};
+use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
 
@@ -42,6 +47,10 @@ const REGIONS: &[&str] = &["us-east-1", "us-east-2", "us-west-2"];
 
 /// Minimum number of availability zones in which we can deploy a cluster
 const MIN_AVAILABILITY_ZONES: usize = 3;
+
+/// Public cloudformation template for the VPC
+const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://aws-quickstart.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml";
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -97,6 +106,7 @@ struct Installer {
     aws_config: Option<aws_config::Config>,
     ec2_client: Option<ec2::Client>,
     rds_client: Option<rds::Client>,
+    cfn_client: Option<cfn::Client>,
 }
 
 impl Installer {
@@ -107,6 +117,7 @@ impl Installer {
             aws_config: None,
             ec2_client: None,
             rds_client: None,
+            cfn_client: None,
         }
     }
 
@@ -181,6 +192,140 @@ impl Installer {
             self.configure_key_pair().await?;
         }
         self.save().await?;
+
+        if self.deployment.vpc_id.as_ref().unwrap().is_create_new() {
+            self.deploy_vpc().await?;
+            self.save().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn deploy_vpc(&mut self) -> Result<()> {
+        println!("About to create VPC");
+        prompt_to_continue()?;
+
+        let mut azs = self
+            .ec2_client()
+            .await?
+            .describe_availability_zones()
+            .filters(filter(
+                "region-name",
+                self.deployment.aws_region.as_ref().unwrap(),
+            ))
+            .send()
+            .await?
+            .availability_zones
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|az| az.zone_name);
+
+        let create_pb = spinner().with_message("Creating VPC");
+        let stack_name = format!("{}-vpc", self.deployment.name());
+        self.cfn_client()
+            .await?
+            .create_stack()
+            .stack_name(&stack_name)
+            .template_url(VPC_CLOUDFORMATION_TEMPLATE_URL)
+            .parameters(cfn_parameter("AvailabilityZones", azs.join(",")))
+            .parameters(cfn_parameter("NumberOfAZs", "3"))
+            .send()
+            .await?;
+        create_pb.finish_with_message(format!(
+            "{}Created CloudFormation stack {}",
+            *GREEN_CHECK,
+            style(&stack_name).bold()
+        ));
+
+        let ready_pb = spinner().with_message("Waiting for stack to be finished creating");
+        loop {
+            let resp = self
+                .cfn_client()
+                .await?
+                .describe_stacks()
+                .stack_name(&stack_name)
+                .send()
+                .await?;
+            let status = resp
+                .stacks
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("CloudFormation stack went away!"))?
+                .stack_status;
+            match status {
+                Some(StackStatus::CreateComplete) => {
+                    ready_pb.finish_with_message(format!(
+                        "{}Stack {} finished creating",
+                        *GREEN_CHECK,
+                        style(&stack_name).bold()
+                    ));
+                    break;
+                }
+                Some(
+                    status
+                    @
+                    (StackStatus::CreateFailed
+                    | StackStatus::DeleteFailed
+                    | StackStatus::RollbackComplete
+                    | StackStatus::RollbackFailed
+                    | StackStatus::UpdateFailed),
+                ) => {
+                    ready_pb.abandon_with_message(format!(
+                        "{} Stack entered non-successful status {}",
+                        style(Emoji("❌ ", "X ")).red(),
+                        style(status.as_str()).red()
+                    ));
+                    bail!("Stack creation failed");
+                }
+                status => {
+                    if let Some(status) = status {
+                        ready_pb.set_message(format!(
+                            "Waiting for stack to be finished creating (Current status: {})",
+                            style(status.as_str()).blue()
+                        ));
+                    }
+                    sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+
+        let stack_outputs = self
+            .cfn_client()
+            .await?
+            .describe_stacks()
+            .stack_name(stack_name)
+            .send()
+            .await?
+            .stacks
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("CloudFormation stack went away!"))?
+            .outputs
+            .unwrap_or_default();
+        let vpc_id = stack_outputs
+            .iter()
+            .find(|output| output.output_key() == Some("VPCID"))
+            .and_then(|output| output.output_value())
+            .ok_or_else(|| anyhow!("CloudFormation stack missing VPCID output key"))?;
+
+        self.deployment.vpc_id = Some(Existing(vpc_id.to_owned()));
+
+        let subnet_ids = stack_outputs
+            .iter()
+            .filter(|output| {
+                [
+                    "PrivateSubnet1AID",
+                    "PrivateSubnet2AID",
+                    "PrivateSubnet3AID",
+                ]
+                .contains(&output.output_key().unwrap())
+            })
+            .filter_map(|output| output.output_value.clone())
+            .collect();
+
+        self.deployment.subnet_ids = Some(subnet_ids);
 
         Ok(())
     }
@@ -971,6 +1116,18 @@ impl Installer {
     async fn init_rds_client(&mut self) -> Result<&rds::Client> {
         let rds_client = rds::Client::new(self.aws_config().await?);
         Ok(self.rds_client.insert(rds_client))
+    }
+
+    async fn cfn_client(&mut self) -> Result<&cfn::Client> {
+        if self.cfn_client.is_none() {
+            self.init_cfn_client().await?;
+        }
+        Ok(self.cfn_client.as_ref().unwrap())
+    }
+
+    async fn init_cfn_client(&mut self) -> Result<&cfn::Client> {
+        let cfn_client = cfn::Client::new(self.aws_config().await?);
+        Ok(self.cfn_client.insert(cfn_client))
     }
 
     async fn aws_config(&mut self) -> Result<&aws_config::Config> {

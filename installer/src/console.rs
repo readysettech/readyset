@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display};
 use std::str::FromStr;
 
+use anyhow::{bail, Result};
 use console::{style, Emoji, StyledObject};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Password, Select};
@@ -62,4 +63,16 @@ pub(crate) fn spinner() -> ProgressBar {
     let spinner = ProgressBar::new_spinner().with_style(SPINNER_STYLE.clone());
     spinner.enable_steady_tick(50);
     spinner
+}
+
+pub(crate) fn prompt_to_continue() -> Result<()> {
+    if confirm()
+        .with_prompt("Continue?")
+        .default(true)
+        .interact()?
+    {
+        Ok(())
+    } else {
+        bail!("Exiting as requested")
+    }
 }

@@ -61,6 +61,13 @@ impl<T> MaybeExisting<T> {
         }
     }
 
+    /// Returns `true` if this value is [`CreateNew`].
+    ///
+    /// [`CreateNew`]: MaybeExisting::CreateNew
+    pub(crate) fn is_create_new(&self) -> bool {
+        matches!(self, Self::CreateNew)
+    }
+
     /// Returns `true` if this value is [`Existing`].
     ///
     /// [`Existing`]: MaybeExisting::Existing

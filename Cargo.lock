@@ -525,6 +525,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-cloudformation"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dc530dfd45e14126df52c622af81fa69be3cd61369a46571b24a4d794849780"
+dependencies = [
+ "aws-endpoint 0.2.0",
+ "aws-http 0.2.0",
+ "aws-hyper 0.2.0",
+ "aws-sig-auth 0.2.0",
+ "aws-smithy-async 0.32.0",
+ "aws-smithy-client 0.32.0",
+ "aws-smithy-http 0.32.0",
+ "aws-smithy-query 0.32.0",
+ "aws-smithy-types 0.32.0",
+ "aws-smithy-xml 0.32.0",
+ "aws-types 0.2.0",
+ "bytes 1.1.0",
+ "fastrand",
+ "http",
+]
+
+[[package]]
 name = "aws-sdk-ec2"
 version = "0.0.26-alpha"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1062,7 +1084,7 @@ dependencies = [
  "hdrhistogram",
  "indicatif 0.16.2",
  "indoc",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "lazy_static",
  "metrics",
  "metrics-exporter-prometheus",
@@ -1644,7 +1666,7 @@ dependencies = [
  "clap 2.33.3",
  "criterion-plot",
  "csv",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -1666,7 +1688,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d00996de9f2f7559f7f4dc286073197f83e92256a59ed395f9aac01fe717da57"
 dependencies = [
  "cast",
- "itertools 0.10.1",
+ "itertools 0.10.3",
 ]
 
 [[package]]
@@ -2931,9 +2953,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
 dependencies = [
  "either",
 ]
@@ -3295,7 +3317,7 @@ dependencies = [
  "futures-executor",
  "futures-util",
  "hyper",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "lazy_static",
  "maplit",
@@ -3729,7 +3751,7 @@ dependencies = [
  "derive_more",
  "eui48",
  "hex",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "lazy_static",
  "maplit",
@@ -3769,7 +3791,7 @@ dependencies = [
  "futures 0.3.17",
  "futures-util",
  "hyper",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "lazy_static",
  "metrics",
@@ -4024,7 +4046,7 @@ dependencies = [
  "hex",
  "humantime",
  "indicatif 0.16.2",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "lazy_static",
  "maplit",
  "maths",
@@ -4057,7 +4079,7 @@ dependencies = [
 name = "noria-mir"
 version = "0.7.0"
 dependencies = [
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "nom-sql",
  "noria",
  "noria-common",
@@ -4077,7 +4099,7 @@ dependencies = [
  "chrono",
  "clap 3.0.0-beta.5",
  "derive_more",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "jemallocator",
  "maplit",
  "msql-srv",
@@ -4110,7 +4132,7 @@ dependencies = [
  "clap 3.0.0-beta.5",
  "eui48",
  "futures 0.3.17",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "jemallocator",
  "launchpad",
  "native-tls",
@@ -4161,7 +4183,7 @@ dependencies = [
  "futures-util",
  "hyper",
  "include_dir",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "jemalloc-ctl",
  "jemallocator",
  "launchpad",
@@ -4961,7 +4983,7 @@ dependencies = [
  "futures-util",
  "humantime",
  "indicatif 0.15.0",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "lazy_static",
  "nom-sql",
@@ -5192,7 +5214,7 @@ name = "reader_map"
 version = "0.1.0"
 dependencies = [
  "hashbag",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "left-right",
  "noria",
  "quickcheck",
@@ -5208,6 +5230,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aws-config 0.2.0",
+ "aws-sdk-cloudformation",
  "aws-sdk-ec2 0.2.0",
  "aws-sdk-rds",
  "aws-types 0.2.0",
@@ -5219,6 +5242,7 @@ dependencies = [
  "indicatif 0.16.2",
  "ipnet",
  "iprange",
+ "itertools 0.10.3",
  "launchpad",
  "lazy_static",
  "proptest",
@@ -5340,7 +5364,7 @@ dependencies = [
  "clap 3.0.0-beta.5",
  "futures 0.3.17",
  "hex",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "metrics",
  "mysql-time",
@@ -5406,7 +5430,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "csv",
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "reqwest",
  "serde",
  "serde_json",
@@ -6686,7 +6710,7 @@ checksum = "56dee185309b50d1f11bfedef0fe6d036842e3fb77413abef29f8f8d1c5d4c1c"
 name = "unbounded-interval-tree"
 version = "0.2.3"
 dependencies = [
- "itertools 0.10.1",
+ "itertools 0.10.3",
  "launchpad",
  "pretty_assertions",
  "proptest",
