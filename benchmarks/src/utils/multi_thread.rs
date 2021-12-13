@@ -1,5 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::stream::futures_unordered::FuturesUnordered;
+use futures::StreamExt;
 use std::time::Duration;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -60,7 +62,6 @@ where
                 }
             }
         }
-        // Read
     }
 
     Ok(())
@@ -79,15 +80,27 @@ where
 {
     let (sender, receiver) = unbounded_channel::<B::BenchmarkResult>();
 
-    let mut threads: Vec<_> = (0..num_threads)
+    let mut futures: FuturesUnordered<_> = (0..num_threads)
         .map(|_| tokio::spawn(B::benchmark_thread(params.clone(), sender.clone())))
         .collect();
-    threads.push(tokio::spawn(benchmark_results_thread::<B>(receiver)));
+    futures.push(tokio::spawn(benchmark_results_thread::<B>(receiver)));
 
-    let res = futures::future::join_all(threads).await;
-    for err_res in res.iter().filter(|e| e.is_err()) {
-        if let Err(e) = err_res {
-            error!("Error executing benchmark {}", e);
+    loop {
+        match futures.next().await {
+            // Error returned from future.
+            Some(Err(e)) => {
+                error!("Error executing future in multi-threaded benchmark");
+                return Err(e.into());
+            }
+            // Error returned from benchmark thread.
+            Some(Ok(Err(e))) => {
+                error!("Error executing benchmark thread: {}", e);
+                return Err(e);
+            }
+            // Success returned from benchmark thread.
+            Some(_) => {}
+            // No more threads to run.
+            None => break,
         }
     }
     Ok(())
