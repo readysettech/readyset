@@ -14,7 +14,6 @@ aws-sdk-sqs = "0.0.26-alpha"
 aws-sdk-autoscaling = "0.0.26-alpha"
 aws-types = "0.0.26-alpha"
 clap = "3.0.0-beta.4"
-itertools = "0.10.1"
 lazy_static = "1.4.0"
 regex = "1.5.4"
 serde = { version = "1.0.130", features = ["derive"] }
