@@ -10,6 +10,7 @@ use futures::{
 };
 use rds::model::{DbInstance, Parameter};
 
+pub(crate) mod cloudformation;
 pub(crate) mod subnets;
 
 pub(crate) fn filter<K, V>(key: K, value: V) -> Filter

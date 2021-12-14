@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::path::Path;
@@ -73,6 +74,14 @@ impl<T> MaybeExisting<T> {
     /// [`Existing`]: MaybeExisting::Existing
     pub(crate) fn is_existing(&self) -> bool {
         matches!(self, Self::Existing(..))
+    }
+
+    pub(crate) fn as_existing(&self) -> Option<&T> {
+        if let Self::Existing(v) = self {
+            Some(v)
+        } else {
+            None
+        }
     }
 }
 
@@ -161,6 +170,10 @@ pub struct Deployment {
     /// Database credentials to use for ReadySet to connect to the RDS database
     #[serde(default)]
     pub(crate) database_credentials: Option<DatabaseCredentials>,
+
+    /// Cloudformation stack outputs for the VPC supplemental stack
+    #[serde(default)]
+    pub(crate) vpc_supplemental_stack_outputs: Option<HashMap<String, String>>,
 }
 
 impl Deployment {

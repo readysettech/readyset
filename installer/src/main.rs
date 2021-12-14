@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use std::{env, iter};
 
 use ::console::{style, Emoji};
@@ -14,7 +13,6 @@ use aws_types::credentials::future::ProvideCredentials as ProvideCredentialsFut;
 use aws_types::credentials::{CredentialsError, ProvideCredentials};
 use aws_types::region::Region;
 use aws_types::Credentials;
-use cfn::model::StackStatus;
 use clap::Parser;
 use deployment::DatabaseCredentials;
 use directories::ProjectDirs;
@@ -28,13 +26,13 @@ use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
 use rusoto_credential::ProfileProvider;
 use tokio::fs::{DirBuilder, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::time::sleep;
 
 mod aws;
 mod deployment;
 #[macro_use]
 mod console;
 
+use crate::aws::cloudformation::deploy_stack;
 use crate::aws::{cfn_parameter, filter};
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
@@ -51,6 +49,10 @@ const MIN_AVAILABILITY_ZONES: usize = 3;
 /// Public cloudformation template for the VPC
 const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://aws-quickstart.s3.amazonaws.com/quickstart-aws-vpc/templates/aws-vpc.template.yaml";
+
+/// Public cloudformation template for the VPC supplemental stack
+const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-vpc-supplemental-template.yaml";
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -198,12 +200,94 @@ impl Installer {
             self.save().await?;
         }
 
+        if self.deployment.vpc_supplemental_stack_outputs.is_none() {
+            self.deploy_vpc_supplemental_stack().await?;
+            self.save().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn deploy_vpc_supplemental_stack(&mut self) -> Result<()> {
+        println!("About to deploy VPC supplemental stack");
+        prompt_to_continue()?;
+        let stack_name = format!("{}-vpc-supplemental", self.deployment.name);
+
+        let vpc_id = self
+            .deployment
+            .vpc_id
+            .as_ref()
+            .unwrap()
+            .as_existing()
+            .unwrap()
+            .to_owned();
+        let vpc_cidr = self
+            .ec2_client()
+            .await?
+            .describe_vpcs()
+            .vpc_ids(&vpc_id)
+            .send()
+            .await?
+            .vpcs
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("VPC went away!"))?
+            .cidr_block
+            .unwrap();
+
+        let default_security_group_id = self
+            .ec2_client()
+            .await?
+            .describe_security_groups()
+            .filters(filter("vpc-id", &vpc_id))
+            .filters(filter("group-name", "default"))
+            .send()
+            .await?
+            .security_groups
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("Could not find default VPC security group"))?
+            .group_id
+            .unwrap();
+
+        let subnet_ids = self.deployment.subnet_ids.as_ref().unwrap().join(",");
+
+        let cfn_client = self.cfn_client().await?;
+        let stack = deploy_stack(
+            cfn_client,
+            &stack_name,
+            cfn_client
+                .create_stack()
+                .stack_name(&stack_name)
+                .template_url(VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL)
+                .parameters(cfn_parameter("VPCPrivateSubnetIds", subnet_ids))
+                .parameters(cfn_parameter("VPCID", vpc_id))
+                .parameters(cfn_parameter("VPCCIDR", vpc_cidr))
+                .parameters(cfn_parameter(
+                    "BastionSecurityGroupID",
+                    default_security_group_id,
+                )),
+        )
+        .await?;
+
+        let outputs = stack
+            .outputs
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|output| Some((output.output_key?, output.output_value?)))
+            .collect();
+        self.deployment.vpc_supplemental_stack_outputs = Some(outputs);
+
         Ok(())
     }
 
     async fn deploy_vpc(&mut self) -> Result<()> {
         println!("About to create VPC");
         prompt_to_continue()?;
+
+        let stack_name = format!("{}-vpc", self.deployment.name());
 
         let mut azs = self
             .ec2_client()
@@ -220,90 +304,20 @@ impl Installer {
             .into_iter()
             .filter_map(|az| az.zone_name);
 
-        let create_pb = spinner().with_message("Creating VPC");
-        let stack_name = format!("{}-vpc", self.deployment.name());
-        self.cfn_client()
-            .await?
-            .create_stack()
-            .stack_name(&stack_name)
-            .template_url(VPC_CLOUDFORMATION_TEMPLATE_URL)
-            .parameters(cfn_parameter("AvailabilityZones", azs.join(",")))
-            .parameters(cfn_parameter("NumberOfAZs", "3"))
-            .send()
-            .await?;
-        create_pb.finish_with_message(format!(
-            "{}Created CloudFormation stack {}",
-            *GREEN_CHECK,
-            style(&stack_name).bold()
-        ));
-
-        let ready_pb = spinner().with_message("Waiting for stack to be finished creating");
-        loop {
-            let resp = self
-                .cfn_client()
-                .await?
-                .describe_stacks()
+        let cfn_client = self.cfn_client().await?;
+        let stack = deploy_stack(
+            cfn_client,
+            &stack_name,
+            cfn_client
+                .create_stack()
                 .stack_name(&stack_name)
-                .send()
-                .await?;
-            let status = resp
-                .stacks
-                .unwrap_or_default()
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow!("CloudFormation stack went away!"))?
-                .stack_status;
-            match status {
-                Some(StackStatus::CreateComplete) => {
-                    ready_pb.finish_with_message(format!(
-                        "{}Stack {} finished creating",
-                        *GREEN_CHECK,
-                        style(&stack_name).bold()
-                    ));
-                    break;
-                }
-                Some(
-                    status
-                    @
-                    (StackStatus::CreateFailed
-                    | StackStatus::DeleteFailed
-                    | StackStatus::RollbackComplete
-                    | StackStatus::RollbackFailed
-                    | StackStatus::UpdateFailed),
-                ) => {
-                    ready_pb.abandon_with_message(format!(
-                        "{} Stack entered non-successful status {}",
-                        style(Emoji("❌ ", "X ")).red(),
-                        style(status.as_str()).red()
-                    ));
-                    bail!("Stack creation failed");
-                }
-                status => {
-                    if let Some(status) = status {
-                        ready_pb.set_message(format!(
-                            "Waiting for stack to be finished creating (Current status: {})",
-                            style(status.as_str()).blue()
-                        ));
-                    }
-                    sleep(Duration::from_millis(500)).await;
-                }
-            }
-        }
+                .template_url(VPC_CLOUDFORMATION_TEMPLATE_URL)
+                .parameters(cfn_parameter("AvailabilityZones", azs.join(",")))
+                .parameters(cfn_parameter("NumberOfAZs", "3")),
+        )
+        .await?;
 
-        let stack_outputs = self
-            .cfn_client()
-            .await?
-            .describe_stacks()
-            .stack_name(stack_name)
-            .send()
-            .await?
-            .stacks
-            .unwrap_or_default()
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("CloudFormation stack went away!"))?
-            .outputs
-            .unwrap_or_default();
+        let stack_outputs = stack.outputs.unwrap_or_default();
         let vpc_id = stack_outputs
             .iter()
             .find(|output| output.output_key() == Some("VPCID"))
