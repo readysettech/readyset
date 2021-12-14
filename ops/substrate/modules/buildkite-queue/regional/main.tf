@@ -28,7 +28,7 @@ data "aws_s3_bucket" "secrets_bucket" {
 resource "aws_cloudformation_stack" "main" {
   name = local.stack_name
 
-  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/v${local.stack_version}/aws-stack.yml"
+  template_url = "https://s3.amazonaws.com/buildkite-aws-stack/${local.stack_version}/aws-stack.yml"
 
   capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
   parameters = {
