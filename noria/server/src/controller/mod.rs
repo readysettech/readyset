@@ -22,6 +22,7 @@ use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use stream_cancel::Valve;
@@ -282,7 +283,7 @@ pub struct Controller {
     /// The config associated with this controller's server.
     config: Config,
     /// Whether we are the leader and ready to handle requests.
-    leader_ready: RwLock<bool>,
+    leader_ready: Arc<AtomicBool>,
     /// A notify to be passed to leader's when created, used to notify the Controller that the
     /// leader is ready to handle requests.
     leader_ready_notification: Arc<Notify>,
@@ -318,7 +319,7 @@ impl Controller {
             valve: shutoff_valve,
             worker_descriptor,
             config,
-            leader_ready: RwLock::new(false),
+            leader_ready: Arc::new(AtomicBool::new(false)),
             leader_ready_notification: Arc::new(Notify::new()),
             replication_error_channel: ReplicationErrorChannel::new(),
             authority_task: None,
@@ -345,8 +346,8 @@ impl Controller {
         match req {
             HandleRequest::QueryReadiness(tx) => {
                 let guard = self.inner.read().await;
-                let leader_ready = { self.leader_ready.read().await };
-                let done = *leader_ready
+                let leader_ready = self.leader_ready.load(Ordering::Acquire);
+                let done = leader_ready
                     && match guard.as_ref() {
                         Some(leader) => {
                             let ds = leader.dataflow_state_handle.read().await;
@@ -393,16 +394,14 @@ impl Controller {
                     self.config.replication_url.clone(),
                     self.config.replication_server_id,
                 );
+                self.leader_ready.store(false, Ordering::Release);
+
                 leader
                     .start(
                         self.leader_ready_notification.clone(),
                         self.replication_error_channel.sender(),
                     )
                     .await;
-
-                {
-                    *self.leader_ready.write().await = false;
-                }
 
                 self.inner.replace(leader).await;
                 self.send_worker_request(WorkerRequestKind::NewController {
@@ -463,10 +462,12 @@ impl Controller {
                 self.authority.clone(),
                 self.inner.clone(),
                 self.valve.clone(),
+                self.leader_ready.clone(),
             )
             .instrument(tracing::info_span!("write_processing")),
         ));
 
+        let leader_ready = self.leader_ready.clone();
         loop {
             // produces a value when the `Valve` is closed
             let mut shutdown_stream = self.valve.wrap(futures_util::stream::pending::<()>());
@@ -490,7 +491,13 @@ impl Controller {
                         // also handle the request in the same way, but on a different thread.
                         // This is how we avoid blocking reads.
                         if !crate::controller::inner::is_write(&req) {
-                            crate::controller::handle_controller_request(req, self.authority.clone(), self.inner.clone()).await?;
+                            let leader_ready = leader_ready.load(Ordering::Acquire);
+                            crate::controller::handle_controller_request(
+                                req,
+                                self.authority.clone(),
+                                self.inner.clone(),
+                                leader_ready
+                            ).await?;
                         } else if writer_tx.send(req).await.is_err() {
                             internal!("write processing handle hung up!")
                         }
@@ -525,8 +532,7 @@ impl Controller {
 
                 }
                 _ = self.leader_ready_notification.notified() => {
-                    let mut leader_ready = self.leader_ready.write().await;
-                    *leader_ready = true;
+                    self.leader_ready.store(true, Ordering::Release);
                 }
                 _ = shutdown_stream.next() => {
                     info!("Controller shutting down after valve shut");
@@ -890,13 +896,20 @@ async fn write_processing_runner(
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
     shutdown_stream: Valve,
+    leader_ready: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     loop {
         let mut shutdown_stream = shutdown_stream.wrap(futures_util::stream::pending::<()>());
         select! {
             request = request_rx.recv() => {
                 if let Some(req) = request {
-                        crate::controller::handle_controller_request(req, authority.clone(), leader_handle.clone()).await?;
+                    let leader_ready = leader_ready.load(Ordering::Acquire);
+                    crate::controller::handle_controller_request(
+                        req,
+                        authority.clone(),
+                        leader_handle.clone(),
+                        leader_ready
+                    ).await?;
                 } else {
                     info!("Controller shutting down after write processing handle dropped");
                     break;
@@ -915,6 +928,7 @@ async fn handle_controller_request(
     req: ControllerRequest,
     authority: Arc<Authority>,
     leader_handle: Arc<LeaderHandle>,
+    leader_ready: bool,
 ) -> ReadySetResult<()> {
     let ControllerRequest {
         method,
@@ -929,7 +943,7 @@ async fn handle_controller_request(
         let guard = leader_handle.read().await;
         let resp = if let Some(ref ci) = *guard {
             Ok(tokio::task::block_in_place(|| {
-                ci.external_request(method, path.as_ref(), query, body, &authority)
+                ci.external_request(method, path.as_ref(), query, body, &authority, leader_ready)
             }))
         } else {
             Err(ReadySetError::NotLeader)

@@ -361,12 +361,16 @@ pub struct ReaderReplicationResult {
 }
 
 /// Represents a request to install or extend a recipe
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct RecipeSpec<'a> {
     /// The recipe string
     pub recipe: &'a str,
     /// Optional replication offset if recipe is installed from replication or binlog
     pub replication_offset: Option<ReplicationOffset>,
+    /// Optional parameter that indicates if the leader is required to be ready before handling
+    /// this RecipeSpec.
+    /// If not supplied, defaults to true.
+    require_leader_ready: Option<bool>,
 }
 
 /// Filters that can be used to filter the type of
@@ -389,6 +393,14 @@ pub struct ViewRequest {
     pub name: String,
     /// Filter to be applied when searching for a view.
     pub filter: Option<ViewFilter>,
+}
+
+impl<'a> RecipeSpec<'a> {
+    /// Translates the internal require_leader_ready field into a simple boolean by defaulting
+    /// anything other then Some(false) to true.
+    pub fn require_leader_ready(&self) -> bool {
+        !matches!(self.require_leader_ready, Some(false))
+    }
 }
 
 #[doc(hidden)]

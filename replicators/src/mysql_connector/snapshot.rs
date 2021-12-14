@@ -276,7 +276,7 @@ impl MySqlReplicator {
             info!("Not loading recipe as replication offset already exists for schema");
         } else {
             if install_recipe {
-                noria.install_recipe(&recipe).await?;
+                noria.install_recipe_without_leader_ready(&recipe).await?;
                 debug!("Recipe installed");
             }
             noria
@@ -316,7 +316,7 @@ impl MySqlReplicator {
             info!("Not loading recipe as replication offset already exists for schema");
         } else {
             if install_recipe {
-                noria.install_recipe(&recipe).await?;
+                noria.install_recipe_without_leader_ready(&recipe).await?;
                 debug!("Recipe installed");
             }
 

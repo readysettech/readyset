@@ -1499,7 +1499,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let mut g = Builder::for_tests();
     g.set_persistence(persistence_parameters);
     let mut g = g.start(authority.clone()).await.unwrap();
-    sleep().await;
+    g.backend_ready().await;
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
         let result = getter.lookup(&[i.into()], true).await.unwrap();

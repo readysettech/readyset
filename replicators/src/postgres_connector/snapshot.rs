@@ -371,7 +371,9 @@ impl<'a> PostgresReplicator<'a> {
 
         debug!(%recipe, "Installing recipe");
 
-        self.noria.install_recipe(&recipe).await?;
+        self.noria
+            .install_recipe_without_leader_ready(&recipe)
+            .await?;
         self.noria
             .set_schema_replication_offset(Some(PostgresPosition::default().into()))
             .await?;

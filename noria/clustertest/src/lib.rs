@@ -12,7 +12,7 @@ use futures::executor;
 use mysql_async::prelude::Queryable;
 use noria::consensus::AuthorityType;
 use noria::metrics::client::MetricsClient;
-use noria::ControllerHandle;
+use noria::{ControllerHandle, ReadySetResult};
 use rand::Rng;
 use serde::Deserialize;
 use server::{AdapterBuilder, NoriaServerBuilder, ProcessHandle};
@@ -429,6 +429,42 @@ impl DeploymentHandle {
         )
         .await?;
         Ok(server_addr)
+    }
+
+    /// Waits for the back-end to return that it is ready to process queries.
+    pub async fn backend_ready(&mut self, timeout: Duration) -> ReadySetResult<()> {
+        let mut e = None;
+        let start = Instant::now();
+        let check_leader_loop = async {
+            loop {
+                let remaining = std::cmp::min(Duration::from_secs(5), timeout - start.elapsed());
+                let res = tokio::time::timeout(remaining, self.handle.leader_ready()).await;
+                match res {
+                    Ok(Ok(true)) => return,
+                    Ok(Err(rpc_err)) => e = Some(rpc_err),
+                    Ok(_) => {
+                        // Any other Ok case means we didn't hit the tokio timeout, so we should
+                        // still sleep to ensure we aren't spamming RPCs.
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    Err(_) => {
+                        // We hit the timeout, which is pretty long, so we can just try again right
+                        // away.
+                        continue;
+                    }
+                }
+            }
+        };
+        if tokio::time::timeout(timeout, check_leader_loop)
+            .await
+            .is_err()
+        {
+            if let Some(e) = e {
+                return Err(e);
+            }
+        }
+
+        Ok(())
     }
 
     /// Kill an existing noria-server instance in the deployment referenced
