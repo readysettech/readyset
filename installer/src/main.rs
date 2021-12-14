@@ -54,6 +54,10 @@ const VPC_CLOUDFORMATION_TEMPLATE_URL: &str =
 const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-vpc-supplemental-template.yaml";
 
+/// Public cloudformation template for the Consul stack
+const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml";
+
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
 struct Options {
@@ -204,6 +208,61 @@ impl Installer {
             self.deploy_vpc_supplemental_stack().await?;
             self.save().await?;
         }
+
+        if self.deployment.consul_stack_outputs.is_none() {
+            self.deploy_consul_stack().await?;
+            self.save().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn deploy_consul_stack(&mut self) -> Result<()> {
+        println!("About to deploy Consul stack");
+        prompt_to_continue()?;
+        let stack_name = format!("{}-consul", self.deployment.name);
+
+        let key_pair_name = self.deployment.key_pair_name.clone().unwrap();
+        let consul_server_security_group_id = self
+            .deployment
+            .vpc_supplemental_stack_outputs
+            .as_ref()
+            .unwrap()["ConsulServerSecurityGroupID"]
+            .clone();
+        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
+
+        let cfn_client = self.cfn_client().await?;
+        let stack = deploy_stack(
+            cfn_client,
+            &stack_name,
+            cfn_client
+                .create_stack()
+                .stack_name(&stack_name)
+                .template_url(CONSUL_CLOUDFORMATION_TEMPLATE_URL)
+                .parameters(cfn_parameter("KeyPairName", &key_pair_name))
+                .parameters(cfn_parameter("PrivateSubnet1ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter(
+                    "ConsulEc2RetryJoinTagKey",
+                    "ReadySetConsulNodeType",
+                ))
+                .parameters(cfn_parameter("ConsulEc2RetryJoinTagValue", "Server"))
+                .parameters(cfn_parameter(
+                    "ConsulServerSecurityGroupID",
+                    consul_server_security_group_id,
+                ))
+                .capabilities("CAPABILITY_IAM"),
+        )
+        .await?;
+
+        let outputs = stack
+            .outputs
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|output| Some((output.output_key?, output.output_value?)))
+            .collect();
+        self.deployment.consul_stack_outputs = Some(outputs);
 
         Ok(())
     }
