@@ -4,26 +4,68 @@ use anyhow::{anyhow, bail, Result};
 use aws_sdk_cloudformation as cfn;
 use cfn::client::fluent_builders::CreateStack;
 use cfn::model::{Stack, StackStatus};
+use cfn::SdkError;
 use console::{style, Emoji};
 use tokio::time::sleep;
 
 use crate::console::{spinner, GREEN_CHECK};
+
+pub(crate) async fn describe_stack(
+    cfn_client: &cfn::Client,
+    stack_name: &str,
+) -> Result<Option<Stack>> {
+    let res = cfn_client
+        .describe_stacks()
+        .stack_name(stack_name)
+        .send()
+        .await;
+    match res {
+        Ok(r) => Ok(r.stacks.unwrap_or_default().into_iter().next()),
+        Err(SdkError::ServiceError { err, .. })
+            if err
+                .message()
+                .iter()
+                .any(|msg| msg.contains("does not exist")) =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
 
 pub(crate) async fn deploy_stack(
     cfn_client: &cfn::Client,
     stack_name: &str,
     operation: CreateStack,
 ) -> Result<Stack> {
-    let create_pb = spinner().with_message(format!(
-        "Creating CloudFormation stack {}",
-        style(stack_name).bold()
-    ));
-    operation.send().await?;
-    create_pb.finish_with_message(format!(
-        "{}Created CloudFormation stack {}",
-        *GREEN_CHECK,
-        style(stack_name).bold()
-    ));
+    if let Some(existing_stack) = describe_stack(cfn_client, stack_name).await? {
+        println!(
+            "Stack {} already exists (status: {})",
+            style(stack_name).bold(),
+            style(existing_stack.stack_status.clone().unwrap().as_str()).blue()
+        );
+        if matches!(
+            existing_stack.stack_status,
+            Some(
+                StackStatus::CreateComplete
+                    | StackStatus::UpdateComplete
+                    | StackStatus::RollbackComplete
+            )
+        ) {
+            return Ok(existing_stack);
+        }
+    } else {
+        let create_pb = spinner().with_message(format!(
+            "Creating CloudFormation stack {}",
+            style(stack_name).bold()
+        ));
+        operation.send().await?;
+        create_pb.finish_with_message(format!(
+            "{}Created CloudFormation stack {}",
+            *GREEN_CHECK,
+            style(stack_name).bold()
+        ));
+    }
 
     let ready_pb_desc = format!(
         "Waiting for stack to have status {}",
@@ -31,15 +73,8 @@ pub(crate) async fn deploy_stack(
     );
     let ready_pb = spinner().with_message(ready_pb_desc.clone());
     loop {
-        let stack = cfn_client
-            .describe_stacks()
-            .stack_name(stack_name)
-            .send()
+        let stack = describe_stack(cfn_client, stack_name)
             .await?
-            .stacks
-            .unwrap_or_default()
-            .into_iter()
-            .next()
             .ok_or_else(|| anyhow!("CloudFormation stack went away!"))?;
 
         match stack.stack_status {
