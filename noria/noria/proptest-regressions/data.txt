@@ -7,3 +7,4 @@
 cc 5a80fc0968dfe48ffb59b253b06b4db0c6de4c557ae22bc099f5b6ae5be09c27 # shrinks to input = _RealToIntArgs { whole_part: 0, int_type: Int(0) }
 cc fd7bab9140b47020588225d322c9232f4358f7bac97a0b517d1e52f188a9e403 # shrinks to input = _CharEqualLengthArgs { text: "\u{0}   " }
 cc ca3711db7695c10eee7d1b4600bbfa524f50b276c20cf6da24999b5b42fce6d0 # shrinks to input = _IntToTinyintArgs { tiny: 3 }
+cc a688e2520ea72b3fd119744b2dc56b233cff4691660cce497f62a2fbd855aaf9 # shrinks to input = _SymmetricArgs { dt1: Float(0.0, 178), dt2: Double(2.87157423024014e-310, 178) }
