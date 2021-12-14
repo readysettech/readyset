@@ -33,8 +33,10 @@ images=(
     "ruby:2.6.3"
 
     "debian:bullseye-slim"
+    "debian:stretch-slim"
     "alpine:latest"
     "fedora:32"
+    "ubuntu:20.04"
 )
 
 echo "steps:"
