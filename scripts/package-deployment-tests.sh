@@ -43,6 +43,7 @@ mkdir -p $DATA_DIR_PATH
 cp -r benchmarks/src/data/* $DATA_DIR_PATH
 cp benchmarks/src/yaml/benchmarks/* $TMP_DIR
 cp benchmarks/src/yaml/deployments/example.yaml $TMP_DIR/deployment.example.yaml
+cp scripts/test-deployment.sh $TMP_DIR
 
 tar -cvf deployment_test.tar.gz -C $TMP_DIR .
 rm -r $TMP_DIR
