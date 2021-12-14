@@ -1162,6 +1162,7 @@ mod tests {
 
         let number: f32 = 4.12345;
         let param1 = DataType::try_from(number).unwrap();
+        let want = Cow::Owned(DataType::try_from(4.123_f32).unwrap());
         assert_eq!(expr.eval(&[param1, param2]).unwrap(), want);
     }
 

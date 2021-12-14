@@ -916,11 +916,6 @@ impl PartialEq for DataType {
                 // Eq
                 fa.to_bits() == fb.to_bits() && pa == pb
             }
-            (&DataType::Float(fa, pa), &DataType::Double(fb, pb)) => {
-                // We need to compare the *bit patterns* of the floats so that our Hash matches our
-                // Eq
-                fa.to_bits() == (fb as f32).to_bits() && pa == pb
-            }
             (&DataType::Float(fa, _), &DataType::Numeric(ref d)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
@@ -933,7 +928,8 @@ impl PartialEq for DataType {
                 // Eq
                 fa.to_bits() == fb.to_bits() && pa == pb
             }
-            (&DataType::Double(fa, pa), &DataType::Float(fb, pb)) => {
+            (&DataType::Double(fa, pa), &DataType::Float(fb, pb))
+            | (&DataType::Float(fb, pa), &DataType::Double(fa, pb)) => {
                 // We need to compare the *bit patterns* of the floats so that our Hash matches our
                 // Eq
                 fa.to_bits() == (fb as f64).to_bits() && pa == pb
