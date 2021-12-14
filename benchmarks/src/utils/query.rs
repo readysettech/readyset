@@ -81,6 +81,13 @@ impl ArbitraryQueryParameters {
         }
         labels
     }
+
+    pub async fn migrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+        let query = fs::read_to_string(&self.query).unwrap();
+        let stmt = "CREATE QUERY CACHE AS ".to_string() + &query;
+        conn.query_drop(stmt).await?;
+        Ok(())
+    }
 }
 
 /// Utility wrapper around Vec<DistributionAnnotation>. A list of DistributionAnnotation

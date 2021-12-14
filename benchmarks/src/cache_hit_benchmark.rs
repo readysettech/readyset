@@ -119,6 +119,9 @@ impl BenchmarkControl for CacheHitBenchmark {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        // Explicitely migrate the query before benchmarking.
+        self.query.migrate(&mut conn).await?;
+
         let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);
 
         // Generate the cache misses.
