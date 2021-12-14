@@ -70,6 +70,19 @@ mod tests {
     }
 
     #[test]
+    fn subnet_cidrs_class_a_slash_18() {
+        let res = subnet_cidrs("10.0.0.0/18".parse().unwrap(), vec![], 3).unwrap();
+        assert_eq!(
+            res,
+            vec![
+                "10.0.0.0/20".parse().unwrap(),
+                "10.0.16.0/20".parse().unwrap(),
+                "10.0.32.0/20".parse().unwrap(),
+            ]
+        )
+    }
+
+    #[test]
     fn subnet_cidrs_10_slash_16_slash_18_existing() {
         let res = subnet_cidrs(
             "10.0.0.0/16".parse().unwrap(),
@@ -127,6 +140,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(res, vec![])
+    }
+
+    #[test]
+    fn subnet_cidrs_class_b() {
+        let res = subnet_cidrs(
+            "172.16.0.0/20".parse().unwrap(),
+            vec!["172.16.0.0/24".parse().unwrap()],
+            3,
+        )
+        .unwrap();
+
+        assert_eq!(
+            res,
+            vec![
+                "172.16.8.0/22".parse().unwrap(),
+                "172.16.12.0/22".parse().unwrap()
+            ]
+        );
+    }
+
+    #[test]
+    fn subnet_cidrs_class_c() {
+        let res = subnet_cidrs("192.168.0.0/22".parse().unwrap(), vec![], 3).unwrap();
+
+        assert_eq!(
+            res,
+            vec![
+                "192.168.0.0/24".parse().unwrap(),
+                "192.168.1.0/24".parse().unwrap(),
+                "192.168.2.0/24".parse().unwrap(),
+            ]
+        );
     }
 
     #[derive(Debug)]
