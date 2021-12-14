@@ -15,6 +15,9 @@ struct IrlQueryTest {
     /// The URL to the MySQL database.
     #[clap(default_value = "mysql://127.0.0.1:3307")]
     mysql_url: String,
+
+    #[clap(long)]
+    explicit_migrations: bool,
 }
 
 impl IrlQueryTest {
@@ -34,7 +37,7 @@ impl IrlQueryTest {
                 $(evaluate!(@impl, $query, $params);)+
             };
             (@impl, $query:expr, $params:expr) => {
-                match evaluate_query::<_>(&mut adapter_conn, $query, $params) {
+                match evaluate_query::<_>(&mut adapter_conn, $query, $params, self.explicit_migrations) {
                     Ok(_) => {
                         success += 1;
                     },
@@ -68,12 +71,30 @@ impl IrlQueryTest {
     }
 }
 
-fn evaluate_query<T>(adapter_conn: &mut Conn, query: &str, params: T) -> Result<(), ()>
+fn evaluate_query<T>(
+    adapter_conn: &mut Conn,
+    query: &str,
+    params: T,
+    explicit_migrations: bool,
+) -> Result<(), ()>
 where
     T: Into<Params> + Clone,
 {
     debug!("running query");
     let mut err = None;
+
+    // For statements to hit noria they must be migrated beforehand with
+    // CREATE QUERY CACHE AS.
+    if explicit_migrations {
+        let stmt = "CREATE QUERY CACHE AS ".to_string() + query;
+        match adapter_conn.query_drop(stmt) {
+            Ok(_) => err = None,
+            Err(e) => {
+                err = Some(e);
+            }
+        }
+    }
+
     for _ in 0..100 {
         std::thread::sleep(std::time::Duration::from_millis(10));
 
