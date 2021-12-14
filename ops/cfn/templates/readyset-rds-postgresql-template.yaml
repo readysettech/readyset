@@ -138,6 +138,10 @@ Resources:
       DBParameterGroupName: !Ref DatabaseParameterGroup
 
 Outputs:
+  DatabaseIdentifier:
+    Description: Identifier of the created RDS instance
+    Value: !Ref DatabaseInstance
+
   DatabaseURL:
     Description: Database connection URL for RDS instance
     Value: !Sub
