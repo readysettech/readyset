@@ -338,7 +338,7 @@ impl NoriaAdapter {
 
                 // Send the query to Noria as is
                 self.noria
-                    .extend_recipe_with_offset(&ddl, Some(pos.clone()))
+                    .extend_recipe_with_offset(&ddl, pos.clone(), false)
                     .await?;
                 self.replication_offsets.schema = Some(pos);
                 self.clear_mutator_cache();

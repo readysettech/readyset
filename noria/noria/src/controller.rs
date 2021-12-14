@@ -488,7 +488,7 @@ impl ControllerHandle {
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: recipe_addition,
-            replication_offset: None,
+            ..Default::default()
         };
 
         self.rpc("extend_recipe", request)
@@ -500,11 +500,13 @@ impl ControllerHandle {
     pub fn extend_recipe_with_offset(
         &mut self,
         recipe_addition: &str,
-        replication_offset: Option<ReplicationOffset>,
+        replication_offset: ReplicationOffset,
+        require_leader_ready: bool,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: recipe_addition,
-            replication_offset,
+            replication_offset: Some(replication_offset),
+            require_leader_ready: Some(require_leader_ready),
         };
 
         self.rpc("extend_recipe", request)
@@ -519,7 +521,23 @@ impl ControllerHandle {
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: new_recipe,
-            replication_offset: None,
+            ..Default::default()
+        };
+
+        self.rpc("install_recipe", request)
+    }
+
+    /// Replace the existing recipe with this one, and don't require the leader to be ready.
+    ///
+    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
+    pub fn install_recipe_without_leader_ready(
+        &mut self,
+        new_recipe: &str,
+    ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
+        let request = RecipeSpec {
+            recipe: new_recipe,
+            require_leader_ready: Some(false),
+            ..Default::default()
         };
 
         self.rpc("install_recipe", request)
@@ -531,11 +549,12 @@ impl ControllerHandle {
     pub fn install_recipe_with_offset(
         &mut self,
         new_recipe: &str,
-        replication_offset: Option<ReplicationOffset>,
+        replication_offset: ReplicationOffset,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: new_recipe,
-            replication_offset,
+            replication_offset: Some(replication_offset),
+            ..Default::default()
         };
 
         self.rpc("install_recipe", request)
@@ -655,5 +674,10 @@ impl ControllerHandle {
         &mut self,
     ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
         self.rpc("snapshotting_tables", ())
+    }
+
+    /// Return whether the leader is ready or not.
+    pub fn leader_ready(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
+        self.rpc("leader_ready", ())
     }
 }

@@ -223,6 +223,11 @@ async fn query_view_after_failure() {
         .await
         .unwrap();
 
+    deployment
+        .backend_ready(Duration::from_secs(60))
+        .await
+        .unwrap();
+
     for _ in 0..10 {
         let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
     }

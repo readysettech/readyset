@@ -18,7 +18,7 @@ use dataflow::node;
 use dataflow::prelude::*;
 use hyper::Method;
 use noria::consensus::Authority;
-use noria::WorkerDescriptor;
+use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
 use std::sync::Arc;
@@ -140,12 +140,21 @@ impl Leader {
         query: Option<String>,
         body: hyper::body::Bytes,
         authority: &Arc<Authority>,
+        leader_ready: bool,
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
                 return Ok(::bincode::serialize(&$expr)?);
             }};
         }
+
+        let require_leader_ready = || -> ReadySetResult<()> {
+            if !leader_ready {
+                Err(ReadySetError::LeaderNotReady)
+            } else {
+                Ok(())
+            }
+        };
 
         // *** Read methods that don't require a quorum***
 
@@ -289,6 +298,7 @@ impl Leader {
                 }
                 (&Method::POST, "/view_builder") => {
                     // NOTE(eta): same as above applies
+                    require_leader_ready()?;
                     let body = bincode::deserialize(&body)?;
                     let ds = futures::executor::block_on(self.dataflow_state_handle.read());
                     check_quorum!(ds);
@@ -320,6 +330,9 @@ impl Leader {
                     })?;
                     return_serialized!(res);
                 }
+                (&Method::POST, "/leader_ready") => {
+                    return_serialized!(leader_ready);
+                }
                 _ => {}
             }
         }
@@ -338,7 +351,10 @@ impl Leader {
                 return_serialized!(ret);
             }
             (Method::POST, "/extend_recipe") => {
-                let body = bincode::deserialize(&body)?;
+                let body: RecipeSpec = bincode::deserialize(&body)?;
+                if body.require_leader_ready() {
+                    require_leader_ready()?;
+                }
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
@@ -349,7 +365,10 @@ impl Leader {
                 return_serialized!(ret);
             }
             (Method::POST, "/install_recipe") => {
-                let body = bincode::deserialize(&body)?;
+                let body: RecipeSpec = bincode::deserialize(&body)?;
+                if body.require_leader_ready() {
+                    require_leader_ready()?;
+                }
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
@@ -360,6 +379,7 @@ impl Leader {
                 return_serialized!(ret);
             }
             (Method::POST, "/remove_query") => {
+                require_leader_ready()?;
                 let query_name = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
@@ -396,6 +416,7 @@ impl Leader {
                 return_serialized!(ret);
             }
             (Method::POST, "/remove_node") => {
+                require_leader_ready()?;
                 let body = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;

@@ -335,6 +335,13 @@ pub enum ReadySetError {
     #[error("This instance is not the leader")]
     NotLeader,
 
+    /// An RPC request was made to the leader, but it's not ready. This is likely because
+    /// snapshotting is currently ongoing.
+    #[error(
+        "The leader is not ready. Either it has not finished initializing, or there is an ongoing snapshotting operation."
+    )]
+    LeaderNotReady,
+
     /// An RPC request was made to a controller that doesn't have quorum.
     #[error("A quorum of workers is not yet available")]
     NoQuorum,
