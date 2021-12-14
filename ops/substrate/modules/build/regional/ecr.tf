@@ -22,6 +22,7 @@ locals {
     "debian",
     "alpine",
     "fedora",
+    "ubuntu",
   ])
 }
 
