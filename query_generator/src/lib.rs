@@ -859,6 +859,7 @@ pub struct NonRepeatingGenerator {
 
 impl NonRepeatingGenerator {
     fn gen(&mut self) -> DataType {
+        let mut reps = 0;
         loop {
             let d = match &mut *self.generator {
                 ColumnGenerator::Uniform(u) => u.gen(),
@@ -872,6 +873,14 @@ impl NonRepeatingGenerator {
 
             if self.generated.insert(d.clone()) {
                 return d;
+            }
+
+            reps += 1;
+            if reps == 100 {
+                println!(
+                    "Having a hard time generating a unique value, try a wider range {:?}",
+                    self.generator
+                )
             }
         }
     }

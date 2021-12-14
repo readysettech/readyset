@@ -21,10 +21,6 @@ struct DataGenerator {
     /// The format is a json map, for example "{ 'user_rows': '10000', 'article_rows': '100' }"
     #[clap(long, default_value = "{}")]
     var_overrides: serde_json::Value,
-
-    /// The number of threads to generate data with.
-    #[clap(long, default_value = "1")]
-    threads: usize,
 }
 
 impl DataGenerator {
@@ -39,14 +35,41 @@ impl DataGenerator {
 
         let schema = DatabaseSchema::try_from((self.schema, user_vars))?;
 
-        let mut database_spec = DatabaseGenerationSpec::new(schema);
-        parallel_load(self.database_url.clone(), &mut database_spec, self.threads).await?;
+        let database_spec = DatabaseGenerationSpec::new(schema);
 
-        Ok(())
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut conn = self.database_url.connect().await?;
+        // Prioir to data injection we want to increase the innodb pool size for faster writes
+        let old_size: usize = conn.query("SELECT @@innodb_buffer_pool_size").await?[0][0]
+            .to_string()
+            .parse()
+            .unwrap();
+
+        let new_size = old_size * 8;
+        let _ = conn
+            .query_drop(format!("SET GLOBAL innodb_buffer_pool_size={}", new_size))
+            .await;
+
+        let ret = runtime
+            .spawn(parallel_load(self.database_url.clone(), database_spec))
+            .await;
+
+        // Restore the original buffer size
+        let _ = conn
+            .query_drop(format!("SET GLOBAL innodb_buffer_pool_size={}", old_size))
+            .await;
+
+        runtime.shutdown_background();
+
+        ret.unwrap()
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let data_generator = DataGenerator::parse();
     data_generator.run().await

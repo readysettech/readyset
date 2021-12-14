@@ -38,6 +38,7 @@ lazy_static = "1.4.0"
 thiserror = "1.0.30"
 async-stream = "0.3.2"
 parking_lot = "0.11.2"
+indicatif = "0.16.2"
 
 # local dependencies
 noria = { path = "../noria/noria/" }

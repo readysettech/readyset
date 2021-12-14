@@ -1,27 +1,24 @@
 //! Utilities to take a `DatabaseGenerationSpec` and a `DatabaseConnection`,
 //! and generate batches of data to write to the connection.
 
-use super::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
+
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
-use futures::stream::futures_unordered::FuturesUnordered;
 use futures::StreamExt;
 use noria_client::backend::Backend;
-use noria_logictest::upstream::DatabaseConnection;
 use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
 use query_generator::{TableName, TableSpec};
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::io::{stdout, Write};
+use std::convert::{TryFrom, TryInto};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-const MAX_BATCH_ROWS: usize = 1000;
-const MAX_PARTITION_ROWS: usize = 10000;
+const MAX_BATCH_ROWS: usize = 500;
+const MAX_PARTITION_ROWS: usize = 20000;
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct DataGenerator {
@@ -52,9 +49,24 @@ impl DataGenerator {
             .collect();
 
         let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
-        let mut database_spec = DatabaseGenerationSpec::new(schema);
-        let mut conn = DatabaseURL::from_str(conn_str)?.connect().await?;
-        load(&mut conn, &mut database_spec).await?;
+        let database_spec = DatabaseGenerationSpec::new(schema);
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let status = runtime
+            .spawn(parallel_load(
+                DatabaseURL::from_str(conn_str)?,
+                database_spec.clone(),
+            ))
+            .await
+            .unwrap();
+
+        runtime.shutdown_background();
+
+        status?;
 
         Ok(database_spec)
     }
@@ -80,6 +92,7 @@ pub async fn load_table_part(
     table_name: TableName,
     mut spec: TableSpec,
     partition: TablePartition,
+    progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
     let mut db = db_url.connect().await?;
 
@@ -109,156 +122,82 @@ pub async fn load_table_part(
             .await
             .with_context(|| format!("Inserting row into database for {}", table_name))?;
 
+        progress_bar.inc(rows_to_generate as _);
+
         rows_remaining -= rows_to_generate;
-        let _ = stdout().flush();
     }
 
     Ok(())
 }
 
-pub async fn parallel_load(
-    db: DatabaseURL,
-    spec: &mut DatabaseGenerationSpec,
-    threads: usize,
+async fn load_table(
+    db_url: DatabaseURL,
+    table_name: TableName,
+    spec: TableGenerationSpec,
+    progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
-    // Iterate over the set of tables in the database for each, generate random
-    // data.
-    for (table_name, table_spec) in spec.tables.iter_mut() {
-        if table_spec.num_rows == 0 {
-            continue;
-        }
+    let mut sub_tasks =
+        futures::stream::iter((0..spec.num_rows).step_by(MAX_PARTITION_ROWS).map(|index| {
+            load_table_part(
+                db_url.clone(),
+                table_name.clone(),
+                spec.table.clone(),
+                TablePartition {
+                    rows: usize::min(MAX_PARTITION_ROWS, spec.num_rows - index),
+                    index,
+                },
+                progress_bar.clone(),
+            )
+        }))
+        .buffer_unordered(32);
 
-        println!(
-            "Generating table '{}', {} rows",
-            table_name, table_spec.num_rows
-        );
+    while let Some(task) = sub_tasks.next().await {
+        task?;
+    }
 
-        print!("Progress 0.00%");
-        let _ = stdout().flush();
+    progress_bar.finish();
 
-        // Create a queue of table parts that still need to be generated.
-        let num_partitions = table_spec.num_rows / MAX_PARTITION_ROWS
-            + (table_spec.num_rows % MAX_PARTITION_ROWS != 0) as usize;
-        let mut to_load: VecDeque<TablePartition> = (0..num_partitions)
-            .map(|p| {
-                let index = p * MAX_PARTITION_ROWS;
-                let rows = if p == (num_partitions - 1) {
-                    MAX_PARTITION_ROWS
-                        - ((num_partitions * MAX_PARTITION_ROWS) - table_spec.num_rows)
-                } else {
-                    MAX_PARTITION_ROWS
-                };
+    Ok(())
+}
 
-                TablePartition { rows, index }
-            })
-            .collect();
+pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Result<()> {
+    use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
-        // If we have enough partitions to run the maximum, start of with the
-        // maximum number of futures.
-        let mut futures = FuturesUnordered::new();
-        while futures.len() < threads && !to_load.is_empty() {
-            let partition = to_load.pop_back().unwrap();
-            futures.push(tokio::spawn(load_table_part(
+    let multi_progress = MultiProgress::new();
+
+    let sty = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .progress_chars("##-");
+
+    let mut progress_bars: HashMap<String, ProgressBar> = Default::default();
+
+    spec.tables.iter().for_each(|(table_name, table_spec)| {
+        let new_bar = multi_progress.add(ProgressBar::new(table_spec.num_rows as _));
+        new_bar.set_style(sty.clone());
+        new_bar.set_message(table_name.to_string());
+        progress_bars.insert(table_name.to_string(), new_bar);
+    });
+
+    std::thread::spawn(move || {
+        multi_progress.join().unwrap();
+    });
+
+    let mut table_tasks =
+        futures::stream::iter(spec.tables.into_iter().map(|(table_name, table_spec)| {
+            load_table(
                 db.clone(),
                 table_name.clone(),
-                table_spec.table.clone(),
-                partition,
-            )));
-        }
+                table_spec,
+                progress_bars
+                    .get(<TableName as Borrow<str>>::borrow(&table_name))
+                    .unwrap()
+                    .clone(),
+            )
+        }))
+        .buffer_unordered(1); // Sadly MySQL is slower when writing to two tables, if someone can figure it out change this to a higher value
 
-        // Until we get through the entire queue of partitions, poll on a
-        // future completing, when it does, start the next partition.
-        while !to_load.is_empty() || !futures.is_empty() {
-            match futures.next().await {
-                Some(r) => {
-                    r??;
-
-                    print!(
-                        "\rProgress {:.2}%",
-                        (1.0 - (to_load.len() as f64 + futures.len() as f64)
-                            / num_partitions as f64)
-                            * 100.0
-                    );
-                    let _ = stdout().flush();
-
-                    if !to_load.is_empty() {
-                        let partition = to_load.pop_back().unwrap();
-                        futures.push(tokio::spawn(load_table_part(
-                            db.clone(),
-                            table_name.clone(),
-                            table_spec.table.clone(),
-                            partition,
-                        )));
-                    }
-                }
-                None => {
-                    break;
-                }
-            }
-        }
-
-        println!();
-    }
-
-    Ok(())
-}
-
-pub async fn load(db: &mut DatabaseConnection, spec: &mut DatabaseGenerationSpec) -> Result<()> {
-    // Iterate over the set of tables in the database for each, generate random
-    // data.
-    for (table_name, table_spec) in spec.tables.iter_mut() {
-        if table_spec.num_rows == 0 {
-            continue;
-        }
-
-        println!(
-            "Generating table '{}', {} rows",
-            table_name, table_spec.num_rows
-        );
-
-        let mut rows_remaining = table_spec.num_rows;
-        let row_at_start = table_spec.num_rows as f64;
-
-        print!("Progress 0.00%");
-        let _ = stdout().flush();
-
-        while rows_remaining > 0 {
-            let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
-            let data = table_spec.table.generate_data_from_index(
-                rows_to_generate,
-                table_spec.num_rows - rows_remaining,
-                false,
-            );
-            let columns = table_spec.table.columns.keys().collect::<Vec<_>>();
-            let insert = nom_sql::InsertStatement {
-                table: table_name.clone().into(),
-                fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
-                data: data
-                    .into_iter()
-                    .map(|mut row| {
-                        columns
-                            .iter()
-                            .map(|col| row.remove(col).unwrap().try_into().unwrap())
-                            .collect()
-                    })
-                    .collect(),
-                ignore: false,
-                on_duplicate: None,
-            };
-
-            db.query_drop(insert.to_string())
-                .await
-                .with_context(|| format!("Inserting row into database for {}", table_name))?;
-
-            rows_remaining -= rows_to_generate;
-
-            print!(
-                "\rProgress {:.2}%",
-                (1.0 - rows_remaining as f64 / row_at_start) * 100.0
-            );
-            let _ = stdout().flush();
-        }
-        println!();
+    while let Some(task) = table_tasks.next().await {
+        task?;
     }
 
     Ok(())

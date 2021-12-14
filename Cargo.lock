@@ -1060,6 +1060,7 @@ dependencies = [
  "enum_dispatch",
  "futures 0.3.17",
  "hdrhistogram",
+ "indicatif 0.16.2",
  "indoc",
  "itertools 0.10.1",
  "lazy_static",

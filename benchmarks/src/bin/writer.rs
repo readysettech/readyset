@@ -4,7 +4,7 @@
 //! Assumptions: There is only a single write client
 //! in the system.
 
-use benchmarks::utils::generate::load;
+use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
 use noria::DataType;
@@ -112,10 +112,9 @@ impl Writer {
             ),
         ]);
 
-        let mut conn = self.database_url.connect().await?;
         // TODO(justin): This includes generating the data for the insert.
         let before = Instant::now();
-        load(&mut conn, &mut database_spec).await?;
+        parallel_load(self.database_url.clone(), database_spec).await?;
         Ok((Instant::now() - before).as_millis())
     }
 
@@ -142,9 +141,8 @@ impl Writer {
             ),
         ]);
 
-        let mut conn = self.database_url.connect().await?;
         let before = Instant::now();
-        load(&mut conn, &mut database_spec).await?;
+        parallel_load(self.database_url.clone(), database_spec).await?;
         Ok((Instant::now() - before).as_millis())
     }
 
