@@ -1,5 +1,4 @@
-FROM ubuntu:20.04
-# TODO: Mirror ubuntu
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
 
 RUN set -eux; \
     apt-get update; \

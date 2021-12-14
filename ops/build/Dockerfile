@@ -7,7 +7,7 @@
 # Since this needs a number of bash scripts, we also lint those using
 # shellcheck.
 
-FROM ubuntu:20.04 as fetcher
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04 as fetcher
 
 RUN set -eux; \
     apt-get update; \
@@ -111,7 +111,7 @@ RUN set -eux; \
     chmod a+x /usr/local/bin/rain; \
     rain --version
 
-FROM ubuntu:20.04
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
 
 WORKDIR /workdir
 COPY --from=packer-fetcher /usr/local/bin/packer /usr/local/bin/packer
