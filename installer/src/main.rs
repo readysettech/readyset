@@ -22,7 +22,9 @@ use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
 use itertools::Itertools;
 use launchpad::display::EnglishList;
+use lazy_static::lazy_static;
 use rds::model::{ApplyMethod, DbInstance, DbParameterGroup, Parameter};
+use regex::Regex;
 use rusoto_credential::ProfileProvider;
 use tokio::fs::{DirBuilder, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -33,7 +35,7 @@ mod deployment;
 mod console;
 
 use crate::aws::cloudformation::deploy_stack;
-use crate::aws::{cfn_parameter, filter};
+use crate::aws::{cfn_parameter, filter, vpc_cidr};
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
@@ -57,6 +59,10 @@ const VPC_SUPPLEMENTAL_CLOUDFORMATION_TEMPLATE_URL: &str =
 /// Public cloudformation template for the Consul stack
 const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml";
+
+/// Public cloudformation template for the MySQL RDS stack
+const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
 
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
@@ -214,6 +220,90 @@ impl Installer {
             self.save().await?;
         }
 
+        if self
+            .deployment
+            .rds_db
+            .as_ref()
+            .unwrap()
+            .db_id
+            .is_create_new()
+        {
+            self.deploy_rds_db().await?;
+            self.save().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn deploy_rds_db(&mut self) -> Result<()> {
+        println!("About to deploy RDS database stack");
+        prompt_to_continue()?;
+        let stack_name = format!("{}-rds", self.deployment.name);
+
+        let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
+            Engine::MySQL => RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
+            Engine::PostgreSQL => {
+                bail!("Sorry, the installer doesn't support PostgreSQL databases yet")
+            }
+        };
+
+        let vpc_id = self
+            .deployment
+            .vpc_id
+            .as_ref()
+            .unwrap()
+            .as_existing()
+            .unwrap()
+            .to_owned();
+        let vpc_cidr = vpc_cidr(self.ec2_client().await?, &vpc_id).await?;
+        let DatabaseCredentials { username, password } =
+            self.deployment.database_credentials.clone().unwrap();
+        let db_name = self.deployment.rds_db.as_ref().unwrap().db_name.clone();
+        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
+
+        let cfn_client = self.cfn_client().await?;
+        let stack = deploy_stack(
+            cfn_client,
+            &stack_name,
+            cfn_client
+                .create_stack()
+                .stack_name(&stack_name)
+                .template_url(template_url)
+                .parameters(cfn_parameter("VPCID", vpc_id))
+                .parameters(cfn_parameter("VPCCIDR", vpc_cidr))
+                .parameters(cfn_parameter("PrivateSubnet1ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("DatabaseUsername", username))
+                .parameters(cfn_parameter("DatabasePassword", password))
+                .parameters(cfn_parameter("DatabaseName", db_name)),
+        )
+        .await?;
+
+        let rds_db_id = match stack
+            .outputs
+            .unwrap_or_default()
+            .into_iter()
+            .find(|output| output.output_key() == Some("DatabaseIdentifier"))
+            .and_then(|output| output.output_value)
+        {
+            Some(id) => id,
+            // TODO: remove once https://gerrit.readyset.name/c/readyset/+/1394 is deployed
+            None => self
+                .cfn_client()
+                .await?
+                .describe_stack_resource()
+                .stack_name(&stack_name)
+                .logical_resource_id("DatabaseInstance")
+                .send()
+                .await?
+                .stack_resource_detail
+                .ok_or_else(|| anyhow!("DatabaseInstance not found in RDS stack"))?
+                .physical_resource_id
+                .unwrap(),
+        };
+        self.deployment.rds_db.as_mut().unwrap().db_id = Existing(rds_db_id);
+
         Ok(())
     }
 
@@ -280,20 +370,7 @@ impl Installer {
             .as_existing()
             .unwrap()
             .to_owned();
-        let vpc_cidr = self
-            .ec2_client()
-            .await?
-            .describe_vpcs()
-            .vpc_ids(&vpc_id)
-            .send()
-            .await?
-            .vpcs
-            .unwrap_or_default()
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("VPC went away!"))?
-            .cidr_block
-            .unwrap();
+        let vpc_cidr = vpc_cidr(self.ec2_client().await?, &vpc_id).await?;
 
         let default_security_group_id = self
             .ec2_client()
@@ -1085,12 +1162,14 @@ impl Installer {
                         .engine()
                         .ok_or_else(|| anyhow!("RDS instance missing engine"))?,
                 )?;
+                let db_name = instance.db_name.unwrap();
                 Some(RdsDb {
                     db_id: Existing(
                         instance
                             .db_instance_identifier
                             .ok_or_else(|| anyhow!("RDS instance missing identifier"))?,
                     ),
+                    db_name,
                     engine,
                 })
             } else {
@@ -1105,8 +1184,23 @@ impl Installer {
             let engine =
                 Engine::select("Which database engine should I create the database with?")?;
 
+            let db_name = input()
+                .with_prompt("Enter a name for the database to create")
+                .validate_with(|input: &String| {
+                    lazy_static! {
+                        static ref RE: Regex = Regex::new("^[a-zA-Z][a-zA-Z0-9]{0,63}$").unwrap();
+                    }
+                    if RE.is_match(input) {
+                        Ok(())
+                    } else {
+                        Err("Database name must begin with a letter and can contain only alphanumeric characters")
+                    }
+                })
+                .interact()?;
+
             Ok(RdsDb {
                 db_id: CreateNew,
+                db_name,
                 engine,
             })
         })?;

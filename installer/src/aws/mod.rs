@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
@@ -76,4 +76,19 @@ pub(crate) async fn db_parameters(
         .try_flatten()
         .try_collect::<Vec<Parameter>>()
         .await
+}
+
+pub(crate) async fn vpc_cidr(ec2_client: &ec2::Client, vpc_id: &str) -> Result<String> {
+    Ok(ec2_client
+        .describe_vpcs()
+        .vpc_ids(vpc_id)
+        .send()
+        .await?
+        .vpcs
+        .unwrap_or_default()
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("VPC went away!"))?
+        .cidr_block
+        .unwrap())
 }

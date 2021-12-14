@@ -5246,6 +5246,7 @@ dependencies = [
  "launchpad",
  "lazy_static",
  "proptest",
+ "regex",
  "rusoto_credential",
  "serde",
  "serde_json",

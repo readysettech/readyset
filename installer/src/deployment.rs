@@ -130,6 +130,7 @@ impl Engine {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub(crate) struct RdsDb {
     pub(crate) db_id: MaybeExisting<String>,
+    pub(crate) db_name: String,
     pub(crate) engine: Engine,
 }
 
