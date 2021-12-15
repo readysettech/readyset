@@ -183,9 +183,7 @@ async fn query_failure_recovery_with_volume_id() {
 #[clustertest]
 async fn new_leader_worker_set() {
     let mut deployment = DeploymentBuilder::new("ct_new_leader_worker_set")
-        .add_server(ServerParams::default())
-        .add_server(ServerParams::default())
-        .add_server(ServerParams::default())
+        .with_servers(3, ServerParams::default())
         .start()
         .await
         .unwrap();
@@ -204,8 +202,7 @@ async fn new_leader_worker_set() {
 #[clustertest]
 async fn balance_base_table_domains() {
     let mut deployment = DeploymentBuilder::new("ct_balance_base_table_domains")
-        .add_server(ServerParams::default())
-        .add_server(ServerParams::default())
+        .with_servers(2, ServerParams::default())
         .start()
         .await
         .unwrap();

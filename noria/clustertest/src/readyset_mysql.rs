@@ -10,13 +10,16 @@ use test_utils::skip_slow_tests;
 
 const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[clustertest]
-async fn create_table_insert_test() {
-    let mut deployment = DeploymentBuilder::new("ct_create_table_insert")
-        .add_server(ServerParams::default())
-        .add_server(ServerParams::default())
+fn readyset_mysql(name: &str) -> DeploymentBuilder {
+    DeploymentBuilder::new(name)
         .deploy_mysql()
         .deploy_mysql_adapter()
+}
+
+#[clustertest]
+async fn create_table_insert_test() {
+    let mut deployment = readyset_mysql("ct_create_table_insert")
+        .with_servers(2, ServerParams::default())
         .start()
         .await
         .unwrap();
@@ -54,10 +57,8 @@ async fn create_table_insert_test() {
 /// on both noria and mysql.
 #[clustertest]
 async fn mirror_prepare_exec_test() {
-    let mut deployment = DeploymentBuilder::new("ct_mirror_prepare_exec")
+    let mut deployment = readyset_mysql("ct_mirror_prepare_exec")
         .add_server(ServerParams::default())
-        .deploy_mysql()
-        .deploy_mysql_adapter()
         .start()
         .await
         .unwrap();
@@ -110,10 +111,8 @@ async fn mirror_prepare_exec_test() {
 
 #[clustertest]
 async fn async_migrations_confidence_check() {
-    let mut deployment = DeploymentBuilder::new("ct_async_migrations_confidence_check")
+    let mut deployment = readyset_mysql("ct_async_migrations_confidence_check")
         .add_server(ServerParams::default())
-        .deploy_mysql()
-        .deploy_mysql_adapter()
         .async_migrations(500)
         .start()
         .await
@@ -178,10 +177,8 @@ async fn async_migrations_confidence_check() {
 
 #[clustertest]
 async fn query_view_after_failure() {
-    let mut deployment = DeploymentBuilder::new("ct_query_view_after_failure")
+    let mut deployment = readyset_mysql("ct_query_view_after_failure")
         .add_server(ServerParams::default())
-        .deploy_mysql()
-        .deploy_mysql_adapter()
         .start()
         .await
         .unwrap();
@@ -248,12 +245,10 @@ async fn end_to_end_with_restarts() {
         return;
     }
 
-    let mut deployment = DeploymentBuilder::new("ct_repeated_failure")
+    let mut deployment = readyset_mysql("ct_repeated_failure")
         .quorum(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
-        .deploy_mysql()
-        .deploy_mysql_adapter()
         .start()
         .await
         .unwrap();
@@ -324,12 +319,9 @@ async fn view_survives_restart() {
         return;
     }
 
-    let mut deployment = DeploymentBuilder::new("ct_view_survives_restarts")
+    let mut deployment = readyset_mysql("ct_view_survives_restarts")
         .quorum(2)
-        .add_server(ServerParams::default())
-        .add_server(ServerParams::default())
-        .deploy_mysql()
-        .deploy_mysql_adapter()
+        .with_servers(2, ServerParams::default())
         .start()
         .await
         .unwrap();
