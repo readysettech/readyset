@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::str;
 use std::vec::Vec;
 
-use common::IndexType;
 use petgraph::graph::NodeIndex;
 
 use ::mir::query::{MirQuery, QueryFlowParts};
@@ -10,6 +9,7 @@ use ::mir::reuse as mir_reuse;
 use ::mir::Column;
 use ::mir::MirNodeRef;
 
+use ::serde::{Deserialize, Serialize};
 use nom_sql::analysis::ReferredTables;
 use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
@@ -30,6 +30,7 @@ use self::query_signature::Signature;
 use self::query_utils::{contains_aggregate, is_aggregate};
 use self::reuse::ReuseConfig;
 use ::mir::node::node_inner::MirNodeInner;
+use noria::internal::IndexType;
 
 pub(crate) mod mir;
 mod passes;
@@ -37,6 +38,7 @@ mod query_graph;
 mod query_signature;
 pub(crate) mod query_utils;
 mod reuse;
+mod serde;
 
 #[derive(Clone, Debug)]
 enum QueryGraphReuse<'a> {
@@ -48,7 +50,7 @@ enum QueryGraphReuse<'a> {
 }
 
 /// Configuration for converting SQL to dataflow
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) struct Config {
     pub(crate) reuse_type: Option<ReuseConfigType>,
@@ -2111,7 +2113,7 @@ mod tests {
             assert_eq!(edge_view.fields(), &["count", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
-        .await;
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2122,8 +2124,8 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                    .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
-                    .is_ok());
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -2141,16 +2143,16 @@ mod tests {
             assert_eq!(mig.graph().node_count(), 6);
             // check aggregation view
             let f = Box::new(FunctionExpression::Sum{expr: Box::new(Expression::CaseWhen {
-                    condition: Box::new(
-                        Expression::BinaryOp {
-                            op: BinaryOperator::Equal,
-                            lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
-                            rhs: Box::new(Expression::Literal(5.into())),
-                        }
-                    ),
-                    then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
-                    else_expr: None,
-                }),
+                condition: Box::new(
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Equal,
+                        lhs: Box::new(Expression::Column(Column::from("votes.aid"))),
+                        rhs: Box::new(Expression::Literal(5.into())),
+                    }
+                ),
+                then_expr: Box::new(Expression::Column(Column::from("votes.sign"))),
+                else_expr: None,
+            }),
                 distinct: false
             });
             let qid = query_id_hash(
@@ -2184,8 +2186,8 @@ mod tests {
             let mut inc = SqlIncorporator::default();
             // Establish a base write type
             assert!(inc
-                    .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
-                    .is_ok());
+                .add_query("CREATE TABLE votes (userid int, aid int, sign int);", None, mig)
+                .is_ok());
             // Should have source and "users" base table node
             assert_eq!(mig.graph().node_count(), 2);
             assert_eq!(get_node(&inc, mig, "votes").name(), "votes");
@@ -2439,10 +2441,10 @@ mod tests {
                 }),
             };
             let f = Box::new(FunctionExpression::Count{expr: Box::new(Expression::CaseWhen {
-                    condition: Box::new(filter_cond),
-                    then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
-                    else_expr: None,
-                }),
+                condition: Box::new(filter_cond),
+                then_expr: Box::new(Expression::Column(Column::from("votes.vote"))),
+                else_expr: None,
+            }),
                 distinct: false,
                 count_nulls: false,
             });
@@ -2465,7 +2467,7 @@ mod tests {
             assert_eq!(edge_view.fields(), &["votes", "bogokey"]);
             assert_eq!(edge_view.description(true), "π[1, lit: 0]");
         })
-        .await;
+            .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

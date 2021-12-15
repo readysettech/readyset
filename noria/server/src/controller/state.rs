@@ -48,6 +48,7 @@ use noria::{
 use noria_errors::{bad_request_err, internal, internal_err, invariant, invariant_eq, NodeType};
 use petgraph::visit::Bfs;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
@@ -66,7 +67,7 @@ const CONCURRENT_REQUESTS: usize = 16;
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DataflowStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DataflowState {
     pub(super) ingredients: Graph,
 
@@ -94,17 +95,24 @@ pub struct DataflowState {
     /// Latest replication position for the schema if from replica or binlog
     schema_replication_offset: Option<ReplicationOffset>,
     /// Placement restrictions for nodes and the domains they are placed into.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
 
+    #[serde(skip)]
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+    #[serde(skip)]
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
 
     /// Map from worker URI to the address the worker is listening on for reads.
+    #[serde(skip)]
     pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
+    #[serde(skip)]
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
 
     /// State between migrations
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
     /// Whether to keep prior recipes when modifying data flow state. This should

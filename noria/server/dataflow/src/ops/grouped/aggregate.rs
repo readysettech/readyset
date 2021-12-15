@@ -84,6 +84,8 @@ pub struct Aggregator {
     over: usize,
     group: Vec<usize>,
     // only needed for AVG. Stores both sum and count to avoid rounding errors.
+    // We skip serde since we don't want the state, just the configuration.
+    #[serde(skip)]
     count_sum_map: RefCell<HashMap<GroupHash, AverageDataPair>>,
     over_else: Option<Literal>,
 }

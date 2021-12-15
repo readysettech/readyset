@@ -44,11 +44,15 @@ pub enum DuplicateMode {
 enum Emit {
     AllFrom(IndexPair, Sharding),
     Project {
+        #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
         emit: HashMap<IndexPair, Vec<usize>>,
 
         // generated
+        #[serde(with = "serde_with::rust::btreemap_as_tuple_list")]
         emit_l: BTreeMap<LocalNodeIndex, Vec<usize>>,
+        #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
         cols: HashMap<IndexPair, usize>,
+        #[serde(with = "serde_with::rust::btreemap_as_tuple_list")]
         cols_l: BTreeMap<LocalNodeIndex, usize>,
     },
 }
@@ -65,6 +69,7 @@ enum FullWait {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ReplayPieces {
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     buffered: HashMap<LocalNodeIndex, Records>,
     evict: bool,
 }
@@ -75,14 +80,19 @@ struct ReplayPieces {
 /// parent with the most duplicates of that row, and the difference between number of copies of that
 /// row stored in that parent and the number of copies stored in the other parent
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-struct BagUnionState(HashMap<u64, (Side, usize)>);
+struct BagUnionState {
+    // We skip any state when serializing, as we will deserialize
+    // when recovering.
+    #[serde(skip)]
+    state: HashMap<u64, (Side, usize)>,
+}
 
 impl BagUnionState {
     /// Process a single record through the bag union state, and return whether that record should
     /// be emitted
     fn process(&mut self, from_side: Side, record: &Record) -> bool {
         let row_hash = hash(record.row());
-        match self.0.entry(row_hash) {
+        match self.state.entry(row_hash) {
             hash_map::Entry::Occupied(mut entry) => {
                 // If we already have state for this row, just update the size accordingly
                 let (row_side, size) = entry.get_mut();
@@ -177,6 +187,7 @@ pub struct Union {
     bag_union_state: Option<BagUnionState>,
 
     /// This is a map from (Tag, LocalNodeIndex) to ColumnList
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     replay_key: HashMap<(Tag, usize), Vec<usize>>,
 
     /// Buffered upquery responses that are waiting for more replay pieces.
@@ -186,6 +197,8 @@ pub struct Union {
     /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
     /// check the replay pieces for all values of [`BufferedReplayKey::requesting_shard`]  if we do
     /// find a key match for an update.
+    // We skip any state when serializing, as we will deserialize when recovering.
+    #[serde(skip)]
     replay_pieces: BTreeMap<BufferedReplayKey, ReplayPieces>,
 
     required: usize,

@@ -9,6 +9,7 @@ use nom_sql::{OrderType, SelectStatement};
 use noria::PlaceholderIdx;
 use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
 
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -20,21 +21,21 @@ use std::vec::Vec;
 use super::mir;
 use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
     pub name: String,
     pub table: Option<String>,
     pub value: Literal,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ExpressionColumn {
     pub name: String,
     pub table: Option<String>,
     pub expression: Expression,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum OutputColumn {
     Data { alias: String, column: Column },
     Literal(LiteralColumn),
@@ -153,28 +154,28 @@ impl PartialOrd for OutputColumn {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinRef {
     pub src: String,
     pub dst: String,
 }
 
 /// An equality predicate on two expressions, used as the key for a join
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct JoinPredicate {
     pub left: Expression,
     pub right: Expression,
 }
 
 /// An individual column on which a query is parameterized
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     pub col: Column,
     pub op: nom_sql::BinaryOperator,
     pub placeholder_idx: Option<PlaceholderIdx>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<Expression>,
@@ -182,14 +183,14 @@ pub struct QueryGraphNode {
     pub parameters: Vec<Parameter>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub enum QueryGraphEdge {
     Join { on: Vec<JoinPredicate> },
     LeftJoin { on: Vec<JoinPredicate> },
     GroupBy(Vec<Column>),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Pagination {
     pub order: Vec<(Column, OrderType)>,
     pub limit: Option<Expression>,
@@ -207,11 +208,12 @@ pub struct ViewKey {
     pub index_type: IndexType,
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<String, QueryGraphNode>,
     /// Joins and GroupBys in the query.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub edges: HashMap<(String, String), QueryGraphEdge>,
     /// Final set of projected columns in this query; may include literals in addition to the
     /// columns reflected in individual relations' `QueryGraphNode` structures.

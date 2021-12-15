@@ -29,6 +29,7 @@ pub struct NodeKeys {
 #[derive(Serialize, Deserialize, PartialEq, Clone, Default)]
 pub struct PacketFilter {
     /// Stores the information needed to filter [`Record`]s from [`Packet::Message`]s.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     requested_keys: HashMap<NodeIndex, NodeKeys>,
 }
 

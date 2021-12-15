@@ -1,3 +1,4 @@
+use ::serde::{Deserialize, Serialize};
 use common::IndexType;
 use dataflow::ops::join::JoinType;
 use dataflow::ops::union;
@@ -8,7 +9,6 @@ pub use mir::Column;
 use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
-use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use tracing::{debug, error, trace, warn};
 
@@ -37,6 +37,7 @@ use super::query_graph::JoinPredicate;
 
 mod grouped;
 mod join;
+pub(in crate::controller::sql) mod serde;
 
 fn sanitize_leaf_column(c: &mut Column, view_name: &str) {
     c.table = Some(view_name.to_string());
@@ -135,6 +136,14 @@ pub(super) struct SqlToMirConverter {
 }
 
 impl SqlToMirConverter {
+    /// Returns a reference to the `nodes` map field
+    /// Needed for deserialization, as the [`SqlToMirConverter`] is the
+    /// source of truth to know the [`MirNodeRef`]s that compose the
+    /// MIR graph.
+    pub(super) fn nodes(&self) -> &HashMap<(String, usize), MirNodeRef> {
+        &self.nodes
+    }
+
     pub(crate) fn config(&self) -> &Config {
         &self.config
     }

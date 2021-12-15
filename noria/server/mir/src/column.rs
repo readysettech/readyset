@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::mem;
 
@@ -5,7 +6,7 @@ use nom_sql::{self, FunctionExpression};
 
 // FIXME: this is _not_ okay! malte knows about it
 #[allow(clippy::derive_hash_xor_eq)]
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct Column {
     pub table: Option<String>,
     pub name: String,

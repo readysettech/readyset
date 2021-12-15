@@ -16,6 +16,7 @@ struct EgressTx {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Egress {
     txs: Vec<EgressTx>,
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     tags: HashMap<Tag, NodeIndex>,
     packet_filter: PacketFilter,
 }

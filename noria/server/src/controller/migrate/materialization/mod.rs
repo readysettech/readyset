@@ -106,31 +106,44 @@ impl Default for Config {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
+    // Skipping this field as we will rebuild the [`Materializations`] state
+    // upon recovery.
+    #[serde(skip)]
     have: HashMap<NodeIndex, Indices>,
     /// Nodes materialized since the last time `commit()` was invoked.
+    #[serde(skip)]
     added: HashMap<NodeIndex, Indices>,
 
     /// Weak indices added since the last time `commit()` was invoked
+    #[serde(skip)]
     added_weak: HashMap<NodeIndex, Indices>,
 
     /// Readers added since the last time `commit()` was invoked.
+    #[serde(skip)]
     new_readers: HashSet<NodeIndex>,
 
     /// A list of replay paths for each node, indexed by tag.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     paths: HashMap<NodeIndex, HashMap<Tag, Vec<NodeIndex>>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
+    // Skipping this field as we will rebuild the [`Materializations`] state
+    // upon recovery.
+    #[serde(skip)]
     redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
+    // Skipping this field as we will rebuild the [`Materializations`] state
+    // upon recovery.
+    #[serde(skip)]
     partial: HashSet<NodeIndex>,
 
     tag_generator: usize,
 
-    config: Config,
+    pub(crate) config: Config,
 }
 
 impl Materializations {

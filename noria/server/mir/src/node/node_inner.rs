@@ -8,8 +8,10 @@ use itertools::Itertools;
 use nom_sql::{ColumnSpecification, Expression, OrderType};
 use noria::PlaceholderIdx;
 use noria_errors::{internal, ReadySetResult};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 
+#[derive(Clone, Serialize, Deserialize)]
 pub enum MirNodeInner {
     /// over column, group_by columns
     Aggregation {

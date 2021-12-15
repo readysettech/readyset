@@ -55,6 +55,8 @@ pub struct Join {
 
     /// Buffered records from one half of a remapped upquery. The key is (column index,
     /// side).
+    // We skip serde since we don't want the state of the node, just the configuration.
+    #[serde(skip)]
     generated_column_buffer: HashMap<(Vec<usize>, Side), Records>,
 
     kind: JoinType,

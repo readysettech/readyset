@@ -22,6 +22,7 @@ itertools = "0.10.0"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 noria = { path = "../../noria" }
 noria-errors = { path = "../../errors" }
+serde = { version = "1.0.8", features = ["rc", "derive"] }
 
 # local deps
 common = { path = "../common", package = "noria-common" }

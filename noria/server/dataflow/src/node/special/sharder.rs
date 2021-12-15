@@ -6,7 +6,9 @@ use vec_map::VecMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct Sharder {
+    #[serde(skip)]
     txs: Vec<(LocalNodeIndex, ReplicaAddr)>,
+    #[serde(skip)]
     sharded: VecMap<Box<Packet>>,
     shard_by: usize,
 }
