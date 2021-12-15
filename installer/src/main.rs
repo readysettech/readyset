@@ -64,6 +64,10 @@ const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str =
 const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
 
+/// Public cloudformation template for the MySQL Readyset stack
+const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml";
+
 /// Install and configure a ReadySet cluster in AWS
 #[derive(Parser)]
 struct Options {
@@ -231,6 +235,143 @@ impl Installer {
             self.deploy_rds_db().await?;
             self.save().await?;
         }
+
+        let outputs = if let Some(outputs) = &self.deployment.readyset_stack_outputs {
+            outputs
+        } else {
+            self.deploy_readyset_cluster().await?;
+            self.save().await?;
+            self.deployment.readyset_stack_outputs.as_ref().unwrap()
+        };
+
+        success!("ReadySet cluster deployed successfully!");
+        println!(
+            "URL to connect to ReadySet: {}",
+            style(&outputs["ReadySetAdapterNLBDNSName"]).bold()
+        );
+
+        Ok(())
+    }
+
+    async fn deploy_readyset_cluster(&mut self) -> Result<()> {
+        println!("About to deploy ReadySet cluster");
+        prompt_to_continue()?;
+        let stack_name = format!("{}-readyset", self.deployment.name);
+
+        let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
+            Engine::MySQL => READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
+            Engine::PostgreSQL => {
+                bail!("Sorry, the installer doesn't support PostgreSQL databases yet")
+            }
+        };
+
+        let deployment_name = self.deployment.name.clone();
+        let key_pair_name = self.deployment.key_pair_name.clone().unwrap();
+        let vpc_id = self
+            .deployment
+            .vpc_id
+            .as_ref()
+            .unwrap()
+            .as_existing()
+            .unwrap()
+            .to_owned();
+        let mut subnets = self.deployment.subnet_ids.clone().unwrap().into_iter();
+        let consul_stack_outputs = self.deployment.consul_stack_outputs.as_ref().unwrap();
+        let retry_join_tag_key = consul_stack_outputs["ConsulEc2RetryJoinTagKey"].clone();
+        let retry_join_tag_value = consul_stack_outputs["ConsulEc2RetryJoinTagValue"].clone();
+        let consul_join_managed_policy_arn =
+            consul_stack_outputs["ConsulJoinManagedPolicyArn"].clone();
+        let DatabaseCredentials { username, password } =
+            self.deployment.database_credentials.clone().unwrap();
+        let supplemental_stack_outputs = self
+            .deployment
+            .vpc_supplemental_stack_outputs
+            .clone()
+            .unwrap();
+        let mysql_database_address = self
+            .rds_client()
+            .await?
+            .describe_db_instances()
+            .db_instance_identifier(
+                self.deployment
+                    .rds_db
+                    .as_ref()
+                    .unwrap()
+                    .db_id
+                    .as_existing()
+                    .unwrap(),
+            )
+            .send()
+            .await?
+            .db_instances
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .unwrap()
+            .endpoint
+            .unwrap()
+            .address
+            .unwrap();
+        let mysql_database_url = format!(
+            "mysql://{}:{}@{}/{}",
+            username,
+            password,
+            mysql_database_address,
+            self.deployment.rds_db.as_ref().unwrap().db_name
+        );
+
+        let cfn_client = self.cfn_client().await?;
+        let stack = deploy_stack(
+            cfn_client,
+            &stack_name,
+            cfn_client
+                .create_stack()
+                .stack_name(&stack_name)
+                .template_url(template_url)
+                .parameters(cfn_parameter("VPCID", vpc_id))
+                .parameters(cfn_parameter("PrivateSubnet1ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
+                .parameters(cfn_parameter(
+                    "ConsulEc2RetryJoinTagKey",
+                    retry_join_tag_key,
+                ))
+                .parameters(cfn_parameter(
+                    "ConsulEc2RetryJoinTagValue",
+                    retry_join_tag_value,
+                ))
+                .parameters(cfn_parameter(
+                    "ConsulJoinManagedPolicyArn",
+                    consul_join_managed_policy_arn,
+                ))
+                .parameters(cfn_parameter("KeyPairName", key_pair_name))
+                .parameters(cfn_parameter("ReadySetMySQLAdapterUsername", username))
+                .parameters(cfn_parameter("ReadySetMySQLAdapterPassword", password))
+                .parameters(cfn_parameter("MySQLDatabaseURL", mysql_database_url))
+                .parameters(cfn_parameter("ReadySetDeploymentName", deployment_name))
+                .parameters(cfn_parameter(
+                    "ReadySetServerSecurityGroupID",
+                    &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
+                ))
+                .parameters(cfn_parameter(
+                    "ReadySetAdapterSecurityGroupID",
+                    &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
+                ))
+                .parameters(cfn_parameter(
+                    "ReadySetMonitoringSecurityGroupID",
+                    &supplemental_stack_outputs["ReadySetMonitoringSecurityGroupID"],
+                ))
+                .capabilities("CAPABILITY_IAM"),
+        )
+        .await?;
+
+        let outputs = stack
+            .outputs
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|output| Some((output.output_key?, output.output_value?)))
+            .collect();
+        self.deployment.readyset_stack_outputs = Some(outputs);
 
         Ok(())
     }

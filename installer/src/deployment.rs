@@ -179,6 +179,10 @@ pub struct Deployment {
     /// Cloudformation stack outputs for the Consul stack
     #[serde(default)]
     pub(crate) consul_stack_outputs: Option<HashMap<String, String>>,
+
+    /// Cloudformation stack outputs for the ReadySet stack
+    #[serde(default)]
+    pub(crate) readyset_stack_outputs: Option<HashMap<String, String>>,
 }
 
 impl Deployment {
