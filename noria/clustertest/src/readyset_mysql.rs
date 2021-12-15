@@ -1,7 +1,7 @@
 use crate::utils::query_until_expected;
 use crate::*;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Row, Value};
+use mysql_async::Row;
 use noria::get_metric;
 use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
@@ -13,14 +13,15 @@ const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(10);
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn create_table_insert_test() {
-    let cluster_name = "ct_create_table_insert";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
+    let mut deployment = DeploymentBuilder::new("ct_create_table_insert")
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
@@ -50,100 +51,18 @@ async fn create_table_insert_test() {
     deployment.teardown().await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-#[serial]
-// TODO(ENG-641): Test is failing.
-async fn show_tables_test() {
-    let cluster_name = "ct_show_tables";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
-
-    let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
-        .query_drop(r"CREATE TABLE t2a (uid INT NOT NULL, value INT NOT NULL,);")
-        .await
-        .unwrap();
-    let _ = conn
-        .query_drop(r"CREATE TABLE t2b (uid INT NOT NULL, value INT NOT NULL,);")
-        .await
-        .unwrap();
-
-    let tables: Vec<String> = conn.query("SHOW TABLES;").await.unwrap();
-    deployment.teardown().await.unwrap();
-    assert_eq!(tables, vec!["t2a", "t2b"]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-#[serial]
-// TODO(ENG-641): Test is failing.
-async fn describe_table_test() {
-    let cluster_name = "ct_describe_table";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
-
-    let mut deployment = start_multi_process(deployment).await.unwrap();
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
-        .query_drop(r"CREATE TABLE t3 (uid INT NOT NULL, value INT NOT NULL,);")
-        .await
-        .unwrap();
-
-    let table: Vec<Row> = conn.query("DESCRIBE t3;").await.unwrap();
-    let descriptor = table.get(0).unwrap();
-    let cols = descriptor.columns_ref();
-    let cols = cols
-        .iter()
-        .map(|c| c.name_ref())
-        .into_iter()
-        .collect::<Vec<_>>();
-    let vals: Vec<Value> = descriptor.clone().unwrap();
-
-    let cols_truth = vec![
-        "Field".as_bytes(),
-        "Type".as_bytes(),
-        "Null".as_bytes(),
-        "Key".as_bytes(),
-        "Default".as_bytes(),
-        "Extra".as_bytes(),
-    ];
-    let vals_truth = vec![
-        Value::Bytes("uid".as_bytes().to_vec()),
-        Value::Bytes("int".as_bytes().to_vec()),
-        Value::Bytes("NO".as_bytes().to_vec()),
-        Value::Bytes("".as_bytes().to_vec()),
-        Value::NULL,
-        Value::Bytes("".as_bytes().to_vec()),
-    ];
-
-    deployment.teardown().await.unwrap();
-
-    assert_eq!(vals, vals_truth);
-    assert_eq!(cols, cols_truth);
-}
-
 /// This test verifies that a prepared statement can be executed
 /// on both noria and mysql.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn mirror_prepare_exec_test() {
-    let cluster_name = "ct_mirror_prepare_exec";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
-
-    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let mut deployment = DeploymentBuilder::new("ct_mirror_prepare_exec")
+        .add_server(ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
 
     // Create a table and write to it through the adapter.
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
@@ -194,15 +113,15 @@ async fn mirror_prepare_exec_test() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn async_migrations_confidence_check() {
-    let cluster_name = "ct_async_migrations_confidence_check";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
-    // Enable async migrations with an interval of 500ms.
-    deployment.enable_async_migrations(500);
+    let mut deployment = DeploymentBuilder::new("ct_async_migrations_confidence_check")
+        .add_server(ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .async_migrations(500)
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
@@ -263,13 +182,14 @@ async fn async_migrations_confidence_check() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn query_view_after_failure() {
-    let cluster_name = "ct_query_view_after_failure";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
+    let mut deployment = DeploymentBuilder::new("ct_query_view_after_failure")
+        .add_server(ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
@@ -333,15 +253,16 @@ async fn end_to_end_with_restarts() {
         return;
     }
 
-    let cluster_name = "ct_repeated_failure";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_quorum(2);
-    deployment.add_server(ServerParams::default().with_volume("v1"));
-    deployment.add_server(ServerParams::default().with_volume("v2"));
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
+    let mut deployment = DeploymentBuilder::new("ct_repeated_failure")
+        .quorum(2)
+        .add_server(ServerParams::default().with_volume("v1"))
+        .add_server(ServerParams::default().with_volume("v2"))
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn
@@ -409,15 +330,16 @@ async fn view_survives_restart() {
         return;
     }
 
-    let cluster_name = "ct_view_survives_restart";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_quorum(2);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-    deployment.deploy_mysql();
-    deployment.deploy_mysql_adapter();
+    let mut deployment = DeploymentBuilder::new("ct_view_survives_restarts")
+        .quorum(2)
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     let _ = conn

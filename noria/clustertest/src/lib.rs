@@ -15,7 +15,7 @@ use noria::metrics::client::MetricsClient;
 use noria::ControllerHandle;
 use rand::Rng;
 use serde::Deserialize;
-use server::{NoriaMySQLRunner, NoriaServerRunner, ProcessHandle};
+use server::{AdapterBuilder, NoriaServerBuilder, ProcessHandle};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -103,14 +103,14 @@ impl ServerParams {
 }
 
 /// Set of parameters defining an entire cluster's topology.
-pub struct DeploymentParams {
+pub struct DeploymentBuilder {
     /// Name of the cluster, cluster resources will be prefixed
     /// with this name.
     name: String,
     /// Source of the binaries.
     noria_binaries: NoriaBinarySource,
     /// Number of shards for dataflow nodes.
-    sharding: Option<usize>,
+    shards: Option<usize>,
     /// Number of workers to wait for before starting.
     quorum: usize,
     /// The primary region of the noria cluster.
@@ -133,7 +133,7 @@ pub struct DeploymentParams {
     async_migration_interval: Option<u64>,
 }
 
-impl DeploymentParams {
+impl DeploymentBuilder {
     pub fn new(name: &str) -> Self {
         let env = envy::from_env::<Env>().unwrap();
 
@@ -154,7 +154,7 @@ impl DeploymentParams {
                 noria_server: noria_server_path,
                 noria_mysql: Some(noria_mysql_path),
             },
-            sharding: None,
+            shards: None,
             quorum: 1,
             primary_region: None,
             servers: vec![],
@@ -168,44 +168,172 @@ impl DeploymentParams {
         }
     }
 
-    pub fn set_binary_source(&mut self, source: NoriaBinarySource) {
-        self.noria_binaries = source;
+    pub fn shards(mut self, shards: usize) -> Self {
+        self.shards = Some(shards);
+        self
     }
 
-    pub fn set_sharding(&mut self, shards: usize) {
-        self.sharding = Some(shards);
-    }
-
-    pub fn set_quorum(&mut self, quorum: usize) {
+    pub fn quorum(mut self, quorum: usize) -> Self {
         self.quorum = quorum;
+        self
     }
 
-    pub fn set_primary_region(&mut self, region: &str) {
+    pub fn primary_region(mut self, region: &str) -> Self {
         self.primary_region = Some(region.to_string());
+        self
     }
 
-    pub fn add_server(&mut self, server: ServerParams) {
+    pub fn add_server(mut self, server: ServerParams) -> Self {
         self.servers.push(server);
+        self
     }
 
-    pub fn deploy_mysql_adapter(&mut self) {
+    pub fn deploy_mysql_adapter(mut self) -> Self {
         self.mysql_adapter = true;
+        self
     }
 
-    pub fn deploy_mysql(&mut self) {
+    pub fn deploy_mysql(mut self) -> Self {
         self.mysql = true;
+        self
     }
 
-    pub fn set_authority(&mut self, authority: AuthorityType) {
-        self.authority = authority;
-    }
-
-    pub fn set_authority_address(&mut self, authority_address: String) {
-        self.authority_address = authority_address;
-    }
-
-    pub fn enable_async_migrations(&mut self, interval_ms: u64) {
+    pub fn async_migrations(mut self, interval_ms: u64) -> Self {
         self.async_migration_interval = Some(interval_ms);
+        self
+    }
+
+    /// Checks the set of deployment params for invalid configurations
+    pub fn check_deployment_params(&self) -> anyhow::Result<()> {
+        match &self.primary_region {
+            Some(pr) => {
+                // If the primary region is set, at least one server should match that
+                // region.
+                if self
+                    .servers
+                    .iter()
+                    .all(|s| s.region.as_ref().filter(|region| region == &pr).is_none())
+                {
+                    return Err(anyhow!(
+                        "Primary region specified, but no servers match
+                    the region."
+                    ));
+                }
+            }
+            None => {
+                // If the primary region is not set, servers should not include a `region`
+                // parameter. Otherwise, a controller will not be elected.
+                if self.servers.iter().any(|s| s.region.is_some()) {
+                    return Err(anyhow!(
+                        "Servers have region without a deployment primary region"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Used to create a multi_process test deployment. This deployment
+    /// connects to an authority for cluster management, and deploys a
+    /// set of noria-servers. `params` can be used to setup the topology
+    /// of the deployment for testing.
+    pub async fn start(self) -> anyhow::Result<DeploymentHandle> {
+        self.check_deployment_params()?;
+        let mut port = get_next_good_port(None);
+        // If this deployment includes binlog replication and a mysql instance.
+        let mut mysql_addr = None;
+        if self.mysql {
+            // TODO(justin): Parameterize port.
+            let addr = format!(
+                "mysql://root:{}@{}:3306",
+                &self.mysql_root_password, &self.mysql_host
+            );
+            let opts = mysql_async::Opts::from_url(&addr).unwrap();
+            let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+            let _ = conn
+                .query_drop(format!("CREATE DATABASE {};", &self.name))
+                .await
+                .unwrap();
+            mysql_addr = Some(format!("{}/{}", &addr, &self.name));
+        }
+
+        // Create the noria-server instances.
+        let mut handles = HashMap::new();
+        for server in &self.servers {
+            port = get_next_good_port(Some(port));
+            let handle = start_server(
+                server,
+                &self.noria_binaries.noria_server,
+                &self.name,
+                self.shards,
+                self.quorum,
+                self.primary_region.as_ref(),
+                &self.authority_address,
+                &self.authority.to_string(),
+                port,
+                mysql_addr.as_ref(),
+            )?;
+
+            handles.insert(handle.addr.clone(), handle);
+        }
+
+        let authority = self
+            .authority
+            .to_authority(&self.authority_address, &self.name)
+            .await;
+        let mut handle = ControllerHandle::new(authority).await;
+        wait_until_worker_count(&mut handle, Duration::from_secs(15), self.servers.len()).await?;
+
+        // Duplicate the authority and handle creation as the metrics client
+        // owns its own handle.
+        let metrics_authority = self
+            .authority
+            .to_authority(&self.authority_address, &self.name)
+            .await;
+        let metrics_handle = ControllerHandle::new(metrics_authority).await;
+        let metrics = MetricsClient::new(metrics_handle).unwrap();
+
+        // Start a MySQL adapter instance.
+        let mysql_adapter_handle = if self.mysql_adapter || self.mysql {
+            // TODO(justin): Turn this into a stateful object.
+            port = get_next_good_port(Some(port));
+            let metrics_port = get_next_good_port(Some(port));
+            let process = start_mysql_adapter(
+                self.noria_binaries.noria_mysql.as_ref().unwrap(),
+                &self.name,
+                &self.authority_address,
+                &self.authority.to_string(),
+                port,
+                metrics_port,
+                mysql_addr.as_ref(),
+                self.async_migration_interval,
+            )?;
+            // Sleep to give the adapter time to startup.
+            sleep(Duration::from_millis(2000)).await;
+            Some(MySQLAdapterHandle {
+                conn_str: format!("mysql://127.0.0.1:{}", port),
+                process,
+            })
+        } else {
+            None
+        };
+
+        Ok(DeploymentHandle {
+            handle,
+            metrics,
+            name: self.name.clone(),
+            authority_addr: self.authority_address,
+            authority: self.authority,
+            mysql_addr,
+            noria_server_handles: handles,
+            shutdown: false,
+            noria_binaries: self.noria_binaries,
+            shards: self.shards,
+            quorum: self.quorum,
+            primary_region: self.primary_region,
+            port,
+            mysql_adapter: mysql_adapter_handle,
+        })
     }
 }
 
@@ -249,8 +377,8 @@ pub struct DeploymentHandle {
     shutdown: bool,
     /// The paths to the binaries for the deployment.
     noria_binaries: NoriaBinarySource,
-    /// Dataflow sharding for new servers.
-    sharding: Option<usize>,
+    /// Dataflow shards for new servers.
+    shards: Option<usize>,
     /// Number of workers to wait for before starting.
     quorum: usize,
     /// The primary region of the deployment.
@@ -271,7 +399,7 @@ impl DeploymentHandle {
             &params,
             &self.noria_binaries.noria_server,
             &self.name,
-            self.sharding,
+            self.shards,
             self.quorum,
             self.primary_region.as_ref(),
             &self.authority_addr,
@@ -417,7 +545,7 @@ fn start_server(
     server_params: &ServerParams,
     noria_server_path: &Path,
     deployment_name: &str,
-    sharding: Option<usize>,
+    shards: Option<usize>,
     quorum: usize,
     primary_region: Option<&String>,
     authority_addr: &str,
@@ -425,37 +553,38 @@ fn start_server(
     port: u16,
     mysql: Option<&String>,
 ) -> Result<ServerHandle> {
-    let mut runner = NoriaServerRunner::new(noria_server_path);
-    runner.set_deployment(deployment_name);
-    runner.set_external_port(port);
-    runner.set_authority_addr(authority_addr);
-    runner.set_authority(authority);
-    runner.set_quorum(quorum);
-    if let Some(shard) = sharding {
-        runner.set_shards(shard);
+    let log_path = get_log_path(deployment_name).join(port.to_string());
+    std::fs::create_dir_all(&log_path)?;
+
+    let mut builder = NoriaServerBuilder::new(noria_server_path)
+        .deployment(deployment_name)
+        .external_port(port)
+        .authority_addr(authority_addr)
+        .authority(authority)
+        .quorum(quorum)
+        .log_dir(&log_path);
+
+    if let Some(shard) = shards {
+        builder = builder.shards(shard);
     }
 
     let region = server_params.region.as_ref();
     if let Some(region) = region {
-        runner.set_region(region);
+        builder = builder.region(region);
     }
     if let Some(region) = primary_region.as_ref() {
-        runner.set_primary_region(region);
+        builder = builder.primary_region(region);
     }
     if let Some(volume) = server_params.volume_id.as_ref() {
-        runner.set_volume_id(volume);
+        builder = builder.volume_id(volume);
     }
     if let Some(mysql) = mysql {
-        runner.set_mysql(mysql);
+        builder = builder.mysql(mysql);
     }
-    let log_path = get_log_path(deployment_name).join(port.to_string());
-    std::fs::create_dir_all(&log_path)?;
-    runner.set_log_dir(&log_path);
-
     let addr = Url::parse(&format!("http://127.0.0.1:{}", port)).unwrap();
     Ok(ServerHandle {
         addr,
-        process: runner.start()?,
+        process: builder.start()?,
         params: server_params.clone(),
     })
 }
@@ -472,52 +601,22 @@ fn start_mysql_adapter(
     mysql: Option<&String>,
     async_migration_interval: Option<u64>,
 ) -> Result<ProcessHandle> {
-    let mut runner = NoriaMySQLRunner::new(noria_mysql_path);
-    runner.set_deployment(deployment_name);
-    runner.set_port(port);
-    runner.set_metrics_port(metrics_port);
-    runner.set_authority_addr(authority_addr);
-    runner.set_authority(authority);
+    let mut builder = AdapterBuilder::new(noria_mysql_path)
+        .deployment(deployment_name)
+        .port(port)
+        .metrics_port(metrics_port)
+        .authority_addr(authority_addr)
+        .authority(authority);
 
     if let Some(interval) = async_migration_interval {
-        runner.set_async_migrations(interval);
+        builder = builder.async_migrations(interval);
     }
 
     if let Some(mysql) = mysql {
-        runner.set_mysql(mysql);
+        builder = builder.mysql(mysql);
     }
 
-    runner.start()
-}
-
-/// Checks the set of deployment params for invalid configurations
-pub fn check_deployment_params(params: &DeploymentParams) -> anyhow::Result<()> {
-    match &params.primary_region {
-        Some(pr) => {
-            // If the primary region is set, at least one server should match that
-            // region.
-            if params
-                .servers
-                .iter()
-                .all(|s| s.region.as_ref().filter(|region| region == &pr).is_none())
-            {
-                return Err(anyhow!(
-                    "Primary region specified, but no servers match
-                    the region."
-                ));
-            }
-        }
-        None => {
-            // If the primary region is not set, servers should not include a `region`
-            // parameter. Otherwise, a controller will not be elected.
-            if params.servers.iter().any(|s| s.region.is_some()) {
-                return Err(anyhow!(
-                    "Servers have region without a deployment primary region"
-                ));
-            }
-        }
-    }
-    Ok(())
+    builder.start()
 }
 
 /// Finds the next available port after `port` (if supplied).
@@ -533,109 +632,6 @@ fn get_next_good_port(port: Option<u16>) -> u16 {
     port
 }
 
-/// Used to create a multi_process test deployment. This deployment
-/// connects to an authority for cluster management, and deploys a
-/// set of noria-servers. `params` can be used to setup the topology
-/// of the deployment for testing.
-pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<DeploymentHandle> {
-    check_deployment_params(&params)?;
-    let mut port = get_next_good_port(None);
-    // If this deployment includes binlog replication and a mysql instance.
-    let mut mysql_addr = None;
-    if params.mysql {
-        // TODO(justin): Parameterize port.
-        let addr = format!(
-            "mysql://root:{}@{}:3306",
-            &params.mysql_root_password, &params.mysql_host
-        );
-        let opts = mysql_async::Opts::from_url(&addr).unwrap();
-        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-        let _ = conn
-            .query_drop(format!("CREATE DATABASE {};", &params.name))
-            .await
-            .unwrap();
-        mysql_addr = Some(format!("{}/{}", &addr, &params.name));
-    }
-
-    // Create the noria-server instances.
-    let mut handles = HashMap::new();
-    for server in &params.servers {
-        port = get_next_good_port(Some(port));
-        let handle = start_server(
-            server,
-            &params.noria_binaries.noria_server,
-            &params.name,
-            params.sharding,
-            params.quorum,
-            params.primary_region.as_ref(),
-            &params.authority_address,
-            &params.authority.to_string(),
-            port,
-            mysql_addr.as_ref(),
-        )?;
-
-        handles.insert(handle.addr.clone(), handle);
-    }
-
-    let authority = params
-        .authority
-        .to_authority(&params.authority_address, &params.name)
-        .await;
-    let mut handle = ControllerHandle::new(authority).await;
-    wait_until_worker_count(&mut handle, Duration::from_secs(15), params.servers.len()).await?;
-
-    // Duplicate the authority and handle creation as the metrics client
-    // owns its own handle.
-    let metrics_authority = params
-        .authority
-        .to_authority(&params.authority_address, &params.name)
-        .await;
-    let metrics_handle = ControllerHandle::new(metrics_authority).await;
-    let metrics = MetricsClient::new(metrics_handle).unwrap();
-
-    // Start a MySQL adapter instance.
-    let mysql_adapter_handle = if params.mysql_adapter || params.mysql {
-        // TODO(justin): Turn this into a stateful object.
-        port = get_next_good_port(Some(port));
-        let metrics_port = get_next_good_port(Some(port));
-        let process = start_mysql_adapter(
-            params.noria_binaries.noria_mysql.as_ref().unwrap(),
-            &params.name,
-            &params.authority_address,
-            &params.authority.to_string(),
-            port,
-            metrics_port,
-            mysql_addr.as_ref(),
-            params.async_migration_interval,
-        )?;
-        // Sleep to give the adapter time to startup.
-        sleep(Duration::from_millis(2000)).await;
-        Some(MySQLAdapterHandle {
-            conn_str: format!("mysql://127.0.0.1:{}", port),
-            process,
-        })
-    } else {
-        None
-    };
-
-    Ok(DeploymentHandle {
-        handle,
-        metrics,
-        name: params.name.clone(),
-        authority_addr: params.authority_address,
-        authority: params.authority,
-        mysql_addr,
-        noria_server_handles: handles,
-        shutdown: false,
-        noria_binaries: params.noria_binaries,
-        sharding: params.sharding,
-        quorum: params.quorum,
-        primary_region: params.primary_region,
-        port,
-        mysql_adapter: mysql_adapter_handle,
-    })
-}
-
 // These tests currently require that a docker daemon is already setup
 // and accessible by the user calling cargo test. As these tests interact
 // with a stateful external component, the docker daemon, each test is
@@ -644,18 +640,15 @@ pub async fn start_multi_process(params: DeploymentParams) -> anyhow::Result<Dep
 mod tests {
     use super::*;
     use serial_test::serial;
-    // Verifies that the wrappers that create and teardown the deployment
-    // correctly setup zookeeper containers.
+    // Verifies that the wrappers that create and teardown the deployment.
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn clustertest_startup_teardown_test() {
-        let cluster_name = "ct_startup_teardown";
-
-        let mut deployment = DeploymentParams::new(cluster_name);
-        deployment.add_server(ServerParams::default());
-        deployment.add_server(ServerParams::default());
-
-        let deployment = start_multi_process(deployment).await;
+        let deployment = DeploymentBuilder::new("ct_startup_teardown")
+            .add_server(ServerParams::default())
+            .add_server(ServerParams::default())
+            .start()
+            .await;
         assert!(
             !deployment.is_err(),
             "Error starting deployment: {}",
@@ -683,38 +676,38 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn clustertest_minimal() {
-        let cluster_name = "ct_minimal";
-        let mut deployment = DeploymentParams::new(cluster_name);
-        deployment.add_server(ServerParams::default());
-        deployment.add_server(ServerParams::default());
-
-        let mut deployment = start_multi_process(deployment).await.unwrap();
+        let mut deployment = DeploymentBuilder::new("ct_minimal")
+            .add_server(ServerParams::default())
+            .add_server(ServerParams::default())
+            .start()
+            .await
+            .unwrap();
         deployment.teardown().await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn clustertest_multiregion() {
-        let cluster_name = "ct_multiregion";
-        let mut deployment = DeploymentParams::new(cluster_name);
-        deployment.set_primary_region("r1");
-        deployment.add_server(ServerParams::default().with_region("r1"));
-        deployment.add_server(ServerParams::default().with_region("r2"));
-
-        let mut deployment = start_multi_process(deployment).await.unwrap();
+        let mut deployment = DeploymentBuilder::new("ct_multiregion")
+            .primary_region("r1")
+            .add_server(ServerParams::default().with_region("r1"))
+            .add_server(ServerParams::default().with_region("r2"))
+            .start()
+            .await
+            .unwrap();
         deployment.teardown().await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn clustertest_server_management() {
-        let cluster_name = "ct_server_management";
-        let mut deployment = DeploymentParams::new(cluster_name);
-        deployment.set_primary_region("r1");
-        deployment.add_server(ServerParams::default().with_region("r1"));
-        deployment.add_server(ServerParams::default().with_region("r2"));
-
-        let mut deployment = start_multi_process(deployment).await.unwrap();
+        let mut deployment = DeploymentBuilder::new("ct_server_management")
+            .primary_region("r1")
+            .add_server(ServerParams::default().with_region("r1"))
+            .add_server(ServerParams::default().with_region("r2"))
+            .start()
+            .await
+            .unwrap();
 
         // Check that we currently have two workers.
         assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
@@ -735,34 +728,35 @@ mod tests {
 
     #[tokio::test]
     async fn clustertest_no_server_in_primary_region_test() {
-        let mut deployment = DeploymentParams::new("fake_cluster");
-
-        deployment.set_primary_region("r1");
-        deployment.add_server(ServerParams::default().with_region("r2"));
-        deployment.add_server(ServerParams::default().with_region("r3"));
-        assert!(start_multi_process(deployment).await.is_err());
+        assert!(DeploymentBuilder::new("fake_cluster")
+            .primary_region("r1")
+            .add_server(ServerParams::default().with_region("r2"))
+            .add_server(ServerParams::default().with_region("r3"))
+            .start()
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn clustertest_server_region_without_primary_region() {
-        let mut deployment = DeploymentParams::new("fake_cluster_2");
-
-        deployment.add_server(ServerParams::default().with_region("r1"));
-        deployment.add_server(ServerParams::default().with_region("r2"));
-
-        assert!(start_multi_process(deployment).await.is_err());
+        assert!(DeploymentBuilder::new("fake_cluster_2")
+            .add_server(ServerParams::default().with_region("r1"))
+            .add_server(ServerParams::default().with_region("r2"))
+            .start()
+            .await
+            .is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn clustertest_with_binlog() {
-        let cluster_name = "ct_with_binlog";
-        let mut deployment = DeploymentParams::new(cluster_name);
-        deployment.add_server(ServerParams::default());
-        deployment.add_server(ServerParams::default());
-        deployment.deploy_mysql();
-
-        let mut deployment = start_multi_process(deployment).await.unwrap();
+        let mut deployment = DeploymentBuilder::new("ct_with_binlog")
+            .add_server(ServerParams::default())
+            .add_server(ServerParams::default())
+            .deploy_mysql()
+            .start()
+            .await
+            .unwrap();
 
         // Check that we currently have two workers.
         assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
