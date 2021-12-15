@@ -24,7 +24,7 @@ async fn query_regional_routing_test() {
         .unwrap();
 
     deployment
-        .handle
+        .leader_handle()
         .install_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
@@ -43,13 +43,13 @@ async fn query_regional_routing_test() {
 
     // Replicate the reader for `q`.
     deployment
-        .handle
+        .leader_handle()
         .replicate_readers(vec!["q".to_owned()], Some(r2_addr.clone()))
         .await
         .unwrap();
 
     // Insert row (1, 2, 2) into t1.
-    let mut t1 = deployment.handle.table("t1").await.unwrap();
+    let mut t1 = deployment.leader_handle().table("t1").await.unwrap();
     t1.insert(vec![
         DataType::from(1i32),
         DataType::from(2i32),
@@ -59,7 +59,11 @@ async fn query_regional_routing_test() {
     .unwrap();
 
     // Query via r2.
-    let mut view_r2 = deployment.handle.view_from_region("q", "r2").await.unwrap();
+    let mut view_r2 = deployment
+        .leader_handle()
+        .view_from_region("q", "r2")
+        .await
+        .unwrap();
     assert_eq!(
         view_r2.lookup(&[0i32.into()], true).await.unwrap(),
         vec![vec![
@@ -70,13 +74,13 @@ async fn query_regional_routing_test() {
     );
 
     let r1_metrics = deployment
-        .metrics
+        .metrics()
         .get_metrics_for_server(r1_addr)
         .await
         .unwrap()
         .metrics;
     let r2_metrics = deployment
-        .metrics
+        .metrics()
         .get_metrics_for_server(r2_addr)
         .await
         .unwrap()
@@ -115,12 +119,12 @@ async fn controller_in_primary_test() {
         .await
         .unwrap();
 
-    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
     let controller_handle = deployment.server_handles().get(&controller_uri).unwrap();
     assert_eq!(controller_handle.params.region, Some("r1".to_string()));
 
     deployment.kill_server(&controller_uri).await.unwrap();
-    let new_controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let new_controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
     let new_controller_handle = deployment
         .server_handles()
         .get(&new_controller_uri)
@@ -143,7 +147,7 @@ async fn query_failure_recovery_with_volume_id() {
         .unwrap();
 
     deployment
-        .handle
+        .leader_handle()
         .install_recipe(
             "
       CREATE TABLE t1 (id_1 int, id_2 int, val_1 int);
@@ -155,7 +159,7 @@ async fn query_failure_recovery_with_volume_id() {
         .unwrap();
 
     // Insert row (1, 2, 2) into t1.
-    let mut t1 = deployment.handle.table("t1").await.unwrap();
+    let mut t1 = deployment.leader_handle().table("t1").await.unwrap();
     t1.insert(vec![
         DataType::from(1i32),
         DataType::from(2i32),
@@ -174,7 +178,7 @@ async fn query_failure_recovery_with_volume_id() {
 
     deployment.kill_server(&r1_addr).await.unwrap();
 
-    let res = deployment.handle.view("q").await;
+    let res = deployment.leader_handle().view("q").await;
     assert!(res.is_err());
 
     deployment.teardown().await.unwrap();
@@ -188,13 +192,21 @@ async fn new_leader_worker_set() {
         .await
         .unwrap();
 
-    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
 
     // Kill the first server to trigger failure recovery.
     deployment.kill_server(&controller_uri).await.unwrap();
 
     // Check the number of healthy workers in the system.
-    assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+    assert_eq!(
+        deployment
+            .leader_handle()
+            .healthy_workers()
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
 
     deployment.teardown().await.unwrap();
 }
@@ -208,7 +220,7 @@ async fn balance_base_table_domains() {
         .unwrap();
 
     deployment
-        .handle
+        .leader_handle()
         .install_recipe(
             "
         CREATE TABLE t1 (id INT PRIMARY KEY);
@@ -217,7 +229,7 @@ async fn balance_base_table_domains() {
         .await
         .unwrap();
 
-    let info = deployment.handle.get_info().await.unwrap();
+    let info = deployment.leader_handle().get_info().await.unwrap();
 
     dbg!(&info);
 

@@ -165,7 +165,7 @@ async fn async_migrations_confidence_check() {
 
     // TODO(justin): Add utilities to abstract out this ridiculous way of getting
     // metrics.
-    let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+    let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
     let counter_value = get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT);
     match counter_value {
         Some(DumpedMetricValue::Counter(n)) => assert!(n >= 1.0),
@@ -202,7 +202,7 @@ async fn query_view_after_failure() {
     let query = "SELECT * FROM t1 where uid = ?";
     loop {
         let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
-        let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+        let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
         if Some(DumpedMetricValue::Counter(1.0))
             == get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT)
         {
@@ -233,7 +233,7 @@ async fn query_view_after_failure() {
     }
 
     // After a restart, we hit noria on the same view because we re-retrieve the view.
-    let metrics_dump = &deployment.metrics.get_metrics().await.unwrap()[0].metrics;
+    let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
     assert!(matches!(
         get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
         Some(_)
@@ -285,7 +285,7 @@ async fn end_to_end_with_restarts() {
     );
 
     for _ in 0..10 {
-        let controller_uri = deployment.handle.controller_uri().await.unwrap();
+        let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
         let volume_id = deployment
             .server_handle(&controller_uri)
             .unwrap()
@@ -350,7 +350,7 @@ async fn view_survives_restart() {
         .unwrap();
 
     loop {
-        let view = deployment.handle.view("test").await;
+        let view = deployment.leader_handle().view("test").await;
         if view.is_ok() {
             break;
         }
@@ -359,7 +359,7 @@ async fn view_survives_restart() {
     }
 
     for _ in 0..10 {
-        let controller_uri = deployment.handle.controller_uri().await.unwrap();
+        let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
         println!("Killing server: {}", controller_uri);
         deployment.kill_server(&controller_uri).await.unwrap();
         println!("Starting new server");
@@ -370,7 +370,7 @@ async fn view_survives_restart() {
 
         // Request the view until it exists.
         loop {
-            let view = deployment.handle.view("test").await;
+            let view = deployment.leader_handle().view("test").await;
             if view.is_ok() {
                 break;
             }
