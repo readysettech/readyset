@@ -1219,7 +1219,10 @@ where
                                     MigrationMode::InRequestPath => {
                                         prepared_statement.noria.is_none()
                                     }
-                                    MigrationMode::OutOfBand => s == MigrationState::Successful,
+                                    MigrationMode::OutOfBand => {
+                                        prepared_statement.noria.is_none()
+                                            && s == MigrationState::Successful
+                                    }
                                 };
                                 if should_prepare {
                                     // TODO(justin): Refactor prepared statement cache to wrap preparing and storing
