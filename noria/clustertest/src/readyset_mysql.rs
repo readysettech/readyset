@@ -1,4 +1,4 @@
-use crate::utils::query_until_expected;
+use crate::utils::{query_until_expected, UntilResults};
 use crate::*;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
@@ -44,7 +44,7 @@ async fn create_table_insert_test() {
             &mut conn,
             r"SELECT * FROM t1;",
             (),
-            &[(1, 4)],
+            UntilResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -90,7 +90,7 @@ async fn mirror_prepare_exec_test() {
             &mut adapter_conn,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            &[(2, 5)],
+            UntilResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -143,7 +143,7 @@ async fn async_migrations_confidence_check() {
             &mut adapter_conn,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            &[(2, 5)],
+            UntilResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -157,7 +157,7 @@ async fn async_migrations_confidence_check() {
             &mut adapter_conn,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            &[(2, 5)],
+            UntilResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -278,7 +278,7 @@ async fn end_to_end_with_restarts() {
             &mut conn,
             r"SELECT * FROM t1;",
             (),
-            &[(1, 4)],
+            UntilResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -306,7 +306,7 @@ async fn end_to_end_with_restarts() {
                 &mut conn,
                 r"SELECT * FROM t1;",
                 (),
-                &[(1, 4)],
+                UntilResults::empty_or(&[(1, 4)]),
                 PROPAGATION_DELAY_TIMEOUT,
             )
             .await
