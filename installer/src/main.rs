@@ -34,7 +34,7 @@ mod deployment;
 #[macro_use]
 mod console;
 
-use crate::aws::cloudformation::deploy_stack;
+use crate::aws::cloudformation::{deploy_stack, StackConfig};
 use crate::aws::{cfn_parameter, filter, vpc_cidr};
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
@@ -254,8 +254,6 @@ impl Installer {
     }
 
     async fn deploy_readyset_cluster(&mut self) -> Result<()> {
-        println!("About to deploy ReadySet cluster");
-        prompt_to_continue()?;
         let stack_name = format!("{}-readyset", self.deployment.name);
 
         let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
@@ -320,48 +318,65 @@ impl Installer {
             self.deployment.rds_db.as_ref().unwrap().db_name
         );
 
+        let mut stack_config = StackConfig::from_url(template_url).await?;
+        stack_config
+            .with_non_modifiable_parameter("VPCID", vpc_id)
+            .with_non_modifiable_parameter("PrivateSubnet1ID", subnets.next().unwrap())
+            .with_non_modifiable_parameter("PrivateSubnet2ID", subnets.next().unwrap())
+            .with_non_modifiable_parameter("PrivateSubnet3ID", subnets.next().unwrap())
+            .with_non_modifiable_parameter("ConsulEc2RetryJoinTagKey", retry_join_tag_key)
+            .with_non_modifiable_parameter("ConsulEc2RetryJoinTagValue", retry_join_tag_value)
+            .with_non_modifiable_parameter(
+                "ConsulJoinManagedPolicyArn",
+                consul_join_managed_policy_arn,
+            )
+            .with_non_modifiable_parameter("KeyPairName", key_pair_name)
+            .with_non_modifiable_parameter("ReadySetMySQLAdapterUsername", username)
+            .with_non_modifiable_parameter("ReadySetMySQLAdapterPassword", password)
+            .with_non_modifiable_parameter("MySQLDatabaseURL", mysql_database_url)
+            .with_non_modifiable_parameter("ReadySetDeploymentName", deployment_name)
+            .with_non_modifiable_parameter(
+                "ReadySetServerSecurityGroupID",
+                &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
+            )
+            .with_non_modifiable_parameter(
+                "ReadySetAdapterSecurityGroupID",
+                &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
+            )
+            .with_non_modifiable_parameter(
+                "ReadySetMonitoringSecurityGroupID",
+                &supplemental_stack_outputs["ReadySetMonitoringSecurityGroupID"],
+            );
+
+        stack_config.prompt_for_required_parameters()?;
+
+        loop {
+            println!("Deploying ReadySet cluster with the following config:");
+            stack_config.describe_non_modifiable_config();
+            match select()
+                .with_prompt("Continue?")
+                .items(&["yes", "no", "modify config"])
+                .default(0)
+                .interact()?
+            {
+                0 => break,
+                1 => bail!("Exiting as requested"),
+                2 => stack_config.modify_config()?,
+                _ => unreachable!(),
+            }
+        }
+
         let cfn_client = self.cfn_client().await?;
         let stack = deploy_stack(
             cfn_client,
             &stack_name,
-            cfn_client
-                .create_stack()
-                .stack_name(&stack_name)
-                .template_url(template_url)
-                .parameters(cfn_parameter("VPCID", vpc_id))
-                .parameters(cfn_parameter("PrivateSubnet1ID", subnets.next().unwrap()))
-                .parameters(cfn_parameter("PrivateSubnet2ID", subnets.next().unwrap()))
-                .parameters(cfn_parameter("PrivateSubnet3ID", subnets.next().unwrap()))
-                .parameters(cfn_parameter(
-                    "ConsulEc2RetryJoinTagKey",
-                    retry_join_tag_key,
-                ))
-                .parameters(cfn_parameter(
-                    "ConsulEc2RetryJoinTagValue",
-                    retry_join_tag_value,
-                ))
-                .parameters(cfn_parameter(
-                    "ConsulJoinManagedPolicyArn",
-                    consul_join_managed_policy_arn,
-                ))
-                .parameters(cfn_parameter("KeyPairName", key_pair_name))
-                .parameters(cfn_parameter("ReadySetMySQLAdapterUsername", username))
-                .parameters(cfn_parameter("ReadySetMySQLAdapterPassword", password))
-                .parameters(cfn_parameter("MySQLDatabaseURL", mysql_database_url))
-                .parameters(cfn_parameter("ReadySetDeploymentName", deployment_name))
-                .parameters(cfn_parameter(
-                    "ReadySetServerSecurityGroupID",
-                    &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
-                ))
-                .parameters(cfn_parameter(
-                    "ReadySetAdapterSecurityGroupID",
-                    &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
-                ))
-                .parameters(cfn_parameter(
-                    "ReadySetMonitoringSecurityGroupID",
-                    &supplemental_stack_outputs["ReadySetMonitoringSecurityGroupID"],
-                ))
-                .capabilities("CAPABILITY_IAM"),
+            stack_config.apply_to_create_stack(
+                cfn_client
+                    .create_stack()
+                    .stack_name(&stack_name)
+                    .template_url(template_url)
+                    .capabilities("CAPABILITY_IAM"),
+            ),
         )
         .await?;
 

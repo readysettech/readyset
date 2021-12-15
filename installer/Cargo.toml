@@ -13,6 +13,7 @@ aws-sdk-rds = "0.2.0"
 aws-types = "0.2.0"
 clap = "3.0.0-beta.5"
 console = "0.15.0"
+derive_more = "0.99.17"
 dialoguer = "0.9.0"
 directories = "4.0.1"
 futures = "0.3"
@@ -24,9 +25,13 @@ launchpad = { path = "../launchpad" }
 lazy_static = "1.4.0"
 proptest = "1.0"
 regex = "1.5"
+reqwest = "0.11.7"
 rusoto_credential = "0.47.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_regex = "1.1.0"
+serde_with = "1.11.0"
+serde_yaml = "0.8.23"
 test-strategy = "0.1.2"
 tokio = { version = "1.14", features = ["fs", "macros", "rt", "rt-multi-thread", "io-util"] }
 
