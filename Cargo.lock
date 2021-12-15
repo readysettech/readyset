@@ -1479,6 +1479,7 @@ name = "clustertest"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clustertest-macros",
  "envy",
  "futures 0.3.17",
  "futures-util",
@@ -1493,6 +1494,16 @@ dependencies = [
  "test_utils",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "clustertest-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "serial_test",
+ "syn",
+ "tokio",
 ]
 
 [[package]]

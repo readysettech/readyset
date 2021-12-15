@@ -10,8 +10,7 @@ use test_utils::skip_slow_tests;
 
 const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn create_table_insert_test() {
     let mut deployment = DeploymentBuilder::new("ct_create_table_insert")
         .add_server(ServerParams::default())
@@ -53,8 +52,7 @@ async fn create_table_insert_test() {
 
 /// This test verifies that a prepared statement can be executed
 /// on both noria and mysql.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn mirror_prepare_exec_test() {
     let mut deployment = DeploymentBuilder::new("ct_mirror_prepare_exec")
         .add_server(ServerParams::default())
@@ -110,8 +108,7 @@ async fn mirror_prepare_exec_test() {
     deployment.teardown().await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn async_migrations_confidence_check() {
     let mut deployment = DeploymentBuilder::new("ct_async_migrations_confidence_check")
         .add_server(ServerParams::default())
@@ -179,8 +176,7 @@ async fn async_migrations_confidence_check() {
     deployment.teardown().await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn query_view_after_failure() {
     let mut deployment = DeploymentBuilder::new("ct_query_view_after_failure")
         .add_server(ServerParams::default())
@@ -246,8 +242,7 @@ async fn query_view_after_failure() {
 
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn end_to_end_with_restarts() {
     if skip_slow_tests() {
         return;
@@ -323,8 +318,7 @@ async fn end_to_end_with_restarts() {
 
 /// Fail the controller 10 times and check if we can query a view following
 /// a restart.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn view_survives_restart() {
     if skip_slow_tests() {
         return;

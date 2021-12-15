@@ -19,6 +19,7 @@ members = [
     "noria/server",
     "noria/applications",
     "noria/clustertest",
+    "noria/clustertest/macros",
     "noria/tools",
     "noria/noria-logictest",
     "noria/timestamp_service",
