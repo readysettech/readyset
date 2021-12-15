@@ -1,4 +1,6 @@
-# General AWS Infrastructure for the ReadySet Build account
+# ReadySet Supporting Infra for US-EAST-2 in Build AWS Account
+
+This is the Terraform/Substrate root module by which AWS resources for builds and other generic product-focused infrastructure is provisioned.
 
 ## Requirements
 
@@ -20,6 +22,8 @@
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| benchmarking\_iam\_role\_enabled | Toggles creation of AWS IAM resources required for Benchmarking. | `bool` | `false` | no |
+| benchmarking\_iam\_role\_trusted\_account\_ids | AWS accounts to permit assumption of Benchmarking IAM role. Should be empty if not using this role xaccount boundaries. | `list(string)` | `[]` | no |
 | devops\_assets\_s3\_bucket\_enabled | Toggles creation of s3 bucket containing devops assets used during builds or benchmarking. | `bool` | `false` | no |
 | environment | The name of the Substrate environment. | `string` | n/a | yes |
 | resource\_tags | Base AWS resource tags to apply to resources. | `map(any)` | <pre>{<br>  "managed": "terraform"<br>}</pre> | no |

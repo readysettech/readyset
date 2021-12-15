@@ -123,7 +123,7 @@ module "buildkite_ops_queue" {
   environment     = "build"
   buildkite_queue = "ops"
   instance_type   = "t3.large"
-  max_size = 15
+  max_size        = 15
 
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
 
