@@ -9,6 +9,7 @@ use tracing::{debug, error, warn};
 
 use nom_sql::CreateTableStatement;
 use noria_errors::{internal, internal_err, ReadySetError};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::str;
@@ -24,10 +25,11 @@ pub const CANONICAL_DIALECT: Dialect = Dialect::MySQL;
 type QueryID = u64;
 
 /// Represents a Soup recipe.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 // crate viz for tests
 pub(crate) struct Recipe {
     /// SQL queries represented in the recipe. Value tuple is (name, query, public).
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
@@ -36,8 +38,16 @@ pub(crate) struct Recipe {
     aliases: HashMap<String, QueryID>,
 
     /// Recipe revision.
+    // We are skipping this field, since in the near future when we recover using the [`DataflowState`]
+    // as source of truth, we won't need a list of [`Recipes`] anymore.
+    // Thus, we don't need to version them.
+    #[serde(skip)]
     version: usize,
+
     /// Preceding recipe.
+    // We are skipping this field, since in the near future when we recover using the [`DataflowState`]
+    // as source of truth, we won't need a list of [`Recipes`] anymore.
+    #[serde(skip)]
     prior: Option<Box<Recipe>>,
 
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.

@@ -3622,6 +3622,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "serde_with",
  "serial_test",
  "slab",
  "test-strategy",
@@ -3853,6 +3854,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "tempfile",
  "test-strategy",
  "thiserror",
@@ -3945,6 +3947,7 @@ dependencies = [
  "noria-errors",
  "petgraph",
  "regex",
+ "serde",
  "tracing",
 ]
 

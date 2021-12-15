@@ -12,6 +12,7 @@ use std::collections::HashMap;
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Timestamp {
     /// A map from  a base table's LocalNodeIndex to timestamp.
+    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
     pub map: HashMap<LocalNodeIndex, u64>,
 }
 

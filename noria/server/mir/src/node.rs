@@ -6,6 +6,7 @@ use node_inner::MirNodeInner;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::ColumnSpecification;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
 
 use std::rc::Rc;
 
@@ -21,12 +22,15 @@ pub enum GroupedNodeType {
     Extremum(ops::grouped::extremum::Extremum),
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MirNode {
     pub name: String,
     pub from_version: usize,
     pub columns: Vec<Column>,
     pub inner: MirNodeInner,
+    #[serde(skip)]
     pub ancestors: Vec<MirNodeWeakRef>,
+    #[serde(skip)]
     pub children: Vec<MirNodeRef>,
     pub flow_node: Option<FlowNode>,
 }
@@ -393,10 +397,25 @@ impl MirNode {
             self.columns.len()
         )
     }
+
+    /// Clones the [`MirNode`] but leaving the `children` and `ancestors` fields empty.
+    #[must_use]
+    pub fn clone_without_relations(&self) -> MirNode {
+        MirNode {
+            name: self.name.clone(),
+            from_version: self.from_version,
+            columns: self.columns.clone(),
+            inner: self.inner.clone(),
+            ancestors: Default::default(),
+            children: Default::default(),
+            flow_node: self.flow_node.clone(),
+        }
+    }
 }
 
 /// Specifies the adapatation of an existing base node by column addition/removal.
 /// `over` is a `MirNode` of type `Base`.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BaseNodeAdaptation {
     pub over: MirNodeRef,
     pub columns_added: Vec<ColumnSpecification>,

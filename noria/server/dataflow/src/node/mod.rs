@@ -36,6 +36,11 @@ pub struct Node {
     parents: Vec<LocalNodeIndex>,
     children: Vec<LocalNodeIndex>,
     inner: NodeType,
+    // We are skipping the serialization of `taken` so we get `false` for
+    // this field upon deserialization.
+    // We need that since we deserialize when we are recovering (and thus all nodes should
+    // NOT be taken).
+    #[serde(skip)]
     taken: bool,
 
     pub purge: bool,
@@ -47,6 +52,8 @@ pub struct Node {
     // in the data flow graph.
     // Wrapped in a RefCell as this map will be mutated while using
     // immutable references to fields in Node.
+    // We skip serde since we don't want the state of the node, just the configuration.
+    #[serde(skip)]
     timestamps: HashMap<LocalNodeIndex, Timestamp>,
 }
 

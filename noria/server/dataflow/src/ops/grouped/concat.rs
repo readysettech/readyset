@@ -43,6 +43,8 @@ pub struct GroupConcat {
     /// The user-defined separator.
     separator: String,
     /// Cached state for each group (set of data corresponding to the columns of `group_by`).
+    // We skip serde since we don't want the state of the node, just the configuration.
+    #[serde(skip)]
     last_state: RefCell<HashMap<Vec<DataType>, LastState>>,
 }
 
