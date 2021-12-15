@@ -22,6 +22,7 @@ nom-sql = { path = "../../nom-sql" }
 noria = { path = "../noria" }
 noria-mysql = { path = "../../noria-mysql" }
 test_utils = { path = "../../test_utils" }
+clustertest-macros = { path = "./macros" }
 
 [dev-dependencies]
 serial_test = "0.5.1"

@@ -14,8 +14,7 @@ use serial_test::serial;
 //   3. Use the `r1` view for `q`.
 //   4. Verify that the noria-server in `r1` issued an upquery.
 //   5. Verify that this reached the base table.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn query_regional_routing_test() {
     let mut deployment = DeploymentBuilder::new("ct_server_regional")
         .primary_region("r1")
@@ -104,8 +103,7 @@ async fn query_regional_routing_test() {
 //      server and verify that it is in `r1`.
 //   3. Kill the server associated with the controller.
 //   4. Verify the new controller elected is also in `r1`.
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn controller_in_primary_test() {
     let mut deployment = DeploymentBuilder::new("ct_controller_in_primary")
         .primary_region("r1")
@@ -135,9 +133,8 @@ async fn controller_in_primary_test() {
 
 // Ignored as this test cannot issue RPCs after killing the worker as it
 // will get into a failing state and will not accept RPCs.
-#[tokio::test(flavor = "multi_thread")]
+#[clustertest]
 #[ignore]
-#[serial]
 async fn query_failure_recovery_with_volume_id() {
     let mut deployment = DeploymentBuilder::new("ct_failure_recovery_with_volume_id")
         .add_server(ServerParams::default().with_volume("v1"))
@@ -183,8 +180,7 @@ async fn query_failure_recovery_with_volume_id() {
     deployment.teardown().await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn new_leader_worker_set() {
     let mut deployment = DeploymentBuilder::new("ct_new_leader_worker_set")
         .add_server(ServerParams::default())
@@ -205,8 +201,7 @@ async fn new_leader_worker_set() {
     deployment.teardown().await.unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
+#[clustertest]
 async fn balance_base_table_domains() {
     let mut deployment = DeploymentBuilder::new("ct_balance_base_table_domains")
         .add_server(ServerParams::default())

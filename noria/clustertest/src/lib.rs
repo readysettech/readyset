@@ -23,6 +23,9 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use url::Url;
 
+#[cfg(test)]
+use clustertest_macros::clustertest;
+
 /// The set of environment variables that need to be set for the
 /// tests to run. Each variable is the upper case of their respective,
 /// struct variable name, i.e. AUTHORITY_ADDRESS.
@@ -641,8 +644,7 @@ mod tests {
     use super::*;
     use serial_test::serial;
     // Verifies that the wrappers that create and teardown the deployment.
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn clustertest_startup_teardown_test() {
         let deployment = DeploymentBuilder::new("ct_startup_teardown")
             .add_server(ServerParams::default())
@@ -673,8 +675,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn clustertest_minimal() {
         let mut deployment = DeploymentBuilder::new("ct_minimal")
             .add_server(ServerParams::default())
@@ -685,8 +686,7 @@ mod tests {
         deployment.teardown().await.unwrap();
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn clustertest_multiregion() {
         let mut deployment = DeploymentBuilder::new("ct_multiregion")
             .primary_region("r1")
@@ -698,8 +698,7 @@ mod tests {
         deployment.teardown().await.unwrap();
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn clustertest_server_management() {
         let mut deployment = DeploymentBuilder::new("ct_server_management")
             .primary_region("r1")
@@ -726,7 +725,7 @@ mod tests {
         deployment.teardown().await.unwrap();
     }
 
-    #[tokio::test]
+    #[clustertest]
     async fn clustertest_no_server_in_primary_region_test() {
         assert!(DeploymentBuilder::new("fake_cluster")
             .primary_region("r1")
@@ -737,7 +736,7 @@ mod tests {
             .is_err());
     }
 
-    #[tokio::test]
+    #[clustertest]
     async fn clustertest_server_region_without_primary_region() {
         assert!(DeploymentBuilder::new("fake_cluster_2")
             .add_server(ServerParams::default().with_region("r1"))
@@ -747,8 +746,7 @@ mod tests {
             .is_err());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn clustertest_with_binlog() {
         let mut deployment = DeploymentBuilder::new("ct_with_binlog")
             .add_server(ServerParams::default())
