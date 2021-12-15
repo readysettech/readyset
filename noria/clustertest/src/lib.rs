@@ -1,3 +1,149 @@
+//! A local multi-process deployment test framework for ReadySet. It enables
+//! local blackbox testing on multi-server deployments with support for
+//! programatically modifying the deployment, i.e. introducing faults,
+//! adding new servers, replicating readers.
+//!
+//! This makes this framework well suited for:
+//!   * Testing fault tolerance and failure recovery behavior. Clustertests can
+//!     easily introduce faults via
+//!     [`kill_server`](DeploymentHandle::kill_server) and
+//!     mimic failure recovery via [`start_server`](DeploymentHandle::start_server).
+//!   * Testing behavior that is localized to specific workers. Each worker in
+//!     a deployment can be queried for metrics separately via [`MetricsClient`]
+//!     which can be checked in clustertests.
+//!
+//! # Running clustertests
+//!
+//! Clustertests are run through `cargo test`.
+//! ```bash
+//! cargo test -p clustertest
+//! ```
+//!
+//! Clustertests can be configured via environment variables. Since clustertests
+//! depend on external resources in order to run: a MySQL server,
+//! prebuilt binaries for noria-server and noria-mysql, and a running authority,
+//! a clustertest user should take care that these environment variables are set
+//! if the defaults are not sufficient.
+//!
+//! * `AUTHORITY_ADDRESS`: The address of an authority, defaults to `127.0.0.1:8500`
+//!
+//! * `AUTHORITY`: The type of authority, defaults to `consul`.
+//!
+//! * `BINARY_PATH`: The path to a directory with the noria-server and
+//! noria-mysql binaries, defaults to `$CARGO_MANIFEST_DIR/../../target/debug`,
+//! `readyset/target/debug`.
+//!
+//! * `MYSQL_HOST`: The host of the MySQL database to use as upstream, defaults to
+//! `127.0.0.1`.
+//!
+//! * `MYSQL_ROOT_PASSWORD`: The password to use for the upstream MySQL database,
+//! defaults to `noria`.
+//!
+//! * `RUN_SLOW_TESTS`: Enables running certain tests that are slow.
+//!
+//! # Example Clustertest
+//!
+//! Creating a two server deployment, creating a third server, and then killing a
+//! server.
+//!
+//! ```rust
+//! use clustertest::*;
+//! use clustertest_macros::clustertest;
+//!
+//! #[clustertest]
+//! async fn example_clustertest() {
+//!     // DeploymentBuilder is a builder used to create the local
+//!     // deployment.
+//!     let mut deployment = DeploymentBuilder::new("ct_example")
+//!         .with_servers(2, ServerParams::default())
+//!         .start()
+//!         .await
+//!         .unwrap();
+//!
+//!     // Check that we currently have two workers.
+//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 2);
+//!
+//!     // Start up a new server.
+//!     let server_handle = deployment
+//!     .start_server(ServerParams::default())
+//!     .await
+//!     .unwrap();
+//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 3);
+//!
+//!     // Now kill that server we started up.
+//!     deployment.kill_server(&server_handle).await.unwrap();
+//!     assert_eq!(deployment.leader_handle().healthy_workers().await.unwrap().len(), 2);
+//!
+//!     // Clustertests must cleanup their state via deployment.teardown().
+//!     deployment.teardown().await.unwrap();
+//! }
+//! ```
+//!
+//! # Anatomy of a clustertest
+//!
+//! ### `#[clustertest]`
+//!
+//! Clustertests begin with the clustertest attribute: `#[clustertest]`. This
+//! creates clustertests as a multi-threaded tokio test, that is run serially
+//! with other tests (`#[serial]`).
+//!
+//! ### [`DeploymentBuilder`]
+//!
+//! The [`DeploymentBuilder`] is used to specify parameters for a deployment,
+//! for example:
+//!   * the number of noria-server instances to create,
+//!     [`with_servers`](DeploymentBuilder::with_servers).
+//!   * whether to use an upstream
+//!     database, [`deploy_mysql`](DeploymentBuilder::deploy_mysql).
+//!   * whether to deploy an adapter,
+//!     [`deploy_mysql_adapter`](DeploymentBuilder::deploy_mysql_adapter).
+//!   * The parameters used to build a server, [`ServerParams`].
+//!
+//! Once all parameters are specified, creating the resources for the deployment
+//! is done with [`DeploymentBuilder::start`].
+//!
+//! ```rust
+//! use clustertest::*;
+//! // Deploy a three server deployment with two servers in region, r1,
+//! // one server in region, r2, with a mysql adapter and upstream database.
+//! async fn build_deployment() {
+//!     let mut deployment = DeploymentBuilder::new("ct_example")
+//!         .with_servers(2, ServerParams::default().with_region("r1"))
+//!         .add_server(ServerParams::default().with_region("r2"))
+//!         .quorum(3)
+//!         .deploy_mysql()
+//!         .deploy_mysql_adapter()
+//!         .start()
+//!         .await
+//!         .unwrap();
+//! }
+//! ```
+//!
+//! Calling [`DeploymentBuilder::start`] creates a [`DeploymentHandle`] that
+//! can be used to modify a deployment
+//!
+//! ### [`DeploymentHandle`]
+//!
+//! The [`DeploymentHandle`] allows clustertests writers to programatically
+//! modify the deployment and check controller / metrics properties. It
+//! primarily facilitates four operations:
+//!   1. Adding servers to the deployment. Clustertest can create any number
+//!      of server processes during the test via
+//!      [`DeploymentHandle::start_server`].
+//!   2. Killing server in the deployment.
+//!      [`DeploymentHandle::kill_server`] may be called to
+//!      remove a server from the deployment, this is done by sending the kill
+//!      command to the process running the server.
+//!   3. Sending controller RPCs via the [`ControllerHandle`] returned by
+//!      [`DeploymentHandle::leader_handle`].
+//!   4. Querying metrics via the [`MetricsClient`] returned by
+//!      [`DeploymentHandle::metrics`].
+//!
+//! ### [`DeploymentHandle::teardown`]
+//!
+//! All tests should end in a call to [`DeploymentHandle::teardown`]. To
+//! kill the deployment proceses and remove locally created files.
+
 mod server;
 
 #[cfg(test)]
@@ -69,7 +215,7 @@ fn default_root_password() -> String {
 }
 
 /// Source of the noria binaries.
-pub struct NoriaBinarySource {
+pub(crate) struct NoriaBinarySource {
     /// Path to a built noria-server on the local machine.
     pub noria_server: PathBuf,
     /// Optional path to noria-mysql on the local machine. noria-mysql
@@ -94,11 +240,13 @@ impl ServerParams {
         }
     }
 
+    /// Sets a server's region string, passed in via --region.
     pub fn with_region(mut self, region: &str) -> Self {
         self.region = Some(region.to_string());
         self
     }
 
+    /// Sets a server's --volume-id string, passed in via --volume-id.
     pub fn with_volume(mut self, volume: &str) -> Self {
         self.volume_id = Some(volume.to_string());
         self
@@ -171,21 +319,27 @@ impl DeploymentBuilder {
         }
     }
 
+    /// The number of shards in the graph, `shards` <= 1 disables sharding.
     pub fn shards(mut self, shards: usize) -> Self {
         self.shards = Some(shards);
         self
     }
 
+    /// The number of healthy servers required in the system before we begin
+    /// accepting queries and performing migrations.
     pub fn quorum(mut self, quorum: usize) -> Self {
         self.quorum = quorum;
         self
     }
 
+    /// The region where the leader should be hosted.
     pub fn primary_region(mut self, region: &str) -> Self {
         self.primary_region = Some(region.to_string());
         self
     }
 
+    /// Adds `count` servers to the deployment, each created with the specified
+    /// [`ServerParams`].
     pub fn with_servers(mut self, count: u32, server: ServerParams) -> Self {
         for _ in 0..count {
             self.servers.push(server.clone());
@@ -193,28 +347,38 @@ impl DeploymentBuilder {
         self
     }
 
+    /// Adds a single server to the deployment, created with the specified
+    /// [`ServerParams`].
     pub fn add_server(mut self, server: ServerParams) -> Self {
         self.servers.push(server);
         self
     }
 
+    /// Deploys an adapter server as part of this deployment. This will
+    /// populate [`DeploymentHandle::mysql_connection_str`] with the adapter's
+    /// MySQL connection string.
     pub fn deploy_mysql_adapter(mut self) -> Self {
         self.mysql_adapter = true;
         self
     }
 
+    /// Whether to use an upstream database as part of this deployment. This
+    /// will populate [`DeploymentHandle::mysql_db_str`] with the upstream
+    /// databases's connection string.
     pub fn deploy_mysql(mut self) -> Self {
         self.mysql = true;
         self
     }
 
+    /// Whether to enable the async migrations feature in the adapter. Requires
+    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
     pub fn async_migrations(mut self, interval_ms: u64) -> Self {
         self.async_migration_interval = Some(interval_ms);
         self
     }
 
     /// Checks the set of deployment params for invalid configurations
-    pub fn check_deployment_params(&self) -> anyhow::Result<()> {
+    fn check_deployment_params(&self) -> anyhow::Result<()> {
         match &self.primary_region {
             Some(pr) => {
                 // If the primary region is set, at least one server should match that
@@ -243,10 +407,8 @@ impl DeploymentBuilder {
         Ok(())
     }
 
-    /// Used to create a multi_process test deployment. This deployment
-    /// connects to an authority for cluster management, and deploys a
-    /// set of noria-servers. `params` can be used to setup the topology
-    /// of the deployment for testing.
+    /// Creates the local multi-process deployment from the set of parameters
+    /// specified in the builder.
     pub async fn start(self) -> anyhow::Result<DeploymentHandle> {
         self.check_deployment_params()?;
         let mut port = get_next_good_port(None);
@@ -320,7 +482,7 @@ impl DeploymentBuilder {
             )?;
             // Sleep to give the adapter time to startup.
             sleep(Duration::from_millis(2000)).await;
-            Some(MySQLAdapterHandle {
+            Some(AdapterHandle {
                 conn_str: format!("mysql://127.0.0.1:{}", port),
                 process,
             })
@@ -358,7 +520,7 @@ pub struct ServerHandle {
 }
 
 /// A handle to a mysql-adapter instance in the deployment.
-pub struct MySQLAdapterHandle {
+pub struct AdapterHandle {
     /// The mysql connection string of the adapter.
     pub conn_str: String,
     /// The local process the adapter is running in.
@@ -368,11 +530,11 @@ pub struct MySQLAdapterHandle {
 /// A handle to a deployment created with `start_multi_process`.
 pub struct DeploymentHandle {
     /// A handle to the current controller of the deployment.
-    pub handle: ControllerHandle,
+    handle: ControllerHandle,
     /// Metrics client for aggregating metrics across the deployment.
-    pub metrics: MetricsClient,
+    metrics: MetricsClient,
     /// Map from a noria server's address to a handle to the server.
-    pub noria_server_handles: HashMap<Url, ServerHandle>,
+    noria_server_handles: HashMap<Url, ServerHandle>,
     /// The name of the deployment, cluster resources are prefixed
     /// by `name`.
     name: String,
@@ -397,11 +559,40 @@ pub struct DeploymentHandle {
     port: u16,
     /// Holds a handle to the mysql adapter if this deployment includes
     /// a mysql adapter.
-    mysql_adapter: Option<MySQLAdapterHandle>,
+    mysql_adapter: Option<AdapterHandle>,
 }
 
 impl DeploymentHandle {
-    /// Start a new noria-server instance in the deployment.
+    /// Returns a [`ControllerHandle`] that enables sending RPCs to the leader
+    /// of the deployment.
+    pub fn leader_handle(&mut self) -> &mut ControllerHandle {
+        &mut self.handle
+    }
+
+    /// Returns a [`MetricsClient`] for the deployment. Tests can query for
+    /// metrics for each server via [`MetricsClient::get_metrics_for_server`]
+    /// with the URL from `server_addrs` or `server_handles`.
+    pub fn metrics(&mut self) -> &mut MetricsClient {
+        &mut self.metrics
+    }
+
+    /// Returns the MySQL connection string of the adapter that can be
+    /// passed to [`mysql_async::Opts::from_url`]. If this deployment does not
+    /// have an adapter, `None` is returned.
+    pub fn mysql_connection_str(&self) -> Option<String> {
+        self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
+    }
+
+    /// Returns the MySQL connection string of the upstream database that
+    /// can be passed to [`'mysql_async::Opts::from-url`]. If this deployment
+    /// does not have an upstream database, `None` is returned.
+    pub fn mysql_db_str(&self) -> Option<String> {
+        self.mysql_addr.clone()
+    }
+
+    /// Start a new noria-server instance in the deployment using the provided
+    /// [`ServerParams`]. Any deployment-wide configuration parameters, such as
+    /// sharing, quorum, authority, are passed to the new server.
     pub async fn start_server(&mut self, params: ServerParams) -> anyhow::Result<Url> {
         let port = get_next_good_port(Some(self.port));
         self.port = port;
@@ -467,8 +658,8 @@ impl DeploymentHandle {
         Ok(())
     }
 
-    /// Kill an existing noria-server instance in the deployment referenced
-    /// by `ServerHandle`.
+    /// Kills an existing noria-server instance in the deployment referenced
+    /// by `Url`.
     pub async fn kill_server(&mut self, server_addr: &Url) -> anyhow::Result<()> {
         if !self.noria_server_handles.contains_key(server_addr) {
             return Err(anyhow!("Server handle does not exist in deployment"));
@@ -516,24 +707,21 @@ impl DeploymentHandle {
         Ok(())
     }
 
+    /// Returns a vector of noria-server controller addresses.
     pub fn server_addrs(&self) -> Vec<Url> {
         self.noria_server_handles.keys().cloned().collect()
     }
 
+    /// Returns a mutable map from noria-server addresses to their
+    /// [`ServerHandle`].
     pub fn server_handles(&mut self) -> &mut HashMap<Url, ServerHandle> {
         &mut self.noria_server_handles
     }
 
+    /// Returns the [`ServerHandle`] for a noria-server if `url` is in the
+    /// deployment. Otherwise, `None` is returned.
     pub fn server_handle(&self, url: &Url) -> Option<&ServerHandle> {
         self.noria_server_handles.get(url)
-    }
-
-    pub fn mysql_connection_str(&self) -> Option<String> {
-        self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
-    }
-
-    pub fn mysql_db_str(&self) -> Option<String> {
-        self.mysql_addr.clone()
     }
 }
 
@@ -702,11 +890,11 @@ mod tests {
         let mut deployment = deployment.unwrap();
 
         // Check we received a metrics dump from each client.
-        let metrics = deployment.metrics.get_metrics().await.unwrap();
+        let metrics = deployment.metrics().get_metrics().await.unwrap();
         assert_eq!(metrics.len(), 2);
 
         // Check that the controller can respond to an rpc.
-        let workers = deployment.handle.healthy_workers().await.unwrap();
+        let workers = deployment.leader_handle().healthy_workers().await.unwrap();
         assert_eq!(workers.len(), 2);
 
         let res = deployment.teardown().await;
@@ -750,18 +938,42 @@ mod tests {
             .unwrap();
 
         // Check that we currently have two workers.
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+        assert_eq!(
+            deployment
+                .leader_handle()
+                .healthy_workers()
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
 
         // Start up a new server.
         let server_handle = deployment
             .start_server(ServerParams::default().with_region("r3"))
             .await
             .unwrap();
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 3);
+        assert_eq!(
+            deployment
+                .leader_handle()
+                .healthy_workers()
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
 
         // Now kill that server we started up.
         deployment.kill_server(&server_handle).await.unwrap();
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+        assert_eq!(
+            deployment
+                .leader_handle()
+                .healthy_workers()
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
 
         deployment.teardown().await.unwrap();
     }
@@ -797,7 +1009,15 @@ mod tests {
             .unwrap();
 
         // Check that we currently have two workers.
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
+        assert_eq!(
+            deployment
+                .leader_handle()
+                .healthy_workers()
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
         deployment.teardown().await.unwrap();
     }
 }
