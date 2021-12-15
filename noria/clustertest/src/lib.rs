@@ -186,6 +186,13 @@ impl DeploymentBuilder {
         self
     }
 
+    pub fn with_servers(mut self, count: u32, server: ServerParams) -> Self {
+        for _ in 0..count {
+            self.servers.push(server.clone());
+        }
+        self
+    }
+
     pub fn add_server(mut self, server: ServerParams) -> Self {
         self.servers.push(server);
         self
@@ -647,8 +654,7 @@ mod tests {
     #[clustertest]
     async fn clustertest_startup_teardown_test() {
         let deployment = DeploymentBuilder::new("ct_startup_teardown")
-            .add_server(ServerParams::default())
-            .add_server(ServerParams::default())
+            .with_servers(2, ServerParams::default())
             .start()
             .await;
         assert!(
@@ -678,8 +684,7 @@ mod tests {
     #[clustertest]
     async fn clustertest_minimal() {
         let mut deployment = DeploymentBuilder::new("ct_minimal")
-            .add_server(ServerParams::default())
-            .add_server(ServerParams::default())
+            .with_servers(2, ServerParams::default())
             .start()
             .await
             .unwrap();
@@ -749,8 +754,7 @@ mod tests {
     #[clustertest]
     async fn clustertest_with_binlog() {
         let mut deployment = DeploymentBuilder::new("ct_with_binlog")
-            .add_server(ServerParams::default())
-            .add_server(ServerParams::default())
+            .with_servers(2, ServerParams::default())
             .deploy_mysql()
             .start()
             .await
