@@ -873,6 +873,45 @@ where
         }
     }
 
+    /// Prepares Insert, Delete, and Update statements
+    async fn prepare_write(
+        &mut self,
+        query: &str,
+        stmt: &nom_sql::SqlQuery,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<PrepareResult<DB>, DB::Error> {
+        event.sql_type = SqlQueryType::Write;
+        if let Some(ref mut upstream) = self.upstream {
+            let handle = event.start_timer();
+            let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
+            handle.set_upstream_duration();
+            res
+        } else {
+            let handle = event.start_timer();
+            let res = match stmt {
+                nom_sql::SqlQuery::Insert(ref stmt) => {
+                    self.noria
+                        .prepare_insert(stmt.clone(), self.prepared_count)
+                        .await?
+                }
+                nom_sql::SqlQuery::Delete(ref stmt) => {
+                    self.noria
+                        .prepare_delete(stmt.clone(), self.prepared_count)
+                        .await?
+                }
+                nom_sql::SqlQuery::Update(ref stmt) => {
+                    self.noria
+                        .prepare_update(stmt.clone(), self.prepared_count)
+                        .await?
+                }
+                // prepare_write does not support other statements
+                _ => internal!(),
+            };
+            handle.set_noria_duration();
+            Ok(PrepareResult::Noria(res))
+        }
+    }
+
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
@@ -1002,49 +1041,9 @@ where
                     }
                 }
             }
-            nom_sql::SqlQuery::Insert(_) => {
-                event.sql_type = SqlQueryType::Write;
-                if let Some(ref mut upstream) = self.upstream {
-                    let handle = event.start_timer();
-                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
-                    handle.set_upstream_duration();
-                    res
-                } else {
-                    Ok(PrepareResult::Noria(
-                        self.noria
-                            .prepare_insert(parsed_query.clone(), self.prepared_count)
-                            .await?,
-                    ))
-                }
-            }
-            nom_sql::SqlQuery::Update(_) => {
-                event.sql_type = SqlQueryType::Write;
-                if let Some(ref mut upstream) = self.upstream {
-                    let handle = event.start_timer();
-                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
-                    handle.set_upstream_duration();
-                    res
-                } else {
-                    Ok(PrepareResult::Noria(
-                        self.noria
-                            .prepare_update(parsed_query.clone(), self.prepared_count)
-                            .await?,
-                    ))
-                }
-            }
-            nom_sql::SqlQuery::Delete(ref stmt) => {
-                event.sql_type = SqlQueryType::Write;
-                if let Some(ref mut upstream) = self.upstream {
-                    let handle = event.start_timer();
-                    let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
-                    handle.set_upstream_duration();
-                    res
-                } else {
-                    Ok(PrepareResult::Noria(
-                        self.noria.prepare_delete(stmt, self.prepared_count).await?,
-                    ))
-                }
-            }
+            nom_sql::SqlQuery::Insert(_)
+            | nom_sql::SqlQuery::Update(_)
+            | nom_sql::SqlQuery::Delete(_) => self.prepare_write(query, &parsed_query, event).await,
             nom_sql::SqlQuery::CreateTable(..)
             | nom_sql::SqlQuery::CreateView(..)
             | nom_sql::SqlQuery::Set(..)
