@@ -16,7 +16,7 @@ impl ProcessHandle {
 }
 
 /// Manages running a noria-server binary with the correct arguments.
-pub struct NoriaServerRunner {
+pub struct NoriaServerBuilder {
     /// Path to the noria-server binary.
     binary: PathBuf,
 
@@ -24,7 +24,7 @@ pub struct NoriaServerRunner {
     args: Vec<String>,
 }
 
-impl NoriaServerRunner {
+impl NoriaServerBuilder {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
@@ -41,64 +41,59 @@ impl NoriaServerRunner {
         })
     }
 
-    pub fn set_region(&mut self, region: &str) {
-        self.args.push("--region".to_string());
-        self.args.push(region.to_string());
+    fn push_arg(mut self, arg_name: &str, arg_value: &str) -> Self {
+        self.args.push(arg_name.to_string());
+        self.args.push(arg_value.to_string());
+        self
     }
 
-    pub fn set_primary_region(&mut self, primary_region: &str) {
-        self.args.push("--primary-region".to_string());
-        self.args.push(primary_region.to_string());
+    pub fn region(self, region: &str) -> Self {
+        self.push_arg("--region", region)
     }
 
-    pub fn set_volume_id(&mut self, id: &str) {
-        self.args.push("--volume-id".to_string());
-        self.args.push(id.to_string());
+    pub fn primary_region(self, primary_region: &str) -> Self {
+        self.push_arg("--primary-region", primary_region)
     }
 
-    pub fn set_authority_addr(&mut self, authority_addr: &str) {
-        self.args.push("--authority-address".to_string());
-        self.args.push(authority_addr.to_string());
+    pub fn volume_id(self, id: &str) -> Self {
+        self.push_arg("--volume-id", id)
     }
 
-    pub fn set_authority(&mut self, authority: &str) {
-        self.args.push("--authority".to_string());
-        self.args.push(authority.to_string());
+    pub fn authority_addr(self, authority_addr: &str) -> Self {
+        self.push_arg("--authority-address", authority_addr)
     }
 
-    pub fn set_deployment(&mut self, deployment: &str) {
-        self.args.push("--deployment".to_string());
-        self.args.push(deployment.to_string());
+    pub fn authority(self, authority: &str) -> Self {
+        self.push_arg("--authority", authority)
     }
 
-    pub fn set_shards(&mut self, shards: usize) {
-        self.args.push("--shards".to_string());
-        self.args.push(shards.to_string());
+    pub fn deployment(self, deployment: &str) -> Self {
+        self.push_arg("--deployment", deployment)
     }
 
-    pub fn set_quorum(&mut self, quorum: usize) {
-        self.args.push("--quorum".to_string());
-        self.args.push(quorum.to_string());
+    pub fn shards(self, shards: usize) -> Self {
+        self.push_arg("--shards", &shards.to_string())
     }
 
-    pub fn set_external_port(&mut self, external_port: u16) {
-        self.args.push("--external-port".to_string());
-        self.args.push(external_port.to_string());
+    pub fn quorum(self, quorum: usize) -> Self {
+        self.push_arg("--quorum", &quorum.to_string())
     }
 
-    pub fn set_log_dir(&mut self, path: &Path) {
-        self.args.push("--log-dir".to_string());
-        self.args.push(path.to_str().unwrap().to_string());
+    pub fn external_port(self, external_port: u16) -> Self {
+        self.push_arg("--external-port", &external_port.to_string())
     }
 
-    pub fn set_mysql(&mut self, addr: &str) {
-        self.args.push("--replication-url".to_string());
-        self.args.push(addr.to_string());
+    pub fn log_dir(self, path: &Path) -> Self {
+        self.push_arg("--log-dir", path.to_str().unwrap())
+    }
+
+    pub fn mysql(self, addr: &str) -> Self {
+        self.push_arg("--replication-url", addr)
     }
 }
 
 /// Manages running a noria-mysql binary with the correct arguments.
-pub struct NoriaMySQLRunner {
+pub struct AdapterBuilder {
     /// Path to the noria-mysql binary.
     binary: PathBuf,
 
@@ -106,7 +101,7 @@ pub struct NoriaMySQLRunner {
     args: Vec<String>,
 }
 
-impl NoriaMySQLRunner {
+impl AdapterBuilder {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
@@ -123,39 +118,44 @@ impl NoriaMySQLRunner {
         })
     }
 
-    pub fn set_authority_addr(&mut self, authority_addr: &str) {
-        self.args.push("--authority-address".to_string());
-        self.args.push(authority_addr.to_string());
+    fn push_arg(mut self, arg_name: &str, arg_value: &str) -> Self {
+        self.args.push(arg_name.to_string());
+        self.args.push(arg_value.to_string());
+        self
     }
 
-    pub fn set_authority(&mut self, authority: &str) {
-        self.args.push("--authority".to_string());
-        self.args.push(authority.to_string());
+    pub fn authority_addr(self, authority_addr: &str) -> Self {
+        self.push_arg("--authority-address", authority_addr)
     }
 
-    pub fn set_deployment(&mut self, deployment: &str) {
-        self.args.push("--deployment".to_string());
-        self.args.push(deployment.to_string());
+    pub fn authority(self, authority: &str) -> Self {
+        self.push_arg("--authority", authority)
     }
 
-    pub fn set_port(&mut self, port: u16) {
-        self.args.push("-a".to_string());
-        self.args.push(format!("127.0.0.1:{}", port.to_string()));
+    pub fn deployment(self, deployment: &str) -> Self {
+        self.push_arg("--deployment", deployment)
     }
 
-    pub fn set_metrics_port(&mut self, port: u16) {
-        self.args.push("--metrics-address".to_string());
-        self.args.push(format!("0.0.0.0:{}", port.to_string()));
+    pub fn port(self, port: u16) -> Self {
+        self.push_arg("-a", &format!("127.0.0.1:{}", port.to_string()))
     }
 
-    pub fn set_mysql(&mut self, addr: &str) {
-        self.args.push("--upstream-db-url".to_string());
-        self.args.push(addr.to_string());
+    pub fn metrics_port(self, port: u16) -> Self {
+        self.push_arg(
+            "--metrics-address",
+            &format!("0.0.0.0:{}", port.to_string()),
+        )
     }
 
-    pub fn set_async_migrations(&mut self, migration_task_interval: u64) {
+    pub fn mysql(self, addr: &str) -> Self {
+        self.push_arg("--upstream-db-url", addr)
+    }
+
+    pub fn async_migrations(mut self, migration_task_interval: u64) -> Self {
         self.args.push("--async-migrations".to_string());
-        self.args.push("--migration-task-interval".to_string());
-        self.args.push(migration_task_interval.to_string());
+        self.push_arg(
+            "--migration-task-interval",
+            &migration_task_interval.to_string(),
+        )
     }
 }

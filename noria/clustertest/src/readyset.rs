@@ -17,13 +17,13 @@ use serial_test::serial;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn query_regional_routing_test() {
-    let cluster_name = "ct_server_regional";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_sharding(1);
-    deployment.set_primary_region("r1");
-    deployment.add_server(ServerParams::default().with_region("r1"));
+    let mut deployment = DeploymentBuilder::new("ct_server_regional")
+        .primary_region("r1")
+        .add_server(ServerParams::default().with_region("r1"))
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     deployment
         .handle
         .install_recipe(
@@ -107,15 +107,16 @@ async fn query_regional_routing_test() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn controller_in_primary_test() {
-    let cluster_name = "ct_controller_in_primary";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_primary_region("r1");
-    deployment.add_server(ServerParams::default().with_region("r1"));
-    deployment.add_server(ServerParams::default().with_region("r1"));
-    deployment.add_server(ServerParams::default().with_region("r2"));
-    deployment.add_server(ServerParams::default().with_region("r3"));
+    let mut deployment = DeploymentBuilder::new("ct_controller_in_primary")
+        .primary_region("r1")
+        .add_server(ServerParams::default().with_region("r1"))
+        .add_server(ServerParams::default().with_region("r1"))
+        .add_server(ServerParams::default().with_region("r2"))
+        .add_server(ServerParams::default().with_region("r3"))
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let controller_uri = deployment.handle.controller_uri().await.unwrap();
     let controller_handle = deployment.server_handles().get(&controller_uri).unwrap();
     assert_eq!(controller_handle.params.region, Some("r1".to_string()));
@@ -138,12 +139,12 @@ async fn controller_in_primary_test() {
 #[ignore]
 #[serial]
 async fn query_failure_recovery_with_volume_id() {
-    let cluster_name = "ct_failure_recovery_with_volume_id";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_sharding(1);
-    deployment.add_server(ServerParams::default().with_volume("v1"));
+    let mut deployment = DeploymentBuilder::new("ct_failure_recovery_with_volume_id")
+        .add_server(ServerParams::default().with_volume("v1"))
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     deployment
         .handle
         .install_recipe(
@@ -185,14 +186,14 @@ async fn query_failure_recovery_with_volume_id() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn new_leader_worker_set() {
-    let cluster_name = "ct_failure_recovery_with_volume_id";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_sharding(1);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
+    let mut deployment = DeploymentBuilder::new("ct_new_leader_worker_set")
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
+        .start()
+        .await
+        .unwrap();
 
-    let mut deployment = start_multi_process(deployment).await.unwrap();
     let controller_uri = deployment.handle.controller_uri().await.unwrap();
 
     // Kill the first server to trigger failure recovery.
@@ -207,13 +208,12 @@ async fn new_leader_worker_set() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn balance_base_table_domains() {
-    let cluster_name = "ct_balance_base_table_domains";
-    let mut deployment = DeploymentParams::new(cluster_name);
-    deployment.set_sharding(1);
-    deployment.add_server(ServerParams::default());
-    deployment.add_server(ServerParams::default());
-
-    let mut deployment = start_multi_process(deployment).await.unwrap();
+    let mut deployment = DeploymentBuilder::new("ct_balance_base_table_domains")
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
+        .start()
+        .await
+        .unwrap();
 
     deployment
         .handle
