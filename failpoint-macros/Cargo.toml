@@ -1,0 +1,10 @@
+[package]
+name = "failpoint-macros"
+version = "0.1.0"
+publish = false
+authors = ["justin@readyset.io"]
+edition = "2018"
+
+[dependencies]
+fail = "0.5.0"
+failpoint-proc-macros = { path = "./proc-macros" }
