@@ -6,14 +6,16 @@ use super::spec::{DatabaseGenerationSpec, DatabaseSchema, TableGenerationSpec};
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
 use futures::StreamExt;
+use itertools::Itertools;
 use noria_client::backend::Backend;
 use noria_logictest::upstream::DatabaseURL;
 use noria_mysql::{MySqlQueryHandler, MySqlUpstream};
-use query_generator::{TableName, TableSpec};
+use query_generator::{ColumnName, TableName, TableSpec};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::iter::repeat;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -87,6 +89,18 @@ pub struct TablePartition {
     index: usize,
 }
 
+fn query_for_prepared_insert(table_name: &TableName, cols: &[ColumnName], rows: usize) -> String {
+    let placeholders = format!("({})", repeat("?").take(cols.len()).join(","));
+    let placeholders = repeat(placeholders).take(rows).join(",");
+
+    format!(
+        "INSERT INTO `{}` (`{}`) VALUES {}",
+        table_name,
+        cols.iter().join("`,`"),
+        placeholders
+    )
+}
+
 pub async fn load_table_part(
     db_url: DatabaseURL,
     table_name: TableName,
@@ -94,36 +108,47 @@ pub async fn load_table_part(
     partition: TablePartition,
     progress_bar: indicatif::ProgressBar,
 ) -> Result<()> {
-    let mut db = db_url.connect().await?;
+    use mysql_async::prelude::Queryable;
+    let mut conn = match db_url {
+        DatabaseURL::MySQL(opts) => mysql_async::Conn::new(opts).await?,
+        _ => unimplemented!(),
+    };
+
+    let columns = spec.columns.keys().cloned().collect::<Vec<_>>();
+    let insert_stmt = query_for_prepared_insert(&table_name, &columns, MAX_BATCH_ROWS);
+    let prepared_stmt = conn.prep(insert_stmt).await?;
 
     let mut rows_remaining = partition.rows;
+
     while rows_remaining > 0 {
         let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
         let index = partition.index + partition.rows - rows_remaining;
         let data = spec.generate_data_from_index(rows_to_generate, index, false);
-        let columns = spec.columns.keys().collect::<Vec<_>>();
-        let insert = nom_sql::InsertStatement {
-            table: table_name.clone().into(),
-            fields: Some(columns.iter().map(|cn| (*cn).clone().into()).collect()),
-            data: data
-                .into_iter()
-                .map(|mut row| {
-                    columns
-                        .iter()
-                        .map(|col| row.remove(col).unwrap().try_into().unwrap())
-                        .collect()
-                })
-                .collect(),
-            ignore: false,
-            on_duplicate: None,
-        };
 
-        db.query_drop(insert.to_string())
-            .await
-            .with_context(|| format!("Inserting row into database for {}", table_name))?;
+        let data_as_params = data
+            .into_iter()
+            .map(|mut row| {
+                columns
+                    .iter()
+                    .map(move |col| row.remove(col).unwrap().try_into().unwrap())
+            })
+            .flatten()
+            .collect::<Vec<mysql_async::Value>>();
+
+        if rows_to_generate == MAX_BATCH_ROWS {
+            conn.exec_drop(
+                &prepared_stmt,
+                mysql_async::Params::Positional(data_as_params),
+            )
+            .await?;
+        } else {
+            let tail_insert = query_for_prepared_insert(&table_name, &columns, rows_to_generate);
+            let stmt = conn.prep(tail_insert).await?;
+            conn.exec_drop(&stmt, mysql_async::Params::Positional(data_as_params))
+                .await?;
+        }
 
         progress_bar.inc(rows_to_generate as _);
-
         rows_remaining -= rows_to_generate;
     }
 
