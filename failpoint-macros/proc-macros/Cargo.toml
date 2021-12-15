@@ -1,0 +1,14 @@
+[package]
+name = "failpoint-proc-macros"
+version = "0.1.0"
+publish = false
+authors = ["justin@readyset.io"]
+edition = "2018"
+
+[dependencies]
+syn = {version="1.0.57",features=["full","fold"]}
+quote = "1.0.8"
+fail = "0.5.0"
+
+[lib]
+proc-macro = true

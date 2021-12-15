@@ -85,6 +85,7 @@ dataflow = { path = "dataflow", package = "noria-dataflow" }
 mir = { path = "mir", package = "noria-mir" }
 common = { path = "common", package = "noria-common" }
 noria = { path = "../noria" }
+failpoint-macros = { path = "../../failpoint-macros" }
 noria-errors = { path = "../errors" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }

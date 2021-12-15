@@ -20,6 +20,8 @@ members = [
     "noria/applications",
     "noria/clustertest",
     "noria/clustertest/macros",
+    "failpoint-macros",
+    "failpoint-macros/proc-macros",
     "noria/tools",
     "noria/noria-logictest",
     "noria/timestamp_service",

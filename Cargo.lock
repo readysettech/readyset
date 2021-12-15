@@ -2229,6 +2229,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "failpoint-macros"
+version = "0.1.0"
+dependencies = [
+ "fail",
+ "failpoint-proc-macros",
+]
+
+[[package]]
+name = "failpoint-proc-macros"
+version = "0.1.0"
+dependencies = [
+ "fail",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4136,6 +4153,7 @@ dependencies = [
  "criterion",
  "diff",
  "fail",
+ "failpoint-macros",
  "futures 0.3.17",
  "futures-core",
  "futures-executor",

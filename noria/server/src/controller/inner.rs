@@ -16,6 +16,7 @@ use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
 use dataflow::node;
 use dataflow::prelude::*;
+use failpoint_macros::failpoint;
 use hyper::Method;
 use noria::consensus::Authority;
 use noria::{RecipeSpec, WorkerDescriptor};
@@ -133,6 +134,7 @@ impl Leader {
     }
 
     #[allow(unused_variables)] // `query` is not used unless debug_assertions is enabled
+    #[failpoint("controller-request")]
     pub(super) fn external_request(
         &self,
         method: hyper::Method,
@@ -142,9 +144,6 @@ impl Leader {
         authority: &Arc<Authority>,
         leader_ready: bool,
     ) -> ReadySetResult<Vec<u8>> {
-        #[cfg(feature = "failure_injection")]
-        fail::fail_point!("controller-request");
-
         macro_rules! return_serialized {
             ($expr:expr) => {{
                 return Ok(::bincode::serialize(&$expr)?);

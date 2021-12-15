@@ -17,11 +17,27 @@ enabling and disabling failpoints, (2) Configuring failpoint behavior.
 ## Annotating Failpoints
 Failpoints introduce test code to into our production code. To prevent
 failpoints from being compiled into the production binary, the feature flag
-`failure_injection` should be used.
+`failure_injection` should be used. We provide two convinience macros
+for annotating failpoints that are dependent on the `failure_injection`
+feature.
 
-```
-#[cfg(feature = "failure_injection")]
-fail::fail_point!("critical-code-failure");
+  * The `#[failpoint("failpoint-name")]` attribute macro, which creates a
+    failpoint at the start of the annotated function.
+  * The `set_failpoint!("failpoint-name")` macro. This is a wrapper
+    around [`set_failpoint`] that includes checking for the
+    `failure_injection` feature.
+
+```rust
+use failpoint_macros::{failpoint, set_failpoint}
+
+// Creates a failpoint at the start of the function.
+#[failpoint("critical-function")]
+fn critical_function() -> Result<()> {
+
+  // Introduces a failpoint within functions.
+  set_failpoint!("critical-function-2");
+}
+
 ```
 
 If the feature flag does not exist for the crate it should be added and
@@ -46,11 +62,12 @@ Enabled failpoints should also be disabled following a test run. The fail-rs
 library provides [`FailScenario`](https://docs.rs/fail/0.5.0/fail/struct.FailScenario.html) to wrap enabling and disabling failpoints for a specific test.
 
 ```
-use fail::{fail_point, FailScenario};
+use fail::FailScenario;
+use failpoint_macros::failpoint;
 use serial_test::serial
 
+#[failpoint("read-dir")]
 fn do_fallible_work() {
-    fail_point!("read-dir");
     let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
     // ... do some work on the directory ...
 }
@@ -69,9 +86,14 @@ Noria-server, when built with the `failure_injection` feature supports
 dynamically configuring and toggling failpoints at runtime with the
 `failpoint` binary in `noria/tools`.
 
-```
-#[cfg(feature = "failure_injection")]
-fail::fail_point!("critical-code-failure");
+```rust
+use failpoint_macros::set_failpoint;
+
+fn do_fallible_work() {
+    let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
+    set_failpoint!("critical-code-failure");
+    // ... do some work on the directory ...
+}
 ```
 
 **Enabling a failpoint.**
@@ -118,8 +140,7 @@ RPC to panic. When the second `healthy_workers` call is made, the server
 running the controller panics.
 ```
     /// Test that setting a failpoint triggers a panic on RPC.
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
+    #[clustertest]
     async fn leader_failure_with_failpoints() {
         ...
         assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 1);
