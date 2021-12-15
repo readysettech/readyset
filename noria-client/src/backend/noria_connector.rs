@@ -470,15 +470,9 @@ impl NoriaConnector {
 
     pub async fn prepare_insert(
         &mut self,
-        mut sql_q: nom_sql::SqlQuery,
+        mut q: nom_sql::InsertStatement,
         statement_id: u32,
     ) -> ReadySetResult<PrepareResult> {
-        let q = if let nom_sql::SqlQuery::Insert(ref q) = sql_q {
-            q
-        } else {
-            internal!()
-        };
-
         trace!(table = %q.table.name, "insert::access mutator");
         let mutator = self
             .inner
@@ -497,24 +491,22 @@ impl NoriaConnector {
             .map(|cs| ColumnSchema::from_base(cs.clone(), q.table.name.clone()))
             .collect::<Vec<_>>();
 
-        if let nom_sql::SqlQuery::Insert(ref mut q) = sql_q {
-            if q.fields.is_none() {
-                q.fields = Some(
-                    mutator
-                        .schema()
-                        .as_ref()
-                        .unwrap()
-                        .fields
-                        .iter()
-                        .map(|cs| cs.column.clone())
-                        .collect(),
-                );
-            }
+        if q.fields.is_none() {
+            q.fields = Some(
+                mutator
+                    .schema()
+                    .as_ref()
+                    .unwrap()
+                    .fields
+                    .iter()
+                    .map(|cs| cs.column.clone())
+                    .collect(),
+            );
         }
 
         let params: Vec<_> = {
             // extract parameter columns -- easy here, since they must all be in the same table
-            let param_cols = utils::get_parameter_columns(&sql_q);
+            let param_cols = utils::insert_statement_parameter_columns(&q);
             param_cols
                 .into_iter()
                 .map(|c| {
@@ -531,11 +523,6 @@ impl NoriaConnector {
 
         // nothing more to do for an insert
         // register a new prepared statement
-        let q = if let nom_sql::SqlQuery::Insert(q) = sql_q {
-            q
-        } else {
-            internal!()
-        };
         trace!(id = statement_id, "insert::registered");
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Insert(q));
@@ -642,16 +629,10 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_update(
         &mut self,
-        sql_q: nom_sql::SqlQuery,
+        q: nom_sql::UpdateStatement,
         statement_id: u32,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        let q = if let nom_sql::SqlQuery::Update(ref q) = sql_q {
-            q
-        } else {
-            internal!()
-        };
-
         trace!(table = %q.table.name, "update::access mutator");
         let mutator = self
             .inner
@@ -665,7 +646,7 @@ impl NoriaConnector {
         })?;
 
         // extract parameter columns
-        let params = utils::get_parameter_columns(&sql_q)
+        let params = utils::update_statement_parameter_columns(&q)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -679,13 +660,6 @@ impl NoriaConnector {
                     .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
             })
             .collect::<Result<Vec<_>, _>>()?;
-
-        // must have an update query
-        let q = if let nom_sql::SqlQuery::Update(q) = sql_q {
-            q
-        } else {
-            internal!();
-        };
 
         trace!(id = statement_id, "update::registered");
         self.prepared_statement_cache
@@ -718,27 +692,24 @@ impl NoriaConnector {
 
     pub(crate) async fn prepare_delete(
         &mut self,
-        statement: &DeleteStatement,
+        q: DeleteStatement,
         statement_id: u32,
     ) -> ReadySetResult<PrepareResult> {
         // ensure that we have schemas and endpoints for the query
-        trace!(table = %statement.table.name, "delete::access mutator");
+        trace!(table = %q.table.name, "delete::access mutator");
         let mutator = self
             .inner
             .get_mut()
             .await?
-            .get_noria_table(&statement.table.name)
+            .get_noria_table(&q.table.name)
             .await?;
         trace!("delete::extract schema");
         let table_schema = mutator.schema().ok_or_else(|| {
-            internal_err(format!(
-                "Could not find schema for table {}",
-                statement.table.name
-            ))
+            internal_err(format!("Could not find schema for table {}", q.table.name))
         })?;
 
         // extract parameter columns
-        let params = utils::delete_statement_parameter_columns(statement)
+        let params = utils::delete_statement_parameter_columns(&q)
             .into_iter()
             .map(|c| {
                 table_schema
@@ -748,14 +719,14 @@ impl NoriaConnector {
                     // and name - just check name here
                     .find(|f| f.column.name == c.name)
                     .cloned()
-                    .map(|cs| ColumnSchema::from_base(cs, statement.table.name.clone()))
+                    .map(|cs| ColumnSchema::from_base(cs, q.table.name.clone()))
                     .ok_or_else(|| internal_err(format!("Unknown column {}", c)))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         trace!(id = statement_id, "delete::registered");
         self.prepared_statement_cache
-            .insert(statement_id, PreparedStatement::Delete(statement.clone()));
+            .insert(statement_id, PreparedStatement::Delete(q));
         Ok(PrepareResult::Delete {
             statement_id,
             params,

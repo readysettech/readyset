@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::{TryFrom, TryInto};
 
-use nom_sql::DeleteStatement;
 use nom_sql::{
-    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, Expression, Literal,
-    SelectStatement, SqlQuery, TableKey, UpdateStatement,
+    BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expression,
+    InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
 use noria::{DataType, Modification, Operation};
 use noria_errors::{
@@ -327,6 +326,40 @@ pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
     limit_params
 }
 
+pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec<&Column> {
+    assert_eq!(query.data.len(), 1);
+    // need to find for which fields we *actually* have a parameter
+    query.data[0]
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| match *v {
+            Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn update_statement_parameter_columns(query: &UpdateStatement) -> Vec<&Column> {
+    let field_params = query.fields.iter().filter_map(|f| {
+        if let Expression::Literal(Literal::Placeholder(_)) = f.1 {
+            Some(&f.0)
+        } else {
+            None
+        }
+    });
+
+    let where_params = if let Some(ref wc) = query.where_clause {
+        get_parameter_columns_recurse(wc)
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect()
+    } else {
+        vec![]
+    };
+
+    field_params.chain(where_params.into_iter()).collect()
+}
+
 pub(crate) fn delete_statement_parameter_columns(query: &DeleteStatement) -> Vec<&Column> {
     if let Some(ref wc) = query.where_clause {
         get_parameter_columns_recurse(wc)
@@ -341,38 +374,8 @@ pub(crate) fn delete_statement_parameter_columns(query: &DeleteStatement) -> Vec
 pub(crate) fn get_parameter_columns(query: &SqlQuery) -> Vec<&Column> {
     match *query {
         SqlQuery::Select(ref query) => select_statement_parameter_columns(query),
-        SqlQuery::Insert(ref query) => {
-            assert_eq!(query.data.len(), 1);
-            // need to find for which fields we *actually* have a parameter
-            query.data[0]
-                .iter()
-                .enumerate()
-                .filter_map(|(i, v)| match *v {
-                    Literal::Placeholder(_) => Some(&query.fields.as_ref().unwrap()[i]),
-                    _ => None,
-                })
-                .collect()
-        }
-        SqlQuery::Update(ref query) => {
-            let field_params = query.fields.iter().filter_map(|f| {
-                if let Expression::Literal(Literal::Placeholder(_)) = f.1 {
-                    Some(&f.0)
-                } else {
-                    None
-                }
-            });
-
-            let where_params = if let Some(ref wc) = query.where_clause {
-                get_parameter_columns_recurse(wc)
-                    .into_iter()
-                    .map(|(c, _)| c)
-                    .collect()
-            } else {
-                vec![]
-            };
-
-            field_params.chain(where_params.into_iter()).collect()
-        }
+        SqlQuery::Insert(ref query) => insert_statement_parameter_columns(query),
+        SqlQuery::Update(ref query) => update_statement_parameter_columns(query),
         SqlQuery::Delete(ref query) => delete_statement_parameter_columns(query),
         _ => unimplemented!(),
     }
