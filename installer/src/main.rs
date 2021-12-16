@@ -1153,6 +1153,25 @@ impl Installer {
             .db_instance_identifier(&db_id)
             .send()
             .await?;
+
+        loop {
+            let db = self
+                .rds_client()
+                .await?
+                .describe_db_instances()
+                .db_instance_identifier(&db_id)
+                .send()
+                .await?
+                .db_instances
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("RDS database went away"))?;
+            if db.db_instance_status() == Some("available") {
+                break;
+            }
+        }
+
         reboot_db_pb.finish_with_message(format!("{}Rebooted {}", *GREEN_CHECK, reboot_db_desc));
 
         Ok(())
