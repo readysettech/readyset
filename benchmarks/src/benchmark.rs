@@ -61,25 +61,25 @@ impl Benchmark {
 pub struct DeploymentParameters {
     /// Instance label, for metrics.  In CI, it makes sense to set this to the
     /// CL# or commit hash.
-    #[clap(long, default_value("local"))]
+    #[clap(long, env = "INSTANCE_LABEL", default_value("local"))]
     pub instance_label: String,
 
     /// Address of a push gateway for a benchmark's prometheus metrics.
-    #[clap(long)]
+    #[clap(long, env = "PROMETHEUS_PUSH_GATEWAY")]
     pub prometheus_push_gateway: Option<String>,
 
     /// Noria metrics endpoint; Endpoint that can be used to forward metrics from
     /// the server. If not specified, no metrics will be forwarded.
-    #[clap(long)]
+    #[clap(long, env = "PROMETHEUS_SERVER")]
     pub prometheus_endpoint: Option<PrometheusEndpoint>,
 
     /// Target database connection string. This is the database in the deployment
     /// we are benchmarking operations against.
-    #[clap(long, default_value = "")]
+    #[clap(long, env = "TARGET_CONN_STR", default_value = "")]
     pub target_conn_str: String,
 
-    /// Setup database connection string.    
-    #[clap(long, default_value = "")]
+    /// Setup database connection string.
+    #[clap(long, env = "SETUP_CONN_STR", default_value = "")]
     pub setup_conn_str: String,
 }
 
