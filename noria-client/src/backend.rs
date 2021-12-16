@@ -1162,6 +1162,19 @@ where
             .get(&id)
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
+        if self.is_in_tx() {
+            // transactions are only supported on upstream
+            match prepared_statement.upstream {
+                Some(upstream_id) => {
+                    return self.execute_upstream(upstream_id, params, event).await;
+                }
+                None => {
+                    error!("Missing upstream statement ID for query in transactoin");
+                    return Err(PreparedStatementMissing { statement_id: id }.into());
+                }
+            }
+        }
+
         match self.prepared_queries.get(&id).cloned() {
             // If we have a `prepared_statement` but not a `SqlQuery` associated with it,
             // this is an unparseable prepared statement, issue this directly to
