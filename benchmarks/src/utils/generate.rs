@@ -41,6 +41,42 @@ impl DataGenerator {
         conn.query_drop(ddl).await
     }
 
+    async fn adjust_mysql_vars(db_url: &DatabaseURL) -> Option<usize> {
+        use mysql_async::prelude::Queryable;
+
+        let mysql_opt = match db_url {
+            DatabaseURL::MySQL(mysql_opts) => mysql_opts.clone(),
+            _ => return None,
+        };
+
+        let mut conn = mysql_async::Conn::new(mysql_opt).await.ok()?;
+        let size = conn.query_first("SELECT @@innodb_buffer_pool_size").await;
+        let old_size: usize = size.ok()??;
+        let new_size = std::cmp::min(old_size * 8, 1024 * 1024 * 1024); // We want a buffer of at least 1GiB
+
+        let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", new_size);
+        let disable_redo_log_q = "ALTER INSTANCE DISABLE INNODB REDO_LOG";
+        let _ = conn.query_drop(set_pool_size_q).await;
+        let _ = conn.query_drop(disable_redo_log_q).await;
+        Some(old_size)
+    }
+
+    async fn revert_mysql_vars(db_url: &DatabaseURL, old_size: Option<usize>) {
+        use mysql_async::prelude::Queryable;
+
+        let (mysql_opt, old_size) = match (db_url, old_size) {
+            (DatabaseURL::MySQL(opts), Some(sz)) => (opts.clone(), sz),
+            _ => return,
+        };
+
+        if let Ok(mut conn) = mysql_async::Conn::new(mysql_opt).await {
+            let set_pool_size_q = format!("SET GLOBAL innodb_buffer_pool_size={}", old_size);
+            let enable_redo_log_q = "ALTER INSTANCE ENABLE INNODB REDO_LOG";
+            let _ = conn.query_drop(set_pool_size_q).await;
+            let _ = conn.query_drop(enable_redo_log_q).await;
+        }
+    }
+
     pub async fn generate(&self, conn_str: &str) -> anyhow::Result<DatabaseGenerationSpec> {
         let user_vars: HashMap<String, String> = self
             .var_overrides
@@ -50,23 +86,15 @@ impl DataGenerator {
             .map(|(key, value)| (key.to_owned(), value.as_str().unwrap().to_owned()))
             .collect();
 
+        let db_url = DatabaseURL::from_str(conn_str)?;
+
+        let old_size = Self::adjust_mysql_vars(&db_url).await;
+
         let schema = DatabaseSchema::try_from((self.schema.clone(), user_vars))?;
         let database_spec = DatabaseGenerationSpec::new(schema);
+        let status = parallel_load(db_url.clone(), database_spec.clone()).await;
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        let status = runtime
-            .spawn(parallel_load(
-                DatabaseURL::from_str(conn_str)?,
-                database_spec.clone(),
-            ))
-            .await
-            .unwrap();
-
-        runtime.shutdown_background();
+        Self::revert_mysql_vars(&db_url, old_size).await;
 
         status?;
 
@@ -120,20 +148,24 @@ pub async fn load_table_part(
 
     let mut rows_remaining = partition.rows;
 
+    conn.query_drop("SET autocommit = 0").await?;
+
     while rows_remaining > 0 {
         let rows_to_generate = std::cmp::min(MAX_BATCH_ROWS, rows_remaining);
         let index = partition.index + partition.rows - rows_remaining;
-        let data = spec.generate_data_from_index(rows_to_generate, index, false);
 
-        let data_as_params = data
-            .into_iter()
-            .map(|mut row| {
-                columns
-                    .iter()
-                    .map(move |col| row.remove(col).unwrap().try_into().unwrap())
-            })
-            .flatten()
-            .collect::<Vec<mysql_async::Value>>();
+        let data_as_params = tokio::task::block_in_place(|| {
+            let data = spec.generate_data_from_index(rows_to_generate, index, false);
+
+            data.into_iter()
+                .map(|mut row| {
+                    columns
+                        .iter()
+                        .map(move |col| row.remove(col).unwrap().try_into().unwrap())
+                })
+                .flatten()
+                .collect::<Vec<mysql_async::Value>>()
+        });
 
         if rows_to_generate == MAX_BATCH_ROWS {
             conn.exec_drop(
@@ -151,6 +183,8 @@ pub async fn load_table_part(
         progress_bar.inc(rows_to_generate as _);
         rows_remaining -= rows_to_generate;
     }
+
+    conn.query_drop("COMMIT").await?;
 
     Ok(())
 }
@@ -174,7 +208,7 @@ async fn load_table(
                 progress_bar.clone(),
             )
         }))
-        .buffer_unordered(32);
+        .buffer_unordered(8);
 
     while let Some(task) = sub_tasks.next().await {
         task?;
@@ -219,7 +253,7 @@ pub async fn parallel_load(db: DatabaseURL, spec: DatabaseGenerationSpec) -> Res
                     .clone(),
             )
         }))
-        .buffer_unordered(1); // Sadly MySQL is slower when writing to two tables, if someone can figure it out change this to a higher value
+        .buffer_unordered(4);
 
     while let Some(task) = table_tasks.next().await {
         task?;
