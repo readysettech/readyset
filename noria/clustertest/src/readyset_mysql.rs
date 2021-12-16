@@ -8,7 +8,7 @@ use serial_test::serial;
 use std::time::Duration;
 use test_utils::skip_slow_tests;
 
-const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(10);
+const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn readyset_mysql(name: &str) -> DeploymentBuilder {
     DeploymentBuilder::new(name)
@@ -97,7 +97,7 @@ async fn mirror_prepare_exec_test() {
     );
     // Kill the one and only server, everything should go to fallback.
     deployment
-        .kill_server(&deployment.server_addrs()[0])
+        .kill_server(&deployment.server_addrs()[0], false)
         .await
         .unwrap();
     let result: Vec<(i32, i32)> = adapter_conn
@@ -176,7 +176,49 @@ async fn async_migrations_confidence_check() {
 }
 
 #[clustertest]
-async fn query_view_after_failure() {
+async fn failure_during_query() {
+    let mut deployment = readyset_mysql("ct_failure_during_query")
+        .with_servers(2, ServerParams::default())
+        .quorum(2)
+        .start()
+        .await
+        .unwrap();
+
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_db_str().unwrap()).unwrap();
+    let mut upstream_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    upstream_conn
+        .query_drop("CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);")
+        .await
+        .unwrap();
+    upstream_conn
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    adapter_conn
+        .query_drop("CREATE QUERY CACHE AS SELECT * FROM t1 where uid = ?")
+        .await
+        .unwrap();
+
+    // Whoever services the read query is going to panic.
+    for s in deployment.server_handles().values_mut() {
+        s.set_failpoint("read-query", "panic").await;
+    }
+
+    // Should return the correct results from fallback.
+    let result: Vec<(i32, i32)> = adapter_conn
+        .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
+        .await
+        .unwrap();
+    assert_eq!(result, vec![(2, 5)]);
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+async fn query_cached_view_after_failure() {
     let mut deployment = readyset_mysql("ct_query_view_after_failure")
         .add_server(ServerParams::default())
         .start()
@@ -194,7 +236,11 @@ async fn query_view_after_failure() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    conn.query_drop("CREATE QUERY CACHE AS SELECT * FROM t1 where uid = ?")
         .await
         .unwrap();
 
@@ -215,11 +261,12 @@ async fn query_view_after_failure() {
     sleep(std::time::Duration::from_secs(10)).await;
 
     deployment
-        .kill_server(&deployment.server_addrs()[0])
+        .kill_server(&deployment.server_addrs()[0], false)
         .await
         .unwrap();
+
     deployment
-        .start_server(ServerParams::default())
+        .start_server(ServerParams::default(), false)
         .await
         .unwrap();
 
@@ -294,10 +341,13 @@ async fn end_to_end_with_restarts() {
             .clone()
             .unwrap();
         println!("Killing server: {}", controller_uri);
-        deployment.kill_server(&controller_uri).await.unwrap();
+        deployment
+            .kill_server(&controller_uri, false)
+            .await
+            .unwrap();
         println!("Starting new server");
         deployment
-            .start_server(ServerParams::default().with_volume(&volume_id))
+            .start_server(ServerParams::default().with_volume(&volume_id), false)
             .await
             .unwrap();
 
@@ -361,10 +411,13 @@ async fn view_survives_restart() {
     for _ in 0..10 {
         let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
         println!("Killing server: {}", controller_uri);
-        deployment.kill_server(&controller_uri).await.unwrap();
+        deployment
+            .kill_server(&controller_uri, false)
+            .await
+            .unwrap();
         println!("Starting new server");
         deployment
-            .start_server(ServerParams::default())
+            .start_server(ServerParams::default(), false)
             .await
             .unwrap();
 

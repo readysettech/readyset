@@ -37,7 +37,7 @@ async fn query_regional_routing_test() {
 
     let r1_addr = deployment.server_addrs()[0].clone();
     let r2_addr = deployment
-        .start_server(ServerParams::default().with_region("r2"))
+        .start_server(ServerParams::default().with_region("r2"), true)
         .await
         .unwrap();
 
@@ -123,7 +123,7 @@ async fn controller_in_primary_test() {
     let controller_handle = deployment.server_handles().get(&controller_uri).unwrap();
     assert_eq!(controller_handle.params.region, Some("r1".to_string()));
 
-    deployment.kill_server(&controller_uri).await.unwrap();
+    deployment.kill_server(&controller_uri, true).await.unwrap();
     let new_controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
     let new_controller_handle = deployment
         .server_handles()
@@ -172,11 +172,11 @@ async fn query_failure_recovery_with_volume_id() {
     // on the first server.
     let r1_addr = deployment.server_addrs()[0].clone();
     deployment
-        .start_server(ServerParams::default().with_volume("v2"))
+        .start_server(ServerParams::default().with_volume("v2"), true)
         .await
         .unwrap();
 
-    deployment.kill_server(&r1_addr).await.unwrap();
+    deployment.kill_server(&r1_addr, true).await.unwrap();
 
     let res = deployment.leader_handle().view("q").await;
     assert!(res.is_err());
@@ -195,7 +195,7 @@ async fn new_leader_worker_set() {
     let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
 
     // Kill the first server to trigger failure recovery.
-    deployment.kill_server(&controller_uri).await.unwrap();
+    deployment.kill_server(&controller_uri, true).await.unwrap();
 
     // Check the number of healthy workers in the system.
     assert_eq!(

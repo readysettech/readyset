@@ -3,6 +3,7 @@ use dataflow::prelude::DataType;
 use dataflow::prelude::*;
 use dataflow::Readers;
 use dataflow::SingleReadHandle;
+use failpoint_macros::set_failpoint;
 use futures_util::{
     future,
     future::Either,
@@ -73,6 +74,7 @@ type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadRe
 pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: Readers) {
     let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
     while let Some(stream) = stream.next().await {
+        set_failpoint!("read-query");
         if stream.is_err() {
             // io error from client: just ignore it
             continue;
