@@ -13,6 +13,10 @@ impl ProcessHandle {
         self.process.kill()?;
         Ok(())
     }
+
+    pub fn is_alive(&mut self) -> bool {
+        self.process.try_wait().unwrap().is_none()
+    }
 }
 
 /// Manages running a noria-server binary with the correct arguments.

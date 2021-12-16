@@ -454,8 +454,7 @@ impl DeploymentBuilder {
             .authority
             .to_authority(&self.authority_address, &self.name)
             .await;
-        let mut handle = ControllerHandle::new(authority).await;
-        wait_until_worker_count(&mut handle, Duration::from_secs(15), self.servers.len()).await?;
+        let handle = ControllerHandle::new(authority).await;
 
         // Duplicate the authority and handle creation as the metrics client
         // owns its own handle.
@@ -491,7 +490,7 @@ impl DeploymentBuilder {
             None
         };
 
-        Ok(DeploymentHandle {
+        let mut handle = DeploymentHandle {
             handle,
             metrics,
             name: self.name.clone(),
@@ -506,7 +505,11 @@ impl DeploymentBuilder {
             primary_region: self.primary_region,
             port,
             mysql_adapter: mysql_adapter_handle,
-        })
+        };
+
+        handle.wait_for_workers(Duration::from_secs(90)).await?;
+
+        Ok(handle)
     }
 }
 
@@ -521,7 +524,15 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
-    pub async fn set_failpoint(&self, name: &str, action: &str) {
+    pub fn is_alive(&mut self) -> bool {
+        self.process.is_alive()
+    }
+
+    pub async fn set_failpoint(&mut self, name: &str, action: &str) {
+        if !self.is_alive() {
+            return;
+        }
+
         let data = bincode::serialize(&(name, action)).unwrap();
         let string_url = self.addr.to_string() + "failpoint";
         let r = hyper::Request::get(string_url)
@@ -529,9 +540,13 @@ impl ServerHandle {
             .unwrap();
 
         let client = Client::new();
-        let res = client.request(r).await.unwrap();
-        let status = res.status();
-        assert!(status == hyper::StatusCode::OK);
+        // If this http requests returns an error, we probably killed off the
+        // server. If it returns something that isn't StatusCode::Ok, there
+        // is probably a problem with the controller HTTP logic.
+        if let Ok(r) = client.request(r).await {
+            let status = r.status();
+            assert!(status == hyper::StatusCode::OK);
+        }
     }
 }
 
@@ -606,10 +621,54 @@ impl DeploymentHandle {
         self.mysql_addr.clone()
     }
 
+    pub fn num_alive_workers(&mut self) -> usize {
+        let mut count = 0;
+        for s in self.server_handles().values_mut() {
+            count += s.is_alive() as usize;
+        }
+        count
+    }
+
+    // Queries the number of workers every half second until `max_wait`.
+    pub async fn wait_for_workers(&mut self, max_wait: Duration) -> Result<()> {
+        let num_workers = self.num_alive_workers();
+        if num_workers == 0 {
+            return Ok(());
+        }
+
+        let start = Instant::now();
+        loop {
+            let now = Instant::now();
+            if (now - start) > max_wait {
+                break;
+            }
+
+            let num_workers = self.num_alive_workers();
+
+            // Use a timeout so if the leader died we retry quickly before the `max_wait`
+            // duration.
+            if let Ok(Ok(workers)) =
+                tokio::time::timeout(Duration::from_secs(1), self.handle.healthy_workers()).await
+            {
+                if workers.len() == num_workers {
+                    return Ok(());
+                }
+            }
+
+            sleep(Duration::from_millis(500)).await;
+        }
+
+        Err(anyhow!("Exceeded maximum time to wait for workers"))
+    }
+
     /// Start a new noria-server instance in the deployment using the provided
     /// [`ServerParams`]. Any deployment-wide configuration parameters, such as
     /// sharing, quorum, authority, are passed to the new server.
-    pub async fn start_server(&mut self, params: ServerParams) -> anyhow::Result<Url> {
+    pub async fn start_server(
+        &mut self,
+        params: ServerParams,
+        wait_for_startup: bool,
+    ) -> anyhow::Result<Url> {
         let port = get_next_good_port(Some(self.port));
         self.port = port;
         let handle = start_server(
@@ -628,13 +687,10 @@ impl DeploymentHandle {
         self.noria_server_handles
             .insert(server_addr.clone(), handle);
 
-        // Wait until the worker has been created and is visible over rpc.
-        wait_until_worker_count(
-            &mut self.handle,
-            Duration::from_secs(90),
-            self.noria_server_handles.len(),
-        )
-        .await?;
+        if wait_for_startup {
+            self.wait_for_workers(Duration::from_secs(90)).await?;
+        }
+
         Ok(server_addr)
     }
 
@@ -676,7 +732,11 @@ impl DeploymentHandle {
 
     /// Kills an existing noria-server instance in the deployment referenced
     /// by `Url`.
-    pub async fn kill_server(&mut self, server_addr: &Url) -> anyhow::Result<()> {
+    pub async fn kill_server(
+        &mut self,
+        server_addr: &Url,
+        wait_for_removal: bool,
+    ) -> anyhow::Result<()> {
         if !self.noria_server_handles.contains_key(server_addr) {
             return Err(anyhow!("Server handle does not exist in deployment"));
         }
@@ -684,13 +744,9 @@ impl DeploymentHandle {
         let mut handle = self.noria_server_handles.remove(server_addr).unwrap();
         handle.process.kill()?;
 
-        // Wait until the server is no longer visible in the deployment.
-        wait_until_worker_count(
-            &mut self.handle,
-            Duration::from_secs(90),
-            self.noria_server_handles.len(),
-        )
-        .await?;
+        if wait_for_removal {
+            self.wait_for_workers(Duration::from_secs(90)).await?;
+        }
 
         Ok(())
     }
@@ -736,8 +792,8 @@ impl DeploymentHandle {
 
     /// Returns the [`ServerHandle`] for a noria-server if `url` is in the
     /// deployment. Otherwise, `None` is returned.
-    pub fn server_handle(&self, url: &Url) -> Option<&ServerHandle> {
-        self.noria_server_handles.get(url)
+    pub fn server_handle(&mut self, url: &Url) -> Option<&mut ServerHandle> {
+        self.noria_server_handles.get_mut(url)
     }
 }
 
@@ -750,39 +806,6 @@ impl Drop for DeploymentHandle {
     fn drop(&mut self) {
         executor::block_on(self.teardown());
     }
-}
-
-// Queries the number of workers every half second until `max_wait`.
-async fn wait_until_worker_count(
-    handle: &mut ControllerHandle,
-    max_wait: Duration,
-    num_workers: usize,
-) -> Result<()> {
-    if num_workers == 0 {
-        return Ok(());
-    }
-
-    let start = Instant::now();
-    loop {
-        let now = Instant::now();
-        if (now - start) > max_wait {
-            break;
-        }
-
-        // Use a timeout so if the leader died we retry quickly before the `max_wait`
-        // duration.
-        if let Ok(Ok(workers)) =
-            tokio::time::timeout(Duration::from_secs(1), handle.healthy_workers()).await
-        {
-            if workers.len() == num_workers {
-                return Ok(());
-            }
-        }
-
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    Err(anyhow!("Exceeded maximum time to wait for workers"))
 }
 
 /// Returns the path `temp_dir()`/deployment_name.
@@ -966,7 +989,7 @@ mod tests {
 
         // Start up a new server.
         let server_handle = deployment
-            .start_server(ServerParams::default().with_region("r3"))
+            .start_server(ServerParams::default().with_region("r3"), true)
             .await
             .unwrap();
         assert_eq!(
@@ -980,16 +1003,8 @@ mod tests {
         );
 
         // Now kill that server we started up.
-        deployment.kill_server(&server_handle).await.unwrap();
-        assert_eq!(
-            deployment
-                .leader_handle()
-                .healthy_workers()
-                .await
-                .unwrap()
-                .len(),
-            2
-        );
+        deployment.kill_server(&server_handle, true).await.unwrap();
+        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 2);
 
         deployment.teardown().await.unwrap();
     }
