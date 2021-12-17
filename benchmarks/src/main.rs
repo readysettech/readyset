@@ -161,6 +161,7 @@ impl BenchmarkRunner {
                 .await?
         {
             benchmark_cmd.setup(&self.deployment_params).await?;
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
 
         let importer = self.start_metric_readers();
