@@ -235,192 +235,116 @@ steps:
       message: ":rocket: External AMIs for ${BUILDKITE_COMMIT}"
     async: true
 
-  - block: ":rocket: :rust: Build release binaries?"
-    key: build-release-binaries
-    depends_on:
-      - lint-commits
-      - build-image
-      - check-rustfmt
-      - check-clippy
-      - rust-tests
-      - logictest
-      - logictest-binlog
+  - block: "Build :amazon-ec2: AMIs and :cloud: CFN templates"
+    prompt: "Build AMIs and CFN templates?"
 
-  - label: ':rust: Build noria-server release binary'
-    key: build-noria-server-release
+  - label: ':rust: Build readyset release binaries'
+    key: build-binaries
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server
-    - strip target/release/noria-server
+      - 'echo +++ :rust: Running cargo build'
+      - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume --bin metrics-aggregator
+      - strip target/release/noria-server target/release/noria-mysql target/release/noria-psql target/release/ensure-ebs-volume target/release/metrics-aggregator
     artifact_paths:
-    - target/release/noria-server
-    depends_on:
-    - build-image
-    - build-release-binaries
+      - target/release/noria-server
+      - target/release/noria-mysql
+      - target/release/noria-psql
+      - target/release/ensure-ebs-volume
+      - target/release/metrics-aggregator
     plugins:
-      - docker#v3.8.0:
+      - docker#v3.9.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
           volumes:
-          - 'cargo-registry:/usr/local/cargo/registry'
+            - 'cargo-registry:/usr/local/cargo/registry'
           environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
+            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+            - CACHEPOT_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
       - ecr#v2.5.0:
           login: true
           retries: 3
 
-  - label: ':rust: Build ensure-ebs-volume release binary'
-    key: build-ensure-ebs-volume-release
+  - label: ":packer: Run build for internal images"
+    key: packer-build
+    depends_on:
+    - build-binaries
     commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build --release --bin ensure-ebs-volume
-    - strip target/release/ensure-ebs-volume
-    artifact_paths:
-    - target/release/ensure-ebs-volume
-    depends_on:
-    - build-image
-    - build-release-binaries
+      - cd /workdir/ops/images
+      - mkdir binaries
+      - 'echo +++ :buildkite: Downloading binary artifacts'
+      - buildkite-agent artifact download target/release/* binaries/
+      - packer init .
+      - 'echo +++ :packer: Running packer build'
+      - packer build -only=amazon-ebs.readyset-* .
+      - 'echo +++ :buildkite: Uploading manifest artifact'
+      - buildkite-agent artifact upload packer-manifest.json
     plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-
-  - label: ':rust: Build noria-mysql adapter release binary'
-    key: build-noria-mysql-adapter-release
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-mysql
-    - strip target/release/noria-mysql
-    artifact_paths:
-    - target/release/noria-mysql
-    depends_on:
-    - build-image
-    - build-release-binaries
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-
-  - label: ':rust: Build metrics-aggregator release binary'
-    key: build-metrics-aggregator-release
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build --release --bin metrics-aggregator
-    - strip target/release/metrics-aggregator
-    artifact_paths:
-    - target/release/metrics-aggregator
-    depends_on:
-    - build-release-binaries
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-
-  - label: ':rust: Build noria-psql adapter release binary'
-    key: build-noria-psql-adapter-release
-    commands:
-    - 'echo +++ :rust: Running cargo build'
-    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-psql
-    - strip target/release/noria-psql
-    artifact_paths:
-    - target/release/noria-psql
-    depends_on:
-    - build-image
-    - build-release-binaries
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
-          volumes:
-          - 'cargo-registry:/usr/local/cargo/registry'
-          environment:
-          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
-          - CACHEPOT_REGION=us-east-2
-          - CARGO_INCREMENTAL=0
-      - ecr#v2.5.0:
-          login: true
-          retries: 3
-
-  - block: ":packer: Build Readyset Packer images?"
-    key: build-packer-images
-    depends_on:
-    - build-release-binaries
-    - build-noria-server-release
-    - build-noria-mysql-adapter-release
-    - build-noria-psql-adapter-release
-    - build-ensure-ebs-volume-release
-
-  - label: ':packer: Build ReadySet Customer images'
-    key: build-images
-    commands:
-    - cd ops/images
-    - mkdir binaries
-    - 'echo +++ :buildkite: Downloading binary artifacts'
-    - buildkite-agent artifact download target/release/* binaries/
-    - 'echo +++ :packer: Running packer build'
-    - packer init .
-    - packer build -only=amazon-ebs.readyset-* .
-    artifact_paths:
-    - ops/images/packer-manifest.json
-    depends_on:
-    - build-packer-images
-    - build-release-binaries
-    - build-noria-server-release
-    - build-noria-mysql-adapter-release
-    - build-noria-psql-adapter-release
-    - build-ensure-ebs-volume-release
-    - build-metrics-aggregator-release
-    plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
           propagate-environment: true
           environment:
-          - PACKER_CREATE_AMI=true
-          - PACKER_PRODUCTION=true
-      - ecr#v2.2.0:
+            - PACKER_CREATE_AMI=true
+            - PACKER_PRODUCTION=true
+      - ecr#v2.5.0:
           login: true
+          retries: 3
 
-  - label: ':packer: Build infrastructure images'
-    key: build-infra-images
-    commands:
-    - cd ops/images
-    - 'echo +++ :packer: Running packer build'
-    - packer init .
-    - packer build -only=amazon-ebs.tailscale-subnet-router .
-    artifact_paths:
-    - ops/images/packer-manifest.json
+  - label: ":python: :yaml: build CFN templates locally"
+    key: packer-cfn-template-ytt
     depends_on:
-    - build-packer-images
+    - packer-build
+    commands:
+      - buildkite-agent artifact download packer-manifest.json --step packer-build ./ops/image-deploy
+      - cd ops/cfn/templates
+      - ytt_apply.sh -i ../ytt_templates -m ../../image-deploy/packer-manifest.json -o ./
+      - buildkite-agent artifact upload "./*.yaml"
     plugins:
-      - docker#v3.8.0:
-          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
           propagate-environment: true
-          environment:
-          - PACKER_CREATE_AMI=true
-          - PACKER_PRODUCTION=true
-      - ecr#v2.2.0:
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
           login: true
+          retries: 3
+
+  - label: ":rain_cloud: Lint CFN templates"
+    key: packer-cfn-template-lint
+    depends_on:
+    - packer-cfn-template-ytt
+    commands:
+      - cd ops/cfn
+      - mkdir ./rendered_templates
+      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
+      - rain fmt --verify rendered_templates/*
+      - cfn-lint rendered_templates/*.yaml
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":aws: Copy CFN Templates to internal storage"
+    key: packer-cfn-template-copy
+    depends_on:
+    - packer-cfn-template-lint
+    commands:
+      - cd ops/cfn
+      - mkdir ./rendered_templates
+      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
+      - cd ./rendered_templates
+      - aws s3 cp . s3://readysettech-cfn-internal-us-east-2/${BUILDKITE_COMMIT}/readyset/templates/ --exclude "*" --include "*.yaml" --recursive
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InternalArtifactsWrite
+    agents:
+      queue: ops

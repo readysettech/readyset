@@ -29,8 +29,9 @@ source "amazon-ebs" "readyset-monitor" {
   ami_name                  = local.readyset_monitor_ami_name
   ssh_clear_authorized_keys = true
 
-  ami_users = local.ami_users
-  region    = local.source_region
+  ami_users   = local.ami_users
+  region      = local.source_region
+  ami_regions = local.ami_regions
 
   # This is only used for building and has no bearing on how it is deployed
   instance_type = "t2.small"

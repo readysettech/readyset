@@ -130,17 +130,22 @@ RUN set -eux; \
         docker.io \
         python3.8 \
         python3-pip \
-        awscli \
         jq; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Install internal python tools
 COPY py-tools /tmp/py-tools
-
 RUN set -eux; \
     cd /tmp/py-tools; \
     python3.8 -m pip install .
 
+# Install general Python Packages
+RUN set -eux; \
+    python3.8 -m pip install \
+        awscli \
+        cfn-lint
+# Install internal shell tools
 COPY sh-tools/ytt_apply.sh /usr/local/bin/ytt_apply.sh
 RUN chmod +x /usr/local/bin/ytt_apply.sh
 
@@ -150,7 +155,7 @@ RUN set -eux; \
     tflint --version; \
     shellcheck --version; \
     python3.8 --version ;\
-    python3.8 -m cfn-deploy --version ;\
+    python3.8 -m ytt-minus --version ;\
     ytt --version ; \
     rain --version ; \
     ytt_apply.sh -v; \

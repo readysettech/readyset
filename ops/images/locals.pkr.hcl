@@ -13,6 +13,7 @@ locals {
   ssh_username            = "ubuntu"
 
   source_region     = "us-east-2"
+  ami_regions       = ["us-east-2", "us-east-1", "us-west-2"]
   ubuntu_account_id = "099720109477"
 
   deploy_account_id  = "888984949675"

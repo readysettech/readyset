@@ -1,5 +1,3 @@
-#@ load("@ytt:data", "data")
-
 AWSTemplateFormatVersion: "2010-09-09"
 
 Metadata:
@@ -15,6 +13,7 @@ Metadata:
       - Label:
           default: SSH Access Configuration
         Parameters:
+          - KeyPairName
           - KeyPairName
       - Label:
           default: Consul Configuration
@@ -75,11 +74,11 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
-      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_east_1
+      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_east_1}
     us-east-2:
-      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_east_2
+      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_east_2}
     us-west-2:
-      READYSETAUTHORITYCONSUL: #@ data.values.readyset_authority_consul_us_west_2
+      READYSETAUTHORITYCONSUL: #@ {readyset_authority_consul_us_west_2}
 
 Resources:
   ConsulJoinManagedPolicy:

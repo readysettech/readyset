@@ -87,10 +87,8 @@ steps:
     depends_on: packer-deploy-external
     commands:
       - buildkite-agent artifact download packer-manifest.json --step packer-deploy-external ./ops/image-deploy
-      - python3.8 -m cfn-deploy --infile ops/image-deploy/packer-manifest.json --outfile ops/cfn/templates/values.yaml
       - cd ops/cfn/templates
-      - ytt_apply.sh -i ../ytt_templates -f values.yaml  -o ./
-      - rm values.yaml
+      - ytt_apply.sh -i ../ytt_templates -m ../../image-deploy/packer-manifest.json -o ./
       - buildkite-agent artifact upload "./*.yaml"
     plugins:
       - docker#v3.9.0:
@@ -109,6 +107,7 @@ steps:
       - mkdir ./rendered_templates
       - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
       - rain fmt --verify rendered_templates/*
+      - cfn-lint rendered_templates/*.yaml
     plugins:
       - docker#v3.9.0:
           image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
@@ -126,7 +125,7 @@ steps:
       - mkdir ./rendered_templates
       - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
       - cd ./rendered_templates
-      - aws s3 cp . s3://readysettech-cfn-internal-us-east-2/${BUILDKITE_COMMIT}/readyset/templates/ --exclude "*" --include "*.yaml" --recursive
+      - aws s3 cp . s3://readysettech-cfn-internal-us-east-2/prod-${BUILDKITE_COMMIT}/readyset/templates/--exclude "*" --include "*.yaml" --recursive
     plugins:
       - docker#v3.9.0:
           image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}

@@ -1,5 +1,3 @@
-#@ load("@ytt:data", "data")
-
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: ReadySet for PostgreSQL
@@ -167,17 +165,17 @@ Parameters:
 Mappings:
   AWSAMIRegionMap:
     us-east-1:
-      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_east_1
-      READYSETSERVER: #@ data.values.readyset_server_us_east_1
-      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_1
+      READYSETPOSTGRESQLADAPTER: #@ {readyset_psql_adapter_us_east_1}
+      READYSETSERVER: #@ {readyset_server_us_east_1}
+      READYSETMONITOR: #@ {readyset_monitor_us_east_1}
     us-east-2:
-      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_east_2
-      READYSETSERVER: #@ data.values.readyset_server_us_east_2
-      READYSETMONITOR: #@ data.values.readyset_monitor_us_east_2
+      READYSETPOSTGRESQLADAPTER: #@ {readyset_psql_adapter_us_east_2}
+      READYSETSERVER: #@ {readyset_server_us_east_2}
+      READYSETMONITOR: #@ {readyset_monitor_us_east_2}
     us-west-2:
-      READYSETPOSTGRESQLADAPTER: #@ data.values.readyset_psql_adapter_us_west_2
-      READYSETSERVER: #@ data.values.readyset_server_us_west_2
-      READYSETMONITOR: #@ data.values.readyset_monitor_us_west_2
+      READYSETPOSTGRESQLADAPTER: #@ {readyset_psql_adapter_us_west_2}
+      READYSETSERVER: #@ {readyset_server_us_west_2}
+      READYSETMONITOR: #@ {readyset_monitor_us_west_2}
 
 Resources:
   ReadySetPostgreSQLAdapterRole:
