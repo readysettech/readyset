@@ -36,6 +36,9 @@ steps:
             # Since we always want to be able to build a release binary, always build the build image.
             - label: ':docker: Build build image'
 
+            # Since we always want to be able to build docker images, always build the base image.
+            - label: ':docker: Build builder base image'
+
             - label: ':rust: Check rustfmt'
               include:
                 - "[!ops]*"

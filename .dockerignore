@@ -2,3 +2,6 @@
 **/target-ubuntu2004/
 logictests/sqlite
 **/.terraform/
+# /build contains the Dockerfiles themselves so ignoring this directory means
+# that updating a Dockerfile does not cause another copy.
+/build

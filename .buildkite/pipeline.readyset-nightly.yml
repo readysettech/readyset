@@ -2,7 +2,7 @@
 steps:
   - label: ':docker: Build build image'
     key: build-image
-    command: .buildkite/build_image.sh build/Dockerfile readyset-build
+    command: .buildkite/build-image.sh build/Dockerfile readyset-build .
     plugins:
       ecr#v2.5.0:
         login: true

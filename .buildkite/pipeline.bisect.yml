@@ -1,7 +1,7 @@
 steps:
   - label: ":rust: :docker: Build xtask image"
     key: build-runtime-image
-    command: .buildkite/build_image.sh xtask/Dockerfile xtask
+    command: .buildkite/build-image.sh xtask/Dockerfile xtask .
     plugins:
       - ecr#v2.5.0:
           login: true

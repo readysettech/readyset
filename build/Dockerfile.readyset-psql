@@ -1,38 +1,30 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly as chef
-WORKDIR /workdir
-COPY rust-toolchain ./rust-toolchain
-RUN rustup toolchain install "$(cat ./rust-toolchain)"
-RUN cargo install cargo-chef
-RUN apt-get update
-RUN apt-get install -y \
-    clang \
-    cmake \
-    libclang-dev \
-    libssl-dev \
-    liblz4-dev \
-    librdkafka-dev \
-    build-essential \
-    llvm
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
 
-FROM chef as planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+ENV CARGO_INCREMENTAL=0
 
-FROM chef as builder
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
+
 ARG release
-WORKDIR /workdir
-COPY rust-toolchain ./rust-toolchain
-RUN rustup toolchain install "$(cat ./rust-toolchain)"
-RUN cargo install cargo-chef
-COPY --from=planner /workdir/recipe.json recipe.json
-RUN cargo chef cook ${release:+--release}  --recipe-path recipe.json
-COPY . .
-RUN cargo build ${release:+--release} --bin noria-psql
-RUN if [ -n "$release" ]; then strip target/release/noria-psql; else strip target/debug/noria-psql; fi
 
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/debian:bullseye-slim
-RUN apt-get update
-# We install mariadb-client so we have access to psqladmin for healthchecks
-RUN apt-get install -y libssl-dev postgresql-client
-COPY --from=builder /workdir/target/*/noria-psql /bin/noria-psql
-ENTRYPOINT ["/bin/noria-psql", "--no-require-authentication", "--prometheus-metrics"]
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin noria-psql; \
+    if [ -z "${release+x}" ]; then strip target/debug/noria-psql; else strip target/release/noria-psql; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
+
+RUN set -eux; \
+    apt-get update;\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libssl-dev=1.1.1f-1ubuntu2.10 \
+        postgresql-client=12+214ubuntu0.1; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/readyset/target/*/noria-psql /usr/local/bin/readyset-psql
+
+ENTRYPOINT ["/usr/local/bin/readyset-psql", "--prometheus-metrics"]

@@ -1,7 +1,15 @@
 steps:
   - label: ':docker: Build build image'
     key: build-image
-    command: .buildkite/build_image.sh build/Dockerfile readyset-build
+    command: .buildkite/build-image.sh build/Dockerfile readyset-build .
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':docker: Build builder base image'
+    key: build-builder-base-image
+    command: .buildkite/build-image.sh build/Dockerfile.readyset-rust-ubuntu2004-builder-base readyset-rust-ubuntu2004-builder-base .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -9,12 +17,10 @@ steps:
 
   - label: ":docker: Build readyset-server image"
     key: readyset-server-image
+    depends_on:
+      - build-builder-base-image
     command: >-
-      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
-        .buildkite/build_image.sh  build/Dockerfile.readyset-server readyset-server --build-arg release=1
-      else
-        .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
-      fi
+      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-server readyset-server .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -22,12 +28,10 @@ steps:
 
   - label: ":docker: Build readyset-mysql image"
     key: readyset-mysql-image
+    depends_on:
+      - build-builder-base-image
     command: >-
-      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
-        .buildkite/build_image.sh  build/Dockerfile.readyset-mysql readyset-mysql --build-arg release=1
-      else
-        .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
-      fi
+      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-mysql readyset-mysql .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -36,13 +40,9 @@ steps:
   - label: ":docker: Build readyset-psql image"
     key: readyset-psql-image
     depends_on:
-      - list-frameworks
+      - build-builder-base-image
     command: >-
-      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
-        .buildkite/build_image.sh  build/Dockerfile.readyset-psql readyset-psql --build-arg release=1
-      elif .buildkite/will-run-psql-tests.sh; then
-        .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
-      fi
+      .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-psql readyset-psql .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -50,12 +50,10 @@ steps:
 
   - label: ":docker: Build metrics-aggregator image"
     key: metrics-aggregator-image
+    depends_on:
+      - build-builder-base-image
     command: >-
-      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
-        .buildkite/build_image.sh  build/Dockerfile.metrics-aggregator metrics-aggregator --build-arg release=1
-      else
-        .buildkite/build_image.sh build/Dockerfile.metrics-aggregator metrics-aggregator
-      fi
+      .buildkite/build-image-with-builder.sh build/Dockerfile.metrics-aggregator metrics-aggregator .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -63,7 +61,7 @@ steps:
 
   - label: ':docker: Build prettier image'
     key: prettier-image
-    command: .buildkite/build_image.sh build/Dockerfile.prettier prettier
+    command: .buildkite/build-image.sh build/Dockerfile.prettier prettier .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -71,7 +69,7 @@ steps:
 
   - label: ':docker: Build cargo-deny image'
     key: cargo-deny-image
-    command: .buildkite/build_image.sh build/Dockerfile.cargo-deny cargo-deny
+    command: .buildkite/build-image.sh build/Dockerfile.cargo-deny cargo-deny .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -328,7 +326,7 @@ steps:
     key: build-ops-image
     commands:
       - cd ops/build
-      - ../../.buildkite/build_image.sh ./Dockerfile readyset-ops
+      - ../../.buildkite/build-image.sh ./Dockerfile readyset-ops .
     plugins:
       ecr#v2.5.0:
         login: true
@@ -402,7 +400,7 @@ steps:
 
   - label: ":rust: :docker: Build Substrate Runtime Image"
     key: build-runtime-image
-    command: .buildkite/build_image.sh ops/readyset-substrate/Dockerfile substrate-runtime
+    command: .buildkite/build-image.sh ops/readyset-substrate/Dockerfile substrate-runtime .
     plugins:
       - ecr#v2.5.0:
           login: true
@@ -433,7 +431,7 @@ steps:
     key: build-ops-cfn-image
     commands:
       - cd ops
-      - ../.buildkite/build_image.sh build/Dockerfile.cfn readyset-ops-cfn
+      - ../.buildkite/build-image.sh build/Dockerfile.cfn readyset-ops-cfn .
     plugins:
       ecr#v2.5.0:
         login: true
