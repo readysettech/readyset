@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
 use cfn::model::Parameter as CfnParameter;
-use ec2::model::Filter;
+use ec2::model::{Filter, VpcAttributeName};
 use futures::{
     stream::{self, FuturesUnordered},
     TryStreamExt,
@@ -111,4 +111,23 @@ pub(crate) async fn wait_for_rds_db_available(rds_client: &rds::Client, db_id: &
     }
 
     Ok(())
+}
+
+pub(crate) async fn vpc_attribute(
+    ec2_client: &ec2::Client,
+    vpc_id: &str,
+    attribute: VpcAttributeName,
+) -> Result<bool> {
+    let attr = ec2_client
+        .describe_vpc_attribute()
+        .attribute(attribute.clone())
+        .vpc_id(vpc_id)
+        .send()
+        .await?;
+    let val = match attribute {
+        VpcAttributeName::EnableDnsHostnames => attr.enable_dns_hostnames(),
+        VpcAttributeName::EnableDnsSupport => attr.enable_dns_support(),
+        _ => bail!("Unknown VPC attribute name"),
+    };
+    Ok(val.and_then(|val| val.value()).unwrap_or_default())
 }

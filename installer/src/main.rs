@@ -6,6 +6,7 @@ use std::{env, iter};
 
 use ::console::{style, Emoji};
 use anyhow::{anyhow, bail, Result};
+use aws::vpc_attribute;
 use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
@@ -16,7 +17,7 @@ use aws_types::Credentials;
 use clap::Parser;
 use deployment::DatabaseCredentials;
 use directories::ProjectDirs;
-use ec2::model::{KeyType, Subnet};
+use ec2::model::{AttributeBooleanValue, KeyType, Subnet, VpcAttributeName};
 use futures::stream::{FuturesUnordered, TryStreamExt};
 use indicatif::MultiProgress;
 use ipnet::Ipv4Net;
@@ -162,16 +163,8 @@ impl Installer {
         self.save().await?;
 
         if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
-            match &self.deployment.subnet_ids {
-                Some(subnet_ids) => println!(
-                    "Deploying to subnets: {}",
-                    subnet_ids
-                        .iter()
-                        .map(|subnet_id| style(subnet_id).bold())
-                        .into_and_list()
-                ),
-                None => self.validate_vpc(vpc_id).await?,
-            }
+            self.validate_vpc(vpc_id).await?;
+            self.save().await?;
         }
 
         if let Some(rds_db) = &self.deployment.rds_db {
@@ -802,10 +795,8 @@ impl Installer {
             .filters(filter("vpc-id", &vpc_id))
             .send()
             .await?;
-        let vpc_cidr: Ipv4Net = if let Some(vpc) = vpcs.vpcs.unwrap_or_default().first() {
-            vpc.cidr_block()
-                .ok_or_else(|| anyhow!("VPC with id {} doesn't have any CIDR blocks", vpc_id))?
-                .parse()?
+        let vpc = if let Some(vpc) = vpcs.vpcs.unwrap_or_default().into_iter().next() {
+            vpc
         } else {
             println!(
                 "The previously configured VPC {} no longer exists, or you're missing the required \
@@ -831,19 +822,59 @@ impl Installer {
                             .await?
                             .vpcs
                             .unwrap()
-                            .first()
+                            .into_iter()
+                            .next()
                             .unwrap()
-                            .cidr_block()
-                            .ok_or_else(|| {
-                                anyhow!("VPC with id {} doesn't have any CIDR blocks!", vpc_id)
-                            })?
-                            .parse()?
                     }
                 }
             } else {
                 bail!("Could not successfully access the configured VPC");
             }
         };
+
+        let vpc_cidr: Ipv4Net = vpc
+            .cidr_block()
+            .ok_or_else(|| anyhow!("VPC with id {} doesn't have any CIDR blocks", vpc_id))?
+            .parse()?;
+
+        let dns_hostnames = vpc_attribute(
+            self.ec2_client().await?,
+            &vpc_id,
+            VpcAttributeName::EnableDnsHostnames,
+        )
+        .await?;
+        let dns_support = vpc_attribute(
+            self.ec2_client().await?,
+            &vpc_id,
+            VpcAttributeName::EnableDnsSupport,
+        )
+        .await?;
+        if !dns_hostnames || !dns_support {
+            println!("ReadySet requires the EnableDnsHostnames and EnableDnsSupport VPC attributes to both be enabled for the VPC");
+            println!("If you like, I can automatically fix your VPC's configuration");
+            prompt_to_continue()?;
+
+            let modify_pb = spinner().with_message("Modifying VPC attributes");
+            if !dns_hostnames {
+                self.ec2_client()
+                    .await?
+                    .modify_vpc_attribute()
+                    .vpc_id(&vpc_id)
+                    .enable_dns_hostnames(AttributeBooleanValue::builder().value(true).build())
+                    .send()
+                    .await?;
+            }
+            if !dns_support {
+                self.ec2_client()
+                    .await?
+                    .modify_vpc_attribute()
+                    .vpc_id(&vpc_id)
+                    .enable_dns_support(AttributeBooleanValue::builder().value(true).build())
+                    .send()
+                    .await?;
+            }
+            modify_pb.finish_with_message(format!("{}Modified VPC attributes", *GREEN_CHECK));
+        }
 
         let subnets = self
             .ec2_client()
