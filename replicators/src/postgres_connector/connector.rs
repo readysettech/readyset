@@ -343,7 +343,8 @@ impl Connector for PostgresWalConnector {
     /// Process WAL events and batch them into actions
     async fn next_action(
         &mut self,
-        last_pos: ReplicationOffset,
+        last_pos: &ReplicationOffset,
+        _until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
         // Calling the Noria API is a bit expensive, therefore we try to queue as many
         // actions as possible before calling into the API.
@@ -401,7 +402,7 @@ impl Connector for PostgresWalConnector {
 
             match event {
                 WalEvent::WantsKeepaliveResponse => {
-                    self.send_standy_status_update((&last_pos).into())?;
+                    self.send_standy_status_update(last_pos.into())?;
                 }
                 WalEvent::Commit => {
                     if !actions.is_empty() {

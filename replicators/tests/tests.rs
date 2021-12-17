@@ -317,6 +317,82 @@ async fn mysql_replication() -> ReadySetResult<()> {
     replication_test_inner(&mysql_url()).await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+/// This test checks that when writes and replication happen in parallel
+/// noria correctly catches up from binlog
+/// NOTE: If this test flakes, please notify Vlad
+async fn mysql_replication_catch_up() -> ReadySetResult<()> {
+    const TOTAL_INSERTS: usize = 4000;
+
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `catch_up` CASCADE;
+            DROP TABLE IF EXISTS `catch_up_pk` CASCADE;
+            DROP VIEW IF EXISTS catch_up_view;
+            DROP VIEW IF EXISTS catch_up_pk_view;
+            CREATE TABLE `catch_up` (
+                id int,
+                val varchar(255)
+            );
+            CREATE TABLE `catch_up_pk` (
+                id int PRIMARY KEY,
+                val varchar(255)
+            );
+            CREATE VIEW catch_up_view AS SELECT * FROM `catch_up`;
+            CREATE VIEW catch_up_pk_view AS SELECT * FROM `catch_up_pk`;",
+        )
+        .await?;
+
+    // Begin the inserter task before we begin replication. It should have sufficient
+    // inserts to perform to last past the replication process. We use a keyless table
+    // to make sure we not only get all of the inserts, but also all of the inserts are
+    // processed exactly once
+    let inserter: tokio::task::JoinHandle<ReadySetResult<DbConnection>> =
+        tokio::spawn(async move {
+            for idx in 0..TOTAL_INSERTS {
+                client
+                    .query("INSERT INTO `catch_up` VALUES (100, 'I am a teapot')")
+                    .await?;
+
+                client
+                    .query(&format!(
+                        "INSERT INTO `catch_up_pk` VALUES ({}, 'I am a teapot')",
+                        idx
+                    ))
+                    .await?;
+            }
+
+            Ok(client)
+        });
+
+    // Sleep just a bit to make sure we have some writes done
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let ctx = TestHandle::start_noria(url.to_string()).await?;
+    let client = inserter.await.unwrap()?;
+
+    // Sleep just more to allow propagation time
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Finished inserting, check view result
+    let mut getter = ctx.controller().await.view("catch_up_view").await?;
+    let results = getter.lookup(&[0.into()], true).await?;
+    assert_eq!(results.len(), TOTAL_INSERTS);
+
+    let mut getter = ctx.controller().await.view("catch_up_pk_view").await?;
+    let results = getter.lookup(&[0.into()], true).await?;
+    assert_eq!(results.len(), TOTAL_INSERTS);
+
+    client.stop().await;
+    ctx.stop().await;
+
+    Ok(())
+}
+
 async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
     let url = &mysql_url();
     let mut client = DbConnection::connect(url).await?;
