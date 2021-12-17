@@ -27,7 +27,7 @@ use std::{
 
 use nom_sql::{CreateQueryCacheStatement, Dialect, DropQueryCacheStatement};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{error, instrument, span, trace, warn, Level};
+use tracing::{error, instrument, trace, warn};
 
 use nom_sql::{
     DeleteStatement, Expression, InsertStatement, Literal, ShowStatement, SqlQuery, UpdateStatement,
@@ -113,6 +113,24 @@ pub fn warn_on_slow_query(start: &time::Instant, query: &str) {
             "slow query",
         );
     }
+}
+
+/// Query metadata used to plan the query execution
+#[derive(Debug)]
+enum ExecutionMeta {
+    /// Query was received in a transaction
+    InTransaction,
+    /// There is no SqlQuery stored for this statement
+    NoParsedQuery,
+    /// Query could not be rewritten for processing in noria
+    FailedToRewrite,
+    /// A write query (Insert, Update, Delete)
+    Write { stmt: Arc<SqlQuery> },
+    /// A read query (Select; may be extended in the future)
+    Read {
+        stmt: Arc<SqlQuery>,
+        state: MigrationState,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -1148,159 +1166,164 @@ where
         res
     }
 
-    async fn execute_inner(
+    /// Used in the execute path to determine if we should prepare a statement against noria.
+    /// Checks to see if the noria statement is missing and whether a migration exists in noria or
+    /// the recipe can be extended from this path
+    async fn prepare_if_allowed(
         &mut self,
+        stmt: &nom_sql::SelectStatement,
+        rewritten_stmt: &nom_sql::SelectStatement,
+        state: &MigrationState,
         id: u32,
-        params: &[DataType],
-        event: &mut QueryExecutionEvent,
-    ) -> Result<QueryResult<'_, DB>, DB::Error> {
-        let span = span!(Level::TRACE, "execute", id);
-        let _g = span.enter();
+        is_missing: bool,
+    ) {
+        let should_prepare = match self.migration_mode {
+            MigrationMode::InRequestPath => is_missing,
+            MigrationMode::OutOfBand => is_missing && state == &MigrationState::Successful,
+        };
+        // TODO(justin): Refactor prepared statement cache to wrap preparing and storing
+        // prepared statements in a thread-local cache.
+        if should_prepare {
+            let res = self
+                .noria
+                .prepare_select(stmt.clone(), id, state != &MigrationState::Successful)
+                .await
+                .map(PrepareResult::Noria);
 
-        let prepared_statement = self
-            .prepared_statements
-            .get(&id)
-            .ok_or(PreparedStatementMissing { statement_id: id })?;
-
-        if self.is_in_tx() {
-            // transactions are only supported on upstream
-            match prepared_statement.upstream {
-                Some(upstream_id) => {
-                    return self.execute_upstream(upstream_id, params, event).await;
-                }
-                None => {
-                    error!("Missing upstream statement ID for query in transactoin");
-                    return Err(PreparedStatementMissing { statement_id: id }.into());
-                }
-            }
-        }
-
-        match self.prepared_queries.get(&id).cloned() {
-            // If we have a `prepared_statement` but not a `SqlQuery` associated with it,
-            // this is an unparseable prepared statement, issue this directly to
-            // upstream.
-            None => match prepared_statement.upstream {
-                Some(upstream_id) => self.execute_upstream(upstream_id, params, event).await,
-                None => {
-                    error!("Missing upstream statement ID for unparseable query (adapter statement ID {})", id);
-                    Err(PreparedStatementMissing { statement_id: id }.into())
-                }
-            },
-            Some(prep) => {
-                match prep.as_ref() {
-                    SqlQuery::Select(ref stmt) => {
-                        // If we cannot rewrite the query, we treat the query as unsupported as
-                        // it will fail to execute in Noria.
-                        let mut rewritten_stmt = stmt.clone();
-                        let migration_state = if rewrite::process_query(&mut rewritten_stmt).is_ok()
-                        {
-                            self.query_status_cache
-                                .query_migration_state(&rewritten_stmt)
-                                .await
-                        } else {
-                            warn!("Failed to rewrite SELECT query, marking query as unsupported");
-                            MigrationState::Unsupported
-                        };
-
-                        let stmt = stmt.clone();
-
-                        match migration_state {
-                            MigrationState::Unsupported => {
-                                if let (Some(statement_id), Some(upstream)) =
-                                    (prepared_statement.upstream, &mut self.upstream)
-                                {
-                                    let handle = event.start_timer();
-                                    let res = upstream
-                                        .execute(statement_id, params)
-                                        .await
-                                        .map(QueryResult::Upstream);
-                                    handle.set_upstream_duration();
-                                    res
-                                } else {
-                                    Err(PreparedStatementMissing { statement_id: id })
-                                        .map_err(|e| e.into())
-                                }
-                            }
-
-                            s => {
-                                // If the query is allowed and we have not yet prepared it noria - then
-                                // during our prepare we either encountered a transient noria
-                                // failure or the migration was pending. Prepare it now as we
-                                // should be able to succeed.
-                                let should_prepare = match self.migration_mode {
-                                    MigrationMode::InRequestPath => {
-                                        prepared_statement.noria.is_none()
-                                    }
-                                    MigrationMode::OutOfBand => {
-                                        prepared_statement.noria.is_none()
-                                            && s == MigrationState::Successful
-                                    }
-                                };
-                                if should_prepare {
-                                    // TODO(justin): Refactor prepared statement cache to wrap preparing and storing
-                                    // prepared statements in a thread-local cache.
-                                    let res = self
-                                        .noria
-                                        .prepare_select(
-                                            stmt.clone(),
-                                            id,
-                                            s != MigrationState::Successful,
-                                        )
-                                        .await
-                                        .map(PrepareResult::Noria);
-
-                                    if let Ok(ref result) = res {
-                                        self.store_prep_statement(id, result);
-                                        // This circumvents executing against upstream and validate
-                                        // queries.
-                                        if s != MigrationState::Successful {
-                                            self.query_status_cache
-                                                .update_query_migration_state(
-                                                    &rewritten_stmt,
-                                                    MigrationState::Successful,
-                                                )
-                                                .await
-                                        }
-                                    }
-                                }
-
-                                self.cascade_execute(id, params, &prep, event).await
-                            }
-                        }
-                    }
-                    SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
-                        event.sql_type = SqlQueryType::Write;
-                        if self.upstream.is_some() {
-                            match prepared_statement.upstream {
-                                Some(upstream_id) => {
-                                    self.execute_upstream(upstream_id, params, event).await
-                                }
-                                None => {
-                                    error!("Missing upstream statement ID for write query (adapter statement ID {})", id);
-                                    Err(PreparedStatementMissing { statement_id: id }.into())
-                                }
-                            }
-                        } else {
-                            Self::execute_noria(
-                                &mut self.noria,
-                                id,
-                                params,
-                                &prep,
-                                self.ticket.clone(),
-                            )
-                            .await
-                            .map_err(|e| e.into())
-                        }
-                    }
-                    _ => internal!(),
+            if let Ok(ref result) = res {
+                self.store_prep_statement(id, result);
+                // This circumvents executing against upstream and validate queries.
+                if state != &MigrationState::Successful {
+                    self.query_status_cache
+                        .update_query_migration_state(rewritten_stmt, MigrationState::Successful)
+                        .await
                 }
             }
         }
     }
 
-    /// Executes the already-prepared query with id `id` and parameters `params` using the reader/writer
-    /// belonging to the calling `Backend` struct.
+    /// Provides metadata required to execute the query. Also prepares the query if that is required
+    /// before execution
+    async fn plan_execution(&mut self, id: u32) -> Result<ExecutionMeta, DB::Error> {
+        if self.is_in_tx() {
+            return Ok(ExecutionMeta::InTransaction);
+        }
+
+        match self.prepared_queries.get(&id).cloned() {
+            None => Ok(ExecutionMeta::NoParsedQuery),
+            Some(prep) => match prep.as_ref() {
+                SqlQuery::Insert(_) | SqlQuery::Update(_) | SqlQuery::Delete(_) => {
+                    Ok(ExecutionMeta::Write { stmt: prep })
+                }
+                SqlQuery::Select(stmt) => {
+                    // we may need to prepare statement before executing
+                    let prepared_statement = self
+                        .prepared_statements
+                        .get(&id)
+                        .ok_or(PreparedStatementMissing { statement_id: id })?;
+                    let is_missing = prepared_statement.noria.is_none();
+
+                    let mut rewritten_stmt = stmt.clone();
+                    if rewrite::process_query(&mut rewritten_stmt).is_err() {
+                        Ok(ExecutionMeta::FailedToRewrite)
+                    } else {
+                        let state = self
+                            .query_status_cache
+                            .query_migration_state(&rewritten_stmt)
+                            .await;
+                        // TODO(ENG-903): Consider pulling prepare out of plan_execution()
+                        self.prepare_if_allowed(stmt, &rewritten_stmt, &state, id, is_missing)
+                            .await;
+
+                        Ok(ExecutionMeta::Read { stmt: prep, state })
+                    }
+                }
+                _ => {
+                    internal!();
+                }
+            },
+        }
+    }
+
+    /// Executes a query on noria and upstream based on the provided ExecutionMeta
+    async fn execute_with_upstream(
+        &mut self,
+        id: u32,
+        params: &[DataType],
+        event: &mut QueryExecutionEvent,
+        meta: ExecutionMeta,
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        match meta {
+            ExecutionMeta::InTransaction
+            | ExecutionMeta::Write { .. }
+            | ExecutionMeta::FailedToRewrite
+            | ExecutionMeta::NoParsedQuery
+            | ExecutionMeta::Read {
+                state: MigrationState::Unsupported,
+                ..
+            } => {
+                let upstream_id = self
+                    .prepared_statements
+                    .get(&id)
+                    .map(|ps| ps.upstream)
+                    .flatten()
+                    .ok_or(PreparedStatementMissing { statement_id: id })?;
+                self.execute_upstream(upstream_id, params, event).await
+            }
+            ExecutionMeta::Read { stmt, .. } => {
+                self.cascade_execute(id, params, stmt.as_ref(), event).await
+            }
+        }
+    }
+
+    /// Executes a query on noria based on the provided ExecutionMeta
+    async fn execute_noria_only(
+        &mut self,
+        id: u32,
+        params: &[DataType],
+        event: &mut QueryExecutionEvent,
+        meta: ExecutionMeta,
+    ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        match meta {
+            // These three states should not be encountered in execute() for noria only mode
+            ExecutionMeta::InTransaction
+            | ExecutionMeta::NoParsedQuery
+            | ExecutionMeta::FailedToRewrite => internal!(),
+            //TODO: Include information on why the query is unsuppored
+            ExecutionMeta::Read {
+                state: MigrationState::Unsupported,
+                ..
+            } => unsupported!(),
+            ExecutionMeta::Write { stmt } | ExecutionMeta::Read { stmt, .. } => {
+                let handle = event.start_timer();
+                let res = Self::execute_noria(
+                    &mut self.noria,
+                    id,
+                    params,
+                    stmt.as_ref(),
+                    self.ticket.clone(),
+                )
+                .await
+                .map_err(|e| e.into());
+                handle.set_noria_duration();
+                res
+            }
+        }
+    }
+
+    /// Executes a prepared statement identified by `id` with parameters specified by the client
+    /// `params`. Execution is broken into two stages:
+    ///   1. Planning, [`plan_execution`], which when successful, returns [`ExecutionMetadata`],
+    ///      encapsulating "how" to execute the query.
+    ///   2. Execution, which uses the [`ExecutionMetadata`] to execute the query against Noria and
+    ///      an upstream database [`execute_with_upstream`].  If an upstream database does not
+    ///      exist, we may instead try to only execute against Noria, [`execute_noria_only`] but
+    ///      not all operations may be supported and will return errors.
+    ///
+    /// During planning and execution, a [`QueryExecutionEvent`], is used to track metrics and
+    /// behavior scoped to the execute operation.
     // TODO(andrew, justin): add RYW support for executing prepared queries
+    #[instrument(level = "trace", "execute", skip(self, params))]
     pub async fn execute(
         &mut self,
         id: u32,
@@ -1311,7 +1334,15 @@ where
         let query_logger = self.query_log_sender.clone();
         let mut query_event = QueryExecutionEvent::new(EventType::Execute);
         query_event.query = self.prepared_queries.get(&id).cloned();
-        let res = self.execute_inner(id, params, &mut query_event).await?;
+
+        let execution_meta = self.plan_execution(id).await?;
+        let res = if self.upstream.is_some() {
+            self.execute_with_upstream(id, params, &mut query_event, execution_meta)
+                .await?
+        } else {
+            self.execute_noria_only(id, params, &mut query_event, execution_meta)
+                .await?
+        };
 
         log_query(query_logger, query_event);
         Ok(res)
