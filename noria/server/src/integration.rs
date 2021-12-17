@@ -1174,8 +1174,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         g.set_persistence(persistence_params.clone());
         g.set_volume_id("ef731j2".into());
         let mut g = g.start(authority.clone()).await.unwrap();
-        sleep().await;
-
+        g.backend_ready().await;
         {
             let sql = "
             CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
@@ -1209,7 +1208,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
     g.set_persistence(persistence_params);
     g.set_volume_id("ef731j2".into());
     let mut g = g.start(authority.clone()).await.unwrap();
-    sleep().await;
+    g.backend_ready().await;
     {
         let mut getter = g.view("CarPrice").await.unwrap();
 
