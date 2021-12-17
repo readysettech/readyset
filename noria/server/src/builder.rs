@@ -155,6 +155,13 @@ impl Builder {
         self.config.replication_server_id = Some(id);
     }
 
+    /// Sets whether we should keep the chain of prior recipes when storing a new
+    /// recipe. Setting this to false may have unexpected behavior and should be
+    /// used with caution. It is currently only used in test environments.
+    pub fn set_keep_prior_recipes(&mut self, value: bool) {
+        self.config.keep_prior_recipes = value;
+    }
+
     /// Configures this Noria server to accept only reader domains.
     pub fn as_reader_only(&mut self) {
         self.reader_only = true;

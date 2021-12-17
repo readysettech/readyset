@@ -393,6 +393,7 @@ impl Controller {
                     self.authority.clone(),
                     self.config.replication_url.clone(),
                     self.config.replication_server_id,
+                    self.config.keep_prior_recipes,
                 );
                 self.leader_ready.store(false, Ordering::Release);
 
