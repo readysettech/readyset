@@ -1,5 +1,7 @@
+use futures::future::TryFutureExt;
 use futures::{stream::FuturesUnordered, StreamExt};
-use mysql::prelude::*;
+use itertools::Itertools;
+use mysql::{prelude::*, Transaction, TxOpts};
 use mysql_async as mysql;
 use noria::replication::{ReplicationOffset, ReplicationOffsets};
 use noria::ReadySetResult;
@@ -7,7 +9,7 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt::{self, Display};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
 use super::BinlogPosition;
@@ -39,20 +41,6 @@ async fn load_table_list<Q: Queryable>(q: &mut Q, kind: TableKind) -> mysql::Res
     Ok(tables_entries.into_iter().map(|(name, _)| name).collect())
 }
 
-/// Issue a `LOCK TABLES tbl_name READ, ...` for the names of tables and views provided
-async fn lock_tables<Q, N, I>(q: &mut Q, names: I) -> mysql::Result<()>
-where
-    Q: Queryable,
-    N: Display,
-    I: IntoIterator<Item = N>,
-{
-    let mut query = names.into_iter().fold("LOCK TABLES".to_string(), |q, t| {
-        format!("{} `{}` READ,", q, t)
-    });
-    query.pop(); // Remove any trailing commas
-    q.query_drop(query).await
-}
-
 /// Get the `CREATE TABLE` or `CREATE VIEW` statement for the named table
 async fn create_for_table<Q: Queryable>(
     q: &mut Q,
@@ -74,64 +62,84 @@ async fn create_for_table<Q: Queryable>(
     }
 }
 
+fn tx_opts() -> TxOpts {
+    let mut tx_opts = mysql::TxOpts::default();
+    tx_opts
+        .with_isolation_level(mysql::IsolationLevel::RepeatableRead)
+        .with_consistent_snapshot(true)
+        .with_readonly(true);
+    tx_opts
+}
+
 impl MySqlReplicator {
     /// Load all the `CREATE TABLE` statements for the database and concatenate them
-    /// into a single String that can be installed as a recipe in Noria
-    pub async fn load_recipe<Q: Queryable>(&mut self, q: &mut Q) -> mysql::Result<String> {
+    /// into a single String that can be installed as a recipe in Noria. Return the stirng
+    /// and the transaction that holds the DDL locks for the tables.
+    pub async fn load_recipe_with_meta_lock(
+        &mut self,
+    ) -> mysql::Result<(String, Transaction<'static>)> {
+        let mut tx = self.pool.start_transaction(tx_opts()).await?;
+
         if self.tables.is_none() {
-            self.tables = Some(load_table_list(q, TableKind::BaseTable).await?);
+            self.tables = Some(load_table_list(&mut tx, TableKind::BaseTable).await?);
+        }
+        let tables = self.tables.as_ref().unwrap();
+
+        // After we loaded the list of currently existing tables, we will acquire a metadata
+        // lock on all of them to prevent DDL changes.
+        // This is easy to do: simply use the tables from within a transaction:
+        // https://dev.mysql.com/doc/refman/8.0/en/metadata-locking.html
+        // >> To ensure transaction serializability, the server must not permit one session to perform
+        // >> a data definition language (DDL) statement on a table that is used in an uncompleted explicitly
+        // >> or implicitly started transaction in another session. The server achieves this by acquiring
+        // >> metadata locks on tables used within a transaction and deferring release of those locks until
+        // >> the transaction ends. A metadata lock on a table prevents changes to the table's structure.
+        // >> This locking approach has the implication that a table that is being used by a transaction within
+        // >> one session cannot be used in DDL statements by other sessions until the transaction ends.
+        // >> This principle applies not only to transactional tables, but also to nontransactional tables.
+        if !tables.is_empty() {
+            let metalock_query = format!("SELECT 1 FROM `{}` LIMIT 0", tables.iter().join("`,`"));
+            tx.query_drop(metalock_query).await?;
         }
 
         let mut recipe = String::new();
-
         // Append `CREATE TABLE` statements
-        for table in self.tables.as_ref().unwrap() {
-            let create = create_for_table(q, table, TableKind::BaseTable).await?;
+        for table in tables {
+            let create = create_for_table(&mut tx, table, TableKind::BaseTable).await?;
             recipe.push_str(&create);
             recipe.push_str(";\n");
         }
 
         // Append `CREATE VIEW` statements
-        for view in load_table_list(q, TableKind::View).await? {
-            let create = create_for_table(q, &view, TableKind::View).await?;
+        for view in load_table_list(&mut tx, TableKind::View).await? {
+            let create = create_for_table(&mut tx, &view, TableKind::View).await?;
             recipe.push_str(&create);
             recipe.push_str(";\n");
         }
 
-        Ok(recipe)
+        Ok((recipe, tx))
     }
 
     /// Call `SELECT * FROM table` and convert all rows into a Noria row
     /// it may seem inefficient but apparently that is the correct way to
     /// replicate a table, and `mysqldump` and `debezium` do just that
     pub async fn dump_table(&self, table: &str) -> mysql::Result<TableDumper> {
-        let conn = self.pool.get_conn().await.map_err(log_err)?;
+        let tx = self
+            .pool
+            .start_transaction(tx_opts())
+            .await
+            .map_err(log_err)?;
         let query_count = format!("select count(*) from `{}`", table);
         let query = format!("select * from `{}`", table);
         Ok(TableDumper {
             query_count,
             query,
-            conn,
+            tx,
         })
     }
 
-    /// From MySQL docs:
-    /// Start a session on the source by connecting to it with the command-line client,
-    /// and flush all tables and block write statements by executing the
-    /// FLUSH TABLES WITH READ LOCK statement
-    /// Leave the client from which you issued the FLUSH TABLES statement running so that
-    /// the read lock remains in effect. If you exit the client, the lock is released.
-    /// (In our case we keep a reference to the connection alive)
-    async fn flush_and_read_lock(&self) -> mysql::Result<mysql::Conn> {
-        let mut conn = self.pool.get_conn().await?;
-        let query = "FLUSH TABLES WITH READ LOCK";
-        conn.query_drop(query).await?;
-        Ok(conn)
-    }
-
-    /// From MySQL docs:
-    /// In a different session on the source, use the SHOW MASTER STATUS
-    /// statement to determine the current binary log file name and position.
+    /// Use the SHOW MASTER STATUS statement to determine the current binary log
+    /// file name and position.
     async fn get_binlog_position(&self) -> mysql::Result<BinlogPosition> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SHOW MASTER STATUS";
@@ -150,6 +158,17 @@ impl MySqlReplicator {
         })
     }
 
+    /// Issue a `LOCK TABLES tbl_name READ` for the table name provided
+    async fn lock_table<N>(&self, name: N) -> mysql::Result<mysql::Conn>
+    where
+        N: Display,
+    {
+        let mut conn = self.pool.get_conn().await?;
+        let query = format!("LOCK TABLES `{}` READ", name);
+        conn.query_drop(query).await.unwrap();
+        Ok(conn)
+    }
+
     /// Replicate a single table from the provided TableDumper and into Noria by
     /// converting every MySQL row into Noria row and calling `insert_many` in batches
     async fn replicate_table(
@@ -160,7 +179,7 @@ impl MySqlReplicator {
 
         // Query for number of rows first
         let nrows: usize = dumper
-            .conn
+            .tx
             .query_first(&dumper.query_count)
             .await
             .map_err(log_err)?
@@ -226,16 +245,9 @@ impl MySqlReplicator {
         replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
-        let result = match self
-            .replicate_to_noria_with_global_lock(noria, replication_offsets, install_recipe)
-            .await
-        {
-            Err(err) if err.to_string().contains("Access denied for user") => {
-                self.replicate_to_noria_with_table_locks(noria, replication_offsets, install_recipe)
-                    .await
-            }
-            result => result,
-        };
+        let result = self
+            .replicate_to_noria_with_table_locks(noria, replication_offsets, install_recipe)
+            .await;
 
         // Wait for all connections to finish, not strictly neccessary
         self.pool.disconnect().await?;
@@ -253,26 +265,43 @@ impl MySqlReplicator {
         replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
     ) -> ReadySetResult<BinlogPosition> {
-        // Start a transaction with `REPEATABLE READ` isolation level
-        let mut tx_opts = mysql::TxOpts::default();
-        tx_opts.with_isolation_level(mysql::IsolationLevel::RepeatableRead);
-        let mut tx = self.pool.start_transaction(tx_opts).await?;
-        // Read the list of tables and views
-        let tables = load_table_list(&mut tx, TableKind::BaseTable).await?;
-        let views = load_table_list(&mut tx, TableKind::View).await?;
-        if !tables.is_empty() || !views.is_empty() {
-            lock_tables(&mut tx, tables.into_iter().chain(views)).await?;
-        }
-        debug!("Acquired table read locks");
-        // Get current binlog position, since all table are locked no action can take place that would
-        // advance the binlog *and* affect the tables
-        let binlog_position = self.get_binlog_position().await?;
+        // NOTE: There are two ways to prevent DDL changes in MySQL:
+        // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
+        // possible in RDS however.
 
-        // Even if we don't install the recipe, this will load the tables from the database
-        let recipe = self.load_recipe(&mut tx).await?;
+        // It would be really good if we could prevent DDL changes during snapshotting,
+        // but in the common case we are running on AWS RDS, and it is simply not allowed
+        // to the RDS superuser. We will however lock DDL for the existing tables, so they
+        // can't change during replication. If new tables are created during replication
+        // we will miss their creation.
+
+        // Attempt to lock the instance for DDL changes anyway, if it fails we will still
+        // lock the metadata for the replicated tables, however if new `CREATE TABLE`
+        // statements are issued between the time when we collect the existing table list
+        // and get the binlog position, we will not be able to detect them.
+        let _instance_lock = {
+            let mut conn = self.pool.get_conn().await?;
+            match conn.query_drop("LOCK INSTANCE FOR BACKUP").await {
+                Ok(_) => Some(conn),
+                Err(err) => {
+                    warn!(%err, "Failed to aquire instance lock, DDL changes may cause inconsistency");
+                    None
+                }
+            }
+        };
+
+        let (recipe, _meta_lock) = self.load_recipe_with_meta_lock().await?;
         debug!(%recipe, "Loaded recipe");
 
+        // Get the current binlog position, since at this point the tables are not locked, binlog
+        // will advance while we are taking the snapshot. This is fine, we will catch up later.
+        // We prefer to take the binlog position *after* the recipe is loaded in order to make sure
+        // no ddl changes took place between the binlog position and the schema that we loaded
+        let binlog_position = self.get_binlog_position().await?;
+
         if replication_offsets.has_schema() {
+            // TODO: we can't assume the schema hasn't changed between two points in time.
+            // we have to check the two schemas match.
             info!("Not loading recipe as replication offset already exists for schema");
         } else {
             if install_recipe {
@@ -284,49 +313,7 @@ impl MySqlReplicator {
                 .await?;
         }
 
-        // Although the table dumping happens on a connection pool, and not within our transaction,
-        // it doesn't matter because we maintain a read lock on all the tables anyway
-        self.dump_tables(noria, replication_offsets, &binlog_position, tx)
-            .await?;
-
-        Ok(binlog_position)
-    }
-
-    /// This method aquires a global read lock using `FLUSH TABLES WITH READ LOCK`, which is
-    /// the recommended MySQL method of obtaining a snapshot, however it is not available on
-    /// Amazon RDS.
-    async fn replicate_to_noria_with_global_lock(
-        &mut self,
-        noria: &mut noria::ControllerHandle,
-        replication_offsets: &ReplicationOffsets,
-        install_recipe: bool,
-    ) -> ReadySetResult<BinlogPosition> {
-        // We must hold the locking connection open until replication is finished,
-        // if dropped, it would probably remain open in the pool, but we can't risk it
-        let lock = self.flush_and_read_lock().await?;
-        debug!("Acquired read lock");
-
-        let binlog_position = self.get_binlog_position().await?;
-
-        // Even if we don't install the recipe, this will load the tables from the database
-        let recipe = self.load_recipe(&mut self.pool.get_conn().await?).await?;
-        debug!(%recipe, "Loaded recipe");
-
-        if replication_offsets.has_schema() {
-            info!("Not loading recipe as replication offset already exists for schema");
-        } else {
-            if install_recipe {
-                noria.install_recipe_without_leader_ready(&recipe).await?;
-                debug!("Recipe installed");
-            }
-
-            noria
-                .set_schema_replication_offset(Some((&binlog_position).try_into()?))
-                .await?;
-        }
-
-        self.dump_tables(noria, replication_offsets, &binlog_position, lock)
-            .await?;
+        self.dump_tables(noria, replication_offsets).await?;
 
         Ok(binlog_position)
     }
@@ -337,19 +324,31 @@ impl MySqlReplicator {
         &mut self,
         noria: &mut noria::ControllerHandle,
         table_name: String,
-    ) -> ReadySetResult<JoinHandle<(String, ReadySetResult<()>)>> {
+    ) -> ReadySetResult<JoinHandle<(String, ReplicationOffset, ReadySetResult<()>)>> {
         let span = info_span!("replicating table", table = %table_name);
+        span.in_scope(|| info!("Acquiring read lock"));
+        let mut read_lock = self.lock_table(&table_name).await?;
+        // We acquire the position for each table individually, since it changes from
+        // one lock to the other
+        let repl_offset = ReplicationOffset::try_from(self.get_binlog_position().await?)?;
         span.in_scope(|| info!("Replicating table"));
 
         let dumper = self
             .dump_table(&table_name)
             .instrument(span.clone())
             .await?;
+
+        // At this point we have a transaction that will see *that* table at *this* binlog
+        // position, so we can drop the read lock
+        read_lock.query_drop("UNLOCK TABLES").await?;
+        span.in_scope(|| info!("Read lock released"));
+
         let table_mutator = noria.table(&table_name).instrument(span.clone()).await?;
 
         Ok(tokio::spawn(async {
             (
                 table_name,
+                repl_offset,
                 Self::replicate_table(dumper, table_mutator)
                     .instrument(span)
                     .await,
@@ -358,17 +357,15 @@ impl MySqlReplicator {
     }
 
     /// Copy all base tables into noria
-    async fn dump_tables<L>(
+    async fn dump_tables(
         &mut self,
         noria: &mut noria::ControllerHandle,
         replication_offsets: &ReplicationOffsets,
-        binlog_position: &BinlogPosition,
-        _lock: L,
     ) -> ReadySetResult<()> {
         let mut replication_tasks = FuturesUnordered::new();
         let mut compacting_tasks = FuturesUnordered::new();
 
-        // For each table we spawn a new task to parallelize the replication process somewhat
+        // For each table we spawn a new task to parallelize the replication process
         for table_name in self.tables.clone().unwrap() {
             if replication_offsets.has_table(&table_name) {
                 info!(%table_name, "Replication offset already exists for table, skipping snapshot");
@@ -377,49 +374,37 @@ impl MySqlReplicator {
             }
         }
 
-        let replication_offset = ReplicationOffset::try_from(binlog_position)?;
-
         while let Some(task_result) = replication_tasks.next().await {
             // The unwrap is for the join handle in that case
             match task_result.unwrap() {
-                (table_name, Ok(())) => {
+                (table_name, repl_offset, Ok(())) => {
                     let mut noria_table = noria.table(&table_name).await?;
-                    let replication_offset = replication_offset.clone();
                     compacting_tasks.push(tokio::spawn(async move {
                         let span = info_span!("Compacting table", table = %table_name);
                         span.in_scope(|| info!("Setting replication offset"));
-                        if let Err(error) = noria_table
-                            .set_replication_offset(replication_offset)
+                        noria_table
+                            .set_replication_offset(repl_offset)
+                            .map_err(log_err)
                             .instrument(span.clone())
-                            .await
-                        {
-                            span.in_scope(|| error!(%error, "Error setting replication offset"));
-                            return Err(error);
-                        }
-                        span.in_scope(|| info!("Set replication offset"));
+                            .await?;
 
-                        span.in_scope(|| info!("Compacting table"));
-                        if let Err(error) = noria_table
+                        span.in_scope(|| info!("Set replication offset, compacting table"));
+                        noria_table
                             .set_snapshot_mode(false)
+                            .map_err(log_err)
                             .instrument(span.clone())
-                            .await
-                        {
-                            span.in_scope(|| error!(%error, "Error compacting table"));
-                            return Err(error);
-                        };
+                            .await?;
+
                         span.in_scope(|| info!("Compacting finished"));
                         ReadySetResult::Ok(())
                     }));
                 }
-                (table_name, Err(err)) => {
+                (table_name, _, Err(err)) => {
                     error!(table = %table_name, error = %err, "Replication failed, retrying");
                     replication_tasks.push(self.dumper_task_for_table(noria, table_name).await?);
                 }
             }
         }
-
-        // Replication is done, release the lock
-        drop(_lock);
 
         while let Some(compaction_result) = compacting_tasks.next().await {
             // The unwrap is for the join handle
@@ -436,13 +421,13 @@ impl MySqlReplicator {
 pub struct TableDumper {
     query_count: String,
     query: String,
-    conn: mysql::Conn,
+    tx: mysql::Transaction<'static>,
 }
 
 impl TableDumper {
     pub async fn stream(&mut self) -> mysql::Result<TableStream<'_>> {
         Ok(TableStream {
-            query: self.conn.exec_iter(&self.query, ()).await?,
+            query: self.tx.exec_iter(&self.query, ()).await?,
         })
     }
 }

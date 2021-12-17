@@ -40,9 +40,22 @@ pub(crate) enum ReplicationAction {
 
 #[async_trait]
 pub(crate) trait Connector {
+    /// Process logical replication events until an actionable event occurs, returning
+    /// the corresponding action.
+    ///
+    /// # Arguments
+    ///
+    /// * `last_pos` - the last processed position to. This is used only by Postgres to
+    /// advance the replication slot position on the server.
+    ///
+    /// * `until` - an optional position in the binlog to stop at, even if no actionable
+    /// occured. In that case the action [`ReplicationAction::LogPosition`] is returned.
+    /// Currently this is only used by MySQL replicator while catching up on replication.
+    ///
     async fn next_action(
         &mut self,
-        last_pos: ReplicationOffset,
+        last_pos: &ReplicationOffset,
+        until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)>;
 }
 
@@ -159,8 +172,9 @@ impl NoriaAdapter {
         server_id: Option<u32>,
         ready_notify: Option<Arc<Notify>>,
     ) -> ReadySetResult<!> {
+        use crate::mysql_connector::BinlogPosition;
         // Load the replication offset for all tables and the schema from Noria
-        let replication_offsets = noria.replication_offsets().await?;
+        let mut replication_offsets = noria.replication_offsets().await?;
         let pos = match replication_offsets.max_offset()? {
             None => {
                 let span = info_span!("taking database snapshot");
@@ -192,6 +206,9 @@ impl NoriaAdapter {
                     "status" => status
                 );
 
+                // Get updated offests, after potential replication happened
+                replication_offsets = noria.replication_offsets().await?;
+
                 // If we have some offsets in `replication_offsets`, that means some tables were
                 // already snapshot before we started up. But if we're in this block
                 // (`max_offsets()` returned `None`), that means not *all* tables were already
@@ -218,8 +235,6 @@ impl NoriaAdapter {
             Some(pos) => pos.clone().into(),
         };
 
-        info!(binlog_position = ?pos);
-
         let schemas = mysql_options
             .db_name()
             .map(|s| vec![s.to_string()])
@@ -232,13 +247,6 @@ impl NoriaAdapter {
             MySqlBinlogConnector::connect(mysql_options, schemas, pos.clone(), server_id).await?,
         );
 
-        info!("MySQL connected");
-
-        // Let waiters know that the initial snapshotting is complete.
-        if let Some(notify) = ready_notify {
-            notify.notify_one();
-        }
-
         let mut adapter = NoriaAdapter {
             noria,
             connector,
@@ -247,7 +255,37 @@ impl NoriaAdapter {
             warned_missing_tables: HashSet::new(),
         };
 
-        adapter.main_loop(pos.try_into()?).await
+        let mut current_pos: ReplicationOffset = pos.try_into()?;
+
+        // At this point it is possible that we just finished replication, but
+        // our schema and our tables are taken at different position in the binlog.
+        // Until our database has a consitent view of the database at a single point
+        // in time, it is not safe to issue any queries. We therefore advance the binlog
+        // to the position of the most recent table we have, applying changes as needed.
+        // Only once binlog advanced to that point, can we send a ready signal to noria.
+        match adapter.replication_offsets.max_offset()? {
+            Some(max) if max > &current_pos => {
+                info!(
+                    start = ?BinlogPosition::from(&current_pos),
+                    end = ?BinlogPosition::from(max),
+                    "Catching up");
+                let max = max.clone();
+                adapter.main_loop(&mut current_pos, Some(max)).await?;
+            }
+            _ => {}
+        }
+
+        info!("MySQL connected");
+        info!(binlog_position = ?BinlogPosition::from(&current_pos));
+
+        // Let waiters know that the initial snapshotting is complete.
+        if let Some(notify) = ready_notify {
+            notify.notify_one();
+        }
+
+        adapter.main_loop(&mut current_pos, None).await?;
+
+        unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
 
     async fn start_inner_postgres(
@@ -314,7 +352,11 @@ impl NoriaAdapter {
             warned_missing_tables: HashSet::new(),
         };
 
-        adapter.main_loop(PostgresPosition::default().into()).await
+        adapter
+            .main_loop(&mut PostgresPosition::default().into(), None)
+            .await?;
+
+        unreachable!("`main_loop` will never stop with an Ok status if `until = None`");
     }
 
     /// Handle a single BinlogAction by calling the proper Noria RPC
@@ -418,10 +460,18 @@ impl NoriaAdapter {
     }
 
     /// Loop over the actions
-    async fn main_loop(&mut self, mut position: ReplicationOffset) -> ReadySetResult<!> {
+    async fn main_loop(
+        &mut self,
+        position: &mut ReplicationOffset,
+        until: Option<ReplicationOffset>,
+    ) -> ReadySetResult<()> {
         loop {
-            let (action, pos) = self.connector.next_action(position).await?;
-            position = pos.clone();
+            if until.as_ref().map(|u| *position >= *u).unwrap_or(false) {
+                return Ok(());
+            }
+
+            let (action, pos) = self.connector.next_action(position, until.as_ref()).await?;
+            *position = pos.clone();
 
             debug!(?action);
 

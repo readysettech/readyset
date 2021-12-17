@@ -23,12 +23,12 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to `full`.
 ///
 /// The connector user may optionally have the following permissions:
-/// `SELECT` - to be able to perform a snapshot
-/// `RELOAD` - to be able to flush tables and acquire locks for a snapshot (otherwise table level locks will be used)
-/// `LOCK TABLES` - if unable to acquire a global lock, this permission is required for table level locks
-/// `SHOW DATABASES` - to see databases for a snapshot
-/// `REPLICATION SLAVE` - to be able to connect and read the binlog
-/// `REPLICATION CLIENT` - to use SHOW MASTER STATUS, SHOW SLAVE STATUS, and SHOW BINARY LOGS;
+/// * `SELECT` - to be able to perform a snapshot
+/// * `BACKUP_ADMIN` - to perform LOCK INSTANCE FOR BACKUP, not available on RDS
+/// * `LOCK TABLES` - this permission is required for table level locks
+/// * `SHOW DATABASES` - to see databases for a snapshot
+/// * `REPLICATION SLAVE` - to be able to connect and read the binlog
+/// * `REPLICATION CLIENT` - to use SHOW MASTER STATUS, SHOW SLAVE STATUS, and SHOW BINARY LOGS;
 ///
 /// The connector must also be assigned a unique `server_id` value
 pub struct MySqlBinlogConnector {
@@ -118,8 +118,8 @@ impl TryFrom<BinlogPosition> for ReplicationOffset {
     }
 }
 
-impl From<ReplicationOffset> for BinlogPosition {
-    fn from(val: ReplicationOffset) -> Self {
+impl From<&ReplicationOffset> for BinlogPosition {
+    fn from(val: &ReplicationOffset) -> Self {
         let suffix_len = (val.offset >> 123) as usize;
         let suffix = (val.offset >> 64) as u32;
         let position = val.offset as u32;
@@ -131,6 +131,12 @@ impl From<ReplicationOffset> for BinlogPosition {
             binlog_file: format!("{0}.{1:02$}", val.replication_log_name, suffix, suffix_len),
             position,
         }
+    }
+}
+
+impl From<ReplicationOffset> for BinlogPosition {
+    fn from(val: ReplicationOffset) -> Self {
+        (&val).into()
     }
 }
 
@@ -218,9 +224,15 @@ impl MySqlBinlogConnector {
         self.schemas.iter().any(|s| *s == schema)
     }
 
-    /// Process binlog events until an actionable event occurs
+    /// Process binlog events until an actionable event occurs.
+    ///
+    /// # Arguments
+    ///
+    /// * `until` - an optional position in the binlog to stop at, even if no actionable
+    /// occured. In that case the action [`ReplicationAction::LogPosition`] is returned.
     pub(crate) async fn next_action_inner(
         &mut self,
+        until: Option<&ReplicationOffset>,
     ) -> mysql::Result<(ReplicationAction, &BinlogPosition)> {
         use mysql_common::binlog::events;
 
@@ -465,6 +477,14 @@ impl MySqlBinlogConnector {
                 */
                 _ => {}
             }
+
+            // We didn't get an actionable event, but we still need to check that we haven't reached the until limit
+            if let Some(limit) = until {
+                let limit = BinlogPosition::try_from(limit).expect("Valid binlog limit");
+                if self.next_position >= limit {
+                    return Ok((ReplicationAction::LogPosition, &self.next_position));
+                }
+            }
         }
     }
 }
@@ -562,9 +582,10 @@ fn binlog_row_to_noria_row(
 impl Connector for MySqlBinlogConnector {
     async fn next_action(
         &mut self,
-        _: ReplicationOffset,
+        _: &ReplicationOffset,
+        until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(ReplicationAction, ReplicationOffset)> {
-        let (action, pos) = self.next_action_inner().await?;
+        let (action, pos) = self.next_action_inner(until).await?;
         Ok((action, pos.try_into()?))
     }
 }
