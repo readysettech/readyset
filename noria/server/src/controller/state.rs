@@ -112,6 +112,12 @@ pub struct DataflowState {
 
     /// State between migrations
     pub(super) remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+
+    /// Whether to keep prior recipes when modifying data flow state. This should
+    /// only be set to true in tests where we are sure it does not break things,
+    /// such as logictests where we may OOM from the recipe size.
+    // TODO(ENG-838): Remove when dataflow state does not keep entire recipe chain.
+    keep_prior_recipes: bool,
 }
 
 impl DataflowState {
@@ -128,6 +134,7 @@ impl DataflowState {
         schema_replication_offset: Option<ReplicationOffset>,
         node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
         channel_coordinator: Arc<ChannelCoordinator>,
+        keep_prior_recipes: bool,
     ) -> Self {
         Self {
             ingredients,
@@ -146,6 +153,7 @@ impl DataflowState {
             read_addrs: Default::default(),
             workers: Default::default(),
             remap: Default::default(),
+            keep_prior_recipes,
         }
     }
 
@@ -1298,6 +1306,9 @@ impl DataflowState {
                     self.remove_nodes(vec![base].as_slice()).await?;
                 }
 
+                if !self.keep_prior_recipes {
+                    new.clear_prior();
+                }
                 self.recipe = new;
             }
             Err(ref e) => {
@@ -1541,6 +1552,7 @@ impl DataflowStateHandle {
         replication_offset: Option<ReplicationOffset>,
         node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
         channel_coordinator: Arc<ChannelCoordinator>,
+        keep_prior_recipes: bool,
     ) -> Self {
         let dataflow_state = DataflowState::new(
             ingredients,
@@ -1554,6 +1566,7 @@ impl DataflowStateHandle {
             replication_offset,
             node_restrictions,
             channel_coordinator,
+            keep_prior_recipes,
         );
         Self {
             reader: RwLock::new(DataflowStateReader {

@@ -37,7 +37,7 @@ steps:
     key: logictest-generated-mysql
     command:
     - 'echo +++ Running noria-logictest'
-    - LOG_LEVEL=error cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 1 --database-type mysql
+    - LOG_LEVEL=error cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 8 --database-type mysql
     depends_on:
     - build-image
     plugins:

@@ -450,6 +450,7 @@ pub struct Config {
     pub(crate) mir_config: sql::mir::Config,
     pub(crate) replication_url: Option<String>,
     pub(crate) replication_server_id: Option<u32>,
+    pub(crate) keep_prior_recipes: bool,
 }
 
 impl Default for Config {
@@ -472,6 +473,7 @@ impl Default for Config {
             mir_config: Default::default(),
             replication_url: None,
             replication_server_id: None,
+            keep_prior_recipes: true,
         }
     }
 }

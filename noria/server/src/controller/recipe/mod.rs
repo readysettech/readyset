@@ -557,6 +557,10 @@ impl Recipe {
         Ok(new)
     }
 
+    pub fn clear_prior(&mut self) {
+        self.prior = None;
+    }
+
     /// Helper method to reparent a recipe. This is needed for the recovery logic to build
     /// recovery and original recipe (see `make_recovery`).
     pub(in crate::controller) fn set_prior(&mut self, new_prior: Recipe) {

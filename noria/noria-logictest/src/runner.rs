@@ -478,6 +478,8 @@ impl TestScript {
                 builder.set_replicator_url(format!("{}/{}", replication_url, run_opts.db_name()));
             }
 
+            builder.set_keep_prior_recipes(false);
+
             let persistence = noria_server::PersistenceParameters {
                 mode: noria_server::DurabilityMode::DeleteOnExit,
                 ..Default::default()

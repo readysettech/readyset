@@ -575,6 +575,7 @@ impl Leader {
         authority: Arc<Authority>,
         replicator_url: Option<String>,
         server_id: Option<u32>,
+        keep_prior_recipes: bool,
     ) -> Self {
         let mut g = petgraph::Graph::new();
         // Create the root node in the graph.
@@ -616,6 +617,7 @@ impl Leader {
             state.schema_replication_offset,
             state.node_restrictions,
             cc,
+            keep_prior_recipes,
         );
 
         Leader {
