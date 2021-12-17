@@ -1,10 +1,14 @@
 use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
+use crate::controller::state::DataflowState;
 use crate::coordination::do_noria_rpc;
+use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
 use anyhow::{format_err, Context};
+use dataflow::node;
+use dataflow::prelude::ChannelCoordinator;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use itertools::Itertools;
@@ -22,6 +26,7 @@ use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -65,9 +70,10 @@ pub struct NodeRestrictionKey {
     shard: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
+    pub(crate) dataflow_state: DataflowState,
 
     recipe_version: usize,
     recipes: Vec<String>,
@@ -105,6 +111,21 @@ impl ControllerState {
 
         self.recipes = vec![new_recipe];
         self.recipe_version = 1;
+    }
+}
+
+// We implement [`Debug`] manually so that we can skip the [`DataflowState`] field.
+// In the future, we might want to implement [`Debug`] for [`DataflowState`] as well and just derive
+// it from [`Debug`] for [`ControllerState`].
+impl Debug for ControllerState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ControllerState")
+            .field("config", &self.config)
+            .field("recipe_version", &self.recipe_version)
+            .field("recipes", &self.recipes)
+            .field("schema_replication_offset", &self.schema_replication_offset)
+            .field("node_restrictions", &self.node_restrictions)
+            .finish()
     }
 }
 
@@ -387,7 +408,7 @@ impl Controller {
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!("won leader election, creating Leader");
                 let mut leader = Leader::new(
-                    state.clone(),
+                    state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
                     self.config.replication_url.clone(),
@@ -639,13 +660,52 @@ impl AuthorityLeaderElectionState {
                 .update_controller_state(
                     |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                         match state {
-                            None => Ok(ControllerState {
-                                config: self.config.clone(),
-                                recipe_version: 0,
-                                recipes: vec![],
-                                schema_replication_offset: None,
-                                node_restrictions: HashMap::new(),
-                            }),
+                            None => {
+                                let mut g = petgraph::Graph::new();
+                                // Create the root node in the graph.
+                                let source = g.add_node(node::Node::new::<_, &[String], _, _>(
+                                    "source",
+                                    &[],
+                                    node::special::Source,
+                                ));
+
+                                let mut materializations = Materializations::new();
+                                materializations.set_config(self.config.materialization_config.clone());
+
+                                let cc = Arc::new(ChannelCoordinator::new());
+                                assert_ne!(self.config.quorum, 0);
+
+                                let recipe = Recipe::with_config(
+                                    crate::sql::Config {
+                                        reuse_type: self.config.reuse,
+                                        ..Default::default()
+                                    },
+                                    self.config.mir_config.clone(),
+                                );
+
+                                let dataflow_state = DataflowState::new(
+                                    g,
+                                    source,
+                                    0,
+                                    self.config.sharding,
+                                    self.config.domain_config.clone(),
+                                    self.config.persistence.clone(),
+                                    materializations,
+                                    recipe,
+                                    None,
+                                    HashMap::new(),
+                                    cc,
+                                    self.config.keep_prior_recipes,
+                                );
+                                Ok(ControllerState {
+                                    config: self.config.clone(),
+                                    dataflow_state,
+                                    recipe_version: 0,
+                                    recipes: vec![],
+                                    schema_replication_offset: None,
+                                    node_restrictions: HashMap::new(),
+                                })
+                            },
                             Some(mut state) => {
                                 if self.should_reset_state {
                                     state.reset();
@@ -655,10 +715,10 @@ impl AuthorityLeaderElectionState {
                                 // configuration.
                                 if state.config != self.config {
                                     warn!(
-                                        authority_config = ?state.config,
-                                        our_config = ?self.config,
-                                        "Config in authority different than our config, changing to our config"
-                                    );
+                                    authority_config = ?state.config,
+                                    our_config = ?self.config,
+                                    "Config in authority different than our config, changing to our config"
+                                );
                                 }
                                 state.config = self.config.clone();
                                 Ok(state)
