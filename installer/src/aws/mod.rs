@@ -3,12 +3,15 @@ use aws_sdk_cloudformation as cfn;
 use aws_sdk_ec2 as ec2;
 use aws_sdk_rds as rds;
 use cfn::model::Parameter as CfnParameter;
+use console::style;
 use ec2::model::{Filter, VpcAttributeName};
 use futures::{
     stream::{self, FuturesUnordered},
     TryStreamExt,
 };
-use rds::model::{DbInstance, Parameter};
+use rds::model::{DbInstance, DbParameterGroup, Parameter};
+
+use crate::console::{spinner, GREEN_CHECK};
 
 pub(crate) mod cloudformation;
 pub(crate) mod subnets;
@@ -110,6 +113,54 @@ pub(crate) async fn wait_for_rds_db_available(rds_client: &rds::Client, db_id: &
         }
     }
 
+    Ok(())
+}
+
+pub(crate) async fn db_instance_parameter_group(
+    rds_client: &rds::Client,
+    db_instance: &DbInstance,
+) -> Result<DbParameterGroup> {
+    Ok(rds_client
+        .describe_db_parameter_groups()
+        .db_parameter_group_name(
+            db_instance
+                .db_parameter_groups
+                .as_ref()
+                .and_then(|pgs| pgs.first())
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Could not find existing db parameter group for RDS database {}",
+                        db_instance.db_instance_identifier().unwrap()
+                    )
+                })?
+                .db_parameter_group_name()
+                .unwrap(),
+        )
+        .send()
+        .await?
+        .db_parameter_groups
+        .unwrap_or_default()
+        .first()
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!(
+                "Could not find existing db parameter group for RDS database {}",
+                db_instance.db_instance_identifier().unwrap()
+            )
+        })?)
+}
+
+pub(crate) async fn reboot_rds_db_instance(rds_client: &rds::Client, db_id: &str) -> Result<()> {
+    let reboot_db_desc = format!("RDS database instance {}", style(db_id).bold());
+    let reboot_db_pb = spinner().with_message(format!("Rebooting {}", &reboot_db_desc));
+    rds_client
+        .reboot_db_instance()
+        .db_instance_identifier(db_id)
+        .send()
+        .await?;
+    wait_for_rds_db_available(rds_client, db_id).await?;
+    reboot_db_pb.finish_with_message(format!("{}Rebooted {}", *GREEN_CHECK, reboot_db_desc));
     Ok(())
 }
 

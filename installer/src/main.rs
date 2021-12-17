@@ -36,7 +36,10 @@ mod deployment;
 mod console;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
-use crate::aws::{cfn_parameter, filter, vpc_cidr, wait_for_rds_db_available};
+use crate::aws::{
+    cfn_parameter, db_instance_parameter_group, filter, reboot_rds_db_instance, vpc_cidr,
+    wait_for_rds_db_available,
+};
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
@@ -65,8 +68,16 @@ const CONSUL_CLOUDFORMATION_TEMPLATE_URL: &str =
 const RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
 
+/// Public cloudformation template for the PostgreSQL RDS stack
+const RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml";
+
 /// Public cloudformation template for the MySQL Readyset stack
 const READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL: &str =
+    "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml";
+
+/// Public cloudformation template for the MySQL Readyset stack
+const READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL: &str =
     "https://readysettech-cfn-public-us-east-2.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml";
 
 /// Install and configure a ReadySet cluster in AWS
@@ -295,9 +306,7 @@ impl Installer {
 
         let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => READYSET_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
-            Engine::PostgreSQL => {
-                bail!("Sorry, the installer doesn't support PostgreSQL databases yet")
-            }
+            Engine::PostgreSQL => READYSET_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
         };
 
         let deployment_name = self.deployment.name.clone();
@@ -435,9 +444,7 @@ impl Installer {
 
         let template_url = match self.deployment.rds_db.as_ref().unwrap().engine {
             Engine::MySQL => RDS_MYSQL_CLOUDFORMATION_TEMPLATE_URL,
-            Engine::PostgreSQL => {
-                bail!("Sorry, the installer doesn't support PostgreSQL databases yet")
-            }
+            Engine::PostgreSQL => RDS_POSTGRESQL_CLOUDFORMATION_TEMPLATE_URL,
         };
 
         let vpc_id = self
@@ -1141,41 +1148,25 @@ impl Installer {
         }
 
         let parameter_group_name = if wrong_binlog_format {
-            let existing_parameter_group = self
-                .rds_client()
-                .await?
-                .describe_db_parameter_groups()
-                .db_parameter_group_name(
-                    db_instance
-                        .db_parameter_groups
-                        .unwrap_or_default()
-                        .first()
-                        .cloned()
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Could not find existing db parameter group for RDS database {}",
-                                db_id
-                            )
-                        })?
-                        .db_parameter_group_name()
-                        .unwrap(),
-                )
-                .send()
-                .await?
-                .db_parameter_groups
-                .unwrap_or_default()
-                .first()
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Could not find existing db parameter group for RDS database {}",
-                        db_id
-                    )
-                })?;
-
+            let existing_parameter_group =
+                db_instance_parameter_group(self.rds_client().await?, &db_instance).await?;
             Some(
-                self.create_mysql_parameter_group(existing_parameter_group, parameters)
-                    .await?,
+                self.create_parameter_group(
+                    "readyset-mysql",
+                    existing_parameter_group,
+                    parameters
+                        .into_iter()
+                        .filter(|param| param.parameter_name() != Some("binlog_format"))
+                        .chain(iter::once(
+                            Parameter::builder()
+                                .parameter_name("binlog_format")
+                                .parameter_value("ROW")
+                                .apply_method(ApplyMethod::Immediate)
+                                .build(),
+                        ))
+                        .collect::<Vec<_>>(),
+                )
+                .await?,
             )
         } else {
             None
@@ -1219,46 +1210,100 @@ impl Installer {
         req.send().await?;
         modify_db_pb.finish_with_message(format!("{}Modified {}", *GREEN_CHECK, modify_db_desc));
 
-        let reboot_db_desc = format!("RDS database instance {}", style(&db_id).bold());
-        let reboot_db_pb = spinner().with_message(format!("Rebooting {}", &reboot_db_desc));
-        reboot_db_pb.enable_steady_tick(50);
-        self.rds_client()
-            .await?
-            .reboot_db_instance()
-            .db_instance_identifier(&db_id)
-            .send()
-            .await?;
-        wait_for_rds_db_available(self.rds_client().await?, &db_id).await?;
-        reboot_db_pb.finish_with_message(format!("{}Rebooted {}", *GREEN_CHECK, reboot_db_desc));
+        reboot_rds_db_instance(self.rds_client().await?, &db_id).await?;
 
         Ok(())
     }
 
-    /// Create a new MySQL parameter group based on the given existing parameter group, and with the
-    /// given set of parameters, except with `binlog_format` set to `ROW`.
+    async fn validate_rds_database_postgresql(
+        &mut self,
+        db_id: String,
+        db_instance: DbInstance,
+    ) -> Result<()> {
+        let parameters = aws::db_parameters(self.rds_client().await?, &db_instance).await?;
+        if parameters
+            .iter()
+            .filter(|p| p.parameter_name() == Some("rds.logical_replication"))
+            .any(|p| p.parameter_value() != Some("1"))
+        {
+            warning!(
+                "ReadySet requires the {} parameter to be set to {}",
+                style("rds.logical_replication").blue(),
+                style("1").blue()
+            );
+        } else {
+            success!("RDS database {} has the correct configuration", db_id);
+            return Ok(());
+        }
+
+        let existing_parameter_group =
+            db_instance_parameter_group(self.rds_client().await?, &db_instance).await?;
+        let parameter_group_name = self
+            .create_parameter_group(
+                "readyset-postgresql",
+                existing_parameter_group,
+                parameters
+                    .into_iter()
+                    .filter(|param| param.parameter_name() != Some("rds.logical_replication"))
+                    .chain(iter::once(
+                        Parameter::builder()
+                            .parameter_name("rds.logical_replication")
+                            .parameter_value("ROW")
+                            .apply_method(ApplyMethod::Immediate)
+                            .build(),
+                    ))
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
+
+        let modify_db_desc = format!(
+            "RDS database instance {}: setting {}={}",
+            style(&db_id).bold(),
+            style("rds_logical_replication").blue(),
+            style("1").blue(),
+        );
+        let modify_db_pb = spinner().with_message(format!("Modifying {}", modify_db_desc));
+        self.rds_client()
+            .await?
+            .modify_db_instance()
+            .db_instance_identifier(&db_id)
+            .db_parameter_group_name(&parameter_group_name)
+            .send()
+            .await?;
+        modify_db_pb.finish_with_message(format!("{}Modified {}", *GREEN_CHECK, modify_db_desc));
+
+        reboot_rds_db_instance(self.rds_client().await?, &db_id).await?;
+
+        Ok(())
+    }
+
+    /// Create a new RDS parameter group with the given (default) name based on the given existing
+    /// parameter group, except with the given set of parameters.
     ///
     /// Returns the `parameter_group_name` of the created db parameter group
-    async fn create_mysql_parameter_group(
+    async fn create_parameter_group<N: Into<String>>(
         &mut self,
+        default_name: N,
         existing_parameter_group: DbParameterGroup,
         parameters: Vec<Parameter>,
     ) -> Result<String> {
-        // first, check if a parameter group named "readyset-mysql" already exists
+        // first, check if a parameter group with the default_name already exists
+        let default_name: String = default_name.into();
         let existing = self
             .rds_client()
             .await?
             .describe_db_parameter_groups()
-            .db_parameter_group_name("readyset-mysql")
+            .db_parameter_group_name(&default_name)
             .send()
             .await?
             .db_parameter_groups
             .unwrap_or_default();
         let (parameter_group_name, do_create) = if existing.is_empty() {
-            (Cow::Borrowed("readyset-mysql"), true)
+            (Cow::Borrowed(&default_name), true)
         } else {
             println!(
                 "Found an existing RDS DB parameter group named {}",
-                style("readyset-mysql").bold()
+                style(&default_name).bold()
             );
             if confirm()
                 .with_prompt(
@@ -1266,7 +1311,7 @@ impl Installer {
                 )
                 .interact()?
             {
-                (Cow::Borrowed("readyset-mysql"), false)
+                (Cow::Borrowed(&default_name), false)
             } else {
                 let parameter_group_name = input()
                     .with_prompt("Please enter a name for a DB parameter group to create")
@@ -1274,38 +1319,6 @@ impl Installer {
                 (Cow::Owned(parameter_group_name), true)
             }
         };
-
-        let (verbing, verbed) = if do_create {
-            ("Creating new", "Created new")
-        } else {
-            ("Updating", "Updated")
-        };
-        let pb_desc = format!(
-            "RDS parameter group {} based on {} with {}={}",
-            style("readyset").bold(),
-            style(existing_parameter_group.db_parameter_group_name().unwrap()).bold(),
-            style("binlog_format").blue(),
-            style("ROW").blue()
-        );
-        let parameter_group_pb = spinner().with_message(format!("{} {}", verbing, pb_desc));
-        parameter_group_pb.enable_steady_tick(50);
-
-        if do_create {
-            self.rds_client()
-                .await?
-                .create_db_parameter_group()
-                .db_parameter_group_name(parameter_group_name.as_ref())
-                .db_parameter_group_family(
-                    existing_parameter_group
-                        .db_parameter_group_family()
-                        .unwrap(),
-                )
-                .description("Automatically-created DB parameter group for ReadySet with MySQL")
-                .send()
-                .await?
-                .db_parameter_group
-                .unwrap();
-        }
 
         // Figure out the default parameters that group gets created with
         let default_parameters = self
@@ -1321,43 +1334,68 @@ impl Installer {
             .map(|param| (param.parameter_name, param.parameter_value))
             .collect::<HashSet<_>>();
 
+        let parameters = parameters
+            .into_iter()
+            .filter(|param| {
+                !default_parameters
+                    .contains(&(param.parameter_name.clone(), param.parameter_value.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        let parameters_desc = parameters
+            .iter()
+            .filter_map(|param| {
+                Some(format!(
+                    "{} = {}",
+                    style(param.parameter_name()?).blue(),
+                    style(param.parameter_value()?).blue()
+                ))
+            })
+            .collect::<Vec<_>>()
+            .into_and_list();
+
+        let (verbing, verbed) = if do_create {
+            ("Creating new", "Created new")
+        } else {
+            ("Updating", "Updated")
+        };
+        let pb_desc = format!(
+            "RDS parameter group {} based on {} with {}",
+            style("readyset").bold(),
+            style(existing_parameter_group.db_parameter_group_name().unwrap()).bold(),
+            parameters_desc,
+        );
+        let parameter_group_pb = spinner().with_message(format!("{} {}", verbing, pb_desc));
+        parameter_group_pb.enable_steady_tick(50);
+
+        if do_create {
+            self.rds_client()
+                .await?
+                .create_db_parameter_group()
+                .db_parameter_group_name(parameter_group_name.as_ref())
+                .db_parameter_group_family(
+                    existing_parameter_group
+                        .db_parameter_group_family()
+                        .unwrap(),
+                )
+                .description("Automatically-created DB parameter group for ReadySet")
+                .send()
+                .await?
+                .db_parameter_group
+                .unwrap();
+        }
+
         self.rds_client()
             .await?
             .modify_db_parameter_group()
             .db_parameter_group_name(parameter_group_name.as_ref())
-            .set_parameters(Some(
-                parameters
-                    .into_iter()
-                    .filter(|param| {
-                        param.parameter_name() != Some("binlog_format")
-                            && !default_parameters.contains(&(
-                                param.parameter_name.clone(),
-                                param.parameter_value.clone(),
-                            ))
-                    })
-                    .chain(iter::once(
-                        Parameter::builder()
-                            .parameter_name("binlog_format")
-                            .parameter_value("ROW")
-                            .apply_method(ApplyMethod::Immediate)
-                            .build(),
-                    ))
-                    .collect::<Vec<_>>(),
-            ))
+            .set_parameters(Some(parameters))
             .send()
             .await?;
 
         parameter_group_pb.finish_with_message(format!("{}{} {}", *GREEN_CHECK, verbed, &pb_desc,));
 
         Ok(parameter_group_name.into_owned())
-    }
-
-    async fn validate_rds_database_postgresql(
-        &mut self,
-        _db_id: String,
-        _db_instance: DbInstance,
-    ) -> Result<()> {
-        bail!("Sorry, the installer doesn't support PostgreSQL databases yet");
     }
 
     async fn prompt_for_rds_database(&mut self) -> Result<()> {
@@ -1417,9 +1455,9 @@ impl Installer {
             None
         }
         .map::<Result<_>, _>(Ok)
-        .unwrap_or_else(|| {
-            let engine =
-                Engine::select("Which database engine should I create the database with?")?;
+            .unwrap_or_else(|| {
+                let engine =
+                    Engine::select("Which database engine should I create the database with?")?;
 
             let db_name = input()
                 .with_prompt("Enter a name for the database to create")
