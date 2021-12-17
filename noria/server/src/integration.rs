@@ -1100,7 +1100,7 @@ async fn it_recovers_persisted_bases() {
         let mut g = Builder::for_tests();
         g.set_persistence(persistence_params.clone());
         let mut g = g.start(authority.clone()).await.unwrap();
-        sleep().await;
+        g.backend_ready().await;
 
         {
             let sql = "
@@ -1135,7 +1135,7 @@ async fn it_recovers_persisted_bases() {
     let mut g = Builder::for_tests();
     g.set_persistence(persistence_params);
     let mut g = g.start(authority.clone()).await.unwrap();
-    sleep().await;
+    g.backend_ready().await;
     {
         let mut getter = g.view("CarPrice").await.unwrap();
 
@@ -1462,7 +1462,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         let mut g = Builder::for_tests();
         g.set_persistence(persistence_parameters.clone());
         let mut g = g.start(authority.clone()).await.unwrap();
-        sleep().await;
+        g.backend_ready().await;
 
         {
             let sql = "
@@ -1532,7 +1532,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         g.set_persistence(persistence_parameters.clone());
         g.set_volume_id("ef731j2".into());
         let mut g = g.start(authority.clone()).await.unwrap();
-        sleep().await;
+        g.backend_ready().await;
 
         {
             let sql = "
@@ -1568,7 +1568,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     g.set_persistence(persistence_parameters);
     g.set_volume_id("ef731j2".into());
     let mut g = g.start(authority.clone()).await.unwrap();
-    sleep().await;
+    g.backend_ready().await;
     std::thread::sleep(Duration::from_secs(10));
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g.view(&format!("{}ID", table)).await.unwrap();
