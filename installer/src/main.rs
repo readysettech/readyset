@@ -1363,7 +1363,12 @@ impl Installer {
                         .engine()
                         .ok_or_else(|| anyhow!("RDS instance missing engine"))?,
                 )?;
-                let db_name = instance.db_name.unwrap();
+                let mut input = input();
+                input.with_prompt(format!("Which {} database should we connect to?", engine));
+                if let Some(instance_db) = instance.db_name() {
+                    input.default(instance_db.to_owned());
+                }
+                let db_name = input.interact_text()?;
                 Some(RdsDb {
                     db_id: Existing(
                         instance
