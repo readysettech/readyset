@@ -92,3 +92,23 @@ pub(crate) async fn vpc_cidr(ec2_client: &ec2::Client, vpc_id: &str) -> Result<S
         .cidr_block
         .unwrap())
 }
+
+pub(crate) async fn wait_for_rds_db_available(rds_client: &rds::Client, db_id: &str) -> Result<()> {
+    loop {
+        let db = rds_client
+            .describe_db_instances()
+            .db_instance_identifier(db_id)
+            .send()
+            .await?
+            .db_instances
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("RDS database went away"))?;
+        if db.db_instance_status() == Some("available") {
+            break;
+        }
+    }
+
+    Ok(())
+}

@@ -35,7 +35,7 @@ mod deployment;
 mod console;
 
 use crate::aws::cloudformation::{deploy_stack, StackConfig};
-use crate::aws::{cfn_parameter, filter, vpc_cidr};
+use crate::aws::{cfn_parameter, filter, vpc_cidr, wait_for_rds_db_available};
 use crate::console::{confirm, input, password, prompt_to_continue, select, spinner, GREEN_CHECK};
 pub use crate::deployment::Deployment;
 use crate::deployment::{CreateNew, Engine, Existing, MaybeExisting, RdsDb};
@@ -236,6 +236,8 @@ impl Installer {
             self.save().await?;
         }
 
+        self.connect_db().await?;
+
         let outputs = if let Some(outputs) = &self.deployment.readyset_stack_outputs {
             outputs
         } else {
@@ -249,6 +251,48 @@ impl Installer {
             "URL to connect to ReadySet: {}",
             style(&outputs["ReadySetAdapterNLBDNSName"]).bold()
         );
+
+        Ok(())
+    }
+
+    async fn connect_db(&mut self) -> Result<()> {
+        let security_group = self
+            .deployment
+            .vpc_supplemental_stack_outputs
+            .as_ref()
+            .unwrap()
+            .get("ReadySetDBSecurityGroupID")
+            .ok_or_else(|| {
+                anyhow!("Could not find ReadySetDBSecurityGroupID output in VPC supplemental stack")
+            })?
+            .clone();
+        let db_id = self
+            .deployment
+            .rds_db
+            .as_ref()
+            .unwrap()
+            .db_id
+            .as_existing()
+            .unwrap()
+            .clone();
+        println!(
+            "Adding security group {} to RDS database instance {}",
+            style(&security_group).bold(),
+            style(&db_id).bold()
+        );
+        prompt_to_continue()?;
+
+        let modify_pb = spinner().with_message("Modifying RDS database instance");
+        self.rds_client()
+            .await?
+            .modify_db_instance()
+            .db_instance_identifier(&db_id)
+            .vpc_security_group_ids(security_group)
+            .apply_immediately(true)
+            .send()
+            .await?;
+        wait_for_rds_db_available(self.rds_client().await?, &db_id).await?;
+        modify_pb.finish_with_message(format!("{}Modified RDS database instance", *GREEN_CHECK));
 
         Ok(())
     }
@@ -1153,25 +1197,7 @@ impl Installer {
             .db_instance_identifier(&db_id)
             .send()
             .await?;
-
-        loop {
-            let db = self
-                .rds_client()
-                .await?
-                .describe_db_instances()
-                .db_instance_identifier(&db_id)
-                .send()
-                .await?
-                .db_instances
-                .unwrap_or_default()
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow!("RDS database went away"))?;
-            if db.db_instance_status() == Some("available") {
-                break;
-            }
-        }
-
+        wait_for_rds_db_available(self.rds_client().await?, &db_id).await?;
         reboot_db_pb.finish_with_message(format!("{}Rebooted {}", *GREEN_CHECK, reboot_db_desc));
 
         Ok(())
