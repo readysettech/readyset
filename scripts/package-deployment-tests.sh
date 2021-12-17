@@ -38,10 +38,10 @@ done
 
 # Directory structure needs to match monorepo since .yaml files use the
 # path in the monorepo.
-DATA_DIR_PATH=$TMP_DIR/src/data/irl
+DATA_DIR_PATH=$TMP_DIR/src/data/
 mkdir -p $DATA_DIR_PATH
-cp benchmarks/src/data/irl/* $DATA_DIR_PATH
-cp benchmarks/src/yaml/benchmarks/read_benchmark_irl_small.yaml $TMP_DIR
+cp -r benchmarks/src/data/* $DATA_DIR_PATH
+cp benchmarks/src/yaml/benchmarks/* $TMP_DIR
 cp benchmarks/src/yaml/deployments/example.yaml $TMP_DIR/deployment.example.yaml
 
 tar -cvf deployment_test.tar.gz -C $TMP_DIR .

@@ -23,7 +23,7 @@ CREATE TABLE authors (
   image_url varchar(128) NOT NULL COMMENT 'REGEX "[A-Za-z0-9/]{20,80}"'
 ) COMMENT = 'ROWS=@authors_rows';
 
-CREATE TABLE users (
+CREATE TABLE fake_users (
   id int(11) NOT NULL PRIMARY KEY
 ) COMMENT = 'ROWS=@users_rows';
 
