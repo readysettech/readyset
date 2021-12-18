@@ -1652,7 +1652,7 @@ where
                     | nom_sql::SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
-                    nom_sql::SqlQuery::Show(ShowStatement::Queries) => {
+                    nom_sql::SqlQuery::Show(ShowStatement::QueryCaches) => {
                         Ok(QueryResult::Noria(self.noria.verbose_outputs().await?))
                     }
                     nom_sql::SqlQuery::Set(_)
@@ -1723,7 +1723,9 @@ where
                     SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                         self.noria.graphviz(*simplified).await
                     }
-                    SqlQuery::Show(ShowStatement::Queries) => self.noria.verbose_outputs().await,
+                    SqlQuery::Show(ShowStatement::QueryCaches) => {
+                        self.noria.verbose_outputs().await
+                    }
                     _ => {
                         error!("unsupported query");
                         unsupported!("query type unsupported");

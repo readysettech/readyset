@@ -14,7 +14,8 @@ use nom::IResult;
 pub enum ShowStatement {
     Events,
     Tables(Tables),
-    Queries,
+    QueryCaches,
+    ProxiedQueries,
 }
 
 impl fmt::Display for ShowStatement {
@@ -23,7 +24,8 @@ impl fmt::Display for ShowStatement {
         match self {
             Self::Events => write!(f, "EVENTS"),
             Self::Tables(tables) => write!(f, "{}", tables),
-            Self::Queries => write!(f, "QUERY CACHES"),
+            Self::QueryCaches => write!(f, "QUERY CACHES"),
+            Self::ProxiedQueries => write!(f, "PROXIED QUERIES"),
         }
     }
 }
@@ -36,7 +38,11 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
             //ReadySet specific show statement
             map(
                 tuple((tag_no_case("query"), multispace1, tag_no_case("caches"))),
-                |_| ShowStatement::Queries,
+                |_| ShowStatement::QueryCaches,
+            ),
+            map(
+                tuple((tag_no_case("proxied"), multispace1, tag_no_case("queries"))),
+                |_| ShowStatement::ProxiedQueries,
             ),
             map(show_tables(dialect), ShowStatement::Tables),
             map(tag_no_case("events"), |_| ShowStatement::Events),
@@ -201,12 +207,22 @@ mod tests {
     }
 
     #[test]
-    fn show_queries() {
+    fn show_query_caches() {
         let qstring1 = "SHOW QUERY CACHES";
         let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
         let qstring2 = "SHOW\tQUERY\tCACHES";
         let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
-        assert_eq!(res1, ShowStatement::Queries);
-        assert_eq!(res2, ShowStatement::Queries);
+        assert_eq!(res1, ShowStatement::QueryCaches);
+        assert_eq!(res2, ShowStatement::QueryCaches);
+    }
+
+    #[test]
+    fn show_proxied_queries() {
+        let qstring1 = "SHOW PROXIED QUERIES";
+        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let qstring2 = "SHOW\tPROXIED\tQUERIES";
+        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        assert_eq!(res1, ShowStatement::ProxiedQueries);
+        assert_eq!(res2, ShowStatement::ProxiedQueries);
     }
 }
