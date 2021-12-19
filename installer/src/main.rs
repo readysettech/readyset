@@ -181,11 +181,11 @@ impl Installer {
         if let Some(rds_db) = &self.deployment.rds_db {
             match &rds_db.db_id {
                 CreateNew => println!(
-                    "Will create a new {} RDS database instance",
+                    "OK, we'll create a new {} RDS database instance.",
                     style(rds_db.engine).bold()
                 ),
                 Existing(rds_db_id) => println!(
-                    "Deploying in front of existing RDS database instance: {}",
+                    "OK, we'll connect ReadySet with existing RDS database instance {}.",
                     style(rds_db_id).bold()
                 ),
             }
@@ -438,7 +438,7 @@ impl Installer {
     }
 
     async fn deploy_rds_db(&mut self) -> Result<()> {
-        println!("About to deploy RDS database stack");
+        println!("{}", style("About to deploy RDS database stack.").bold());
         prompt_to_continue()?;
         let stack_name = format!("{}-rds", self.deployment.name);
 
@@ -558,7 +558,19 @@ impl Installer {
     }
 
     async fn deploy_vpc_supplemental_stack(&mut self) -> Result<()> {
-        println!("About to deploy VPC supplemental stack");
+        println!(
+            "{}",
+            style("About to deploy VPC supplemental stack.").bold()
+        );
+        println!(
+            "The VPC supplemental stack contains the fundamental networking components to support \
+             a performant and secure implementation of ReadySet.\nHere are some of the components \
+             deployed in this stack:
+             - VPC endpoints for services like: CloudFormation (for signaling), SSM, CloudWatch, \
+               CloudWatch Logs, KMS, SQS, Autoscaling, and EC2
+             - VPC security groups for Consul server, ReadySet Server, ReadySet Adapter, \
+               Monitoring (Prometheus), and one to be applied to your RDS DB instance"
+        );
         prompt_to_continue()?;
         let stack_name = format!("{}-vpc-supplemental", self.deployment.name);
 
@@ -620,7 +632,10 @@ impl Installer {
     }
 
     async fn deploy_vpc(&mut self) -> Result<()> {
-        println!("About to create VPC");
+        println!(
+            "{}",
+            style("About to create new VPC to deploy ReadySet to.").bold()
+        );
         prompt_to_continue()?;
 
         let stack_name = format!("{}-vpc", self.deployment.name());
@@ -699,7 +714,7 @@ impl Installer {
                 println!(" • {}", style(permission).blue())
             }
         } else {
-            println!("Enter credentials for the root user account in the new RDS database");
+            println!("Next, enter credentials for the root user account of the new RDS database.");
         }
         let username = input().with_prompt("Database username").interact_text()?;
         let password = password().with_prompt("Database password").interact()?;
@@ -711,9 +726,7 @@ impl Installer {
     async fn configure_key_pair(&mut self) -> Result<()> {
         let key_pair_name = loop {
             let answer = select()
-                .with_prompt(
-                    "Should I use an existing SSH key pair for the instances, or create a new one?",
-                )
+                .with_prompt("Use an existing SSH key pair for the instances, or create a new one?")
                 .items(&["Existing key pair", "New key pair"])
                 .default(1)
                 .interact()?;
@@ -769,7 +782,7 @@ impl Installer {
                     .into_owned();
                 let key_pair_path = PathBuf::from(
                     input()
-                        .with_prompt("Path to save key pair to")
+                        .with_prompt("Path to save key pair to:")
                         .default(default_key_pair_path)
                         .interact()?,
                 );
@@ -1400,9 +1413,13 @@ impl Installer {
 
     async fn prompt_for_rds_database(&mut self) -> Result<()> {
         let rds_db = if let Existing(vpc_id) = self.deployment.vpc_id.clone().unwrap() {
+            println!(
+                "ReadySet will keep cached query results up-to-date based on data changes in \
+                 your database.\n"
+            );
             if confirm()
                 .with_prompt(
-                    "Would you like to deploy in front of an existing RDS database instance?",
+                    "Would you like to connect ReadySet to an existing RDS database instance?",
                 )
                 .default(false)
                 .interact()?
@@ -1417,7 +1434,7 @@ impl Installer {
                     style(&vpc_id).bold()
                 );
                 let idx = select()
-                    .with_prompt("Which RDS database instance would you like to use?")
+                    .with_prompt("Which RDS database instance would you like to connect to?")
                     .items(
                         &instances
                             .iter()
@@ -1448,7 +1465,7 @@ impl Installer {
                     engine,
                 })
             } else {
-                println!("OK, I'll create a new RDS database instance in {}", vpc_id);
+                println!("OK, we'll create a new RDS database instance in {}.", vpc_id);
                 None
             }
         } else {
@@ -1457,10 +1474,10 @@ impl Installer {
         .map::<Result<_>, _>(Ok)
             .unwrap_or_else(|| {
                 let engine =
-                    Engine::select("Which database engine should I create the database with?")?;
+                    Engine::select("Select a database engine:")?;
 
             let db_name = input()
-                .with_prompt("Enter a name for the database to create")
+                .with_prompt("Enter a name for the database:")
                 .validate_with(|input: &String| {
                     lazy_static! {
                         static ref RE: Regex = Regex::new("^[a-zA-Z][a-zA-Z0-9]{0,63}$").unwrap();
@@ -1486,6 +1503,10 @@ impl Installer {
     }
 
     async fn prompt_for_vpc(&mut self) -> Result<MaybeExisting<&str>> {
+        println!(
+            "If you plan to use ReadySet with an existing database, we should deploy to the \
+             same VPC as that database. Otherwise, we can create a new VPC."
+        );
         let vpc_id = if confirm()
             .with_prompt("Would you like to deploy to an existing AWS VPC?")
             .default(false)
@@ -1528,7 +1549,7 @@ impl Installer {
 
             Existing(vpcs[idx].0.to_owned())
         } else {
-            println!("OK, we'll create a new AWS VPC as part of the deployment process");
+            println!("OK, we'll create a new AWS VPC as part of the deployment process.");
             CreateNew
         };
 
@@ -1614,7 +1635,7 @@ impl Installer {
 
     fn prompt_for_aws_credentials_profile(&mut self) -> Result<&str> {
         println!(
-            "We'll use your AWS credentials (stored in {}) throughout the install process.",
+            "Please provide the AWS credentials profile (in {}) we should use",
             style("~/.aws/credentials").bold()
         );
 
@@ -1635,7 +1656,11 @@ impl Installer {
 
     fn prompt_for_aws_region(&mut self) -> Result<&str> {
         let mut prompt = select();
-        prompt.with_prompt("Which AWS region should we deploy to?");
+        println!(
+            "Select an AWS region to deploy to. This should be the same region as your \
+             primary database, if you plan to use ReadySet with an existing database."
+        );
+        prompt.with_prompt("Which AWS region would you like to deploy to?");
         prompt.items(REGIONS);
 
         if let Ok(default_region) = env::var("AWS_DEFAULT_REGION") {
@@ -1653,9 +1678,7 @@ impl Installer {
 #[tokio::main]
 async fn main() -> Result<()> {
     let options = Options::parse();
-
-    println!("\n{}\n", style("Welcome to the ReadySet Installer!").bold());
-
+    println!("Welcome to the ReadySet orchestrator.\n");
     DirBuilder::new()
         .recursive(true)
         .create(options.state_directory()?)

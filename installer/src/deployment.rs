@@ -257,7 +257,7 @@ where
     P: AsRef<Path>,
 {
     let index = match select()
-        .with_prompt("Select a deployment")
+        .with_prompt("Select a previous deployment:")
         .items(&deployments)
         .interact_opt()?
     {
@@ -277,19 +277,17 @@ where
     let deployments = Deployment::list(state_dir.as_ref()).await?;
     let deployment = match deployments.as_slice() {
         [] => {
-            println!("To get started, enter a name for your ReadySet deployment.");
-            println!(
-                "We'll use this name to save your progress during the ReadySet cluster setup process.\n"
-            );
+            println!("Enter a name for your ReadySet deployment.");
             Some(prompt_for_and_create_deployment()?)
         }
         [deployment] => {
             println!(
-                "I found an existing deployment named {}\n",
+                "I found an existing deployment named {}. We can continue with this deployment, or \
+                 create a new one.\n",
                 style(&deployment).bold()
             );
             if confirm()
-                .with_prompt("Would you like to continue where you left off?")
+                .with_prompt("Would you like to continue with the existing deployment?")
                 .default(true)
                 .wait_for_newline(true)
                 .interact()?
@@ -300,11 +298,20 @@ where
             }
         }
         _ => {
-            println!("I found multiple existing deployments.");
             println!(
-                "Would you like to continue where we left off with one of those deployments?\n"
+                "There are multiple existing deployments. We can continue with an existing \
+                 deployment, or create a new one.\n "
             );
-            select_deployment(state_dir, deployments).await?
+            if confirm()
+                .with_prompt("Continue with an existing deployment?")
+                .default(true)
+                .wait_for_newline(true)
+                .interact()?
+            {
+                select_deployment(state_dir, deployments).await?
+            } else {
+                None
+            }
         }
     };
 
