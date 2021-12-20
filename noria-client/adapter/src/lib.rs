@@ -19,7 +19,7 @@ use metrics_exporter_prometheus::PrometheusBuilder;
 use noria_client::http_router::NoriaAdapterHttpRouter;
 use noria_client::migration_handler::MigrationHandler;
 use noria_client::outputs_synchronizer::OutputsSynchronizer;
-use noria_client::query_status_cache::QueryStatusCache;
+use noria_client::query_status_cache::{MigrationStyle, QueryStatusCache};
 use noria_client::{QueryHandler, UpstreamDatabase};
 use noria_client_metrics::QueryExecutionEvent;
 use stream_cancel::Valve;
@@ -298,7 +298,14 @@ where
             None
         };
 
-        let query_status_cache = Arc::new(QueryStatusCache::new());
+        let migration_style = if options.async_migrations {
+            MigrationStyle::Async
+        } else if options.explicit_migrations {
+            MigrationStyle::Explicit
+        } else {
+            MigrationStyle::InRequestPath
+        };
+        let query_status_cache = Arc::new(QueryStatusCache::with_style(migration_style));
 
         if options.async_migrations {
             #[allow(clippy::unwrap_used)] // async_migrations requires upstream_db_url
