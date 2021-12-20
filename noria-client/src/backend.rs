@@ -133,6 +133,32 @@ enum ExecutionMeta {
     },
 }
 
+/// Query metadata used to plan query prepare
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+enum PrepareMeta {
+    /// Query was received in a transaction
+    InTransaction,
+    /// Query could not be parsed
+    FailedToParse,
+    /// Query could not be rewritten for processing in noria
+    FailedToRewrite,
+    /// Noria does not implement this prepared statement. The statement may also be invalid SQL
+    Unimplemented,
+    /// A write query (Insert, Update, Delete)
+    Write { stmt: SqlQuery },
+    /// A read (Select; may be extended in the future)
+    // TODO(DAN): box this?
+    NoriaSelect {
+        stmt: nom_sql::SelectStatement,
+        rewritten: nom_sql::SelectStatement,
+        create_view: bool,
+    },
+    /// A read query that we do not want to process on Noria. This naming takes the approach of
+    /// assuming an upstream by default and forcing noria only code to use its own interpretation.
+    UpstreamSelect { stmt: nom_sql::SelectStatement },
+}
+
 #[derive(Clone, Debug)]
 pub struct PreparedStatement {
     noria: Option<u32>,
@@ -625,7 +651,7 @@ where
     /// if `create_view_in_noria` is set.
     async fn mirror_prepare(
         &mut self,
-        q: nom_sql::SelectStatement,
+        q: &nom_sql::SelectStatement,
         rewritten: &nom_sql::SelectStatement,
         query: &str,
         event: &mut QueryExecutionEvent,
@@ -930,138 +956,59 @@ where
         }
     }
 
-    /// Prepares `query` to be executed later using the reader/writer belonging
-    /// to the calling `Backend` struct and adds the prepared query
-    /// to the calling struct's map of prepared queries with a unique id.
-    #[instrument(level = "debug", name = "prepare", skip(self, event))]
-    async fn prepare_inner(
+    /// Provides metadata required to prepare a select query
+    async fn plan_prepare_select(
         &mut self,
-        query: &str,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<PrepareResult<DB>, DB::Error> {
-        //the updated count will serve as the id for the prepared statement
-        self.prepared_count += 1;
+        stmt: nom_sql::SelectStatement,
+    ) -> Result<PrepareMeta, DB::Error> {
+        let mut rewritten = stmt.clone();
+        if rewrite::process_query(&mut rewritten).is_err() {
+            warn!(statement = %stmt, "This statement could not be rewritten by ReadySet");
+            Ok(PrepareMeta::FailedToRewrite)
+        } else {
+            let state = self
+                .query_status_cache
+                .query_migration_state(&rewritten)
+                .await;
 
-        let mut handle = event.start_timer();
+            // we prepare the select on noria if the state is successful or if we run migrations in
+            // the request path and the state is either Successful or Pending
+            let noria_select = matches!(state, MigrationState::Successful)
+                || (matches!(self.migration_mode, MigrationMode::InRequestPath)
+                    && matches!(state, MigrationState::Pending));
 
-        if self.is_in_tx() {
-            warn!("In transaction, sending query to fallback");
-            let res = self
-                .prepare_fallback(query)
-                .await
-                .map(PrepareResult::Upstream);
-            if let Ok(ref result) = res {
-                self.store_prep_statement(self.prepared_count, result);
-                handle.set_upstream_duration();
+            if noria_select {
+                Ok(PrepareMeta::NoriaSelect {
+                    stmt,
+                    rewritten,
+                    create_view: state != MigrationState::Successful,
+                })
+            } else {
+                warn!(statement = %stmt, "This statement is not supported by ReadySet");
+                Ok(PrepareMeta::UpstreamSelect { stmt })
             }
-            return res;
         }
+    }
 
+    /// Provides metadata required to prepare a query
+    async fn plan_prepare(&mut self, query: &str) -> Result<PrepareMeta, DB::Error> {
+        if self.is_in_tx() {
+            return Ok(PrepareMeta::InTransaction);
+        }
         let parsed_query = match self.parse_query(query) {
-            Ok(parsed_query) => parsed_query,
-            Err(e) => {
-                drop(handle);
-                event.set_noria_error(&e);
-                if self.upstream.is_some() {
-                    error!(error = %e, "Error received from noria, sending query to fallback");
-                    handle = event.start_timer();
-
-                    let res = self
-                        .prepare_fallback(query)
-                        .await
-                        .map(PrepareResult::Upstream);
-                    if let Ok(ref result) = res {
-                        self.store_prep_statement(self.prepared_count, result);
-                        handle.set_upstream_duration();
-                    }
-                    return res;
-                } else {
-                    error!("{}", e);
-                    return Err(e.into());
-                }
+            Ok(pq) => pq,
+            Err(_) => {
+                warn!(query = %query, "ReadySet failed to parse query");
+                return Ok(PrepareMeta::FailedToParse);
             }
         };
 
-        let res = match parsed_query {
-            nom_sql::SqlQuery::Select(ref stmt) => {
-                event.sql_type = SqlQueryType::Read;
-
-                // If we cannot rewrite the query, we treat the query as unsupported as
-                // it will fail to execute in Noria.
-                let mut rewritten_stmt = stmt.clone();
-                let migration_state = if rewrite::process_query(&mut rewritten_stmt).is_ok() {
-                    self.query_status_cache
-                        .query_migration_state(&rewritten_stmt)
-                        .await
-                } else {
-                    warn!("Failed to rewrite SELECT query, marking query as unsupported");
-                    MigrationState::Unsupported
-                };
-
-                match self.migration_mode {
-                    MigrationMode::InRequestPath => {
-                        match migration_state {
-                            MigrationState::Unsupported => {
-                                self.unsupported_err_if_no_upstream()?;
-
-                                // Never send unsupported queries to Noria.
-                                let handle = event.start_timer();
-                                let res = self
-                                    .prepare_fallback(query)
-                                    .await
-                                    .map(PrepareResult::Upstream);
-
-                                handle.set_upstream_duration();
-
-                                res
-                            }
-                            s => {
-                                // For queries we might support, try to create the view if we
-                                // haven't successfully migrated.
-                                self.mirror_prepare(
-                                    stmt.clone(),
-                                    &rewritten_stmt,
-                                    query,
-                                    event,
-                                    s != MigrationState::Successful,
-                                )
-                                .await
-                            }
-                        }
-                    }
-                    MigrationMode::OutOfBand => {
-                        match migration_state {
-                            MigrationState::Successful => {
-                                self.mirror_prepare(
-                                    stmt.clone(),
-                                    &rewritten_stmt,
-                                    query,
-                                    event,
-                                    false,
-                                )
-                                .await
-                            }
-                            _ => {
-                                self.unsupported_err_if_no_upstream()?;
-
-                                // Never send unsupported queries to Noria.
-                                let handle = event.start_timer();
-                                let res = self
-                                    .prepare_fallback(query)
-                                    .await
-                                    .map(PrepareResult::Upstream);
-
-                                handle.set_upstream_duration();
-
-                                res
-                            }
-                        }
-                    }
-                }
-            }
+        match parsed_query {
+            SqlQuery::Select(stmt) => self.plan_prepare_select(stmt).await,
             nom_sql::SqlQuery::Insert(_)
             | nom_sql::SqlQuery::Update(_)
-            | nom_sql::SqlQuery::Delete(_) => self.prepare_write(query, &parsed_query, event).await,
+            | nom_sql::SqlQuery::Delete(_) => Ok(PrepareMeta::Write { stmt: parsed_query }),
+            // Valid SQL but not supported by ReadySet
             nom_sql::SqlQuery::CreateTable(..)
             | nom_sql::SqlQuery::CreateView(..)
             | nom_sql::SqlQuery::Set(..)
@@ -1070,43 +1017,116 @@ where
             | nom_sql::SqlQuery::Rollback(..)
             | nom_sql::SqlQuery::Use(..)
             | nom_sql::SqlQuery::Show(..)
-            | nom_sql::SqlQuery::CompoundSelect(..) => {
-                if let Some(ref mut upstream) = self.upstream {
-                    upstream.prepare(query).await.map(|r| {
-                        handle.set_upstream_duration();
-                        PrepareResult::Upstream(r)
-                    })
-                } else {
-                    // For now we only support prepare deletes over fallback.
-                    error!("unsupported query");
-                    unsupported!("query type unsupported");
-                }
-            }
-            nom_sql::SqlQuery::DropTable(..)
+            | nom_sql::SqlQuery::CompoundSelect(..)
+            | nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::RenameTable(..)
             | nom_sql::SqlQuery::CreateQueryCache(..)
             | nom_sql::SqlQuery::DropQueryCache(..)
             | nom_sql::SqlQuery::Explain(_) => {
-                error!("unsupported query");
-                unsupported!("query type unsupported");
+                warn!(statement = %parsed_query, "Statement cannot be prepared by ReadySet");
+                Ok(PrepareMeta::Unimplemented)
             }
-        };
-
-        if let Ok(ref result) = res {
-            self.prepared_queries
-                .insert(self.prepared_count, Arc::new(parsed_query));
-            self.store_prep_statement(self.prepared_count, result);
         }
-        res
+    }
+
+    /// Prepares a query on noria and upstream based on the provided PrepareMeta
+    async fn prepare_with_upstream(
+        &mut self,
+        meta: &PrepareMeta,
+        query: &str,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<PrepareResult<DB>, DB::Error> {
+        match meta {
+            PrepareMeta::InTransaction
+            | PrepareMeta::FailedToParse
+            | PrepareMeta::FailedToRewrite
+            | PrepareMeta::Unimplemented
+            | PrepareMeta::Write { .. }
+            | PrepareMeta::UpstreamSelect { .. } => {
+                let handle = event.start_timer();
+                let res = self
+                    .prepare_fallback(query)
+                    .await
+                    .map(PrepareResult::Upstream);
+                if let Ok(ref result) = res {
+                    self.store_prep_statement(self.prepared_count, result);
+                    handle.set_upstream_duration();
+                }
+                res
+            }
+            PrepareMeta::NoriaSelect {
+                stmt,
+                rewritten,
+                create_view,
+            } => {
+                self.mirror_prepare(stmt, rewritten, query, event, *create_view)
+                    .await
+            }
+        }
+    }
+
+    /// Prepares a query on noria based on the provided PrepareMeta
+    async fn prepare_noria_only(
+        &mut self,
+        meta: &PrepareMeta,
+        query: &str,
+        event: &mut QueryExecutionEvent,
+    ) -> Result<PrepareResult<DB>, DB::Error> {
+        match meta {
+            PrepareMeta::InTransaction
+            | PrepareMeta::FailedToParse
+            | PrepareMeta::FailedToRewrite
+            | PrepareMeta::Unimplemented
+            | PrepareMeta::UpstreamSelect { .. } => {
+                unsupported!();
+            }
+            PrepareMeta::Write { stmt } => self.prepare_write(query, stmt, event).await,
+            PrepareMeta::NoriaSelect {
+                stmt,
+                rewritten,
+                create_view,
+            } => {
+                // mirror_prepare supports noria only execution
+                self.mirror_prepare(stmt, rewritten, query, event, *create_view)
+                    .await
+            }
+        }
     }
 
     /// Prepares `query` to be executed later using the reader/writer belonging
     /// to the calling `Backend` struct and adds the prepared query
     /// to the calling struct's map of prepared queries with a unique id.
+    #[instrument(level = "debug", name = "prepare", skip(self))]
     pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
-        let res = self.prepare_inner(query, &mut query_event).await;
+        //the updated count will serve as the id for the prepared statement
+        self.prepared_count += 1;
+
+        let meta = self.plan_prepare(query).await?;
+        let res = if self.upstream.is_some() {
+            self.prepare_with_upstream(&meta, query, &mut query_event)
+                .await
+        } else {
+            self.prepare_noria_only(&meta, query, &mut query_event)
+                .await
+        };
+
+        // we only store the parsed query if it may be handled by noria at some point in the future
+        let parsed_query = match meta {
+            PrepareMeta::Write { stmt } => Some(stmt),
+            PrepareMeta::NoriaSelect { stmt, .. } => Some(SqlQuery::Select(stmt)),
+            PrepareMeta::UpstreamSelect { stmt } => Some(SqlQuery::Select(stmt)),
+            _ => None,
+        };
+
+        if let Ok(ref result) = res {
+            if let Some(parsed_query) = parsed_query {
+                self.prepared_queries
+                    .insert(self.prepared_count, Arc::new(parsed_query));
+            }
+            self.store_prep_statement(self.prepared_count, result);
+        }
         res
     }
 
@@ -1496,14 +1516,8 @@ where
                             // prepare results for this select before we proceed.
                             if self.validate_queries {
                                 self.prepared_count += 1;
-                                self.mirror_prepare(
-                                    stmt.clone(),
-                                    &rewritten_stmt,
-                                    query,
-                                    event,
-                                    true,
-                                )
-                                .await?;
+                                self.mirror_prepare(stmt, &rewritten_stmt, query, event, true)
+                                    .await?;
                             }
                             // retry extend_recipe if pending for non-explicit migrations
                             self.cascade_read(
