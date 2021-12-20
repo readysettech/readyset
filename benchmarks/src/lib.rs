@@ -91,6 +91,7 @@ pub mod utils;
 
 // Benchmarks
 mod cache_hit_benchmark;
+mod eviction_benchmark;
 mod migration_benchmark;
 mod query_benchmark;
 mod scale_connections;
