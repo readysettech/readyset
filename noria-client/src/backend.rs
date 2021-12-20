@@ -26,6 +26,7 @@ use std::{
 };
 
 use nom_sql::{CreateCachedQueryStatement, Dialect, DropCachedQueryStatement};
+use noria::results::Results;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
@@ -1655,6 +1656,38 @@ where
                     nom_sql::SqlQuery::Show(ShowStatement::CachedQueries) => {
                         Ok(QueryResult::Noria(self.noria.verbose_outputs().await?))
                     }
+                    nom_sql::SqlQuery::Show(ShowStatement::ProxiedQueries) => {
+                        let queries = self.query_status_cache.deny_list().await;
+                        let select_schema = SelectSchema {
+                            use_bogo: false,
+                            schema: Cow::Owned(vec![ColumnSchema {
+                                spec: nom_sql::ColumnSpecification {
+                                    column: nom_sql::Column {
+                                        name: "proxied query".to_string(),
+                                        table: None,
+                                        function: None,
+                                    },
+                                    sql_type: nom_sql::SqlType::Text,
+                                    constraints: vec![],
+                                    comment: None,
+                                },
+                                base: None,
+                            }]),
+
+                            columns: Cow::Owned(vec!["proxied query".to_string()]),
+                        };
+
+                        let data = queries
+                            .into_iter()
+                            .map(|q| vec![DataType::from(q.to_string())])
+                            .collect::<Vec<_>>();
+                        let data =
+                            vec![Results::new(data, Arc::new(["proxied query".to_string()]))];
+                        Ok(QueryResult::Noria(noria_connector::QueryResult::Select {
+                            data,
+                            select_schema,
+                        }))
+                    }
                     nom_sql::SqlQuery::Set(_)
                     | nom_sql::SqlQuery::CompoundSelect(_)
                     | nom_sql::SqlQuery::Show(_) => {
@@ -1725,6 +1758,10 @@ where
                     }
                     SqlQuery::Show(ShowStatement::CachedQueries) => {
                         self.noria.verbose_outputs().await
+                    }
+                    SqlQuery::Show(ShowStatement::ProxiedQueries) => {
+                        error!("upstream database must be set for show proxied queries to produce any meaningful results");
+                        unsupported!("upstream database must be set for show proxied queries to produce any meaningful results");
                     }
                     _ => {
                         error!("unsupported query");
