@@ -60,6 +60,15 @@ impl From<Vec<Query>> for QueryList {
     }
 }
 
+impl IntoIterator for QueryList {
+    type Item = Query;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.queries.into_iter()
+    }
+}
+
 impl Serialize for QueryList {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
