@@ -1594,7 +1594,7 @@ async fn it_works_with_simple_arithmetic() {
         let sql = "CREATE TABLE Car (id int, price int, PRIMARY KEY(id));
                    QUERY CarPrice: SELECT 2 * price FROM Car WHERE id = ?;";
         let mut recipe = Recipe::from_str(sql).unwrap();
-        recipe.activate(mig).unwrap();
+        recipe.activate(mig, Recipe::blank()).unwrap();
     })
     .await;
 
@@ -3154,8 +3154,7 @@ async fn recipe_activates() {
         let mut r = Recipe::from_str(r_txt).unwrap();
         assert_eq!(r.version(), 0);
         assert_eq!(r.expressions().len(), 1);
-        assert_eq!(r.prior(), None);
-        assert!(r.activate(mig).is_ok());
+        assert!(r.activate(mig, Recipe::blank()).is_ok());
     })
     .await;
     // one base node
@@ -3247,15 +3246,9 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
         // Add them one by one
         for (_i, q) in lines.iter().enumerate() {
             //println!("{}: {}", i, q);
-            r = match r.extend(q) {
-                Ok(mut nr) => {
-                    assert!(nr.activate(mig).is_ok());
-                    nr
-                }
-                Err(e) => {
-                    panic!("{:?}", e);
-                }
-            }
+            let old_r = r.clone();
+            r.extend(q).unwrap();
+            assert!(r.activate(mig, old_r).is_ok());
         }
     })
     .await;
@@ -7904,4 +7897,104 @@ async fn overwrite_with_changed_recipe() {
         .install_recipe("CREATE TABLE t (col INT COMMENT 'hi')")
         .await;
     assert!(res.is_ok());
+}
+
+/// Tests that whenever we have at least two workers (including the leader), and the leader dies,
+/// then the recovery is successful and all the nodes are correctly materialized.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_recovers_fully_materialized() {
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store.clone(),
+    )));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("it_recovers_fully_materialized");
+    let persistence_params = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Some(path.to_string_lossy().into()),
+        1,
+        None,
+    );
+
+    {
+        let mut g = Builder::for_tests();
+        g.set_persistence(persistence_params.clone());
+        let mut g = g.start(authority.clone()).await.unwrap();
+        g.backend_ready().await;
+
+        {
+            let sql = "
+                CREATE TABLE t (x INT);
+                CREATE VIEW tv AS SELECT x, COUNT(*) FROM t GROUP BY x;
+                SELECT * FROM tv;
+            ";
+            g.install_recipe(sql).await.unwrap();
+
+            let mut mutator = g.table("t").await.unwrap();
+
+            for i in 1..10 {
+                mutator.insert(vec![(i % 3).into()]).await.unwrap();
+            }
+        }
+
+        // Let writes propagate:
+        sleep().await;
+        g.shutdown();
+        g.wait_done().await;
+        if let Authority::LocalAuthority(l) = authority.as_ref() {
+            l.delete_ephemeral();
+        }
+    }
+
+    sleep().await;
+
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store.clone(),
+    )));
+
+    let mut g = Builder::for_tests();
+    g.set_persistence(persistence_params);
+    let mut g = g.start(authority.clone()).await.unwrap();
+    g.backend_ready().await;
+    {
+        let mut getter = g.view("tv").await.unwrap();
+
+        // Make sure that the new graph contains the old writes
+        let result = getter.lookup(&[0.into()], true).await.unwrap();
+        assert_eq!(result.len(), 3);
+        // x = 0
+        assert_eq!(result[0][0], 0.into());
+        assert_eq!(result[0][1], 3.into());
+        // x = 2
+        assert_eq!(result[1][0], 2.into());
+        assert_eq!(result[1][1], 3.into());
+        // x = 1
+        assert_eq!(result[2][0], 1.into());
+        assert_eq!(result[2][1], 3.into());
+    }
+    // We add more stuff, to be sure everything is still working
+    {
+        let mut mutator = g.table("t").await.unwrap();
+
+        for i in 1..10 {
+            mutator.insert(vec![(i % 3).into()]).await.unwrap();
+        }
+    }
+    {
+        let mut getter = g.view("tv").await.unwrap();
+
+        // Make sure that the new graph contains the old writes
+        let result = getter.lookup(&[0.into()], true).await.unwrap();
+        assert_eq!(result.len(), 3);
+        // x = 2
+        assert_eq!(result[0][0], 2.into());
+        assert_eq!(result[0][1], 6.into());
+        // x = 1
+        assert_eq!(result[1][0], 1.into());
+        assert_eq!(result[1][1], 6.into());
+        // x = 0
+        assert_eq!(result[2][0], 0.into());
+        assert_eq!(result[2][1], 6.into());
+    }
+    drop(g);
 }

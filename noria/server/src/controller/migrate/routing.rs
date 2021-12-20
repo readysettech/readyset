@@ -281,7 +281,7 @@ pub fn add(
     Ok(swaps)
 }
 
-pub(super) fn connect(
+pub(in crate::controller) fn connect(
     graph: &Graph,
     dmp: &mut DomainMigrationPlan,
     new: &HashSet<NodeIndex>,

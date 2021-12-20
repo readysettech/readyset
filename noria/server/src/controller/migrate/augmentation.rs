@@ -45,6 +45,7 @@ pub(super) fn inform(
                 .ingredients
                 .node_weight_mut(ni)
                 .unwrap()
+                .clone()
                 .take();
             let node = node.finalize(&dataflow_state.ingredients);
             // new parents already have the right child list

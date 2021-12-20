@@ -15,7 +15,7 @@ use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
-use noria_errors::{internal, internal_err, invariant, unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, trace, warn};
 
 use crate::controller::Migration;
@@ -1035,19 +1035,6 @@ impl SqlIncorporator {
             .insert(String::from(query_name.as_str()), qfp.query_leaf);
 
         Ok(qfp)
-    }
-
-    /// Upgrades the schema version that any nodes created for queries will be tagged with.
-    /// `new_version` must be strictly greater than the current version in `self.schema_version`.
-    pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
-        invariant!(new_version > self.schema_version);
-        debug!(
-            "Schema version advanced from {} to {}",
-            self.schema_version, new_version
-        );
-        self.schema_version = new_version;
-        self.mir_converter.upgrade_schema(new_version)?;
-        Ok(())
     }
 }
 
