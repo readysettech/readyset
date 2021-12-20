@@ -14,4 +14,6 @@ locals {
   benchmarking_s3_buckets_allowed = var.devops_assets_s3_bucket_enabled ? [
     aws_s3_bucket.devops-assets[0].id
   ] : null
+  # Buildkite
+  bk_benchmarking_iam_pol_name = format("readyset-benchmarking-assume-pol-%s", local.env_region)
 }

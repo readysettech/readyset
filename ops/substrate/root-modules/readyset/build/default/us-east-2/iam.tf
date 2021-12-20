@@ -27,3 +27,11 @@ resource "aws_iam_policy" "ci-benchmarking" {
   path   = "/"
   policy = data.aws_iam_policy_document.ci-benchmarking[0].json
 }
+
+# Policy to allow Buildkite queue agents to assume role
+resource "aws_iam_policy" "bk-benchmarking-assume-role" {
+  count  = var.benchmarking_iam_role_enabled ? 1 : 0
+  name   = local.bk_benchmarking_iam_pol_name
+  path   = "/"
+  policy = data.aws_iam_policy_document.bk-benchmarking-assume-role[0].json
+}

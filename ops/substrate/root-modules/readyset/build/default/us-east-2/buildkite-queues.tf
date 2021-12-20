@@ -31,7 +31,6 @@ resource "aws_s3_bucket_public_access_block" "sccache" {
   restrict_public_buckets = true
 }
 
-
 module "buildkite_queue_shared" {
   source           = "../../../../../modules/buildkite-queue-shared/regional"
   environment      = "build"
@@ -43,6 +42,7 @@ module "buildkite_queue_shared" {
     flatten(values(module.buildkite_queue)[*].iam_roles),
   )
 }
+
 module "buildkite_queue" {
   for_each = toset(local.instance_types)
 
@@ -129,6 +129,26 @@ module "buildkite_ops_queue" {
 
   extra_iam_policy_arns = local.extra_iam_policy_arns
 
+  secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
+  artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
+}
+
+module "buildkite_benchmark_queue" {
+  source          = "../../../../../modules/buildkite-queue/regional"
+  environment     = "build"
+  buildkite_queue = "benchmarks"
+  instance_type   = "c5.2xlarge"
+
+  min_size = 0
+  max_size = 5
+
+  buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
+
+  extra_iam_policy_arns = concat(
+    local.extra_iam_policy_arns, [
+      aws_iam_policy.bk-benchmarking-assume-role[0].arn
+    ]
+  )
   secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
   artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
 }

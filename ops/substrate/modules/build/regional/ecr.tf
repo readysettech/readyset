@@ -71,4 +71,9 @@ resource "aws_ecr_repository" "metrics-aggregator" {
   image_tag_mutability = "MUTABLE"
 }
 
+resource "aws_ecr_repository" "benchmark" {
+  name                 = "readyset-benchmarks"
+  image_tag_mutability = "MUTABLE"
+}
+
 # TODO: Import our existing repositories

@@ -38,3 +38,14 @@ data "aws_iam_policy_document" "ci-benchmarking" {
     resources = [data.aws_kms_key.s3-default.arn]
   }
 }
+
+# Grants Buildkite queue's role access to assume benchmarking IAM role
+data "aws_iam_policy_document" "bk-benchmarking-assume-role" {
+  count = var.benchmarking_iam_role_enabled ? 1 : 0
+  statement {
+    actions = ["sts:AssumeRole"]
+    resources = [
+      module.ci-benchmarking-iam-role[0].iam_role_arn
+    ]
+  }
+}
