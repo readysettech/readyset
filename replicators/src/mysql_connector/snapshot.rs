@@ -97,9 +97,10 @@ impl MySqlReplicator {
         // >> This locking approach has the implication that a table that is being used by a transaction within
         // >> one session cannot be used in DDL statements by other sessions until the transaction ends.
         // >> This principle applies not only to transactional tables, but also to nontransactional tables.
-        if !tables.is_empty() {
-            let metalock_query = format!("SELECT 1 FROM `{}` LIMIT 0", tables.iter().join("`,`"));
-            tx.query_drop(metalock_query).await?;
+        for tables in tables.chunks(20) {
+            // There is a default limit of 61 tables per join, so we chunk into smaller joins just in case
+            let metalock = format!("SELECT 1 FROM `{}` LIMIT 0", tables.iter().join("`,`"));
+            tx.query_drop(metalock).await?;
         }
 
         let mut recipe = String::new();
@@ -290,7 +291,7 @@ impl MySqlReplicator {
             }
         };
 
-        let (recipe, _meta_lock) = self.load_recipe_with_meta_lock().await?;
+        let (recipe, _meta_lock) = self.load_recipe_with_meta_lock().await.map_err(log_err)?;
         debug!(%recipe, "Loaded recipe");
 
         // Get the current binlog position, since at this point the tables are not locked, binlog

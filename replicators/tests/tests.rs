@@ -99,6 +99,7 @@ struct TestHandle {
     // We spin a whole runtime for the replication task because the tokio postgres
     // connection spawns a background task we can only terminate by dropping the runtime
     replication_rt: Option<tokio::runtime::Runtime>,
+    ready_notify: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl Drop for TestHandle {
@@ -183,6 +184,7 @@ impl TestHandle {
             noria,
             authority,
             replication_rt: None,
+            ready_notify: Some(Default::default()),
         };
 
         handle.start_repl().await?;
@@ -214,7 +216,7 @@ impl TestHandle {
             self.url.clone(),
             controller,
             None,
-            None,
+            self.ready_notify.clone(),
         ));
 
         if let Some(rt) = self.replication_rt.replace(runtime) {
@@ -268,7 +270,7 @@ async fn replication_test_inner(url: &str) -> ReadySetResult<()> {
     client.query(POPULATE_SCHEMA).await?;
 
     let mut ctx = TestHandle::start_noria(url.to_string()).await?;
-    // Allow some time to snapshot
+    ctx.ready_notify.as_ref().unwrap().notified().await;
 
     ctx.check_results("noria_view", "Snapshot", SNAPSHOT_RESULT)
         .await?;
@@ -315,6 +317,7 @@ fn mysql_url() -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn pgsql_replication() -> ReadySetResult<()> {
     replication_test_inner(&pgsql_url()).await
 }
@@ -381,7 +384,9 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     let ctx = TestHandle::start_noria(url.to_string()).await?;
-    let client = inserter.await.unwrap()?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    let mut client = inserter.await.unwrap()?;
 
     // Sleep just more to allow propagation time
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -395,8 +400,60 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
     let results = getter.lookup(&[0.into()], true).await?;
     assert_eq!(results.len(), TOTAL_INSERTS);
 
-    client.stop().await;
     ctx.stop().await;
+
+    client
+        .query(
+            "
+        DROP TABLE IF EXISTS `catch_up` CASCADE;
+        DROP TABLE IF EXISTS `catch_up_pk` CASCADE;
+        DROP VIEW IF EXISTS catch_up_view;
+        DROP VIEW IF EXISTS catch_up_pk_view;",
+        )
+        .await?;
+
+    client.stop().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_many_tables() -> ReadySetResult<()> {
+    const TOTAL_TABLES: usize = 300;
+
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await?;
+
+    for t in 0..TOTAL_TABLES {
+        let tbl_name = format!("t{}", t);
+        client
+            .query(&format!(
+                "DROP TABLE IF EXISTS `{0}` CASCADE; CREATE TABLE `{0}` (id int); INSERT INTO `{0}` VALUES (1);",
+                tbl_name
+            ))
+            .await?;
+    }
+
+    let ctx = TestHandle::start_noria(url.to_string()).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    for t in 0..TOTAL_TABLES {
+        // Just check that all of the tables are really there
+        let tbl_name = format!("t{}", t);
+        ctx.controller().await.table(&tbl_name).await.unwrap();
+    }
+
+    ctx.stop().await;
+
+    for t in 0..TOTAL_TABLES {
+        let tbl_name = format!("t{}", t);
+        client
+            .query(&format!("DROP TABLE IF EXISTS `{0}` CASCADE;", tbl_name))
+            .await?;
+    }
+
+    client.stop().await;
 
     Ok(())
 }
@@ -431,6 +488,7 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
         .await?;
 
     let mut ctx = TestHandle::start_noria(url.to_string()).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
 
     // TODO: Those are obviously not the right answers, but at least we don't panic
     ctx.check_results(
