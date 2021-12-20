@@ -1,23 +1,24 @@
+#![feature(total_cmp)]
+
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone};
-use derive_more::{From, Into};
-use itertools::{Either, Itertools};
-use serde::{Deserialize, Serialize};
-use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
-
-use crate::replication::ReplicationOffset;
-use crate::{Text, TinyText};
+use itertools::Itertools;
 use nom_sql::{Double, Float, Literal, SqlType};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
+use proptest::prelude::{prop_oneof, Arbitrary};
+use tokio_postgres::types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 
+use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Div, Mul, Sub};
-use std::{borrow::Cow, mem};
-use std::{fmt, iter};
+use std::{fmt, mem};
 
-use proptest::prelude::{prop_oneof, Arbitrary};
+mod serde;
+mod text;
+
+pub use crate::text::{Text, TinyText};
 
 /// DateTime offsets must be bigger than -86_000 seconds and smaller than 86_000 (not inclusive in
 /// either case), and we don't care about seconds, so our maximum offset is gonna be
@@ -32,10 +33,6 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
-///
-/// Also note that DataType uses a custom implementation of the Serialize trait, which must be
-/// manually updated if the DataType enum changes:
-/// https://www.notion.so/Text-TinyText-Serialization-Deserialization-9dff56b6974b4bcdae28f236882783a8
 #[derive(Clone, Debug)]
 #[warn(variant_size_differences)]
 pub enum DataType {
@@ -240,7 +237,7 @@ impl DataType {
     /// # Examples
     ///
     /// ```rust
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     ///
     /// assert!(!DataType::None.is_truthy());
     /// assert!(!DataType::Int(0).is_truthy());
@@ -350,7 +347,7 @@ impl DataType {
     /// Reals can be converted to integers
     ///
     /// ```rust
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     /// use nom_sql::SqlType;
     ///
     /// let real = DataType::Double(123.0, 0);
@@ -361,7 +358,7 @@ impl DataType {
     /// Text can be parsed as a timestamp using the SQL `%Y-%m-%d %H:%M:%S` format:
     ///
     /// ```rust
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     /// use nom_sql::SqlType;
     /// use chrono::NaiveDate;
     /// use std::borrow::Borrow;
@@ -804,7 +801,7 @@ impl DataType {
     /// # Examples
     ///
     /// ```
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     ///
     /// assert_eq!(DataType::Int(12).non_null(), Some(&DataType::Int(12)));
     /// assert_eq!(DataType::None.non_null(), None);
@@ -822,7 +819,7 @@ impl DataType {
     /// # Examples
     ///
     /// ```
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     ///
     /// assert_eq!(DataType::Int(12).into_non_null(), Some(DataType::Int(12)));
     /// assert_eq!(DataType::None.into_non_null(), None);
@@ -2409,121 +2406,6 @@ impl<'a, 'b> Div<&'b DataType> for &'a DataType {
     }
 }
 
-/// A modification to make to an existing value.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum Operation {
-    /// Add the given value to the existing one.
-    Add,
-    /// Subtract the given value from the existing value.
-    Sub,
-}
-
-/// A modification to make to a column in an existing row.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum Modification {
-    /// Set the cell to this value.
-    Set(DataType),
-    /// Use the given [`Operation`] to combine the existing value and this one.
-    Apply(Operation, DataType),
-    /// Leave the existing value as-is.
-    None,
-}
-
-impl<T> From<T> for Modification
-where
-    T: Into<DataType>,
-{
-    fn from(t: T) -> Modification {
-        Modification::Set(t.into())
-    }
-}
-
-/// An operation to apply to a base table.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum TableOperation {
-    /// Insert the contained row.
-    Insert(Vec<DataType>),
-    /// Delete a row with the contained key.
-    DeleteByKey {
-        /// The key.
-        key: Vec<DataType>,
-    },
-    /// Delete *one* row matching the entirety of the given row
-    DeleteRow {
-        /// The row to delete
-        row: Vec<DataType>,
-    },
-    /// If a row exists with the same key as the contained row, update it using `update`, otherwise
-    /// insert `row`.
-    InsertOrUpdate {
-        /// This row will be inserted if no existing row is found.
-        row: Vec<DataType>,
-        /// These modifications will be applied to the columns of an existing row.
-        update: Vec<Modification>,
-    },
-    /// Update an existing row with the given `key`.
-    Update {
-        /// The modifications to make to each column of the existing row.
-        update: Vec<Modification>,
-        /// The key used to identify the row to update.
-        key: Vec<DataType>,
-    },
-    /// Set the replication offset for data written to this base table.
-    ///
-    /// Within a group of table operations, the largest replication offset will take precedence
-    ///
-    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
-    /// more information about replication offsets.
-    SetReplicationOffset(ReplicationOffset),
-
-    /// Enter or exit snapshot mode for the underlying persistent storage. In snapshot mode
-    /// compactions are disabled and writes don't go into WAL first.
-    SetSnapshotMode(bool),
-}
-
-impl TableOperation {
-    #[doc(hidden)]
-    pub fn row(&self) -> Option<&[DataType]> {
-        match *self {
-            TableOperation::Insert(ref r) => Some(r),
-            TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
-            _ => None,
-        }
-    }
-
-    /// Construct an iterator over the shards this TableOperation should target.
-    ///
-    /// ## Invariants
-    /// * `key_col` must be in the rows.
-    /// * the `key`s must have at least one element.
-    #[inline]
-    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
-        #[allow(clippy::indexing_slicing)]
-        let key = match self {
-            TableOperation::Insert(row) => Some(&row[key_col]),
-            TableOperation::DeleteByKey { key } => Some(&key[0]),
-            TableOperation::DeleteRow { row } => Some(&row[key_col]),
-            TableOperation::Update { key, .. } => Some(&key[0]),
-            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
-            TableOperation::SetReplicationOffset(_) => None,
-            TableOperation::SetSnapshotMode(_) => None,
-        };
-
-        if let Some(key) = key {
-            Either::Left(iter::once(crate::shard_by(key, num_shards)))
-        } else {
-            // updates to replication offsets should hit all shards
-            Either::Right(0..num_shards)
-        }
-    }
-}
-
-impl From<Vec<DataType>> for TableOperation {
-    fn from(other: Vec<DataType>) -> Self {
-        TableOperation::Insert(other)
-    }
-}
-
 impl Arbitrary for DataType {
     type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<DataType>;
@@ -2555,55 +2437,55 @@ impl Arbitrary for DataType {
     }
 }
 
-#[derive(Debug, From, Into)]
-struct MySqlValue(mysql_common::value::Value);
-
-impl Arbitrary for MySqlValue {
-    type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<MySqlValue>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use mysql_common::value::Value;
-        use proptest::arbitrary::any;
-        use proptest::prelude::*;
-
-        //TODO(DAN): cleaner way of avoiding invalid dates/times
-        prop_oneof![
-            Just(Value::NULL),
-            any::<i64>().prop_map(Value::Int),
-            any::<u64>().prop_map(Value::UInt),
-            any::<f32>().prop_map(Value::Float),
-            any::<f64>().prop_map(Value::Double),
-            (
-                1001u16..9999,
-                1u8..13,
-                1u8..29, //TODO(DAN): Allow up to 31 and check for invalid dates in the test
-                0u8..24,
-                0u8..60,
-                0u8..60,
-                0u32..100
-            )
-                .prop_map(|(y, m, d, h, min, s, ms)| Value::Date(y, m, d, h, min, s, ms)),
-            (
-                any::<bool>(),
-                0u32..34, // DataType cannot accept time hihger than 838:59:59
-                0u8..24,
-                0u8..60,
-                0u8..60,
-                0u32..100
-            )
-                .prop_map(|(neg, d, h, m, s, ms)| Value::Time(neg, d, h, m, s, ms)),
-        ]
-        .prop_map(MySqlValue)
-        .boxed()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use derive_more::{From, Into};
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    #[derive(Debug, From, Into)]
+    struct MySqlValue(mysql_common::value::Value);
+
+    impl Arbitrary for MySqlValue {
+        type Parameters = ();
+        type Strategy = proptest::strategy::BoxedStrategy<MySqlValue>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            use mysql_common::value::Value;
+            use proptest::prelude::*;
+
+            //TODO(DAN): cleaner way of avoiding invalid dates/times
+            prop_oneof![
+                Just(Value::NULL),
+                any::<i64>().prop_map(Value::Int),
+                any::<u64>().prop_map(Value::UInt),
+                any::<f32>().prop_map(Value::Float),
+                any::<f64>().prop_map(Value::Double),
+                (
+                    1001u16..9999,
+                    1u8..13,
+                    1u8..29, //TODO(DAN): Allow up to 31 and check for invalid dates in the test
+                    0u8..24,
+                    0u8..60,
+                    0u8..60,
+                    0u32..100
+                )
+                    .prop_map(|(y, m, d, h, min, s, ms)| Value::Date(y, m, d, h, min, s, ms)),
+                (
+                    any::<bool>(),
+                    0u32..34, // DataType cannot accept time hihger than 838:59:59
+                    0u8..24,
+                    0u8..60,
+                    0u8..60,
+                    0u32..100
+                )
+                    .prop_map(|(neg, d, h, m, s, ms)| Value::Time(neg, d, h, m, s, ms)),
+            ]
+            .prop_map(MySqlValue)
+            .boxed()
+        }
+    }
 
     #[proptest]
     #[allow(clippy::float_cmp)]
@@ -2745,7 +2627,7 @@ mod tests {
         assert_eq!(a_dt.unwrap(), DataType::Timestamp(ts));
 
         // Test Value::Time.
-        // noria::DataType has no `Time` representation.
+        // noria_data::DataType has no `Time` representation.
         let a = Value::Time(true, 0, 0, 0, 0, 0);
         let a_dt = DataType::try_from(a);
         assert!(a_dt.is_ok());

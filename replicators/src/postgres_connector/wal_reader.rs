@@ -3,6 +3,7 @@ use bit_vec::BitVec;
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime};
 use mysql_time::MysqlTime;
 use noria::{ReadySetError, ReadySetResult};
+use noria_data::DataType;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::Decimal;
 use std::sync::Arc;
@@ -23,24 +24,24 @@ pub enum WalEvent {
     Commit,
     Insert {
         table: String,
-        tuple: Vec<noria::DataType>,
+        tuple: Vec<DataType>,
     },
     DeleteRow {
         table: String,
-        tuple: Vec<noria::DataType>,
+        tuple: Vec<DataType>,
     },
     DeleteByKey {
         table: String,
-        key: Vec<noria::DataType>,
+        key: Vec<DataType>,
     },
     UpdateRow {
         table: String,
-        old_tuple: Vec<noria::DataType>,
-        new_tuple: Vec<noria::DataType>,
+        old_tuple: Vec<DataType>,
+        new_tuple: Vec<DataType>,
     },
     UpdateByKey {
         table: String,
-        key: Vec<noria::DataType>,
+        key: Vec<DataType>,
         set: Vec<noria::Modification>,
     },
 }
@@ -209,8 +210,7 @@ impl wal::TupleData {
         self,
         relation: &RelationMapping,
         is_key: bool,
-    ) -> Result<Vec<noria::DataType>, WalError> {
-        use noria::DataType;
+    ) -> Result<Vec<DataType>, WalError> {
         use postgres_types::Type as PGType;
 
         if self.n_cols != relation.n_cols {
@@ -266,12 +266,12 @@ impl wal::TupleData {
                             // If there is a dot, there is a microseconds field attached
                             if let Some((time, micro)) = &str.split_once('.') {
                                 // The usec format in WAL is super dumb, it is actually skipping the trailing zeroes, and not the leading zeroes ...
-                                NaiveDateTime::parse_from_str(time, noria::TIMESTAMP_FORMAT)?
+                                NaiveDateTime::parse_from_str(time, noria_data::TIMESTAMP_FORMAT)?
                                     + Duration::microseconds(
                                         micro.parse::<i64>()? * 10i64.pow(6 - micro.len() as u32),
                                     )
                             } else {
-                                NaiveDateTime::parse_from_str(&str, noria::TIMESTAMP_FORMAT)?
+                                NaiveDateTime::parse_from_str(&str, noria_data::TIMESTAMP_FORMAT)?
                             }
                         }),
                         PGType::TIMESTAMPTZ => match str.strip_suffix(" BC") {
@@ -301,10 +301,10 @@ impl wal::TupleData {
                         PGType::DATE => DataType::Timestamp({
                             // WAL is not using negative years, but converts to BC notation instead
                             if let Some(is_bc) = str.strip_suffix(" BC") {
-                                let d = NaiveDate::parse_from_str(is_bc, noria::DATE_FORMAT)?;
+                                let d = NaiveDate::parse_from_str(is_bc, noria_data::DATE_FORMAT)?;
                                 NaiveDate::from_ymd(-d.year() + 1, d.month(), d.day())
                             } else {
-                                NaiveDate::parse_from_str(&str, noria::DATE_FORMAT)?
+                                NaiveDate::parse_from_str(&str, noria_data::DATE_FORMAT)?
                             }
                             .and_hms(0, 0, 0)
                         }),

@@ -1,5 +1,5 @@
 use noria::internal::LocalNodeIndex;
-use noria::DataType;
+use noria_data::DataType;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
@@ -318,7 +318,7 @@ impl<'a> RangeKey<'a> {
     ///
     /// ```rust
     /// use noria_common::RangeKey;
-    /// use noria::DataType;
+    /// use noria_data::DataType;
     /// use std::ops::Bound::*;
     /// use vec1::vec1;
     ///

@@ -12,7 +12,8 @@ use maths::int::integer_rnd;
 use mysql_time::MysqlTime;
 use nom_sql::{BinaryOperator, SqlType};
 use noria::util::like::{CaseInsensitive, CaseSensitive, LikePattern};
-use noria::{DataType, ReadySetError, ReadySetResult};
+use noria_data::DataType;
+use noria_errors::{ReadySetError, ReadySetResult};
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 

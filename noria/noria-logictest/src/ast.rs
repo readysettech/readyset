@@ -20,7 +20,7 @@ use itertools::Itertools;
 use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use nom_sql::{Literal, SqlQuery};
-use noria::{DataType, TIMESTAMP_FORMAT};
+use noria_data::{DataType, TIMESTAMP_FORMAT};
 use pgsql::types::{accepts, to_sql_checked};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;

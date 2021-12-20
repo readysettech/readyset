@@ -6,7 +6,8 @@ use nom_sql::{
     BinaryOperator, Column, ColumnConstraint, CreateTableStatement, DeleteStatement, Expression,
     InsertStatement, Literal, SelectStatement, SqlQuery, TableKey, UpdateStatement,
 };
-use noria::{DataType, Modification, Operation};
+use noria::{Modification, Operation};
+use noria_data::DataType;
 use noria_errors::{
     bad_request_err, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
 };

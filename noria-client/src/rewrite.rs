@@ -955,7 +955,7 @@ mod tests {
     }
 
     mod process_query {
-        use noria::DataType;
+        use noria_data::DataType;
 
         use super::*;
 

@@ -1,5 +1,6 @@
 use nom_sql::{Double, Float, Literal};
-use noria::{DataType, ReadySetError, ReadySetResult};
+use noria_data::DataType;
+use noria_errors::{ReadySetError, ReadySetResult};
 
 use bit_vec::BitVec;
 use chrono::NaiveDate;

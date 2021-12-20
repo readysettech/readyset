@@ -2,10 +2,12 @@ use nom_sql::{
     Column, ColumnSpecification, Expression, FieldDefinitionExpression, SqlQuery, SqlType,
 };
 use noria::results::Results;
-use noria::{ColumnSchema, DataType, ReadySetResult};
+use noria::ColumnSchema;
 use noria_client::backend::noria_connector::QueryResult;
 use noria_client::backend::{noria_connector, SelectSchema};
 use noria_client::QueryHandler;
+use noria_data::DataType;
+use noria_errors::ReadySetResult;
 use std::borrow::Cow;
 use std::sync::Arc;
 

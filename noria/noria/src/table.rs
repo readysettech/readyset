@@ -1,8 +1,11 @@
-use crate::channel::CONNECTION_FROM_BASE;
-use crate::data::*;
-use crate::internal::*;
-use crate::replication::ReplicationOffset;
-use crate::{consistency, LocalOrNot, Tagged, Tagger};
+use std::collections::HashMap;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant, SystemTime};
+use std::{fmt, iter};
+
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
 use noria_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
@@ -14,15 +17,10 @@ use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
     stream::TryStreamExt,
 };
+use itertools::Either;
 use nom_sql::CreateTableStatement;
+use noria_data::DataType;
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
-use std::fmt;
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant, SystemTime};
 use tokio::io::AsyncWriteExt;
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
@@ -31,8 +29,128 @@ use tower::limit::concurrency::ConcurrencyLimit;
 use tower_service::Service;
 use vec_map::VecMap;
 
+use crate::channel::CONNECTION_FROM_BASE;
+use crate::internal::*;
+use crate::replication::ReplicationOffset;
+use crate::{consistency, LocalOrNot, Tagged, Tagger};
+
 // TODO(justin): Make write propagation sample rate configurable.
 const TRACE_SAMPLE_RATE: Duration = Duration::from_secs(1);
+
+/// A modification to make to an existing value.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Operation {
+    /// Add the given value to the existing one.
+    Add,
+    /// Subtract the given value from the existing value.
+    Sub,
+}
+
+/// A modification to make to a column in an existing row.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Modification {
+    /// Set the cell to this value.
+    Set(DataType),
+    /// Use the given [`Operation`] to combine the existing value and this one.
+    Apply(Operation, DataType),
+    /// Leave the existing value as-is.
+    None,
+}
+
+impl<T> From<T> for Modification
+where
+    T: Into<DataType>,
+{
+    fn from(t: T) -> Modification {
+        Modification::Set(t.into())
+    }
+}
+
+/// An operation to apply to a base table.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum TableOperation {
+    /// Insert the contained row.
+    Insert(Vec<DataType>),
+    /// Delete a row with the contained key.
+    DeleteByKey {
+        /// The key.
+        key: Vec<DataType>,
+    },
+    /// Delete *one* row matching the entirety of the given row
+    DeleteRow {
+        /// The row to delete
+        row: Vec<DataType>,
+    },
+    /// If a row exists with the same key as the contained row, update it using `update`, otherwise
+    /// insert `row`.
+    InsertOrUpdate {
+        /// This row will be inserted if no existing row is found.
+        row: Vec<DataType>,
+        /// These modifications will be applied to the columns of an existing row.
+        update: Vec<Modification>,
+    },
+    /// Update an existing row with the given `key`.
+    Update {
+        /// The modifications to make to each column of the existing row.
+        update: Vec<Modification>,
+        /// The key used to identify the row to update.
+        key: Vec<DataType>,
+    },
+    /// Set the replication offset for data written to this base table.
+    ///
+    /// Within a group of table operations, the largest replication offset will take precedence
+    ///
+    /// See [the documentation for PersistentState](::noria_dataflow::state::persistent_state) for
+    /// more information about replication offsets.
+    SetReplicationOffset(ReplicationOffset),
+
+    /// Enter or exit snapshot mode for the underlying persistent storage. In snapshot mode
+    /// compactions are disabled and writes don't go into WAL first.
+    SetSnapshotMode(bool),
+}
+
+impl TableOperation {
+    #[doc(hidden)]
+    pub fn row(&self) -> Option<&[DataType]> {
+        match *self {
+            TableOperation::Insert(ref r) => Some(r),
+            TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
+            _ => None,
+        }
+    }
+
+    /// Construct an iterator over the shards this TableOperation should target.
+    ///
+    /// ## Invariants
+    /// * `key_col` must be in the rows.
+    /// * the `key`s must have at least one element.
+    #[inline]
+    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
+        #[allow(clippy::indexing_slicing)]
+        let key = match self {
+            TableOperation::Insert(row) => Some(&row[key_col]),
+            TableOperation::DeleteByKey { key } => Some(&key[0]),
+            TableOperation::DeleteRow { row } => Some(&row[key_col]),
+            TableOperation::Update { key, .. } => Some(&key[0]),
+            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
+            TableOperation::SetReplicationOffset(_) => None,
+            TableOperation::SetSnapshotMode(_) => None,
+        };
+
+        if let Some(key) = key {
+            Either::Left(iter::once(crate::shard_by(key, num_shards)))
+        } else {
+            // updates to replication offsets should hit all shards
+            Either::Right(0..num_shards)
+        }
+    }
+}
+
+impl From<Vec<DataType>> for TableOperation {
+    fn from(other: Vec<DataType>) -> Self {
+        TableOperation::Insert(other)
+    }
+}
 
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,

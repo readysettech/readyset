@@ -32,7 +32,7 @@ use proptest::sample::select;
 use proptest::test_runner::TestCaseResult;
 use test_strategy::proptest;
 
-use noria::DataType;
+use noria_data::DataType;
 
 mod common;
 

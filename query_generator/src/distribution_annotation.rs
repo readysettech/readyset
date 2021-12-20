@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::bail;
-use noria::DataType;
+use noria_data::DataType;
 
 use crate::ColumnGenerationSpec;
 

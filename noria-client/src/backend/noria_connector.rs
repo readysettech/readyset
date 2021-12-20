@@ -1,9 +1,10 @@
 use noria::results::Results;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, DataType, ReadySetError,
+    consistency::Timestamp, internal::LocalNodeIndex, ControllerHandle, ReadySetError,
     ReadySetResult, SchemaType, Table, TableOperation, View, ViewQuery, ViewQueryFilter,
     ViewQueryOperator,
 };
+use noria_data::DataType;
 
 use nom_sql::{
     self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,

@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use crate::ast::*;
 use mysql_time::MysqlTime;
-use noria::TIMESTAMP_FORMAT;
+use noria_data::TIMESTAMP_FORMAT;
 
 use anyhow::{anyhow, bail, Context};
 use chrono::NaiveDateTime;

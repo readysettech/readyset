@@ -1,4 +1,4 @@
-use noria::DataType;
+use noria_data::DataType;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::ops::{Deref, DerefMut};

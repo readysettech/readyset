@@ -6,7 +6,7 @@ extern crate mysql;
 extern crate rand;
 
 use mysql as my;
-use noria::DataType;
+use noria_data::DataType;
 use std::time;
 
 #[macro_use]

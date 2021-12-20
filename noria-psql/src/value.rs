@@ -1,5 +1,5 @@
 use eui48::MacAddress;
-use noria::DataType;
+use noria_data::DataType;
 use psql_srv as ps;
 use std::convert::TryFrom;
 use tokio_postgres::types::Type;
@@ -96,7 +96,7 @@ impl TryFrom<Value> for ps::Value {
 #[cfg(test)]
 mod tests {
 
-    use noria::TinyText;
+    use noria_data::TinyText;
 
     use super::*;
 

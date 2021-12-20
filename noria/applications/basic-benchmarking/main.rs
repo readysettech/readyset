@@ -2,7 +2,8 @@
 use clap::{App, Arg};
 use mysql::prelude::*;
 use mysql::*;
-use noria::{Builder, DataType, Handle};
+use noria::{Builder, Handle};
+use noria_data::DataType;
 use rand::Rng;
 use std::convert::TryFrom;
 use std::result;

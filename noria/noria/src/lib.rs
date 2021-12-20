@@ -26,6 +26,7 @@
 //!
 //! ```no_run
 //! # use noria::*;
+//! # use noria_data::DataType;
 //! # use std::convert::TryInto;
 //!
 //! #[tokio::main]
@@ -210,9 +211,6 @@ use tokio_tower::multiplex;
 
 pub mod consistency;
 mod controller;
-mod data;
-mod data_serde;
-mod data_text_types;
 pub mod metrics;
 mod table;
 pub mod util;
@@ -236,6 +234,7 @@ pub use nom_sql::ColumnConstraint;
 pub use crate::consensus::ZookeeperAuthority;
 // FIXME(eta): get rid of these
 use crate::internal::*;
+use noria_data::DataType;
 pub use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -304,12 +303,7 @@ impl<T> From<T> for Tagged<T> {
 
 pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{ControllerDescriptor, ControllerHandle};
-pub use crate::data::{
-    DataType, Modification, Operation, TableOperation, DATE_FORMAT, TIMESTAMP_FORMAT,
-    TIMESTAMP_TZ_FORMAT, TIME_FORMAT,
-};
-pub use crate::data_text_types::{Text, TinyText};
-pub use crate::table::{Table, TableRequest};
+pub use crate::table::{Modification, Operation, Table, TableOperation, TableRequest};
 pub use crate::view::View;
 
 #[doc(hidden)]

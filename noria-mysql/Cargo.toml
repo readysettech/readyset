@@ -18,6 +18,7 @@ mysql_async = "0.29"
 
 noria = { path = "../noria/noria" }
 noria-errors = { path = "../noria/errors" }
+noria-data = { path = "../noria/data" }
 noria-client = { path = "../noria-client" }
 noria-client-adapter = { path = "../noria-client/adapter" }
 nom-sql = { path = "../nom-sql" }

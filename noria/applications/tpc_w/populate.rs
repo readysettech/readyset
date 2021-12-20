@@ -8,7 +8,8 @@ use std::str::FromStr;
 use std::time;
 
 use super::Backend;
-use noria::{DataType, ReadySetResult};
+use noria::ReadySetResult;
+use noria_data::DataType;
 
 async fn populate(
     backend: &mut Backend,

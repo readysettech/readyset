@@ -1,4 +1,4 @@
-use noria::DataType;
+use noria_data::DataType;
 use rand::prelude::*;
 use std::collections::HashMap;
 use std::convert::TryFrom;

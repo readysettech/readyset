@@ -17,7 +17,8 @@ use std::panic;
 use std::thread;
 use std::time;
 
-use noria_server::{Builder, DataType};
+use noria_data::DataType;
+use noria_server::Builder;
 
 const DIRECTORY_PREFIX: &str = "tests/mysql_comparison_tests";
 

@@ -637,7 +637,7 @@ pub(crate) fn materialize(
 pub mod bench {
     use super::*;
     use crate::processing::MissRecord::Point;
-    use noria::DataType::Int;
+    use noria_data::DataType::Int;
 
     pub fn unique_misses(c: &mut criterion::Criterion) {
         let state = unsafe {

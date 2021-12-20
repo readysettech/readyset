@@ -236,7 +236,7 @@
 //! let zookeeper_addr = "";
 //! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
 //! let mut article = db.table("article").await.unwrap();
-//! article.insert(vec![noria::DataType::from(1), "Hello world".try_into().unwrap()]).await.unwrap();
+//! article.insert(vec![noria_data::DataType::from(1), "Hello world".try_into().unwrap()]).await.unwrap();
 //! # }
 //! ```
 //!
@@ -293,7 +293,7 @@
 //! # let zookeeper_addr = "";
 //! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
 //! let mut vote = db.table("vote").await.unwrap();
-//! vote.insert(vec![noria::DataType::from(1000), 1.into()]).await.unwrap();
+//! vote.insert(vec![noria_data::DataType::from(1000), 1.into()]).await.unwrap();
 //! # }
 //! ```
 //!

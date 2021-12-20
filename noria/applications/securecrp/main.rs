@@ -1,7 +1,8 @@
 #![warn(clippy::dbg_macro)]
 mod test_populate;
 
-use noria::{Builder, DataType, Handle, ReuseConfigType};
+use noria::{Builder, Handle, ReuseConfigType};
+use noria_data::DataType;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs::File;

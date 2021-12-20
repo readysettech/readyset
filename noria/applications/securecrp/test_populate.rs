@@ -1,5 +1,5 @@
 use crate::Backend;
-use noria::DataType;
+use noria_data::DataType;
 use std::convert::TryFrom;
 
 pub async fn create_users(backend: &mut Backend) {

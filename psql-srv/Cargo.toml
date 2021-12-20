@@ -15,7 +15,7 @@ bytes = "1.0.1"
 chrono = "0.4.19"
 futures = "0.3.14"
 nom-sql = { path = "../nom-sql" }
-noria = { path = "../noria/noria" }
+noria-data = { path = "../noria/data" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 thiserror = "1.0.26"

@@ -34,6 +34,7 @@ noria = { path = "../noria/noria", package = "noria" }
 launchpad = { path = "../launchpad" }
 readyset-logging = { path = "../readyset-logging" }
 mysql-time = { path = "../mysql-time" }
+noria-data = { path = "../noria/data" }
 
 [dev-dependencies]
 noria-server = { path = "../noria/server" }
