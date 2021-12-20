@@ -97,7 +97,7 @@ use nom_sql::{
     ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, Literal,
     OrderClause, OrderType, SelectStatement, SqlType, Table, TableKey,
 };
-use noria::DataType;
+use noria_data::DataType;
 use parking_lot::Mutex;
 use rand::distributions::Standard;
 use rust_decimal::Decimal;

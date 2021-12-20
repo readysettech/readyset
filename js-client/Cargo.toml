@@ -18,6 +18,7 @@ rust_decimal = { version = "1.16" }
 
 msql-srv = { path = "../msql-srv" }
 noria-client = { path = "../noria-client" }
+noria-data = { path = "../noria/data" }
 noria-mysql = { path = "../noria-mysql" }
 noria = { path = "../noria/noria/" }
 nom-sql = { path = "../nom-sql" }

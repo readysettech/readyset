@@ -10,7 +10,6 @@
 use crate::get_col;
 use crate::integration_utils::*;
 use crate::Builder;
-use crate::DataType;
 use assert_approx_eq::assert_approx_eq;
 use common::Index;
 use dataflow::node::special::Base;
@@ -19,6 +18,7 @@ use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::internal::DomainIndex;
 use noria::metrics::{recorded, DumpedMetricValue, MetricsDump};
 use noria::{get_all_metrics, get_metric};
+use noria_data::DataType;
 use petgraph::graph::NodeIndex;
 use serial_test::serial;
 

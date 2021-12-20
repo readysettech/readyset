@@ -11,6 +11,7 @@ edition = "2018"
 anyhow = "1.0"
 noria = { path = "../noria/noria/" }
 noria-errors = { path = "../noria/errors/" }
+noria-data = { path = "../noria/data" }
 timestamp_service = {path= "../noria/timestamp_service/"}
 futures-executor = "0.3.14"
 futures-util = "0.3.14"

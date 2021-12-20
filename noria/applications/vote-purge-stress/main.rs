@@ -3,7 +3,8 @@
 
 use clap::{value_t_or_exit, App, Arg};
 use hdrhistogram::Histogram;
-use noria::{Builder, DataType, DurabilityMode, FrontierStrategy, PersistenceParameters};
+use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters};
+use noria_data::DataType;
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 

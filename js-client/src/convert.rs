@@ -1,11 +1,12 @@
 use crate::utils;
 use chrono::NaiveDateTime;
 use neon::{prelude::*, types::JsDate};
+use noria::results::Results;
 use noria::ColumnSchema;
-use noria::{results::Results, DataType};
 use noria_client::backend::{
     PrepareResult, QueryResult, SelectSchema, SinglePrepareResult, UpstreamPrepare,
 };
+use noria_data::DataType;
 use noria_mysql::{Error, MySqlUpstream};
 use rust_decimal::prelude::ToPrimitive;
 use std::convert::TryFrom;

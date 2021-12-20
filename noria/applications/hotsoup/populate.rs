@@ -4,7 +4,8 @@ use std::path::Path;
 use std::time;
 
 use super::Backend;
-use noria::{DataType, Table};
+use noria::Table;
+use noria_data::DataType;
 use std::convert::TryFrom;
 
 async fn do_put(mutator: &mut Table, tx: bool, v: Vec<DataType>) {

@@ -18,6 +18,7 @@ lazy_static = "1.4.0"
 nom-sql = { path = "../nom-sql" }
 noria = { path = "../noria/noria/" }
 noria-server = { path = "../noria/server/" }
+noria-data = { path = "../noria/data/" }
 prettytable-rs = "0.8.0"
 rand = "0.8.3"
 regex = "1.4.3"

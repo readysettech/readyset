@@ -87,6 +87,7 @@ common = { path = "common", package = "noria-common" }
 noria = { path = "../noria" }
 failpoint-macros = { path = "../../failpoint-macros" }
 noria-errors = { path = "../errors" }
+noria-data = { path = "../data" }
 launchpad = { path = "../../launchpad" }
 replicators = { path = "../../replicators" }
 readyset-logging = { path = "../../readyset-logging" }

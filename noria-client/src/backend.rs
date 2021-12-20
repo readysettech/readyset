@@ -34,8 +34,9 @@ use nom_sql::{
     DeleteStatement, Expression, InsertStatement, Literal, ShowStatement, SqlQuery, UpdateStatement,
 };
 use noria::consistency::Timestamp;
-use noria::{ColumnSchema, DataType};
+use noria::ColumnSchema;
 use noria_client_metrics::{EventType, QueryExecutionEvent, SqlQueryType};
+use noria_data::DataType;
 use noria_errors::{
     internal, internal_err, unsupported,
     ReadySetError::{self, PreparedStatementMissing},

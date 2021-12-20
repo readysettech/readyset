@@ -1,7 +1,7 @@
 use benchmarks::utils::generate::parallel_load;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
 use clap::{Parser, ValueHint};
-use noria::DataType;
+use noria_data::DataType;
 use noria_logictest::upstream::DatabaseURL;
 use query_generator::ColumnGenerationSpec;
 use std::convert::TryFrom;

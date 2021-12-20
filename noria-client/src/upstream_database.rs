@@ -2,7 +2,9 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use noria::{ColumnSchema, DataType, ReadySetError};
+use noria::ColumnSchema;
+use noria_data::DataType;
+use noria_errors::ReadySetError;
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
 #[derive(Debug)]

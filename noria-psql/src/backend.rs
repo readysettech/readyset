@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use noria::DataType;
 use noria_client::backend as cl;
+use noria_data::DataType;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
 

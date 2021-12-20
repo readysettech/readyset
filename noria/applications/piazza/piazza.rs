@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_variables)]
 use clap::value_t_or_exit;
-use noria::{Builder, DataType, Handle, ReuseConfigType};
+use noria::{Builder, Handle, ReuseConfigType};
+use noria_data::DataType;
 use std::collections::HashMap;
 use std::fs::File;
 

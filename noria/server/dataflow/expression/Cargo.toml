@@ -10,13 +10,17 @@ edition = "2018"
 [dependencies]
 chrono = { version = "0.4.0", features = ["serde"] }
 chrono-tz = { version = "0.5", features = ["serde"] }
+serde = { version = "1.0.8", features = ["derive"] }
+rust_decimal = { version = "1.16" }
+
+# Local deps
+launchpad = { path = "../../../../launchpad" }
 maths = { path = "../../../../maths" }
+mysql-time = { path = "../../../../mysql-time" }
 nom-sql = { path = "../../../../nom-sql" }
 noria = { path = "../../../noria" }
-serde = { version = "1.0.8", features = ["derive"] }
-launchpad = { path = "../../../../launchpad" }
-mysql-time = { path = "../../../../mysql-time" }
-rust_decimal = { version = "1.16" }
+noria-data = { path = "../../../data" }
+noria-errors = { path = "../../../errors" }
 
 [dev-dependencies]
 test-strategy = "0.1.1"

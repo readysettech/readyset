@@ -1,7 +1,7 @@
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use eui48::MacAddress;
-use noria::Text;
+use noria_data::Text;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 

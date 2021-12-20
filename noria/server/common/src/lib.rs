@@ -8,7 +8,7 @@ mod records;
 pub use self::local::*;
 pub use self::records::*;
 pub use noria::internal::{Index, IndexType};
-pub use noria::DataType;
+pub use noria_data::DataType;
 use petgraph::prelude::*;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -100,7 +100,8 @@ mod tests {
         use chrono::NaiveDateTime;
         use std::mem::{size_of, size_of_val};
 
-        let txt: DataType = DataType::Text(noria::Text::from("hi"));
+        let s = "this needs to be longer than 14 chars to make it be a Text";
+        let txt: DataType = DataType::from(s);
         let shrt = DataType::Int(5);
         let long = DataType::BigInt(5);
         let time = DataType::Timestamp(NaiveDateTime::from_timestamp(0, 42_000_000));
@@ -115,7 +116,11 @@ mod tests {
         assert_eq!(size_of::<DataType>(), 16);
         assert_eq!(size_of_val(&txt), 16);
         assert_eq!(size_of_val(&txt) as u64, txt.size_of());
-        assert_eq!(txt.deep_size_of(), txt.size_of() + 8 + 2); // DataType + Arc's ptr + 2 chars
+        assert_eq!(
+            txt.deep_size_of(),
+            // DataType + Arc's ptr + string
+            txt.size_of() + 8 + (s.len() as u64)
+        );
         assert_eq!(size_of_val(&shrt), 16);
         assert_eq!(size_of_val(&long), 16);
         assert_eq!(size_of_val(&time), 16);

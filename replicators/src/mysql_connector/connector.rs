@@ -7,7 +7,8 @@ use mysql_common::binlog;
 use mysql_common::binlog::row::BinlogRow;
 use mysql_common::binlog::value::BinlogValue;
 use noria::replication::ReplicationOffset;
-use noria::{DataType, ReadySetError, ReadySetResult};
+use noria::{ReadySetError, ReadySetResult};
+use noria_data::DataType;
 use std::convert::{TryFrom, TryInto};
 
 use crate::noria_adapter::Connector;

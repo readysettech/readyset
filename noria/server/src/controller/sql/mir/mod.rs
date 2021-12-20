@@ -28,7 +28,7 @@ use std::ops::Deref;
 use std::vec::Vec;
 
 use crate::ReadySetResult;
-use noria::DataType;
+use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
 
 use super::query_graph::JoinPredicate;

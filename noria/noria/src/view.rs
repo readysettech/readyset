@@ -1,7 +1,13 @@
-use crate::consistency::Timestamp;
-use crate::data::*;
-use crate::util::like::CaseSensitivityMode;
-use crate::{Tagged, Tagger};
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::fmt;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::ops::{Bound, Range, RangeBounds};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use futures_util::{
     future, future::TryFutureExt, ready, stream::futures_unordered::FuturesUnordered,
@@ -10,18 +16,11 @@ use futures_util::{
 use launchpad::intervals::BoundPair;
 use nom_sql::{BinaryOperator, ColumnSpecification};
 use nom_sql::{Column, SqlType};
+use noria_data::DataType;
 use noria_errors::{internal_err, rpc_err, view_err, ReadySetError, ReadySetResult};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
-use std::fmt;
-use std::future::Future;
-use std::net::SocketAddr;
-use std::ops::{Bound, Range, RangeBounds};
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::{collections::HashMap, time::Duration};
 use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
@@ -30,6 +29,10 @@ use tower::timeout::Timeout;
 use tower_service::Service;
 use tracing::error;
 use vec1::Vec1;
+
+use crate::consistency::Timestamp;
+use crate::util::like::CaseSensitivityMode;
+use crate::{Tagged, Tagger};
 
 /// A fixed period of time after which a call to any View method will time out
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);

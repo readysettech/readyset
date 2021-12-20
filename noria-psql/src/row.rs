@@ -1,5 +1,5 @@
 use crate::value::Value;
-use noria::DataType;
+use noria_data::DataType;
 use std::sync::Arc;
 use tokio_postgres::types::Type;
 

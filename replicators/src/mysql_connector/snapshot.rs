@@ -443,18 +443,18 @@ pub struct TableStream<'a> {
 
 impl<'a> TableStream<'a> {
     /// Get the next row from the query response
-    pub async fn next<'b>(&'b mut self) -> ReadySetResult<Option<Vec<noria::DataType>>> {
+    pub async fn next<'b>(&'b mut self) -> ReadySetResult<Option<Vec<noria_data::DataType>>> {
         let next_row = self.query.next().await?;
         next_row.map(mysql_row_to_noria_row).transpose()
     }
 }
 
 /// Convert each entry in a row to a Noria type that can be inserted into the base tables
-fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<noria::DataType>> {
+fn mysql_row_to_noria_row(row: mysql::Row) -> ReadySetResult<Vec<noria_data::DataType>> {
     let mut noria_row = Vec::with_capacity(row.len());
     for idx in 0..row.len() {
         let val = value_to_value(row.as_ref(idx).unwrap());
-        noria_row.push(noria::DataType::try_from(val)?);
+        noria_row.push(noria_data::DataType::try_from(val)?);
     }
     Ok(noria_row)
 }

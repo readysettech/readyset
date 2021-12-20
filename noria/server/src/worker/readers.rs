@@ -570,7 +570,8 @@ impl BlockingRead {
 #[cfg(test)]
 mod readreply {
     use super::SerializedReadReplyBatch;
-    use noria::{DataType, ReadReply, Tagged};
+    use noria::{ReadReply, Tagged};
+    use noria_data::DataType;
 
     fn rtt_ok(data: Vec<Vec<Vec<DataType>>>) {
         let got: Tagged<ReadReply> = bincode::deserialize(

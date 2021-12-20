@@ -1,7 +1,8 @@
-use crate::data::*;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
+
+use noria_data::DataType;
 
 /// A result set from a Noria query.
 #[derive(PartialEq, Eq)]

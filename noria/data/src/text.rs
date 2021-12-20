@@ -1,4 +1,6 @@
-use std::{cmp::Ordering, convert::TryFrom, fmt};
+use std::cmp::Ordering;
+use std::convert::TryFrom;
+use std::fmt;
 
 const TINYTEXT_WIDTH: usize = 14;
 

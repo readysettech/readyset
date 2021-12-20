@@ -18,7 +18,7 @@ use tokio::time::Instant;
 
 use noria::metrics::client::MetricsClient;
 use noria::metrics::{recorded, MetricsDump};
-use noria::DataType;
+use noria_data::DataType;
 use noria_server::metrics::{
     get_global_recorder, install_global_recorder, Clear, CompositeMetricsRecorder, MetricsRecorder,
     NoriaMetricsRecorder,

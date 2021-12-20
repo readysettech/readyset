@@ -24,9 +24,10 @@ use nom_sql::OrderType;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::Modification;
 use noria::{
-    consistency::Timestamp, internal::LocalNodeIndex, DataType, KeyComparison, SchemaType,
-    ViewQuery, ViewQueryFilter, ViewQueryOperator, ViewRequest,
+    consistency::Timestamp, internal::LocalNodeIndex, KeyComparison, SchemaType, ViewQuery,
+    ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
+use noria_data::DataType;
 
 use chrono::NaiveDate;
 use noria_errors::ReadySetError::MigrationPlanFailed;

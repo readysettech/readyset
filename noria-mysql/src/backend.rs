@@ -15,9 +15,9 @@ use msql_srv::{
     RowWriter, StatementMetaWriter,
 };
 use mysql_async::consts::StatusFlags;
-use noria::DataType;
 use noria_client::backend::{noria_connector, SinglePrepareResult};
 use noria_client::backend::{QueryResult, UpstreamPrepare};
+use noria_data::DataType;
 use noria_errors::{internal, internal_err, ReadySetError};
 use upstream::StatementMeta;
 

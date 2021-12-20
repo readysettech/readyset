@@ -1,7 +1,7 @@
 use crate::row::Row;
 use crate::schema::{type_to_pgsql, SelectSchema};
 use noria::results::Results;
-use noria::DataType;
+use noria_data::DataType;
 use psql_srv as ps;
 use std::convert::TryFrom;
 use std::iter;
@@ -131,8 +131,9 @@ impl TryFrom<Vec<tokio_postgres::Row>> for Resultset {
 mod tests {
     use super::*;
     use nom_sql::{ColumnSpecification, SqlType};
-    use noria::{ColumnSchema, DataType};
+    use noria::ColumnSchema;
     use noria_client::backend as cl;
+    use noria_data::DataType;
     use std::{borrow::Cow, convert::TryFrom};
 
     fn collect_resultset_values(resultset: Resultset) -> Vec<Vec<ps::Value>> {

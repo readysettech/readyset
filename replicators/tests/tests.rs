@@ -1,8 +1,9 @@
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::DataType as D;
-use noria::{ControllerHandle, DataType, ReadySetResult, TinyText};
+use noria::{ControllerHandle, ReadySetResult};
+use noria_data::DataType as D;
+use noria_data::{DataType, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
 use std::env;
