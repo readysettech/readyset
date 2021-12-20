@@ -40,7 +40,7 @@ impl FromStr for LogFormat {
 
 #[derive(Parser)]
 pub struct Options {
-    /// Format to use when emitting log events
+    /// Format to use when emitting log events.
     #[clap(
         long,
         env = "LOG_FORMAT",
@@ -50,7 +50,22 @@ pub struct Options {
     )]
     log_format: LogFormat,
 
-    /// Level to log at
+    /// Log level filter for spans and events. The log level filter string is a comma separated
+    /// list of directives.
+    /// See [`tracing_subscriber::EnvFilter`] for full documentation on the directive syntax.
+    ///
+    /// Examples:
+    ///
+    /// Log at INFO level for all crates and dependencies.
+    /// ```bash
+    /// LOG_LEVEL=info
+    /// ```
+    ///
+    /// Log at TRACE level for all crates and dependencies except
+    /// tower which should be logged at ERROR level.
+    /// ```bash
+    /// LOG_LEVEL=trace,tower=error
+    /// ```
     #[clap(long, env = "LOG_LEVEL", default_value = "info")]
     log_level: String,
 }
