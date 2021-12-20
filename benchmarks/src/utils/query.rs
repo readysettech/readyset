@@ -39,6 +39,8 @@ pub struct ArbitraryQueryParameters {
     /// `DistributionAnnotation` for the format for each parameters annotation.
     #[clap(long, conflicts_with = "query-spec-file")]
     query_spec: Option<String>,
+
+    stored_query: Option<String>,
 }
 
 impl ArbitraryQueryParameters {
@@ -83,8 +85,15 @@ impl ArbitraryQueryParameters {
     }
 
     pub async fn migrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+        // TODO(justin): Cache this so we don't have to read from file each time.
         let query = fs::read_to_string(&self.query).unwrap();
-        let stmt = "CREATE QUERY CACHE AS ".to_string() + &query;
+        let stmt = "CREATE QUERY CACHE q AS ".to_string() + &query;
+        conn.query_drop(stmt).await?;
+        Ok(())
+    }
+
+    pub async fn unmigrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+        let stmt = "DROP QUERY CACHE q";
         conn.query_drop(stmt).await?;
         Ok(())
     }

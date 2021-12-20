@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::cache_hit_benchmark::CacheHitBenchmark;
+use crate::migration_benchmark::MigrationBenchmark;
 use crate::query_benchmark::QueryBenchmark;
 use crate::scale_connections::ScaleConnections;
 use crate::scale_views::ScaleViews;
@@ -41,6 +42,7 @@ pub enum Benchmark {
     ScaleConnections,
     /// Measures time required to propagate table writes into Noria views
     WriteLatencyBenchmark,
+    MigrationBenchmark,
 }
 
 impl Benchmark {
@@ -53,6 +55,7 @@ impl Benchmark {
             Self::ScaleViews(_) => "scale_views",
             Self::ScaleConnections(_) => "scale_connections",
             Self::WriteLatencyBenchmark(_) => "write_latency",
+            Self::MigrationBenchmark(_) => "migration_benchmark",
         }
     }
 }
