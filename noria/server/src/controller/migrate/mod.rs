@@ -39,7 +39,7 @@ use noria::metrics::recorded;
 use noria::{KeyColumnIdx, PlaceholderIdx, ReadySetError};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tracing::{debug, debug_span, info, info_span, instrument, trace};
+use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
 use crate::controller::migrate::scheduling::Scheduler;
@@ -49,8 +49,8 @@ use crate::controller::WorkerIdentifier;
 pub(crate) mod assignment;
 mod augmentation;
 pub(crate) mod materialization;
-mod routing;
-mod scheduling;
+pub(in crate::controller) mod routing;
+pub(in crate::controller) mod scheduling;
 mod sharding;
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
@@ -165,7 +165,20 @@ impl<'dataflow> MigrationPlan<'dataflow> {
             "applying migration plan",
         );
 
-        dmp.apply(dataflow_state).await
+        let start = Instant::now();
+
+        match dmp.apply(dataflow_state).await {
+            Ok(_) => {
+                info!(ms = %start.elapsed().as_millis(), "migration plan applied");
+                Ok(())
+            }
+            Err(e) => {
+                error!(error = %e, "migration plan apply failed");
+                Err(ReadySetError::MigrationApplyFailed {
+                    source: Box::new(e),
+                })
+            }
+        }
     }
 }
 
@@ -199,6 +212,11 @@ impl DomainMigrationPlan {
             shard_workers,
             nodes,
         });
+    }
+
+    /// Adds a domain and its shards to the list of valid domains.
+    pub(in crate::controller) fn add_valid_domain(&mut self, idx: DomainIndex, shards: usize) {
+        self.valid_domains.insert(idx, shards);
     }
 
     /// Return the number of shards a given domain has.

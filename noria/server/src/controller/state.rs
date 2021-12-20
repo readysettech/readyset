@@ -14,7 +14,8 @@
 
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
-use crate::controller::migrate::Migration;
+use crate::controller::migrate::scheduling::Scheduler;
+use crate::controller::migrate::{routing, DomainMigrationPlan, Migration};
 use crate::controller::recipe::{Recipe, Schema};
 use crate::controller::{
     schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
@@ -55,7 +56,7 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Instant;
-use std::{cell, mem, time};
+use std::{cell, time};
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, instrument, trace, warn};
 use vec1::Vec1;
@@ -157,6 +158,10 @@ impl DataflowState {
             remap: Default::default(),
             keep_prior_recipes,
         }
+    }
+
+    pub(super) fn schema_replication_offset(&self) -> &Option<ReplicationOffset> {
+        &self.schema_replication_offset
     }
 
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
@@ -902,7 +907,12 @@ impl DataflowState {
             .iter()
             .map(|(ni, _)| {
                 #[allow(clippy::unwrap_used)] // checked above
-                let node = self.ingredients.node_weight_mut(*ni).unwrap().take();
+                let node = self
+                    .ingredients
+                    .node_weight_mut(*ni)
+                    .unwrap()
+                    .clone()
+                    .take();
                 node.finalize(&self.ingredients)
             })
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
@@ -1181,25 +1191,8 @@ impl DataflowState {
         );
     }
 
-    pub(super) async fn set_schema_replication_offset(
-        &mut self,
-        authority: &Arc<Authority>,
-        offset: Option<ReplicationOffset>,
-    ) -> Result<(), ReadySetError> {
-        self.schema_replication_offset = offset.clone();
-
-        authority
-            .update_controller_state::<_, ControllerState, _>(|state| match state {
-                Some(mut state) => {
-                    state.schema_replication_offset = offset.clone();
-                    Ok(state)
-                }
-                None => Err(internal_err("Empty state")),
-            })
-            .await
-            .map_err(|_| internal_err("Unable to update state"))??;
-
-        Ok(())
+    pub(super) fn set_schema_replication_offset(&mut self, offset: Option<ReplicationOffset>) {
+        self.schema_replication_offset = offset;
     }
 
     pub(super) async fn flush_partial(&mut self) -> ReadySetResult<u64> {
@@ -1261,8 +1254,8 @@ impl DataflowState {
         mut new: Recipe,
     ) -> Result<ActivationResult, ReadySetError> {
         new.clone_config_from(&self.recipe);
-        // TODO(eta): if this fails, apply the old one?
-        let r = self.migrate(|mig| new.activate(mig)).await?;
+        let old_recipe = self.recipe.clone();
+        let r = self.migrate(|mig| new.activate(mig, old_recipe)).await?;
 
         match r {
             Ok(ref ra) => {
@@ -1316,17 +1309,10 @@ impl DataflowState {
                     self.remove_nodes(vec![base].as_slice()).await?;
                 }
 
-                if !self.keep_prior_recipes {
-                    new.clear_prior();
-                }
                 self.recipe = new;
             }
             Err(ref e) => {
                 error!(error = %e, "failed to apply recipe");
-                // TODO(malte): a little yucky, since we don't really need the blank recipe
-                let blank = Recipe::blank_with_config_from(&self.recipe);
-                let recipe = mem::replace(&mut self.recipe, blank);
-                self.recipe = recipe.revert();
             }
         }
 
@@ -1335,106 +1321,44 @@ impl DataflowState {
 
     pub(super) async fn extend_recipe(
         &mut self,
-        authority: &Arc<Authority>,
         add_txt_spec: RecipeSpec<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
-        let old = self.recipe.clone();
-        // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
-        let blank = Recipe::blank_with_config_from(&self.recipe);
-        let new = mem::replace(&mut self.recipe, blank);
+        let mut new = self.recipe.clone();
         let add_txt = add_txt_spec.recipe;
 
-        match new.extend(add_txt) {
-            Ok(new) => match self.apply_recipe(new).await {
-                Ok(x) => {
-                    if let Some(offset) = &add_txt_spec.replication_offset {
-                        offset.try_max_into(&mut self.schema_replication_offset)?
-                    }
+        if let Err(e) = new.extend(add_txt) {
+            error!(error = %e, "failed to extend recipe");
+            return Err(e);
+        }
 
-                    let node_restrictions = self.node_restrictions.clone();
-                    let recipe_version = self.recipe.version();
-                    if authority
-                        .update_controller_state(|state: Option<ControllerState>| match state {
-                            None => Err(()),
-                            Some(mut state) => {
-                                state.node_restrictions = node_restrictions.clone();
-                                state.recipe_version = recipe_version;
-                                state.recipes.push(add_txt.to_string());
-                                if let Some(offset) = &add_txt_spec.replication_offset {
-                                    offset
-                                        .try_max_into(&mut state.schema_replication_offset)
-                                        .map_err(|_| ())?;
-                                }
-                                Ok(state)
-                            }
-                        })
-                        .await
-                        .is_err()
-                    {
-                        internal!("failed to persist recipe extension");
-                    }
-                    Ok(x)
+        match self.apply_recipe(new).await {
+            Ok(x) => {
+                if let Some(offset) = &add_txt_spec.replication_offset {
+                    offset.try_max_into(&mut self.schema_replication_offset)?
                 }
-                Err(e) => {
-                    self.recipe = old;
-                    Err(e)
-                }
-            },
-            Err((old, e)) => {
-                // need to restore the old recipe
-                error!(error = %e, "failed to extend recipe");
-                self.recipe = old;
-                Err(e)
+
+                Ok(x)
             }
+            Err(e) => Err(e),
         }
     }
 
     pub(super) async fn install_recipe(
         &mut self,
-        authority: &Arc<Authority>,
         r_txt_spec: RecipeSpec<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
         let r_txt = r_txt_spec.recipe;
 
         match Recipe::from_str(r_txt) {
             Ok(r) => {
-                let _old = self.recipe.clone();
-                let old = mem::replace(&mut self.recipe, Recipe::blank_with_config_from(&_old));
-                let new = old.replace(r);
+                let new = self.recipe.clone().replace(r);
                 match self.apply_recipe(new).await {
                     Ok(x) => {
                         self.schema_replication_offset =
                             r_txt_spec.replication_offset.as_deref().cloned();
-
-                        let node_restrictions = self.node_restrictions.clone();
-                        let recipe_version = self.recipe.version();
-                        let install_result = authority
-                            .update_controller_state(|state: Option<ControllerState>| {
-                                match state {
-                                    None => Err(()),
-                                    Some(mut state) => {
-                                        state.node_restrictions = node_restrictions.clone();
-                                        state.recipe_version = recipe_version;
-                                        state.recipes = vec![r_txt.to_string()];
-                                        // When installing a recipe, the new replication offset overwrites the existing
-                                        // offset entirely
-                                        state.schema_replication_offset =
-                                            r_txt_spec.replication_offset.as_deref().cloned();
-                                        Ok(state)
-                                    }
-                                }
-                            })
-                            .await;
-
-                        if let Err(e) = install_result {
-                            internal!("failed to persist recipe installation, {}", e)
-                        }
                         Ok(x)
                     }
-                    Err(e) => {
-                        self.recipe = _old;
-                        Err(e)
-                    }
+                    Err(e) => Err(e),
                 }
             }
             Err(error) => {
@@ -1444,38 +1368,66 @@ impl DataflowState {
         }
     }
 
-    pub(super) async fn remove_query(
-        &mut self,
-        authority: &Arc<Authority>,
-        query_name: &str,
-    ) -> ReadySetResult<()> {
-        let old = self.recipe.clone();
-        let mut new = old.clone();
+    pub(super) async fn remove_query(&mut self, query_name: &str) -> ReadySetResult<()> {
+        let mut new = self.recipe.clone();
         new.remove_query(query_name);
-        let new = old.clone().replace(new);
 
         if let Err(error) = self.apply_recipe(new).await {
-            self.recipe = old;
             error!(%error, "Failed to apply recipe");
             return Err(error);
         }
 
-        let recipe_version = self.recipe.version();
-        let recipe_txt = self.recipe.to_string();
-        let install_result = authority
-            .update_controller_state::<_, _, ()>(move |state: Option<ControllerState>| {
-                let mut state = state.ok_or(())?;
-                state.recipes = vec![recipe_txt.clone()];
-                state.recipe_version = recipe_version;
-                Ok(state)
-            })
-            .await;
-
-        if let Err(e) = install_result {
-            internal!("failed to persist recipe installation: {}", e);
-        }
-
         Ok(())
+    }
+
+    /// Runs all the necessary steps to recover the full [`DataflowState`], when said state only
+    /// has the bare minimum information.
+    ///
+    /// # Invariants
+    /// The following invariants must hold:
+    /// - `self.ingredients` must be a valid [`Graph`]. This means it has to be a description of
+    /// a valid dataflow graph.
+    /// - Each node must have a Domain associated with it (and thus also have a [`LocalNodeIndex`]
+    /// and any other associated information).
+    /// - `self.domain_nodes` must be valid. This means that all the nodes in `self.ingredients`
+    /// (except for `self.source`) must belong to a domain; and there must not be any overlap between
+    /// the nodes owned by each domain. All the invariants for Domain assigment from
+    /// [`crate::controller::migrate::assignment::assign`] must hold as well.
+    ///  - `self.remap` and `self.node_restrictions` must be valid.
+    /// - All the other fields should be empty or `[Default::default()]`.
+    pub(super) async fn recover(&mut self) -> ReadySetResult<()> {
+        invariant!(
+            self.domains.is_empty(),
+            "there shouldn't be any domain if we are recovering"
+        );
+        let mut dmp = DomainMigrationPlan::new(self);
+        let domain_nodes = self
+            .domain_nodes
+            .iter()
+            .map(|(idx, nm)| (*idx, nm.values().map(|&n| (n, true)).collect::<Vec<_>>()))
+            .collect::<HashMap<_, _>>();
+        {
+            let mut scheduler = Scheduler::new(self, &None)?;
+            for (domain, nodes) in domain_nodes.iter() {
+                let workers = scheduler.schedule_domain(*domain, &nodes[..])?;
+                let shards = workers.len();
+                dmp.add_new_domain(*domain, workers, nodes.clone());
+                dmp.add_valid_domain(*domain, shards);
+            }
+        }
+        let new = domain_nodes.values().flatten().map(|(n, _)| *n).collect();
+        routing::connect(
+            &self.ingredients,
+            &mut dmp,
+            &self.ingredients.node_indices().collect(),
+        )?;
+
+        self.materializations.extend(&mut self.ingredients, &new)?;
+
+        self.materializations
+            .commit(&mut self.ingredients, &new, &mut dmp)?;
+
+        dmp.apply(self).await
     }
 }
 
@@ -1551,34 +1503,7 @@ pub(super) struct DataflowStateHandle {
 
 impl DataflowStateHandle {
     /// Creates a new instance of [`DataflowStateHandle`].
-    pub(super) fn new(
-        ingredients: Graph,
-        source: NodeIndex,
-        ndomains: usize,
-        sharding: Option<usize>,
-        domain_config: DomainConfig,
-        persistence: PersistenceParameters,
-        materializations: Materializations,
-        recipe: Recipe,
-        replication_offset: Option<ReplicationOffset>,
-        node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
-        channel_coordinator: Arc<ChannelCoordinator>,
-        keep_prior_recipes: bool,
-    ) -> Self {
-        let dataflow_state = DataflowState::new(
-            ingredients,
-            source,
-            ndomains,
-            sharding,
-            domain_config,
-            persistence,
-            materializations,
-            recipe,
-            replication_offset,
-            node_restrictions,
-            channel_coordinator,
-            keep_prior_recipes,
-        );
+    pub(super) fn new(dataflow_state: DataflowState) -> Self {
         Self {
             reader: RwLock::new(DataflowStateReader {
                 state: dataflow_state,
@@ -1617,9 +1542,31 @@ impl DataflowStateHandle {
 
     /// Commits the changes made to the dataflow state.
     /// This method will block if there are threads reading the dataflow state.
-    pub(super) async fn commit(&self, writer: DataflowStateWriter<'_>) {
+    pub(super) async fn commit(
+        &self,
+        writer: DataflowStateWriter<'_>,
+        authority: &Arc<Authority>,
+    ) -> ReadySetResult<()> {
+        let persistable_ds = PersistableDataflowState {
+            state: writer.state,
+        };
+        authority
+            .update_controller_state(|state: Option<ControllerState>| match state {
+                None => {
+                    eprintln!("There's no controller state to update");
+                    Err(())
+                }
+                Some(mut state) => {
+                    state.dataflow_state = persistable_ds.state.clone();
+                    Ok(state)
+                }
+            })
+            .await
+            .map_err(|e| internal_err(format!("Unable to update state: {}", e)))?
+            .map_err(|_| internal_err("Unable to update state"))?;
         let mut state_guard = self.reader.write().await;
-        state_guard.replace(writer.state);
+        state_guard.replace(persistable_ds.state);
+        Ok(())
     }
 }
 
@@ -1673,6 +1620,12 @@ impl<'handle> AsMut<DataflowState> for DataflowStateWriter<'handle> {
     }
 }
 
+/// A wrapper around the dataflow state, to be used only in [`DataflowStateWriter::commit`]
+/// to send a copy of the state across thread boundaries.
+struct PersistableDataflowState {
+    state: DataflowState,
+}
+
 // There is a chain of not thread-safe (not [`Send`] structures at play here:
 // [`Graph`] is not [`Send`] (as it might contain a [`reader_map::WriteHandle`]), which
 // makes [`DataflowState`] not [`Send`].
@@ -1689,6 +1642,9 @@ impl<'handle> AsMut<DataflowState> for DataflowStateWriter<'handle> {
 // So, we explicitly tell the compiler that the [`DataflowStateReader`] is safe to be moved
 // between threads.
 unsafe impl Sync for DataflowStateReader {}
+// Needed to send a copy of the [`DataflowState`] across thread boundaries, when
+// we are persisting the state to the [`Authority`].
+unsafe impl Sync for PersistableDataflowState {}
 
 pub(super) fn graphviz(
     graph: &Graph,

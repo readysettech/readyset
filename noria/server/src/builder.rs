@@ -18,7 +18,6 @@ pub struct Builder {
     region: Option<String>,
     reader_only: bool,
     volume_id: Option<VolumeId>,
-    should_reset_state: bool,
 }
 
 impl Default for Builder {
@@ -33,7 +32,6 @@ impl Default for Builder {
             region: None,
             reader_only: false,
             volume_id: None,
-            should_reset_state: false,
         }
     }
 }
@@ -183,11 +181,6 @@ impl Builder {
         self.config.abort_on_task_failure = abort_on_task_failure;
     }
 
-    /// Indicate if deployment state should be reset to DDL origin
-    pub fn set_should_reset_state(&mut self, r: bool) {
-        self.should_reset_state = r;
-    }
-
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,
@@ -202,7 +195,6 @@ impl Builder {
             region,
             reader_only,
             volume_id,
-            should_reset_state,
         } = self;
 
         let config = config.clone();
@@ -217,7 +209,6 @@ impl Builder {
             region,
             reader_only,
             volume_id,
-            should_reset_state,
         )
     }
 
