@@ -146,6 +146,7 @@ fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], CreateTableOption> 
                         )),
                         alt((
                             tag("utf8mb4"),
+                            tag("utf8mb3"),
                             tag("utf8"),
                             tag("binary"),
                             tag("big5"),
@@ -160,6 +161,7 @@ fn create_option_default_charset(i: &[u8]) -> IResult<&[u8], CreateTableOption> 
                         )),
                         alt((
                             tag("utf8mb4"),
+                            tag("utf8mb3"),
                             tag("utf8"),
                             tag("binary"),
                             tag("big5"),

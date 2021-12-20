@@ -2251,4 +2251,18 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn solidus_action_mailbox_inbound_emails() {
+        let qstring = b"CREATE TABLE `action_mailbox_inbound_emails` (
+            `id` bigint NOT NULL AUTO_INCREMENT, `status` int NOT NULL DEFAULT '0',
+            `message_id` varchar(255) NOT NULL,
+            `message_checksum` varchar(255) NOT NULL,
+            `created_at` datetime(6) NOT NULL,
+            `updated_at` datetime(6) NOT NULL,
+             PRIMARY KEY (`id`),
+             UNIQUE KEY `index_action_mailbox_inbound_emails_uniqueness` (`message_id`,`message_checksum`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3";
+        test_parse!(creation(Dialect::MySQL), qstring);
+    }
 }
