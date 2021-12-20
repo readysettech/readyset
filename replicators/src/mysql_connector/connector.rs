@@ -23,8 +23,8 @@ const DEFAULT_SERVER_ID: u32 = u32::MAX - 55;
 /// The server must be configured with `binlog_format` set to `row` and `binlog_row_image` set to `full`.
 ///
 /// The connector user may optionally have the following permissions:
+/// * `BACKUP_ADMIN` - (optional) to perform LOCK INSTANCE FOR BACKUP, not available on RDS
 /// * `SELECT` - to be able to perform a snapshot
-/// * `BACKUP_ADMIN` - to perform LOCK INSTANCE FOR BACKUP, not available on RDS
 /// * `LOCK TABLES` - this permission is required for table level locks
 /// * `SHOW DATABASES` - to see databases for a snapshot
 /// * `REPLICATION SLAVE` - to be able to connect and read the binlog

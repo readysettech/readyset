@@ -411,7 +411,6 @@ impl Installer {
             let permissions = match rds_db.engine {
                 Engine::MySQL => &[
                     "SELECT",
-                    "RELOAD",
                     "LOCK TABLES",
                     "SHOW DATABASES",
                     "REPLICATION SLAVE",
