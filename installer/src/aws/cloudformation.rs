@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use tokio::time::sleep;
 
-use crate::console::{input, password, spinner, GREEN_CHECK};
+use crate::console::{confirm, input, password, spinner, GREEN_CHECK};
 
 use super::cfn_parameter;
 
@@ -299,28 +299,92 @@ pub(crate) async fn describe_stack(
     }
 }
 
+pub(crate) async fn delete_stack(cfn_client: &cfn::Client, stack_name: &str) -> Result<()> {
+    let delete_desc = format!("CloudFormation stack {}", style(stack_name).bold());
+    let delete_pb = spinner().with_message(format!("Deleting {}", delete_desc));
+    cfn_client
+        .delete_stack()
+        .stack_name(stack_name)
+        .send()
+        .await?;
+    loop {
+        match describe_stack(cfn_client, stack_name).await? {
+            None => break,
+            Some(stack) if stack.stack_status == Some(StackStatus::DeleteComplete) => break,
+            Some(stack) => {
+                if let Some(status) = stack.stack_status() {
+                    delete_pb.set_message(format!(
+                        "{} (Current status: {})",
+                        delete_desc,
+                        style(status.as_str()).blue()
+                    ))
+                }
+            }
+        }
+    }
+    delete_pb.finish_with_message(format!("{}Deleted {}", *GREEN_CHECK, delete_desc));
+
+    Ok(())
+}
+
 pub(crate) async fn deploy_stack(
     cfn_client: &cfn::Client,
     stack_name: &str,
     operation: CreateStack,
 ) -> Result<Stack> {
-    if let Some(existing_stack) = describe_stack(cfn_client, stack_name).await? {
+    let do_create = if let Some(existing_stack) = describe_stack(cfn_client, stack_name).await? {
+        let unhealthy = matches!(
+            existing_stack.stack_status,
+            Some(
+                StackStatus::CreateFailed
+                    | StackStatus::DeleteFailed
+                    | StackStatus::RollbackComplete
+                    | StackStatus::RollbackFailed
+                    | StackStatus::UpdateFailed
+            )
+        );
+        let status_desc = style(
+            existing_stack
+                .stack_status
+                .clone()
+                .unwrap()
+                .as_str()
+                .to_owned(),
+        );
         println!(
             "Stack {} already exists (status: {})",
             style(stack_name).bold(),
-            style(existing_stack.stack_status.clone().unwrap().as_str()).blue()
+            if unhealthy {
+                status_desc.red()
+            } else {
+                status_desc.blue()
+            }
         );
-        if matches!(
+
+        if unhealthy {
+            if confirm()
+                .with_prompt("Would you like to delete and re-create the stack?")
+                .default(true)
+                .interact()?
+            {
+                delete_stack(cfn_client, stack_name).await?;
+                true
+            } else {
+                bail!("Please fix any issues with the stack and re-run the installer");
+            }
+        } else if matches!(
             existing_stack.stack_status,
-            Some(
-                StackStatus::CreateComplete
-                    | StackStatus::UpdateComplete
-                    | StackStatus::RollbackComplete
-            )
+            Some(StackStatus::CreateComplete | StackStatus::UpdateComplete)
         ) {
             return Ok(existing_stack);
+        } else {
+            false
         }
     } else {
+        true
+    };
+
+    if do_create {
         let create_pb = spinner().with_message(format!(
             "Creating CloudFormation stack {}",
             style(stack_name).bold()
