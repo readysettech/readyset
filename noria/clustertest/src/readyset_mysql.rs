@@ -289,6 +289,77 @@ async fn query_cached_view_after_failure() {
     deployment.teardown().await.unwrap();
 }
 
+#[clustertest]
+async fn correct_data_after_restart() {
+    let mut deployment = readyset_mysql("ct_repeated_failure")
+        .quorum(2)
+        .add_server(ServerParams::default().with_volume("v1"))
+        .add_server(ServerParams::default().with_volume("v2"))
+        .start()
+        .await
+        .unwrap();
+
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let _ = conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut conn,
+            r"SELECT * FROM t1;",
+            (),
+            UntilResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
+    let volume_id = deployment
+        .server_handle(&controller_uri)
+        .unwrap()
+        .params
+        .volume_id
+        .clone()
+        .unwrap();
+    deployment
+        .kill_server(&controller_uri, false)
+        .await
+        .unwrap();
+    deployment
+        .start_server(ServerParams::default().with_volume(&volume_id), false)
+        .await
+        .unwrap();
+    deployment
+        .backend_ready(Duration::from_secs(60))
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected(
+            &mut conn,
+            r"SELECT * FROM t1;",
+            (),
+            UntilResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
