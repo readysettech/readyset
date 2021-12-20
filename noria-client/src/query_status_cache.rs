@@ -87,17 +87,35 @@ impl Serialize for QueryList {
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
-#[derive(Default)]
 pub struct QueryStatusCache {
     /// A thread-safe hash map that holds the query status of each query
     /// that is cached.
     inner: DashMap<Query, QueryStatus>,
+
+    /// Holds the current style of migration, whether async or explicit, which may change the
+    /// behavior of some internal methods.
+    style: MigrationStyle,
+}
+
+impl Default for QueryStatusCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl QueryStatusCache {
+    /// Constructs a new QueryStatusCache with the migration style set to Async.
     pub fn new() -> QueryStatusCache {
         QueryStatusCache {
             inner: DashMap::new(),
+            style: MigrationStyle::InRequestPath,
+        }
+    }
+
+    pub fn with_style(style: MigrationStyle) -> QueryStatusCache {
+        QueryStatusCache {
+            inner: DashMap::new(),
+            style,
         }
     }
 
@@ -156,13 +174,39 @@ impl QueryStatusCache {
 
     /// Returns a list of queries that are in the deny list.
     pub async fn deny_list(&self) -> QueryList {
-        self.inner
-            .iter()
-            .filter(|r| matches!(r.value().migration_state, MigrationState::Unsupported))
-            .map(|r| r.key().clone())
-            .collect::<Vec<Query>>()
-            .into()
+        match self.style {
+            MigrationStyle::Async | MigrationStyle::InRequestPath => self
+                .inner
+                .iter()
+                .filter(|r| matches!(r.value().migration_state, MigrationState::Unsupported))
+                .map(|r| r.key().clone())
+                .collect::<Vec<Query>>()
+                .into(),
+            MigrationStyle::Explicit => self
+                .inner
+                .iter()
+                .filter(|r| {
+                    matches!(
+                        r.value().migration_state,
+                        MigrationState::Unsupported | MigrationState::Pending
+                    )
+                })
+                .map(|r| r.key().clone())
+                .collect::<Vec<Query>>()
+                .into(),
+        }
     }
+}
+
+/// MigrationStyle is used to communicate which style of managing migrations we have configured.
+pub enum MigrationStyle {
+    /// Async migrations are enabled in the adapter by passing the --async-migrations flag.
+    Async,
+    /// Explicit migrations are enabled in the adapter by passing the --explicit-migrations flag.
+    Explicit,
+    /// InRequestPath is the style of managing migrations when neither async nor explicit
+    /// migrations have been enabled.
+    InRequestPath,
 }
 
 #[cfg(test)]
@@ -210,6 +254,27 @@ mod tests {
         assert_eq!(cache.pending_migration().await.len(), 1);
         assert_eq!(cache.allow_list().await.len(), 0);
         assert_eq!(cache.deny_list().await.len(), 0);
+
+        cache
+            .update_query_migration_state(&query, MigrationState::Unsupported)
+            .await;
+        assert_eq!(cache.pending_migration().await.len(), 0);
+        assert_eq!(cache.allow_list().await.len(), 0);
+        assert_eq!(cache.deny_list().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn query_is_inferred_denied_explicit() {
+        let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
+        let query = select_statement("SELECT * FROM t1").unwrap();
+
+        assert_eq!(
+            cache.query_migration_state(&query).await,
+            MigrationState::Pending
+        );
+        assert_eq!(cache.pending_migration().await.len(), 1);
+        assert_eq!(cache.allow_list().await.len(), 0);
+        assert_eq!(cache.deny_list().await.len(), 1);
 
         cache
             .update_query_migration_state(&query, MigrationState::Unsupported)
