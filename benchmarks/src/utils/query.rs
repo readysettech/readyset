@@ -87,13 +87,13 @@ impl ArbitraryQueryParameters {
     pub async fn migrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
         // TODO(justin): Cache this so we don't have to read from file each time.
         let query = fs::read_to_string(&self.query).unwrap();
-        let stmt = "CREATE QUERY CACHE q AS ".to_string() + &query;
+        let stmt = "CREATE CACHED QUERY q AS ".to_string() + &query;
         conn.query_drop(stmt).await?;
         Ok(())
     }
 
     pub async fn unmigrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
-        let stmt = "DROP QUERY CACHE q";
+        let stmt = "DROP CACHED QUERY q";
         conn.query_drop(stmt).await?;
         Ok(())
     }

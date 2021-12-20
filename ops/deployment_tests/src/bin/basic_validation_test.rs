@@ -191,7 +191,7 @@ impl BasicValidationTest {
                     "Allowing the query in the customer database",
                 );
                 adapter
-                    .query_drop(r"CREATE QUERY CACHE test AS SELECT * FROM t1 where uid = ?")
+                    .query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 where uid = ?")
                     .await?;
             }
             MigrationMode::AsyncMigration => {

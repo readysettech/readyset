@@ -84,9 +84,9 @@ where
     let mut err = None;
 
     // For statements to hit noria they must be migrated beforehand with
-    // CREATE QUERY CACHE AS.
+    // CREATE CACHED QUERY AS.
     if explicit_migrations {
-        let stmt = "CREATE QUERY CACHE AS ".to_string() + query;
+        let stmt = "CREATE CACHED QUERY AS ".to_string() + query;
         match adapter_conn.query_drop(stmt) {
             Ok(_) => err = None,
             Err(e) => {

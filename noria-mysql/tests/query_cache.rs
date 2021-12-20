@@ -86,7 +86,7 @@ fn out_of_band_query_with_fallback() {
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
 
-    let res: Result<Vec<Row>> = conn.query("CREATE QUERY CACHE test AS SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.query("CREATE CACHED QUERY test AS SELECT * FROM t");
     assert!(res.is_ok());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t");
@@ -173,7 +173,7 @@ fn out_of_band_prep_with_fallback() {
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
 
-    let res: Result<Vec<Row>> = conn.query("CREATE QUERY CACHE test AS SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.query("CREATE CACHED QUERY test AS SELECT * FROM t");
     assert!(res.is_ok());
 
     let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
@@ -200,7 +200,7 @@ fn in_request_path_rewritten_query_without_fallback() {
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
     let res: Result<Vec<Row>> =
-        conn.query("CREATE QUERY CACHE test AS SELECT * FROM t WHERE a = ? AND b = ?");
+        conn.query("CREATE CACHED QUERY test AS SELECT * FROM t WHERE a = ? AND b = ?");
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
@@ -228,7 +228,7 @@ fn out_of_band_rewritten_query_without_fallback() {
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
     let res: Result<Vec<Row>> =
-        conn.query("CREATE QUERY CACHE test AS SELECT * FROM t WHERE a = ? AND b = ?");
+        conn.query("CREATE CACHED QUERY test AS SELECT * FROM t WHERE a = ? AND b = ?");
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);

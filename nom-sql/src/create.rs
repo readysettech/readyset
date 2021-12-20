@@ -138,18 +138,18 @@ impl fmt::Display for CreateViewStatement {
     }
 }
 
-/// `CREATE QUERY CACHE [<name>] AS ...`
+/// `CREATE CACHED QUERY [<name>] AS ...`
 ///
 /// This is a non-standard ReadySet specific extension to SQL
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct CreateQueryCacheStatement {
+pub struct CreateCachedQueryStatement {
     pub name: Option<String>,
     pub statement: SelectStatement,
 }
 
-impl fmt::Display for CreateQueryCacheStatement {
+impl fmt::Display for CreateCachedQueryStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "CREATE QUERY CACHE ")?;
+        write!(f, "CREATE CACHED QUERY ")?;
         if let Some(name) = &self.name {
             write!(f, "`{}` ", name)?;
         }
@@ -694,16 +694,16 @@ pub fn view_creation(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Creat
     }
 }
 
-/// Parse a [`CreateQueryCacheStatement`]
-pub fn create_query_cache(
+/// Parse a [`CreateCachedQueryStatement`]
+pub fn create_cached_query(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], CreateQueryCacheStatement> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], CreateCachedQueryStatement> {
     move |i| {
         let (i, _) = tag_no_case("create")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, _) = tag_no_case("query")(i)?;
+        let (i, _) = tag_no_case("cached")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = tag_no_case("query")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, name) = opt(terminated(dialect.identifier(), multispace1))(i)?;
         let (i, _) = tag_no_case("as")(i)?;
@@ -711,7 +711,7 @@ pub fn create_query_cache(
         let (i, statement) = selection(dialect)(i)?;
         Ok((
             i,
-            CreateQueryCacheStatement {
+            CreateCachedQueryStatement {
                 name: name.map(Cow::into_owned),
                 statement,
             },
@@ -1448,8 +1448,8 @@ mod tests {
         #[test]
         fn create_query_cache_with_name() {
             let res = test_parse!(
-                create_query_cache(Dialect::MySQL),
-                b"CREATE QUERY CACHE foo AS SELECT id FROM users WHERE name = ?"
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, Some("foo".to_owned()));
             assert_eq!(res.statement.tables, vec!["users".into()]);
@@ -1458,8 +1458,8 @@ mod tests {
         #[test]
         fn create_query_cache_without_name() {
             let res = test_parse!(
-                create_query_cache(Dialect::MySQL),
-                b"CREATE QUERY CACHE AS SELECT id FROM users WHERE name = ?"
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHED QUERY AS SELECT id FROM users WHERE name = ?"
             );
             assert_eq!(res.name, None);
             assert_eq!(res.statement.tables, vec!["users".into()]);
@@ -1468,13 +1468,13 @@ mod tests {
         #[test]
         fn display_create_query_cache() {
             let stmt = test_parse!(
-                create_query_cache(Dialect::MySQL),
-                b"CREATE QUERY CACHE foo AS SELECT id FROM users WHERE name = ?"
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHED QUERY foo AS SELECT id FROM users WHERE name = ?"
             );
             let res = stmt.to_string();
             assert_eq!(
                 res,
-                "CREATE QUERY CACHE `foo` AS SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHED QUERY `foo` AS SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
         }
 

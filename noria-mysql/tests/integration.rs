@@ -1249,16 +1249,16 @@ fn create_query_cache_where_in() {
     conn.query_drop("CREATE TABLE t (id INT);").unwrap();
     sleep();
 
-    conn.query_drop("CREATE QUERY CACHE test AS SELECT id FROM t WHERE id IN (?);")
+    conn.query_drop("CREATE CACHED QUERY test AS SELECT id FROM t WHERE id IN (?);")
         .unwrap();
     sleep();
 
-    let queries: Vec<(String, String)> = conn.query("SHOW QUERY CACHES;").unwrap();
+    let queries: Vec<(String, String)> = conn.query("SHOW CACHED QUERIES;").unwrap();
     assert!(queries.iter().any(|(query_name, _)| query_name == "test"));
 
-    conn.query_drop("CREATE QUERY CACHE test AS SELECT id FROM t WHERE id IN (?, ?);")
+    conn.query_drop("CREATE CACHED QUERY test AS SELECT id FROM t WHERE id IN (?, ?);")
         .unwrap();
     sleep();
-    let new_queries: Vec<(String, String)> = conn.query("SHOW QUERY CACHES;").unwrap();
+    let new_queries: Vec<(String, String)> = conn.query("SHOW CACHED QUERIES;").unwrap();
     assert_eq!(new_queries.len(), queries.len());
 }

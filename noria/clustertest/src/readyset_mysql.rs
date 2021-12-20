@@ -198,7 +198,7 @@ async fn failure_during_query() {
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
-        .query_drop("CREATE QUERY CACHE AS SELECT * FROM t1 where uid = ?")
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?")
         .await
         .unwrap();
 
@@ -240,7 +240,7 @@ async fn query_cached_view_after_failure() {
         .await
         .unwrap();
 
-    conn.query_drop("CREATE QUERY CACHE AS SELECT * FROM t1 where uid = ?")
+    conn.query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?")
         .await
         .unwrap();
 
@@ -466,7 +466,7 @@ async fn view_survives_restart() {
     conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
-    conn.query_drop(r"CREATE QUERY CACHE test AS SELECT * FROM t1 where uid = ?")
+    conn.query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 where uid = ?")
         .await
         .unwrap();
 

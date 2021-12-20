@@ -25,7 +25,7 @@ use std::{
     time::Instant,
 };
 
-use nom_sql::{CreateQueryCacheStatement, Dialect, DropQueryCacheStatement};
+use nom_sql::{CreateCachedQueryStatement, Dialect, DropCachedQueryStatement};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
@@ -389,7 +389,7 @@ pub enum MigrationMode {
     /// migrations and updating a queries migration status. Either
     /// --async-migrations which runs migrations in a separate thread,
     /// or --explicit-migrations which enables special syntax to perform
-    /// migrations "CREATE QUERY CACHE ..." may be used.
+    /// migrations "CREATE CACHED QUERY ..." may be used.
     OutOfBand,
 }
 
@@ -1021,8 +1021,8 @@ where
             | nom_sql::SqlQuery::DropTable(..)
             | nom_sql::SqlQuery::AlterTable(..)
             | nom_sql::SqlQuery::RenameTable(..)
-            | nom_sql::SqlQuery::CreateQueryCache(..)
-            | nom_sql::SqlQuery::DropQueryCache(..)
+            | nom_sql::SqlQuery::CreateCachedQuery(..)
+            | nom_sql::SqlQuery::DropCachedQuery(..)
             | nom_sql::SqlQuery::Explain(_) => {
                 warn!(statement = %parsed_query, "Statement cannot be prepared by ReadySet");
                 Ok(PrepareMeta::Unimplemented)
@@ -1618,14 +1618,14 @@ where
                         .map(QueryResult::Noria)
                         .map_err(|e| e.into()),
 
-                    SqlQuery::CreateQueryCache(CreateQueryCacheStatement {
+                    SqlQuery::CreateCachedQuery(CreateCachedQueryStatement {
                         ref name,
                         ref statement,
                     }) => {
                         let mut statement = statement.clone();
                         rewrite::process_query(&mut statement)?;
                         self.noria
-                            .handle_create_query_cache(
+                            .handle_create_cached_query(
                                 name.as_ref().map(|s| s.as_str()),
                                 &statement,
                             )
@@ -1637,7 +1637,7 @@ where
                         Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                     }
 
-                    SqlQuery::DropQueryCache(DropQueryCacheStatement { ref name }) => {
+                    SqlQuery::DropCachedQuery(DropCachedQueryStatement { ref name }) => {
                         self.noria.drop_view(name).await?;
                         Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                     }
@@ -1652,7 +1652,7 @@ where
                     | nom_sql::SqlQuery::RenameTable(_) => {
                         unsupported!("{} not yet supported", parsed_query.query_type());
                     }
-                    nom_sql::SqlQuery::Show(ShowStatement::QueryCaches) => {
+                    nom_sql::SqlQuery::Show(ShowStatement::CachedQueries) => {
                         Ok(QueryResult::Noria(self.noria.verbose_outputs().await?))
                     }
                     nom_sql::SqlQuery::Set(_)
@@ -1702,11 +1702,11 @@ where
                     SqlQuery::Insert(q) => self.noria.handle_insert(q).await,
                     SqlQuery::Update(q) => self.noria.handle_update(q).await,
                     SqlQuery::Delete(q) => self.noria.handle_delete(q).await,
-                    SqlQuery::CreateQueryCache(CreateQueryCacheStatement { name, statement }) => {
+                    SqlQuery::CreateCachedQuery(CreateCachedQueryStatement { name, statement }) => {
                         let mut statement = statement.clone();
                         rewrite::process_query(&mut statement)?;
                         self.noria
-                            .handle_create_query_cache(
+                            .handle_create_cached_query(
                                 name.as_ref().map(|s| s.as_str()),
                                 &statement,
                             )
@@ -1716,14 +1716,14 @@ where
                             .await;
                         Ok(noria_connector::QueryResult::Empty)
                     }
-                    SqlQuery::DropQueryCache(DropQueryCacheStatement { ref name }) => {
+                    SqlQuery::DropCachedQuery(DropCachedQueryStatement { ref name }) => {
                         self.noria.drop_view(name).await?;
                         Ok(noria_connector::QueryResult::Empty)
                     }
                     SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                         self.noria.graphviz(*simplified).await
                     }
-                    SqlQuery::Show(ShowStatement::QueryCaches) => {
+                    SqlQuery::Show(ShowStatement::CachedQueries) => {
                         self.noria.verbose_outputs().await
                     }
                     _ => {

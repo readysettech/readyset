@@ -13,11 +13,11 @@ pub use self::common::{
 };
 pub use self::compound_select::{CompoundSelectOperator, CompoundSelectStatement};
 pub use self::create::{
-    CreateQueryCacheStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
+    CreateCachedQueryStatement, CreateTableStatement, CreateViewStatement, SelectSpecification,
 };
 pub use self::delete::DeleteStatement;
 pub use self::dialect::Dialect;
-pub use self::drop::DropQueryCacheStatement;
+pub use self::drop::DropCachedQueryStatement;
 pub use self::explain::ExplainStatement;
 pub use self::expression::{
     BinaryOperator, Expression, FunctionExpression, InValue, UnaryOperator,
