@@ -1465,16 +1465,18 @@ impl Installer {
                     engine,
                 })
             } else {
-                println!("OK, we'll create a new RDS database instance in {}.", vpc_id);
+                println!(
+                    "OK, we'll create a new RDS database instance in {}.",
+                    vpc_id
+                );
                 None
             }
         } else {
             None
         }
         .map::<Result<_>, _>(Ok)
-            .unwrap_or_else(|| {
-                let engine =
-                    Engine::select("Select a database engine:")?;
+        .unwrap_or_else(|| {
+            let engine = Engine::select("Select a database engine:")?;
 
             let db_name = input()
                 .with_prompt("Enter a name for the database:")
@@ -1485,7 +1487,10 @@ impl Installer {
                     if RE.is_match(input) {
                         Ok(())
                     } else {
-                        Err("Database name must begin with a letter and can contain only alphanumeric characters")
+                        Err(
+                            "Database name must be less than 63 characters, begin with a letter, \
+                             and contain only alphanumeric characters",
+                        )
                     }
                 })
                 .interact()?;
