@@ -35,6 +35,15 @@ pub struct ForwardPrometheusMetrics {
 }
 
 impl ForwardPrometheusMetrics {
+    /// Returns a stream of parsed Metrics that match our filter
+    pub async fn metrics(
+        &self,
+    ) -> Result<impl Stream<Item = Result<Metric, metric::parser::Error>>, Error> {
+        self.endpoint
+            .metrics_with_filter(self.filter_predicate)
+            .await
+    }
+
     /// It would be nice to run these through our own exporter, but the `metrics` API is missing
     /// some functionality that we would need - for example, writing absolute values to counters -
     /// so the play currently is to parse the metrics, add our labels, and then hand-write the
