@@ -69,30 +69,30 @@ pub fn drop_table(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], DropTabl
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct DropQueryCacheStatement {
+pub struct DropCachedQueryStatement {
     pub name: String,
 }
 
-impl fmt::Display for DropQueryCacheStatement {
+impl fmt::Display for DropCachedQueryStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DROP QUERY CACHE `{}`", self.name)
+        write!(f, "DROP CACHED QUERY `{}`", self.name)
     }
 }
 
-pub fn drop_query_cache(
+pub fn drop_cached_query(
     dialect: Dialect,
-) -> impl Fn(&[u8]) -> IResult<&[u8], DropQueryCacheStatement> {
+) -> impl Fn(&[u8]) -> IResult<&[u8], DropCachedQueryStatement> {
     move |i| {
         let (i, _) = tag_no_case("drop")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, _) = tag_no_case("query")(i)?;
+        let (i, _) = tag_no_case("cached")(i)?;
         let (i, _) = multispace1(i)?;
-        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = tag_no_case("query")(i)?;
         let (i, _) = multispace1(i)?;
         let (i, name) = dialect.identifier()(i)?;
         Ok((
             i,
-            DropQueryCacheStatement {
+            DropCachedQueryStatement {
                 name: name.into_owned(),
             },
         ))
@@ -126,17 +126,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_drop_query_cache() {
-        let res = test_parse!(drop_query_cache(Dialect::MySQL), b"DROP QUERY CACHE test");
+    fn parse_drop_cached_query() {
+        let res = test_parse!(drop_cached_query(Dialect::MySQL), b"DROP CACHED QUERY test");
         assert_eq!(res.name, "test".to_owned());
     }
 
     #[test]
-    fn format_drop_query_cache() {
-        let res = DropQueryCacheStatement {
+    fn format_drop_cached_query() {
+        let res = DropCachedQueryStatement {
             name: "test".to_owned(),
         }
         .to_string();
-        assert_eq!(res, "DROP QUERY CACHE `test`");
+        assert_eq!(res, "DROP CACHED QUERY `test`");
     }
 }

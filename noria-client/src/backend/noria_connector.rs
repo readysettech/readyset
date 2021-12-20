@@ -778,9 +778,9 @@ fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
 }
 
 impl NoriaConnector {
-    /// This function handles CREATE QUERY CACHE statements. When explicit-migrations is enabled,
+    /// This function handles CREATE CACHED QUERY statements. When explicit-migrations is enabled,
     /// this function is the only way to create a view in noria.
-    pub async fn handle_create_query_cache(
+    pub async fn handle_create_cached_query(
         &mut self,
         name: Option<&str>,
         statement: &nom_sql::SelectStatement,

@@ -181,7 +181,7 @@ pub struct Options {
     #[clap(long, hidden = true, env = "ALLOW_UNSUPPORTED_SET")]
     allow_unsupported_set: bool,
 
-    /// Only run migrations through CREATE QUERY CACHE statements. Async migrations are not
+    /// Only run migrations through CREATE CACHED QUERY statements. Async migrations are not
     /// supported in this case.
     #[clap(long, env = "EXPLICIT_MIGRATIONS", conflicts_with = "async-migrations")]
     explicit_migrations: bool,
