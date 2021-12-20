@@ -1003,7 +1003,13 @@ impl PersistentState {
         // Create an iterator once, reuse it for each key
         let mut iter = self.db.raw_iterator_cf(cf);
         let mut iter_primary = if !is_primary {
-            Some(self.db.raw_iterator_cf(self.db.cf_handle(PK_CF).unwrap()))
+            Some(
+                self.db.raw_iterator_cf(
+                    self.db
+                        .cf_handle(PK_CF)
+                        .expect("Primary key column family not found"),
+                ),
+            )
         } else {
             None
         };
@@ -1111,11 +1117,15 @@ impl SizeOf for PersistentState {
         size_of::<Self>() as u64
     }
 
+    #[allow(clippy::panic)] // Can't return a result, panicking is the best we can do
     fn deep_size_of(&self) -> u64 {
         self.indices
             .iter()
             .map(|idx| {
-                let cf = self.db.cf_handle(&idx.column_family).unwrap();
+                let cf = self
+                    .db
+                    .cf_handle(&idx.column_family)
+                    .unwrap_or_else(|| panic!("Column family not found: {}", idx.column_family));
 
                 self.db
                     .property_int_value_cf(cf, "rocksdb.estimate-live-data-size")
