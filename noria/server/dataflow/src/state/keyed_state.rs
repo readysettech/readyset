@@ -51,6 +51,19 @@ pub(super) enum KeyedState {
 }
 
 impl KeyedState {
+    /// Returns the length of this keyed state's key
+    pub(super) fn key_len(&self) -> usize {
+        match self {
+            KeyedState::SingleBTree(_) | KeyedState::SingleHash(_) => 1,
+            KeyedState::DoubleBTree(_) | KeyedState::DoubleHash(_) => 2,
+            KeyedState::TriBTree(_) | KeyedState::TriHash(_) => 3,
+            KeyedState::QuadBTree(_) | KeyedState::QuadHash(_) => 4,
+            KeyedState::QuinBTree(_) | KeyedState::QuinHash(_) => 5,
+            KeyedState::SexBTree(_) | KeyedState::SexHash(_) => 6,
+            KeyedState::MultiHash(_, l) | KeyedState::MultiBTree(_, l) => *l,
+        }
+    }
+
     /// Look up all the rows corresponding to the given `key` and return them, or return None if no
     /// rows exist for the given key
     ///
@@ -77,13 +90,16 @@ impl KeyedState {
             (&KeyedState::MultiHash(ref m, len), &KeyType::Multi(ref k)) if k.len() == len => {
                 m.get(k)
             }
-            _ =>
-            #[allow(clippy::panic)] // documented invariant
-            {
-                panic!(
-                    "Invalid key type for KeyedState, got key of length {}",
-                    key.len()
-                )
+            _ => {
+                #[allow(clippy::panic)] // documented invariant
+                {
+                    panic!(
+                        "Invalid key type for KeyedState, got key of length {}, but expected key \
+                         of length {}",
+                        key.len(),
+                        self.key_len()
+                    )
+                }
             }
         }
     }
