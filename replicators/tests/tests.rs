@@ -1,13 +1,12 @@
 use mysql_async::prelude::Queryable;
 use mysql_time::MysqlTime;
+use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use noria::DataType as D;
-use noria::{
-    consensus::{Authority, LocalAuthority, LocalAuthorityStore},
-    ControllerHandle, DataType, ReadySetResult, TinyText,
-};
+use noria::{ControllerHandle, DataType, ReadySetResult, TinyText};
 use noria_server::Builder;
 use replicators::NoriaAdapter;
 use std::env;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 // Postgres does not accept MySQL escapes, so rename the table before the query
@@ -232,7 +231,7 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
-        const MAX_ATTEMPTS: usize = 6;
+        const MAX_ATTEMPTS: usize = 8;
         let mut attempt: usize = 0;
         loop {
             match self.check_results_inner(view_name).await {
@@ -334,7 +333,8 @@ async fn mysql_replication() -> ReadySetResult<()> {
 /// noria correctly catches up from binlog
 /// NOTE: If this test flakes, please notify Vlad
 async fn mysql_replication_catch_up() -> ReadySetResult<()> {
-    const TOTAL_INSERTS: usize = 4000;
+    const TOTAL_INSERTS: usize = 5000;
+    static INSERTS_DONE: AtomicUsize = AtomicUsize::new(0);
 
     let url = &mysql_url();
     let mut client = DbConnection::connect(url).await?;
@@ -375,30 +375,37 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
                         idx
                     ))
                     .await?;
+
+                INSERTS_DONE.fetch_add(1, Ordering::Relaxed);
             }
 
             Ok(client)
         });
 
-    // Sleep just a bit to make sure we have some writes done
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    while INSERTS_DONE.load(Ordering::Relaxed) < TOTAL_INSERTS / 5 {
+        // Sleep a bit to let some writes happen first
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 
-    let ctx = TestHandle::start_noria(url.to_string()).await?;
+    let mut ctx = TestHandle::start_noria(url.to_string()).await?;
     ctx.ready_notify.as_ref().unwrap().notified().await;
-
     let mut client = inserter.await.unwrap()?;
 
-    // Sleep just more to allow propagation time
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let rs: Vec<_> = std::iter::repeat([D::from(100), D::from("I am a teapot")])
+        .take(TOTAL_INSERTS)
+        .collect();
+    let rs: Vec<&[D]> = rs.iter().map(|r| r.as_slice()).collect();
+    ctx.check_results("catch_up_view", "Catch up", rs.as_slice())
+        .await
+        .unwrap();
 
-    // Finished inserting, check view result
-    let mut getter = ctx.controller().await.view("catch_up_view").await?;
-    let results = getter.lookup(&[0.into()], true).await?;
-    assert_eq!(results.len(), TOTAL_INSERTS);
-
-    let mut getter = ctx.controller().await.view("catch_up_pk_view").await?;
-    let results = getter.lookup(&[0.into()], true).await?;
-    assert_eq!(results.len(), TOTAL_INSERTS);
+    let rs: Vec<_> = (0..TOTAL_INSERTS)
+        .map(|i| [D::from(i as i32), D::from("I am a teapot")])
+        .collect();
+    let rs: Vec<&[D]> = rs.iter().map(|r| r.as_slice()).collect();
+    ctx.check_results("catch_up_pk_view", "Catch up with pk", rs.as_slice())
+        .await
+        .unwrap();
 
     ctx.stop().await;
 
