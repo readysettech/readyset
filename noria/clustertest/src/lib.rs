@@ -163,7 +163,7 @@ use noria::{ControllerHandle, ReadySetResult};
 use rand::Rng;
 use serde::Deserialize;
 use server::{AdapterBuilder, NoriaServerBuilder, ProcessHandle};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -508,6 +508,7 @@ impl DeploymentBuilder {
         };
 
         handle.wait_for_workers(Duration::from_secs(90)).await?;
+        handle.backend_ready(Duration::from_secs(90)).await?;
 
         Ok(handle)
     }
@@ -621,18 +622,19 @@ impl DeploymentHandle {
         self.mysql_addr.clone()
     }
 
-    pub fn num_alive_workers(&mut self) -> usize {
-        let mut count = 0;
+    pub fn expected_workers(&mut self) -> HashSet<Url> {
+        let mut alive = HashSet::new();
         for s in self.server_handles().values_mut() {
-            count += s.is_alive() as usize;
+            if s.is_alive() {
+                alive.insert(s.addr.clone());
+            }
         }
-        count
+        alive
     }
 
     // Queries the number of workers every half second until `max_wait`.
     pub async fn wait_for_workers(&mut self, max_wait: Duration) -> Result<()> {
-        let num_workers = self.num_alive_workers();
-        if num_workers == 0 {
+        if self.expected_workers().is_empty() {
             return Ok(());
         }
 
@@ -643,14 +645,16 @@ impl DeploymentHandle {
                 break;
             }
 
-            let num_workers = self.num_alive_workers();
+            let expected_workers = self.expected_workers();
 
             // Use a timeout so if the leader died we retry quickly before the `max_wait`
             // duration.
             if let Ok(Ok(workers)) =
                 tokio::time::timeout(Duration::from_secs(1), self.handle.healthy_workers()).await
             {
-                if workers.len() == num_workers {
+                if workers.len() == expected_workers.len()
+                    && workers.iter().all(|w| expected_workers.contains(w))
+                {
                     return Ok(());
                 }
             }

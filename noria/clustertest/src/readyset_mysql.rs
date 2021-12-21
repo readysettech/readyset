@@ -360,6 +360,70 @@ async fn correct_data_after_restart() {
     deployment.teardown().await.unwrap();
 }
 
+/// This test verifies that following a worker failure we can create new views.
+// This test is marked `should_panic` as we currently do not handle worker failures
+// without the leader also failing.
+#[clustertest]
+#[should_panic]
+async fn create_view_after_worker_failure() {
+    let mut deployment = readyset_mysql("ct_create_view_after_worker_failure")
+        .quorum(2)
+        .add_server(ServerParams::default().with_volume("v1"))
+        .add_server(ServerParams::default().with_volume("v2"))
+        .start()
+        .await
+        .unwrap();
+
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_db_str().unwrap()).unwrap();
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    let _ = conn
+        .query_drop(
+            r"CREATE TABLE t1 (
+                uid INT PRIMARY KEY,
+                value INT
+              );
+              INSERT INTO t1 VALUES (1,2);
+            ",
+        )
+        .await
+        .unwrap();
+
+    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
+    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    adapter_conn
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1;")
+        .await
+        .unwrap();
+
+    sleep(Duration::from_secs(5)).await;
+
+    let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
+    let (volume_id, addr) = {
+        let server_handle = deployment
+            .server_handles()
+            .values_mut()
+            .find(|v| v.addr != controller_uri)
+            .unwrap();
+        let volume_id = server_handle.params.volume_id.clone().unwrap();
+        let addr = server_handle.addr.clone();
+        (volume_id, addr)
+    };
+    deployment.kill_server(&addr, false).await.unwrap();
+
+    deployment
+        .start_server(ServerParams::default().with_volume(&volume_id), true)
+        .await
+        .unwrap();
+
+    // This currently fails as the leader crashes, so we cannot reach quorum.
+    adapter_conn
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?;")
+        .await
+        .unwrap();
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
