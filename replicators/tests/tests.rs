@@ -231,19 +231,19 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
-        const MAX_ATTEMPTS: usize = 8;
+        const MAX_ATTEMPTS: usize = 20;
         let mut attempt: usize = 0;
         loop {
             match self.check_results_inner(view_name).await {
                 Err(_) if attempt < MAX_ATTEMPTS => {
                     // Sometimes things are slow in CI, so we retry a few times before giving up
                     attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Ok(res) if res != test_results && attempt < MAX_ATTEMPTS => {
                     // Sometimes things are slow in CI, so we retry a few times before giving up
                     attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Ok(res) => {
                     assert_eq!(res, *test_results, "{} incorrect", test_name);
@@ -329,32 +329,59 @@ async fn mysql_replication() -> ReadySetResult<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn pgsql_replication_catch_up() -> ReadySetResult<()> {
+    replication_catch_up_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_catch_up() -> ReadySetResult<()> {
+    replication_catch_up_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_replication_many_tables() -> ReadySetResult<()> {
+    replication_many_tables_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_many_tables() -> ReadySetResult<()> {
+    replication_many_tables_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_datetime_replication() -> ReadySetResult<()> {
+    mysql_datetime_replication_inner().await
+}
+
 /// This test checks that when writes and replication happen in parallel
 /// noria correctly catches up from binlog
 /// NOTE: If this test flakes, please notify Vlad
-async fn mysql_replication_catch_up() -> ReadySetResult<()> {
+async fn replication_catch_up_inner(url: &str) -> ReadySetResult<()> {
     const TOTAL_INSERTS: usize = 5000;
     static INSERTS_DONE: AtomicUsize = AtomicUsize::new(0);
 
-    let url = &mysql_url();
     let mut client = DbConnection::connect(url).await?;
     client
         .query(
             "
-            DROP TABLE IF EXISTS `catch_up` CASCADE;
-            DROP TABLE IF EXISTS `catch_up_pk` CASCADE;
+            DROP TABLE IF EXISTS catch_up CASCADE;
+            DROP TABLE IF EXISTS catch_up_pk CASCADE;
             DROP VIEW IF EXISTS catch_up_view;
             DROP VIEW IF EXISTS catch_up_pk_view;
-            CREATE TABLE `catch_up` (
+            CREATE TABLE catch_up (
                 id int,
                 val varchar(255)
             );
-            CREATE TABLE `catch_up_pk` (
+            CREATE TABLE catch_up_pk (
                 id int PRIMARY KEY,
                 val varchar(255)
             );
-            CREATE VIEW catch_up_view AS SELECT * FROM `catch_up`;
-            CREATE VIEW catch_up_pk_view AS SELECT * FROM `catch_up_pk`;",
+            CREATE VIEW catch_up_view AS SELECT * FROM catch_up;
+            CREATE VIEW catch_up_pk_view AS SELECT * FROM catch_up_pk;",
         )
         .await?;
 
@@ -366,12 +393,12 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
         tokio::spawn(async move {
             for idx in 0..TOTAL_INSERTS {
                 client
-                    .query("INSERT INTO `catch_up` VALUES (100, 'I am a teapot')")
+                    .query("INSERT INTO catch_up VALUES (100, 'I am a teapot')")
                     .await?;
 
                 client
                     .query(&format!(
-                        "INSERT INTO `catch_up_pk` VALUES ({}, 'I am a teapot')",
+                        "INSERT INTO catch_up_pk VALUES ({}, 'I am a teapot')",
                         idx
                     ))
                     .await?;
@@ -412,8 +439,8 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
     client
         .query(
             "
-        DROP TABLE IF EXISTS `catch_up` CASCADE;
-        DROP TABLE IF EXISTS `catch_up_pk` CASCADE;
+        DROP TABLE IF EXISTS catch_up CASCADE;
+        DROP TABLE IF EXISTS catch_up_pk CASCADE;
         DROP VIEW IF EXISTS catch_up_view;
         DROP VIEW IF EXISTS catch_up_pk_view;",
         )
@@ -424,19 +451,15 @@ async fn mysql_replication_catch_up() -> ReadySetResult<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn mysql_replication_many_tables() -> ReadySetResult<()> {
+async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
     const TOTAL_TABLES: usize = 300;
-
-    let url = &mysql_url();
     let mut client = DbConnection::connect(url).await?;
 
     for t in 0..TOTAL_TABLES {
         let tbl_name = format!("t{}", t);
         client
             .query(&format!(
-                "DROP TABLE IF EXISTS `{0}` CASCADE; CREATE TABLE `{0}` (id int); INSERT INTO `{0}` VALUES (1);",
+                "DROP TABLE IF EXISTS {0} CASCADE; CREATE TABLE {0} (id int); INSERT INTO {0} VALUES (1);",
                 tbl_name
             ))
             .await?;
@@ -454,9 +477,8 @@ async fn mysql_replication_many_tables() -> ReadySetResult<()> {
     ctx.stop().await;
 
     for t in 0..TOTAL_TABLES {
-        let tbl_name = format!("t{}", t);
         client
-            .query(&format!("DROP TABLE IF EXISTS `{0}` CASCADE;", tbl_name))
+            .query(&format!("DROP TABLE IF EXISTS t{} CASCADE;", t))
             .await?;
     }
 
@@ -568,10 +590,4 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
     client.stop().await;
     ctx.stop().await;
     Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-async fn mysql_datetime_replication() -> ReadySetResult<()> {
-    mysql_datetime_replication_inner().await
 }
