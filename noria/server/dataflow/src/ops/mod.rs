@@ -487,6 +487,10 @@ pub mod test {
             self.nodes[*self.nut.unwrap()].borrow()
         }
 
+        pub fn node_mut(&self) -> cell::RefMut<Node> {
+            self.nodes[*self.nut.unwrap()].borrow_mut()
+        }
+
         pub fn narrow_base_id(&self) -> IndexPair {
             assert_eq!(self.remap.len(), 2 /* base + nut */);
             *self
