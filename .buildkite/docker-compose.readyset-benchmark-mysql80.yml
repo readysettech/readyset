@@ -1,0 +1,126 @@
+# The purpose of this file is to allow us to orchestrate running benchmarks in CI or locally
+
+version: "3.8"
+services:
+  # MySQL Database Server for Benchmark Data
+  mysql:
+    container_name: mysql
+    image: mysql:8.0
+    user: mysql
+    ports:
+      - 3306:3306
+    expose:
+      - 3306
+    environment:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ${HOST_DATADIR_PATH}:/var/lib/mysql:rw
+      - ./benchmark.my.cnf:/etc/mysql/my.cnf
+    depends_on:
+      consul:
+        condition: service_healthy
+    healthcheck:
+      test: "mysqladmin ping"
+      start_period: 10s
+      interval: 10s
+      timeout: 2s
+      retries: 5
+
+  # Consul Server
+  consul:
+    container_name: consul
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
+    command: ["agent", "-dev", "-client", "0.0.0.0", "-log-level", "INFO"]
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "8500"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+
+  readyset-server:
+    container_name: readyset-server
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${DOCKER_TAG}"
+    expose:
+      # Ephemeral
+      - "32768-60999"
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
+      LISTEN_ADDRESS: 0.0.0.0
+      EXTERNAL_ADDRESS: readyset-server
+      NORIA_DEPLOYMENT: frameworktests
+      REPLICATION_URL: mysql://root:root@mysql/test
+      PROMETHEUS_METRICS: 1
+    links:
+      - mysql
+      - consul
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "127.0.0.1:6033/prometheus"]
+      interval: 10s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+
+  # Client connections go here
+  readyset-adapter:
+    container_name: readyset-adapter
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${DOCKER_TAG}"
+    ports:
+      - 3333:3333
+    expose:
+      - 3333
+    environment:
+      AUTHORITY_ADDRESS: consul:8500
+      AUTHORITY: "consul"
+      LISTEN_ADDRESS: 0.0.0.0:3333
+      NORIA_DEPLOYMENT: frameworktests
+      UPSTREAM_DB_URL: mysql://root:root@mysql:3306/test
+      ALLOWED_USERNAME: root
+      ALLOWED_PASSWORD: root
+    links:
+      - readyset-server
+      - mysql
+      - consul
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--port=3333", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 10s
+      retries: 2
+      start_period: 5s
+    depends_on:
+      readyset-server:
+        condition: service_healthy
+  benchmarks:
+    # Eventually, when benchmarks are more static, we can abstract
+    # the build process external to docker-compose and leverage an image
+    # in ECR. Building inline for now seems viable.
+    container_name: benchmarks
+    image: readyset-benchmarks
+    build:
+      dockerfile: build/Dockerfile.readyset-benchmarks
+      context: ../
+      args:
+        release: 1
+        READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG: latest
+        BUILDKIT_INLINE_CACHE: 1
+    environment:
+      INSTANCE_LABEL: local
+      TARGET_CONN_STR: "mysql://root:root@readyset-adapter:3333"
+      SETUP_CONN_STR: "mysql://root:root@mysql/test"
+      REPL_AWAIT_SLEEP_DURATION: 60
+      IRL_BENCHMARK_DURATION: 60
+      FASTLY_READ_BENCHMARK_DURATION: 60
+      # V2.0 - we'll set these
+      # PROMETHEUS_PUSH_GATEWAY: ""
+      # PROMETHEUS_SERVER: ""
+    # volumes:
+    #   - ../scripts:/usr/src/app/scripts
+    links:
+      - readyset-adapter
+    entrypoint: ["/bin/bash"]
+    command: ["/usr/src/app/scripts/run-mysql-benchmark-ci.sh"]

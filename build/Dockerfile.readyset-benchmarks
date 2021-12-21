@@ -1,0 +1,45 @@
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
+
+ENV CARGO_INCREMENTAL=0
+
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
+
+ARG release
+
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+
+COPY rust-toolchain ./rust-toolchain
+RUN rustup toolchain install "$(cat ./rust-toolchain)" && \
+    rustup component add rustfmt
+
+RUN set -eux; \
+    cargo --locked build ${release:+--release} --bin benchmarks; \
+    if [ -z "${release+x}" ]; then strip target/debug/benchmarks; else strip target/release/benchmarks; fi
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04
+
+RUN set -eux; \
+    apt-get update;\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libssl-dev=1.1.1f-1ubuntu2.10 \
+        mariadb-client=1:10.3.32-0ubuntu0.20.04.1 \
+        curl=7.68.0-1ubuntu2.7; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/readyset/target/*/benchmarks /usr/local/bin
+
+RUN mkdir -p /usr/src/app && \
+    chmod +x /usr/local/bin/benchmarks
+
+COPY --from=builder /tmp/readyset/benchmarks/src/data/ /usr/src/app/src/data/
+COPY --from=builder /tmp/readyset/benchmarks/src/yaml/ /usr/src/app/src/yaml/
+COPY --from=builder /tmp/readyset/scripts/ /usr/src/app/scripts/
+
+WORKDIR /usr/src/app
+
+ENTRYPOINT ["/usr/local/bin/benchmarks"]

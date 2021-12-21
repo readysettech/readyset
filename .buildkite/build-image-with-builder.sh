@@ -28,6 +28,9 @@ CACHEPOT_BUCKET=${CACHEPOT_BUCKET:-readysettech-build-sccache-us-east-2}
 CACHEPOT_REGION=${CACHEPOT_REGION:-${AWS_REGION}}
 
 VERSION=${VERSION:-$BUILDKITE_COMMIT}
+# Allows one to force passing in release=1 as build argument
+FORCE_RELEASE=${FORCE_RELEASE:-"false"}
+BUILDER_VERSION=${BUILDER_VERSION:-$VERSION}
 
 docker_repo="$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
 image="$docker_repo/$image_name"
@@ -40,7 +43,7 @@ else
     cache_from=""
 fi
 
-if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
+if [[ "$BUILDKITE_BRANCH" = "refs/heads/main" || "${FORCE_RELEASE}" == "true" ]]; then
     release_buildargs=("--build-arg" "release=1")
 else
     release_buildargs=()
@@ -53,7 +56,7 @@ build_cmd_prefix=(
     "--build-arg" "BUILDKIT_INLINE_CACHE=1" \
     "--build-arg" "CACHEPOT_BUCKET"
     "--build-arg" "CACHEPOT_REGION"
-    "--build-arg" "READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=${VERSION}"
+    "--build-arg" "READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=${BUILDER_VERSION}"
 )
 
 build_cmd_suffix=(

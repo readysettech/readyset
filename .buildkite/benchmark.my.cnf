@@ -1,0 +1,15 @@
+[mysqld]
+lower_case_table_names  = 1
+pid-file        = /var/run/mysqld/mysqld.pid
+socket          = /var/run/mysqld/mysqld.sock
+datadir         = /var/lib/mysql
+secure-file-priv=NULL
+
+bind-address=0.0.0.0
+
+# http://www.percona.com/blog/2008/05/31/dns-achilles-heel-mysql-installation/
+skip_name_resolve
+authentication_policy=mysql_native_password
+log-bin=/var/lib/mysql/mysql-bin
+binlog-format=ROW
+server_id=123456

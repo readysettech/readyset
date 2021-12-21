@@ -15,7 +15,8 @@ data "aws_iam_policy_document" "ci-benchmarking" {
       "s3:PutObject",
       "s3:PutObjectTagging",
       "s3:PutObjectAcl",
-      "s3:AbortMultipartUpload"
+      "s3:AbortMultipartUpload",
+      "s3:ListBucket"
     ]
 
     resources = concat(

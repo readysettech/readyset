@@ -1,6 +1,6 @@
 # Benchmarks
 
-This directory contains all code that is used to benchmark performance on 
+This directory contains all code that is used to benchmark performance on
 ReadySet. Readyset deployment's used for benchmarking will build all targets
 from this directory.
 
@@ -35,4 +35,3 @@ For local testing `xtask mock-prometheus-push-gateway` is provided, e.g.
 `cargo run --bin benchmark -- --job-name manual --prometheus
 http://localhost:9091 my-benchmark`.  This will print any metrics that are sent
 to it to stdout for easy manual verification.
-

@@ -211,6 +211,14 @@ steps:
 
   - wait
 
+  - trigger: "readyset-benchmarks"
+    label: ":algolia: Performance Benchmarks"
+    build:
+      branch: ${BUILDKITE_BRANCH}
+      commit: ${BUILDKITE_COMMIT}
+      message: ":algolia: Performance Benchmarks for ${BUILDKITE_COMMIT}"
+    async: true
+
   - trigger: "docker-release"
     branches: refs/heads/main
     label: ":rocket: Docker Release"
