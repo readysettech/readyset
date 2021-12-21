@@ -14,10 +14,11 @@ colored = "2.0.0"
 derive_more = "0.99.11"
 hex = "0.4.3"
 md5 = "0.7.0"
-mysql_async = "0.28"
+mysql_async = "0.29"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4"] }
 postgres-native-tls = { git = "https://github.com/readysettech/rust-postgres.git" }
+mysql = "21.0.1"
 native-tls = "0.2.7"
 nom = "5.1.2"
 noria-server = { path = "../server/" }

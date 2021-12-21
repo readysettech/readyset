@@ -6,9 +6,8 @@ use std::str::FromStr;
 use anyhow::{anyhow, bail};
 use derive_more::From;
 use futures::{StreamExt, TryStreamExt};
-use mysql::prelude::Queryable;
-use mysql::OptsBuilder;
-use mysql_async as mysql;
+use mysql_async::prelude::Queryable;
+use mysql_async::OptsBuilder;
 use tokio_postgres as pgsql;
 
 use crate::ast::Value;
@@ -48,7 +47,7 @@ impl Display for DatabaseType {
 #[derive(Debug, Clone, From)]
 #[allow(clippy::large_enum_variant)]
 pub enum DatabaseURL {
-    MySQL(mysql::Opts),
+    MySQL(mysql_async::Opts),
     PostgreSQL(pgsql::Config),
 }
 
@@ -57,7 +56,7 @@ impl FromStr for DatabaseURL {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.starts_with("mysql://") {
-            Ok(Self::MySQL(mysql::Opts::from_url(s)?))
+            Ok(Self::MySQL(mysql_async::Opts::from_url(s)?))
         } else if s.starts_with("postgresql://") {
             Ok(Self::PostgreSQL(pgsql::Config::from_str(s)?))
         } else {
@@ -66,8 +65,8 @@ impl FromStr for DatabaseURL {
     }
 }
 
-impl From<mysql::OptsBuilder> for DatabaseURL {
-    fn from(ob: mysql::OptsBuilder) -> Self {
+impl From<mysql_async::OptsBuilder> for DatabaseURL {
+    fn from(ob: mysql_async::OptsBuilder) -> Self {
         Self::MySQL(ob.into())
     }
 }
@@ -76,7 +75,7 @@ impl DatabaseURL {
     pub async fn connect(&self) -> anyhow::Result<DatabaseConnection> {
         match self {
             DatabaseURL::MySQL(opts) => Ok(DatabaseConnection::MySQL(
-                mysql::Conn::new(opts.clone()).await?,
+                mysql_async::Conn::new(opts.clone()).await?,
             )),
             DatabaseURL::PostgreSQL(config) => {
                 let connector = native_tls::TlsConnector::builder().build().unwrap(); // Never returns an error
@@ -117,20 +116,20 @@ impl DatabaseURL {
 }
 
 pub enum DatabaseConnection {
-    MySQL(mysql::Conn),
+    MySQL(mysql_async::Conn),
     PostgreSQL(pgsql::Client),
 }
 
 async fn convert_mysql_results<'a, 't, P>(
-    mut results: mysql::QueryResult<'a, 't, P>,
+    mut results: mysql_async::QueryResult<'a, 't, P>,
 ) -> anyhow::Result<Vec<Vec<Value>>>
 where
-    P: mysql::prelude::Protocol,
+    P: mysql_async::prelude::Protocol,
 {
     results
         .map(|mut r| {
             (0..r.columns().len())
-                .map(|c| Value::try_from(r.take::<mysql::Value, _>(c).unwrap()))
+                .map(|c| Value::try_from(r.take::<mysql_async::Value, _>(c).unwrap()))
                 .collect::<Result<Vec<Value>, _>>()
         })
         .await?
@@ -182,7 +181,7 @@ impl DatabaseConnection {
     pub async fn execute<Q, P>(&mut self, stmt: Q, params: P) -> anyhow::Result<Vec<Vec<Value>>>
     where
         Q: AsRef<str>,
-        P: Into<mysql::Params> + IntoIterator,
+        P: Into<mysql_async::Params> + IntoIterator,
         P::IntoIter: ExactSizeIterator,
         P::Item: pgsql::types::BorrowToSql,
     {

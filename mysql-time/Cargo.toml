@@ -12,7 +12,7 @@ launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
 thiserror = "1.0.26"
 chrono = "0.4"
-mysql_common = "0.27.5"
+mysql_common = "0.28.0"
 
 [dev-dependencies]
 serde_test = "1.0.117"

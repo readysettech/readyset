@@ -14,7 +14,7 @@ clap = "3.0.0-beta.2"
 async-trait = "0.1.51"
 msql-srv = { path = "../msql-srv" }
 mysql = "21.0.1"
-mysql_async = "0.28"
+mysql_async = "0.29"
 
 noria = { path = "../noria/noria" }
 noria-errors = { path = "../noria/errors" }
@@ -26,7 +26,7 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 anyhow = "1.0.42"
 derive_more = "0.99.16"
 thiserror = "1.0.26"
-mysql_common = "0.27.5"
+mysql_common = "0.28.0"
 itertools = "0.10.1"
 
 [dev-dependencies]

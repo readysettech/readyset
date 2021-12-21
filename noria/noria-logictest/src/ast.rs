@@ -18,7 +18,6 @@ use chrono::{NaiveDate, NaiveTime, Utc};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
 use mysql::chrono::NaiveDateTime;
-use mysql_async as mysql;
 use mysql_time::MysqlTime;
 use nom_sql::{Literal, SqlQuery};
 use noria::{DataType, TIMESTAMP_FORMAT};
@@ -115,8 +114,8 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn of_mysql_value(val: &mysql::Value) -> Option<Self> {
-        use mysql::Value::*;
+    pub fn of_mysql_value(val: &mysql_async::Value) -> Option<Self> {
+        use mysql_async::Value::*;
         match val {
             Bytes(_) => Some(Self::Text),
             Int(_) => Some(Self::Real),
@@ -195,11 +194,11 @@ pub enum Value {
     BitVector(BitVec),
 }
 
-impl TryFrom<mysql::Value> for Value {
+impl TryFrom<mysql_async::Value> for Value {
     type Error = anyhow::Error;
 
-    fn try_from(value: mysql::Value) -> Result<Self, Self::Error> {
-        use mysql::Value::*;
+    fn try_from(value: mysql_async::Value) -> Result<Self, Self::Error> {
+        use mysql_async::Value::*;
         match value {
             NULL => Ok(Self::Null),
             Bytes(bs) => Ok(Self::Text(String::from_utf8(bs)?)),
@@ -272,22 +271,22 @@ impl TryFrom<Literal> for Value {
     }
 }
 
-impl From<Value> for mysql::Value {
+impl From<Value> for mysql_async::Value {
     fn from(val: Value) -> Self {
         match val {
             Value::Text(x) => x.into(),
             Value::Integer(x) => x.into(),
             Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
             Value::Numeric(d) => {
-                // FIXME(fran): This shouldn't be implemented for mysql::Value, since
+                // FIXME(fran): This shouldn't be implemented for mysql_async::Value, since
                 // MySQL has it's own type `DECIMAL`, which is not supported by the library.
                 // However, it seems like the AST relies on this even when the database being used
                 // is Postgres, so we return a float to bypass that for now.
                 d.to_f64().unwrap_or(f64::MAX).into()
             }
-            Value::Null => mysql::Value::NULL,
-            Value::Date(dt) => mysql::Value::from(dt),
-            Value::Time(t) => mysql::Value::Time(
+            Value::Null => mysql_async::Value::NULL,
+            Value::Date(dt) => mysql_async::Value::from(dt),
+            Value::Time(t) => mysql_async::Value::Time(
                 !t.is_positive(),
                 (t.hour() / 24).into(),
                 (t.hour() % 24) as _,
@@ -468,19 +467,22 @@ impl Value {
         }
     }
 
-    pub fn from_mysql_value_with_type(val: mysql::Value, typ: &Type) -> anyhow::Result<Value> {
-        if val == mysql::Value::NULL {
+    pub fn from_mysql_value_with_type(
+        val: mysql_async::Value,
+        typ: &Type,
+    ) -> anyhow::Result<Value> {
+        if val == mysql_async::Value::NULL {
             return Ok(Self::Null);
         }
         match typ {
-            Type::Text => Ok(Self::Text(mysql::from_value_opt(val)?)),
-            Type::Integer => Ok(Self::Integer(mysql::from_value_opt(val.clone()).or_else(
-                |_| -> anyhow::Result<i64> {
-                    Ok(mysql::from_value_opt::<f64>(val)?.trunc() as i64)
-                },
-            )?)),
+            Type::Text => Ok(Self::Text(mysql_async::from_value_opt(val)?)),
+            Type::Integer => Ok(Self::Integer(
+                mysql_async::from_value_opt(val.clone()).or_else(|_| -> anyhow::Result<i64> {
+                    Ok(mysql_async::from_value_opt::<f64>(val)?.trunc() as i64)
+                })?,
+            )),
             Type::Real => {
-                let f: f64 = mysql::from_value_opt(val)?;
+                let f: f64 = mysql_async::from_value_opt(val)?;
                 Ok(Self::Real(
                     f.trunc() as i64,
                     (f.fract() * 1_000_000_000.0).round() as _,
@@ -490,12 +492,12 @@ impl Value {
                 // TODO(fran): Add support for MySQL's DECIMAL.
                 bail!("Conversion of {:?} to DECIMAL is not implemented", val)
             }
-            Type::Date => Ok(Self::Date(mysql::from_value_opt(val)?)),
+            Type::Date => Ok(Self::Date(mysql_async::from_value_opt(val)?)),
             Type::Time => Ok(Self::Time(match val {
-                mysql::Value::Bytes(s) => {
+                mysql_async::Value::Bytes(s) => {
                     MysqlTime::from_str(std::str::from_utf8(&s)?).map_err(|e| anyhow!("{}", e))?
                 }
-                mysql::Value::Time(neg, d, h, m, s, us) => {
+                mysql_async::Value::Time(neg, d, h, m, s, us) => {
                     MysqlTime::from_hmsus(!neg, ((d * 24) + h as u32).try_into()?, m, s, us.into())
                 }
                 _ => bail!("Could not convert {:?} to Time", val),
@@ -539,7 +541,7 @@ impl Value {
     pub fn compare_type_insensitive(&self, other: &Self) -> bool {
         match other.typ() {
             None => *self == Value::Null,
-            Some(typ) => Self::from_mysql_value_with_type(mysql::Value::from(self), &typ)
+            Some(typ) => Self::from_mysql_value_with_type(mysql_async::Value::from(self), &typ)
                 .map_or(false, |v| v == *other),
         }
     }
@@ -679,16 +681,16 @@ impl IntoIterator for QueryParams {
     }
 }
 
-impl From<QueryParams> for mysql::Params {
+impl From<QueryParams> for mysql_async::Params {
     fn from(qp: QueryParams) -> Self {
         match qp {
-            qp if qp.is_empty() => mysql::Params::Empty,
+            qp if qp.is_empty() => mysql_async::Params::Empty,
             QueryParams::PositionalParams(vs) => {
-                mysql::Params::Positional(vs.into_iter().map(mysql::Value::from).collect())
+                mysql_async::Params::Positional(vs.into_iter().map(mysql::Value::from).collect())
             }
-            QueryParams::NumberedParams(nps) => mysql::Params::Named(
+            QueryParams::NumberedParams(nps) => mysql_async::Params::Named(
                 nps.into_iter()
-                    .map(|(n, v)| (n.to_string(), mysql::Value::from(v)))
+                    .map(|(n, v)| (n.to_string(), mysql_async::Value::from(v)))
                     .collect(),
             ),
         }
