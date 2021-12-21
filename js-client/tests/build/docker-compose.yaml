@@ -48,6 +48,7 @@ services:
       EXTERNAL_ADDRESS: readyset-server
       NORIA_DEPLOYMENT: jstests
       REPLICATION_URL: mysql://root:root@mysql/test
+      PROMETHEUS_METRICS: 1
     links:
       - mysql
       - zookeeper

@@ -42,13 +42,13 @@ slab = "0.4"
 pin-project = "0.4.17"
 futures-util = "0.3.0"
 futures = "0.3.0"
-mysql_common = "0.27.5"
+mysql_common ={ version = "0.28.0", features = ["chrono"] }
 vec1 = { version = "1.6.0", features = ["serde"] }
 proptest = "1.0.0"
 derive_more = "0.99.11"
 backoff = { version = "0.3.0", features = ["tokio"] }
 url = { version = "2.2", features = ["serde"] }
-mysql_async = "0.28"
+mysql_async = "0.29"
 rand = "0.8.4"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }

@@ -14,8 +14,8 @@
 
 use benchmarks::utils::generate::load_to_backend;
 use benchmarks::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
+use chrono::Utc;
 use clap::{ArgGroup, Parser, ValueHint};
-use mysql::chrono::Utc;
 use nom_sql::SelectStatement;
 use noria::consensus::AuthorityType;
 use noria::{ControllerHandle, DataType, KeyComparison, View, ViewQuery};

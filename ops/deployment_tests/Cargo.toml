@@ -10,7 +10,7 @@ anyhow = "1.0.38"
 clap = "3.0.0-beta.5"
 prometheus-http-query = "0.3.0"
 tokio = "1.8.4"
-mysql_async = "0.28.0"
+mysql_async = "0.29.0"
 console = "0.15.0"
 indicatif = "0.16.2"
 

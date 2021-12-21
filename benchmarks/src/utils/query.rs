@@ -9,7 +9,7 @@
 //! based on a DistributionAnnotation.
 
 use clap::Parser;
-use mysql::consts::ColumnType;
+use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
 use mysql_async::Statement;
 use mysql_async::Value;

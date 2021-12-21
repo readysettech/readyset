@@ -13,7 +13,7 @@ anyhow = "1.0"
 port_scanner = "0.1.5"
 rand = "0.8.3"
 url = "2.2.2"
-mysql_async = "0.28.0"
+mysql_async = "0.29"
 envy = "0.4"
 serde = { version = "1.0.8", features = ["derive"] }
 hyper = "0.14.10"

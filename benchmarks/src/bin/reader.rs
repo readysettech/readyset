@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mysql::chrono::Utc;
+use chrono::Utc;
 use noria::consensus::AuthorityType;
 use noria::ControllerHandle;
 use noria::DataType;

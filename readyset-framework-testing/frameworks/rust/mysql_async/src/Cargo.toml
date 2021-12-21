@@ -5,7 +5,7 @@ authors = ["Mike Cronce <mc@planetscale.com>", "Peter Farr <peter@prismaphonic.c
 edition = "2018"
 
 [dependencies]
-mysql_async = "0.28"
+mysql_async = "0.29"
 tablefy = "0.1"
 tablefy_derive = "0.2"
 tokio = {version = "1", features = ["macros", "rt-multi-thread"]}
