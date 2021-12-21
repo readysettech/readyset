@@ -101,6 +101,14 @@ struct TestHandle {
     replication_rt: Option<tokio::runtime::Runtime>,
 }
 
+impl Drop for TestHandle {
+    fn drop(&mut self) {
+        if let Some(rt) = self.replication_rt.take() {
+            rt.shutdown_background();
+        }
+    }
+}
+
 enum DbConnection {
     MySQL(mysql_async::Conn),
     PostgreSQL(
