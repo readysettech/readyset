@@ -2,6 +2,7 @@ use super::PostgresPosition;
 use chrono::{DateTime, FixedOffset};
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
+use itertools::Itertools;
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
 use std::convert::{TryFrom, TryInto};
@@ -361,13 +362,7 @@ impl<'a> PostgresReplicator<'a> {
             }
         }
 
-        let recipe = itertools::join(
-            tables
-                .iter()
-                .map(ToString::to_string)
-                .chain(views.iter().map(ToString::to_string)),
-            "\n\n",
-        );
+        let recipe = tables.iter().join("\n\n") + &views.iter().join(";\n\n");
 
         debug!(%recipe, "Installing recipe");
 
