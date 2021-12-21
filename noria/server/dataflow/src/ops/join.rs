@@ -806,50 +806,61 @@ impl Ingredient for Join {
         )
     }
 
+    /// Called for joins that are partial on columns that are sourced from both parents
+    ///
+    /// We receive an upquery with a set of (potentially multiple) keys, and need to split each of
+    /// those into one upquery to each parent with the same total number of keys each.
     fn handle_upquery(&mut self, miss: ColumnMiss) -> ReadySetResult<Vec<ColumnMiss>> {
         // reminder: this function *only* gets called for column indices that are sourced from
         // both parents
 
-        let mut flipped_keys = std::iter::repeat(vec![])
-            .take(miss.missed_columns.columns.len())
-            .collect::<Vec<_>>();
-        for i in 0..miss.missed_columns.columns.len() {
-            for keycomparison in miss.missed_key.iter() {
-                match keycomparison.equal() {
-                    Some(lst) => {
-                        flipped_keys[i].push(lst[i].clone());
-                    }
-                    None => {
-                        // TODO(eta): make this work with range queries as well.
-                        internal!("range queries aren't supported by Join's handle_upquery impl")
-                    }
-                }
-            }
-        }
-        let mut keys = flipped_keys.into_iter();
-
+        // First, which side does each column come from?
         let mut left_cols = vec![];
-        let mut left_keys = vec![];
         let mut right_cols = vec![];
-        let mut right_keys = vec![];
+        let mut col_sides = vec![];
         for col in miss.missed_columns.columns {
-            let key = match keys.next() {
-                Some(k) => k,
-                None => {
-                    internal!("malformed miss passed to Join's handle_upquery");
-                }
-            };
             let (left_idx, right_idx) = self.resolve_col(col);
             if let Some(li) = left_idx {
                 left_cols.push(li);
-                left_keys.push(KeyComparison::Equal(Vec1::try_from(key).unwrap()));
+                col_sides.push(Side::Left);
             } else if let Some(ri) = right_idx {
                 right_cols.push(ri);
-                right_keys.push(KeyComparison::Equal(Vec1::try_from(key).unwrap()));
+                col_sides.push(Side::Right);
             } else {
                 internal!("could not resolve col {} in join upquery", col);
             }
         }
+
+        // Now, split each of the keys into an upquery to each of the left and the right
+        let mut left_keys = Vec::with_capacity(miss.missed_key.len());
+        let mut right_keys = Vec::with_capacity(miss.missed_key.len());
+        for key in miss.missed_key {
+            let key = match key {
+                KeyComparison::Equal(k) => k,
+                KeyComparison::Range(_) => {
+                    internal!("Join's handle_upquery does not handle range queries yet")
+                }
+            };
+
+            let mut left_key = Vec::with_capacity(left_cols.len());
+            let mut right_key = Vec::with_capacity(right_cols.len());
+            for (value, side) in key.into_iter().zip(&col_sides) {
+                match side {
+                    Side::Left => left_key.push(value),
+                    Side::Right => right_key.push(value),
+                }
+            }
+
+            // If either of these is empty, that means the columns weren't actually straddling both
+            // parents - which is an invariant of this function!
+            left_keys.push(left_key.try_into().map_err(|_| {
+                internal_err("Join handle_upquery passed a non-straddled join key")
+            })?);
+            right_keys.push(right_key.try_into().map_err(|_| {
+                internal_err("Join handle_upquery passed a non-straddled join key")
+            })?);
+        }
+
         Ok(vec![
             ColumnMiss {
                 missed_columns: ColumnRef {
@@ -1152,6 +1163,98 @@ mod tests {
         let (g, l, _) = setup();
         let res = g.node().parent_columns(0);
         assert_eq!(res, vec![(l.as_global(), Some(0))]);
+    }
+
+    mod handle_upquery {
+        use super::*;
+
+        #[test]
+        fn compound_key() {
+            let (j, l, r) = setup();
+            let join_index = j.node().global_addr();
+            let res = j
+                .node_mut()
+                .handle_upquery(ColumnMiss {
+                    missed_columns: ColumnRef {
+                        node: join_index,
+                        columns: vec1![0, 1, 2],
+                    },
+                    missed_key: vec1![vec1![
+                        DataType::from(1),
+                        DataType::from(2),
+                        DataType::from(3)
+                    ]
+                    .into()],
+                })
+                .unwrap();
+
+            let left_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == l.as_global())
+                .unwrap();
+            let right_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == r.as_global())
+                .unwrap();
+
+            assert_eq!(left_miss.missed_columns.columns, vec1![0, 1]);
+            assert_eq!(right_miss.missed_columns.columns, vec1![1]);
+
+            assert_eq!(
+                left_miss.missed_key,
+                vec1![vec1![DataType::from(1), DataType::from(2)].into()]
+            );
+            assert_eq!(
+                right_miss.missed_key,
+                vec1![vec1![DataType::from(3)].into()]
+            );
+        }
+
+        #[test]
+        fn multiple_compound_keys() {
+            let (j, l, r) = setup();
+            let join_index = j.node().global_addr();
+            let res = j
+                .node_mut()
+                .handle_upquery(ColumnMiss {
+                    missed_columns: ColumnRef {
+                        node: join_index,
+                        columns: vec1![0, 1, 2],
+                    },
+                    missed_key: vec1![
+                        vec1![DataType::from(1), DataType::from(2), DataType::from(3)].into(),
+                        vec1![DataType::from(4), DataType::from(5), DataType::from(6)].into()
+                    ],
+                })
+                .unwrap();
+
+            let left_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == l.as_global())
+                .unwrap();
+            let right_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == r.as_global())
+                .unwrap();
+
+            assert_eq!(left_miss.missed_columns.columns, vec1![0, 1]);
+            assert_eq!(right_miss.missed_columns.columns, vec1![1]);
+
+            assert_eq!(
+                left_miss.missed_key,
+                vec1![
+                    vec1![DataType::from(1), DataType::from(2)].into(),
+                    vec1![DataType::from(4), DataType::from(5)].into()
+                ]
+            );
+            assert_eq!(
+                right_miss.missed_key,
+                vec1![
+                    vec1![DataType::from(3)].into(),
+                    vec1![DataType::from(6)].into()
+                ]
+            );
+        }
     }
 
     mod compound_keys {
