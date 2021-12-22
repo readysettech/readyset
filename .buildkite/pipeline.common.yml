@@ -194,6 +194,9 @@ steps:
       - ecr#v2.5.0:
           login: true
           retries: 3
+    soft_fail: true
+    env:
+      SOFT_FAIL: "true"
 
   - label: ':rust: Run tests'
     key: rust-tests
