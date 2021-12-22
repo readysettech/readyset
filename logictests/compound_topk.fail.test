@@ -1,0 +1,26 @@
+statement ok
+CREATE TABLE `active_storage_attachments` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `record_type` varchar(255) NOT NULL,
+  `record_id` bigint NOT NULL,
+  `blob_id` bigint NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_active_storage_attachments_uniqueness` (`record_type`,`record_id`,`name`,`blob_id`),
+  KEY `index_active_storage_attachments_on_blob_id` (`blob_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=62 DEFAULT CHARSET=utf8mb3
+
+statement ok
+INSERT INTO `active_storage_attachments` VALUES (1,'attachment','Spree::Asset',1,1,'2021-12-20 22:02:51');
+
+query I nosort
+SELECT
+  `active_storage_attachments`.id
+FROM `active_storage_attachments`
+WHERE `active_storage_attachments`.`record_id` = 1
+AND `active_storage_attachments`.`record_type` = 'Spree::Asset'
+AND `active_storage_attachments`.`name` = 'attachment'
+LIMIT 1
+----
+1
