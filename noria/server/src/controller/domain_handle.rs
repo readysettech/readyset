@@ -44,13 +44,7 @@ impl DomainHandle {
         workers: &HashMap<WorkerIdentifier, Worker>,
     ) -> ReadySetResult<T> {
         let addr = self.assignment(i)?;
-        let worker =
-            workers
-                .get(&addr)
-                .ok_or_else(|| ReadySetError::UnmappableWorkerIdentifier {
-                    ident: addr.to_string(),
-                })?;
-        if worker.healthy {
+        if let Some(worker) = workers.get(&addr) {
             let req = req.clone();
             Ok(worker
                 .rpc(WorkerRequestKind::DomainRequest {
@@ -63,7 +57,7 @@ impl DomainHandle {
                     rpc_err_no_downcast(format!("domain request to {}.{}", self.idx.index(), i), e)
                 })?)
         } else {
-            error!(%addr, "tried to send domain request to failed worker");
+            error!(%addr, ?req, "tried to send domain request to failed worker");
             Err(ReadySetError::WorkerFailed { uri: addr.clone() })
         }
     }
