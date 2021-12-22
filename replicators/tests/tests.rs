@@ -231,7 +231,7 @@ impl TestHandle {
         test_name: &str,
         test_results: &[&[DataType]],
     ) -> ReadySetResult<()> {
-        const MAX_ATTEMPTS: usize = 20;
+        const MAX_ATTEMPTS: usize = 40;
         let mut attempt: usize = 0;
         loop {
             match self.check_results_inner(view_name).await {
