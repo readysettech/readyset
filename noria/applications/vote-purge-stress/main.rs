@@ -26,13 +26,6 @@ async fn main() {
     let args = App::new("purge-stress")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
         .arg(
-            Arg::with_name("flush-timeout")
-                .long("flush-timeout")
-                .takes_value(true)
-                .default_value("100000")
-                .help("Time to wait before processing a merged packet, in nanoseconds."),
-        )
-        .arg(
             Arg::with_name("replay-timeout")
                 .long("replay-timeout")
                 .takes_value(true)
@@ -61,7 +54,6 @@ async fn main() {
 
     builder.set_persistence(PersistenceParameters {
         mode: DurabilityMode::MemoryOnly,
-        flush_timeout: Duration::new(0, value_t_or_exit!(args, "flush-timeout", u32)),
         ..Default::default()
     });
     builder.set_sharding(None);

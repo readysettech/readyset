@@ -25,7 +25,6 @@ async fn main() {
 
     let persistence_params = noria::PersistenceParameters::new(
         noria::DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(String::from("evictorama")),
         1,
     );

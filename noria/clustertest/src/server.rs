@@ -87,10 +87,6 @@ impl NoriaServerBuilder {
         self.push_arg("--external-port", &external_port.to_string())
     }
 
-    pub fn log_dir(self, path: &Path) -> Self {
-        self.push_arg("--log-dir", path.to_str().unwrap())
-    }
-
     pub fn mysql(self, addr: &str) -> Self {
         self.push_arg("--replication-url", addr)
     }

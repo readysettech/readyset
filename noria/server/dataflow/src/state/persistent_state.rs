@@ -451,7 +451,7 @@ impl PersistentState {
             }
         };
 
-        let opts = Self::build_options(&name, params);
+        let opts = Self::build_options(params);
         // We use a column family for each index, and one for metadata.
         // When opening the DB the exact same column families needs to be used,
         // so we'll have to retrieve the existing ones first:
@@ -678,7 +678,7 @@ impl PersistentState {
         self.db.create_cf(cf, &self.db_opts).unwrap();
     }
 
-    fn build_options(name: &str, params: &PersistenceParameters) -> rocksdb::Options {
+    fn build_options(params: &PersistenceParameters) -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
         opts.create_if_missing(true);
@@ -694,12 +694,6 @@ impl PersistentState {
             hash_table_ratio,
             index_sparseness,
         });
-
-        if let Some(ref path) = params.log_dir {
-            // Append the db name to the WAL path to ensure
-            // that we create a directory for each base shard:
-            opts.set_wal_dir(path.join(&name));
-        }
 
         // Create prefixes using `prefix_transform` on all new inserted keys:
         let transform = SliceTransform::create("key", prefix_transform, Some(in_domain));

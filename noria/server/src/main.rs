@@ -1,7 +1,6 @@
 #![warn(clippy::dbg_macro)]
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::Duration;
@@ -95,14 +94,6 @@ struct Opts {
     /// Number of background threads used by RocksDB
     #[clap(long, default_value = "6")]
     persistence_threads: i32,
-
-    /// Time to wait before processing a merged packet, in nanoseconds
-    #[clap(long, default_value = "100000")]
-    flush_timeout: u32,
-
-    /// Absolute path to the directory where the log files will be written
-    #[clap(long)]
-    log_dir: Option<PathBuf>,
 
     /// Authority connection string.
     // TODO(justin): The default address should depend on the authority
@@ -278,13 +269,11 @@ fn main() -> anyhow::Result<()> {
         builder.as_reader_only()
     }
 
-    let mut persistence_params = noria_server::PersistenceParameters::new(
+    let persistence_params = noria_server::PersistenceParameters::new(
         opts.durability,
-        Duration::new(0, opts.flush_timeout),
         Some(opts.deployment.clone()),
         opts.persistence_threads,
     );
-    persistence_params.log_dir = opts.log_dir;
     builder.set_persistence(persistence_params);
 
     if let Some(url) = opts.replication_url {

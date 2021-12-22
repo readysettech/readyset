@@ -773,7 +773,6 @@ impl DeploymentHandle {
         if let Some(adapter_handle) = &mut self.mysql_adapter {
             let _ = adapter_handle.process.kill();
         }
-        std::fs::remove_dir_all(&get_log_path(&self.name))?;
 
         self.shutdown = true;
         Ok(())
@@ -808,11 +807,6 @@ impl Drop for DeploymentHandle {
     }
 }
 
-/// Returns the path `temp_dir()`/deployment_name.
-fn get_log_path(deployment_name: &str) -> PathBuf {
-    std::env::temp_dir().join(deployment_name)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn start_server(
     server_params: &ServerParams,
@@ -826,16 +820,12 @@ fn start_server(
     port: u16,
     mysql: Option<&String>,
 ) -> Result<ServerHandle> {
-    let log_path = get_log_path(deployment_name).join(port.to_string());
-    std::fs::create_dir_all(&log_path)?;
-
     let mut builder = NoriaServerBuilder::new(noria_server_path)
         .deployment(deployment_name)
         .external_port(port)
         .authority_addr(authority_addr)
         .authority(authority)
-        .quorum(quorum)
-        .log_dir(&log_path);
+        .quorum(quorum);
 
     if let Some(shard) = shards {
         builder = builder.shards(shard);
