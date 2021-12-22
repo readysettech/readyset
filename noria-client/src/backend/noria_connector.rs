@@ -888,6 +888,23 @@ impl NoriaConnector {
         Ok(())
     }
 
+    pub fn select_statement_from_name(&self, name: &str) -> Option<SelectStatement> {
+        self.tl_cached
+            .iter()
+            .find(|(_, n)| &n[..] == name)
+            .map(|(v, _)| v.clone())
+            .or_else(|| {
+                tokio::task::block_in_place(|| {
+                    self.cached
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .find(|(_, n)| &n[..] == name)
+                        .map(|(v, _)| v.clone())
+                })
+            })
+    }
+
     async fn do_insert(
         &mut self,
         q: &InsertStatement,

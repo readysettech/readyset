@@ -1639,7 +1639,13 @@ where
                     }
 
                     SqlQuery::DropCachedQuery(DropCachedQueryStatement { ref name }) => {
+                        let maybe_statement = self.noria.select_statement_from_name(name);
                         self.noria.drop_view(name).await?;
+                        if let Some(s) = maybe_statement {
+                            self.query_status_cache
+                                .update_query_migration_state(&s, MigrationState::Pending)
+                                .await;
+                        }
                         Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                     }
 
@@ -1750,7 +1756,13 @@ where
                         Ok(noria_connector::QueryResult::Empty)
                     }
                     SqlQuery::DropCachedQuery(DropCachedQueryStatement { ref name }) => {
+                        let maybe_statement = self.noria.select_statement_from_name(name);
                         self.noria.drop_view(name).await?;
+                        if let Some(s) = maybe_statement {
+                            self.query_status_cache
+                                .update_query_migration_state(&s, MigrationState::Pending)
+                                .await;
+                        }
                         Ok(noria_connector::QueryResult::Empty)
                     }
                     SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
