@@ -1,4 +1,4 @@
-use crate::utils::{query_until_expected, UntilResults};
+use crate::utils::*;
 use crate::*;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
@@ -153,8 +153,9 @@ async fn async_migrations_confidence_check() {
     sleep(Duration::from_secs(2)).await;
 
     assert!(
-        query_until_expected(
+        query_until_expected_from_noria(
             &mut adapter_conn,
+            deployment.metrics(),
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
             UntilResults::empty_or(&[(2, 5)]),
@@ -162,15 +163,6 @@ async fn async_migrations_confidence_check() {
         )
         .await
     );
-
-    // TODO(justin): Add utilities to abstract out this ridiculous way of getting
-    // metrics.
-    let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
-    let counter_value = get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT);
-    match counter_value {
-        Some(DumpedMetricValue::Counter(n)) => assert!(n >= 1.0),
-        _ => panic!("Incorrect metric type or missing metric"),
-    }
 
     deployment.teardown().await.unwrap();
 }
@@ -198,7 +190,7 @@ async fn failure_during_query() {
     let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
     let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?")
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -240,21 +232,23 @@ async fn query_cached_view_after_failure() {
         .await
         .unwrap();
 
-    conn.query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?")
+    conn.query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
     // Query until we hit noria once.
-    let query = "SELECT * FROM t1 where uid = ?";
-    loop {
-        let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
-        let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
-        if Some(DumpedMetricValue::Counter(1.0))
-            == get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT)
-        {
-            break;
-        }
-    }
+    let query = "SELECT * FROM t1 WHERE uid = ?";
+    assert!(
+        query_until_expected_from_noria(
+            &mut conn,
+            deployment.metrics(),
+            query.clone(),
+            (1,),
+            UntilResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     // TODO(ENG-862): This is required as propagation of the INSERT must occur
     // before kill_server or we may panic on recovery.
@@ -275,16 +269,19 @@ async fn query_cached_view_after_failure() {
         .await
         .unwrap();
 
-    for _ in 0..10 {
-        let _: std::result::Result<Vec<Row>, _> = conn.exec(query.clone(), (1,)).await;
-    }
-
-    // After a restart, we hit noria on the same view because we re-retrieve the view.
-    let metrics_dump = &deployment.metrics().get_metrics().await.unwrap()[0].metrics;
-    assert!(matches!(
-        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_RESULT),
-        Some(_)
-    ));
+    // Query until we hit noria once.
+    let query = "SELECT * FROM t1 WHERE uid = ?";
+    assert!(
+        query_until_expected_from_noria(
+            &mut conn,
+            deployment.metrics(),
+            query.clone(),
+            (1,),
+            UntilResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
 
     deployment.teardown().await.unwrap();
 }
@@ -427,7 +424,7 @@ async fn create_view_after_worker_failure() {
 
     // This currently fails as the leader crashes, so we cannot reach quorum.
     adapter_conn
-        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 where uid = ?;")
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?;")
         .await
         .unwrap();
 
@@ -540,7 +537,7 @@ async fn view_survives_restart() {
     conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
-    conn.query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 where uid = ?")
+    conn.query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
