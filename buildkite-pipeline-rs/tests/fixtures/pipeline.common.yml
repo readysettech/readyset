@@ -1,0 +1,511 @@
+steps:
+  - label: ':docker: Build build image'
+    key: build-image
+    command: .buildkite/build_image.sh build/Dockerfile readyset-build
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build readyset-server image"
+    key: readyset-server-image
+    command: >-
+      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
+        .buildkite/build_image.sh  build/Dockerfile.readyset-server readyset-server --build-arg release=1
+      else
+        .buildkite/build_image.sh build/Dockerfile.readyset-server readyset-server
+      fi
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build readyset-mysql image"
+    key: readyset-mysql-image
+    command: >-
+      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
+        .buildkite/build_image.sh  build/Dockerfile.readyset-mysql readyset-mysql --build-arg release=1
+      else
+        .buildkite/build_image.sh build/Dockerfile.readyset-mysql readyset-mysql
+      fi
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build readyset-psql image"
+    key: readyset-psql-image
+    depends_on:
+      - list-frameworks
+    command: >-
+      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
+        .buildkite/build_image.sh  build/Dockerfile.readyset-psql readyset-psql --build-arg release=1
+      elif .buildkite/will-run-psql-tests.sh; then
+        .buildkite/build_image.sh build/Dockerfile.readyset-psql readyset-psql
+      fi
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":docker: Build metrics-aggregator image"
+    key: metrics-aggregator-image
+    command: >-
+      if [ "$BUILDKITE_BRANCH" = refs/heads/main ]; then
+        .buildkite/build_image.sh  build/Dockerfile.metrics-aggregator metrics-aggregator --build-arg release=1
+      else
+        .buildkite/build_image.sh build/Dockerfile.metrics-aggregator metrics-aggregator
+      fi
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':docker: Build prettier image'
+    key: prettier-image
+    command: .buildkite/build_image.sh build/Dockerfile.prettier prettier
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':docker: Build cargo-deny image'
+    key: cargo-deny-image
+    command: .buildkite/build_image.sh build/Dockerfile.cargo-deny cargo-deny
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':rust: Check rustfmt'
+    key: check-rustfmt
+    commands:
+    - "cargo --locked fmt -- --check"
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'target:/workdir/target'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':prettier: Check prettier'
+    commands:
+    - prettier --check "/workdir/js-client/**/*.js"
+    depends_on:
+    - prettier-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/prettier:latest'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: :lock: Check cargo-deny'
+    commands:
+    - cargo --locked deny check
+    depends_on:
+    - cargo-deny-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/cargo-deny:${BUILDKITE_COMMIT}'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':clippy: Check clippy'
+    key: check-clippy
+    commands:
+    - cargo --locked clippy --workspace -- -W clippy::disallowed_method -D warnings
+    depends_on:
+    - build-image
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'target:/workdir/target'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":rust: Build js-client shared library"
+    key: build-js-client-lib
+    commands:
+      - "echo +++ :rust: Running cargo build"
+      - RUSTFLAGS='-D warnings' cargo --locked build --release -p js-client
+      - strip target/release/libjs_client.so
+    artifact_paths:
+      - target/release/libjs_client.so
+    depends_on:
+      - build-image
+    plugins:
+      - docker#v3.8.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}"
+          volumes:
+            - "cargo-registry:/usr/local/cargo/registry"
+          environment:
+            - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+            - CACHEPOT_REGION=us-east-2
+            - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":nodejs: Test js-client"
+    timeout_in_minutes: 60
+    depends_on:
+      - readyset-server-image
+      - build-js-client-lib
+    command:
+      - "echo --- downloading js-client artifact"
+      - buildkite-agent artifact download target/release/libjs_client.so .
+      - mv target/release/libjs_client.so index.node
+      - "echo --- :yarn: installing dependecies"
+      - yarn install
+      - "echo +++ :jest: running js-client tests"
+      - yarn run test
+    plugins:
+      - docker-compose#v3.7.0:
+          run: node
+          config: js-client/tests/build/docker-compose.yaml
+          env:
+            - BUILDKITE_COMMIT
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    soft_fail: true
+    env:
+      SOFT_FAIL: "true"
+
+  - label: ':rust: Run tests'
+    key: rust-tests
+    command: .buildkite/run-tests.sh
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: c5a-4xlarge
+
+  - label: 'Run logictest'
+    key: logictest
+    command:
+    - 'echo +++ Running noria-logictest'
+    - cargo --locked run --bin noria-logictest -- verify logictests
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: 'Run logictest with MySQL replication'
+    key: logictest-binlog
+    command:
+    - 'echo +++ Running noria-logictest with MySQL replication'
+    - cargo --locked run --bin noria-logictest -- verify --replication-url mysql://root:noria@mysql/sqllogictest logictests
+    - cargo --locked run --bin noria-logictest -- verify -r --replication-url  mysql://root:noria@mysql/sqllogictest logictests/requires-fallback
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          run: app
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: 'Run clustertests'
+    key: noria-clustertest
+    command:
+    - 'echo +++ Building binaries for clustertest'
+    - cargo --locked build --bin noria-server --bin noria-mysql --features failure_injection
+    - 'echo +++ Running Clustertests'
+    - cargo --locked test -p clustertest
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - BINARY_PATH=/workdir/target/debug/
+          - MYSQL_ROOT_PASSWORD=noria
+          volumes:
+          - 'target:/workdir/target'
+          config:
+          - docker-compose.yml
+          - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':rust: Deploy docs'
+    branches: 'master'
+    command:
+    - 'echo +++ :rust: Building docs'
+    - cargo --locked doc --workspace --document-private-items
+    - 'echo +++ :ec2: Deploying docs'
+    - apt-get install -y rsync
+    - mkdir -p ~/.ssh
+    - echo '172.31.41.177 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBByYJ6scdtZbyjpIeBB1BrIcfUI/jMYo/re6/0U8ulKEdeh8gyhQ/ujaktSeTQy6yJUE7bIPlpYja2zMsHkOycg=' > ~/.ssh/known_hosts
+    - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'target:/workdir/target'
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          mount-ssh-agent: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+# --- BEGIN INTERNAL OPS STEPS --- #
+  - label: ':docker: Build readyset-ops image'
+    key: build-ops-image
+    commands:
+      - cd ops/build
+      - ../../.buildkite/build_image.sh ./Dockerfile readyset-ops
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':terraform: Format/Validate/Lint readyset module'
+    depends_on:
+    - build-ops-image
+    commands:
+    # TODO: Support validating multiple modules
+    - cd /workdir/ops/tf/modules/readyset
+    - terraform fmt -check -diff
+    - terraform init -backend=false
+    - terraform validate
+    - tflint
+    plugins:
+    - docker#v3.8.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':packer: Format/Validate images'
+    key: ops-packer-lint
+    depends_on:
+    - build-ops-image
+    commands:
+    - .buildkite/confirm-binaries-for-packer.sh
+    - cd /workdir/ops/images
+    - packer fmt -check -diff .
+    - packer init .
+    - packer validate .
+    plugins:
+    - docker#v3.8.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':shell::heavy_check_mark: shellcheck all scripts'
+    key: ops-shellcheck
+    depends_on:
+    - build-ops-image
+    commands:
+    - cd /workdir/ops/images
+    - find -name "*.sh" -type f -exec shellcheck {} \;
+    plugins:
+    - docker#v3.8.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  # TODO: Eventually their will be a base image and other images that will be in different steps
+  - label: ':packer: Run test build for all images'
+    depends_on:
+    - build-ops-image
+    - ops-packer-lint
+    - ops-shellcheck
+    commands:
+    - .buildkite/confirm-binaries-for-packer.sh
+    - cd /workdir/ops/images
+    - packer init .
+    - packer build .
+    plugins:
+    - docker#v3.8.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:latest
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ":rust: :docker: Build Substrate Runtime Image"
+    key: build-runtime-image
+    command: .buildkite/build_image.sh ops/readyset-substrate/Dockerfile substrate-runtime
+    plugins:
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":pipeline: Upload Validate All Pipeline"
+    command: buildkite-terraform-upload-validate-all-pipeline
+    depends_on:
+      - build-runtime-image
+    plugins:
+      - docker#v3.8.0:
+          image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/substrate-runtime:${BUILDKITE_COMMIT}"
+          shell: false
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0:
+          role: "arn:aws:iam::716876017850:role/Administrator"
+    agents:
+      queue: ops
+
+  # --- END INTERNAL OPS STEPS --- #
+
+  # --- BEGIN CLOUDFORMATION STEPS --- #
+  - label: ':docker: Build readyset-ops-cfn image'
+    key: build-ops-cfn-image
+    commands:
+      - cd ops
+      - ../.buildkite/build_image.sh build/Dockerfile.cfn readyset-ops-cfn
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':aws-cloudformation: Lint with taskcat :cat:'
+    depends_on:
+    - build-ops-cfn-image
+    commands:
+    - "echo '{\"general\": {\"regions\": [\"us-east-2\"]}}' > ~/.taskcat.yml"
+    - cd /workdir/ops/cfn
+    - taskcat lint --strict
+    - rain fmt --verify templates/*
+    plugins:
+    - docker#v3.8.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops-cfn:${BUILDKITE_COMMIT}
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  # --- END CLOUDFORMATION STEPS --- #
+
+  - key: list-frameworks
+    label: "List frameworks"
+    plugins:
+      - docker#v3.8.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3
+          command: ["./.buildkite/list-frameworks.sh"]
+          mount-buildkite-agent: true
+          mount-ssh-agent: true
+          environment:
+          - NIGHTLY=false
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+  - key: generate-pipeline
+    label: "Generate framework pipeline"
+    depends_on:
+    - list-frameworks
+    plugins:
+      - docker#v3.8.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/python:3
+          command: ["./.buildkite/generate-framework-pipeline.py"]
+          mount-buildkite-agent: true
+          propagate-environment: true
+          environment:
+          - NIGHTLY=false
+          - SOFT_FAIL=true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    artifact_paths:
+      - ".buildkite/gen/*"
+
+  - label: "Test readyset deployment"
+    depends_on:
+      - readyset-server-image
+      - readyset-mysql-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: test-deploy
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - BUILDKITE_COMMIT
+          - NIGHTLY=false
+          mount-buildkite-agent: true
+          config:
+            - .buildkite/docker-compose.readyset-mysql80.yml
+            - build/docker-compose.test-deploy.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3

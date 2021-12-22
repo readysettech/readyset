@@ -1,0 +1,426 @@
+steps:
+  # Zero the failure status
+  - label: ':buildkite:'
+    command: buildkite-agent meta-data set 'failure' '0'
+    agents:
+      queue: t3a-small
+
+
+  - label: ':bk-status-pending:'
+    command: .buildkite/set_gerrit_running.sh
+    agents:
+      queue: t3a-small
+
+  - wait: ~
+
+  - label: ':git: Lint commits'
+    key: lint-commits
+    branches: '!refs/heads/main'
+    commands:
+    - ./scripts/commit_lint.sh
+    agents:
+      queue: t3a-small
+
+  # Do not run pipeline if the lint has not passed
+  - wait: ~
+
+  - label: ":partyparrot: Creating the pipeline"
+    agents:
+      queue: t3a-small
+    plugins:
+      - Zegocover/git-diff-conditional#v1.1.1:
+          log_level: DEBUG
+          diff: "git diff --name-only HEAD HEAD~1"
+          dynamic_pipeline: ".buildkite/pipeline.common.yml"
+          steps:
+            # Since we always want to be able to build a release binary, always build the build image.
+            - label: ':docker: Build build image'
+
+            - label: ':rust: Check rustfmt'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+                - ops/readyset-substrate
+
+            - label: ':docker: Build cargo-deny image'
+              include:
+                - build/Dockerfile.cargo-deny
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':rust: :lock: Check cargo-deny'
+              include:
+                - build/Dockerfile.cargo-deny
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':clippy: Check clippy'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+                - ops/readyset-substrate
+
+            - label: ":docker: Build readyset-server image"
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':docker: Build readyset-mysql image'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':docker: Build readyset-psql image'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':docker: Build metrics-aggregator image'
+              include:
+                - "metrics-aggregator/**"
+
+            - label: ':rust: Run tests'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+                - ops/readyset-substrate
+
+            - label: 'Run logictest'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: 'Run logictest with MySQL replication'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: 'Run clustertests'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            - label: ':rust: Deploy docs'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+            # --- START INTERNAL OPS STEPS --- #
+            # Since we always want to be able to build images with packer, always build the ops image.
+            - label: ':docker: Build readyset-ops image'
+
+            - label: ':terraform: Format/Validate/Lint readyset module'
+              include:
+                - "ops/tf/**"
+
+            - label: ':packer: Format/Validate images'
+              include:
+                - "ops/images/**"
+
+            - label: ':shell::heavy_check_mark: shellcheck all scripts'
+              include:
+                - "ops/images/**"
+
+            - label: ':packer: Run test build for all images'
+              include:
+                - "ops/images/**"
+
+            - label: ":rust: :docker: Build Substrate Runtime Image"
+              include:
+                - "ops/readyset-substrate/**"
+                - "ops/substrate/**"
+
+            - label: ":pipeline: Upload Validate All Pipeline"
+              include:
+                - "ops/readyset-substrate/**"
+                - "ops/substrate/**"
+
+            # --- END INTERNAL OPS STEPS --- #
+
+            # --- START CLOUDFORMATION STEPS --- #
+            - label: ':docker: Build readyset-ops-cfn image'
+              include:
+                - "ops/cfn/**"
+
+            - label: ':aws-cloudformation: Lint with taskcat :cat:'
+              include:
+                - "ops/cfn/**"
+            # --- END CLOUDFORMATIOn STEPS --- #
+
+            # --- START JS CLIENT STEPS --- #
+            - label: ':docker: Build prettier image'
+              include:
+                - "js-client/**"
+
+            - label: ':prettier: Check prettier'
+              include:
+                - "js-client/**"
+
+            - label: ":rust: Build js-client shared library"
+              include:
+                - "js-client/**"
+
+            - label: ':nodejs: Test js-client'
+              include:
+                - "js-client/**"
+            # --- END JS CLIENT STEPS --- #
+            - label: 'List frameworks'
+              include:
+                - "readyset-framework-testing/**"
+
+            - label: 'Generate framework pipeline'
+              include:
+                - "readyset-framework-testing/**"
+
+            - label: 'Test readyset deployment'
+              include:
+                - "[!ops]*"
+                - Cargo.lock
+                - Cargo.toml
+                - rust-toolchain
+
+  - wait: ~
+    continue_on_failure: true
+  - command: ".buildkite/set_gerrit_status.sh"
+    agents:
+      queue: t3a-small
+  - wait
+
+  - trigger: "docker-release"
+    branches: refs/heads/main
+    label: ":rocket: Docker Release"
+    build:
+      branch: refs/heads/main
+      commit: HEAD
+      message: ":rocket: Docker Release for ${BUILDKITE_COMMIT}"
+    async: true
+
+  - trigger: "internal-amis"
+    branches: refs/heads/main
+    label: ":rocket: Internal AMIs"
+    build:
+      branch: refs/heads/main
+      commit: ${BUILDKITE_COMMIT}
+      message: ":rocket: Internal AMIs for ${BUILDKITE_COMMIT}"
+    async: true
+
+  - trigger: "external-amis"
+    branches: refs/heads/main
+    label: ":rocket: External AMIs"
+    build:
+      branch: refs/heads/main
+      commit: ${BUILDKITE_COMMIT}
+      message: ":rocket: External AMIs for ${BUILDKITE_COMMIT}"
+    async: true
+
+  - block: ":rocket: :rust: Build release binaries?"
+    key: build-release-binaries
+    depends_on:
+      - lint-commits
+      - build-image
+      - check-rustfmt
+      - check-clippy
+      - rust-tests
+      - logictest
+      - logictest-binlog
+
+  - label: ':rust: Build noria-server release binary'
+    key: build-noria-server-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server
+    - strip target/release/noria-server
+    artifact_paths:
+    - target/release/noria-server
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: Build ensure-ebs-volume release binary'
+    key: build-ensure-ebs-volume-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin ensure-ebs-volume
+    - strip target/release/ensure-ebs-volume
+    artifact_paths:
+    - target/release/ensure-ebs-volume
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: Build noria-mysql adapter release binary'
+    key: build-noria-mysql-adapter-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-mysql
+    - strip target/release/noria-mysql
+    artifact_paths:
+    - target/release/noria-mysql
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: Build metrics-aggregator release binary'
+    key: build-metrics-aggregator-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin metrics-aggregator
+    - strip target/release/metrics-aggregator
+    artifact_paths:
+    - target/release/metrics-aggregator
+    depends_on:
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ':rust: Build noria-psql adapter release binary'
+    key: build-noria-psql-adapter-release
+    commands:
+    - 'echo +++ :rust: Running cargo build'
+    - RUSTFLAGS='-D warnings' cargo build --release --bin noria-psql
+    - strip target/release/noria-psql
+    artifact_paths:
+    - target/release/noria-psql
+    depends_on:
+    - build-image
+    - build-release-binaries
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+          volumes:
+          - 'cargo-registry:/usr/local/cargo/registry'
+          environment:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - block: ":packer: Build Readyset Packer images?"
+    key: build-packer-images
+    depends_on:
+    - build-release-binaries
+    - build-noria-server-release
+    - build-noria-mysql-adapter-release
+    - build-noria-psql-adapter-release
+    - build-ensure-ebs-volume-release
+
+  - label: ':packer: Build ReadySet Customer images'
+    key: build-images
+    commands:
+    - cd ops/images
+    - mkdir binaries
+    - 'echo +++ :buildkite: Downloading binary artifacts'
+    - buildkite-agent artifact download target/release/* binaries/
+    - 'echo +++ :packer: Running packer build'
+    - packer init .
+    - packer build -only=amazon-ebs.readyset-* .
+    artifact_paths:
+    - ops/images/packer-manifest.json
+    depends_on:
+    - build-packer-images
+    - build-release-binaries
+    - build-noria-server-release
+    - build-noria-mysql-adapter-release
+    - build-noria-psql-adapter-release
+    - build-ensure-ebs-volume-release
+    - build-metrics-aggregator-release
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+          propagate-environment: true
+          environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+      - ecr#v2.2.0:
+          login: true
+
+  - label: ':packer: Build infrastructure images'
+    key: build-infra-images
+    commands:
+    - cd ops/images
+    - 'echo +++ :packer: Running packer build'
+    - packer init .
+    - packer build -only=amazon-ebs.tailscale-subnet-router .
+    artifact_paths:
+    - ops/images/packer-manifest.json
+    depends_on:
+    - build-packer-images
+    plugins:
+      - docker#v3.8.0:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}'
+          propagate-environment: true
+          environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+      - ecr#v2.2.0:
+          login: true

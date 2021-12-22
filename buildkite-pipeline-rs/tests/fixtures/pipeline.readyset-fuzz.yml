@@ -1,0 +1,32 @@
+# Buildkite pipeline for fuzz-testing
+steps:
+  - label: ':docker: Build build image'
+    key: build-image
+    command: .buildkite/build_image.sh build/Dockerfile readyset-build
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: 'Run fuzz tests'
+    key: logictest-fuzz
+    command:
+    - 'echo +++ Running noria-logictest'
+    - cargo run --bin noria-logictest -- fuzz -n 5000 --compare-to mysql://root:noria@mysql/noria
+    timeout_in_minutes: 360
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - PROPTEST_MAX_SHRINK_ITERS=1000
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+      - ecr#v2.5.0:
+          login: true
+          retries: 3

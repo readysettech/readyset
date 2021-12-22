@@ -1,0 +1,138 @@
+# Buildkite pipeline for nightly (periodic) builds
+steps:
+  - label: ':docker: Build build image'
+    key: build-image
+    command: .buildkite/build_image.sh build/Dockerfile readyset-build
+    plugins:
+      ecr#v2.5.0:
+        login: true
+        retries: 3
+
+  - label: ':rust: Run tests (including slow :snail: tests)'
+    key: rust-tests
+    command: .buildkite/run-tests.sh
+    timeout_in_minutes: 60
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - RUN_SLOW_TESTS=1
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: c5a-4xlarge
+
+  - label: 'Run MySQL generated logictests'
+    key: logictest-generated-mysql
+    command:
+    - 'echo +++ Running noria-logictest'
+    - LOG_LEVEL=error cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 4 --database-type mysql
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: r5a-2xlarge
+
+  - label: ':arrow_up: Run vertical tests'
+    key: vertical-tests
+    command: .buildkite/vertical_tests.sh
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - PROPTEST_CASES=1000
+          config:
+          - docker-compose.yml
+          - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.2.0:
+          login: true
+          retries: 3
+    agents:
+      queue: r5a-2xlarge
+
+  - label: 'Run test flakiness check'
+    key: flaky-finder
+    command:
+    - 'echo +++ Running flaky-finder'
+    - flaky-finder -j1 -r5 --continue "cargo --locked test --all --exclude clustertest --exclude aggressive_eviction -- --nocapture --skip integration_serial"
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - FLAKY_FINDER=1
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.2.0:
+          login: true
+    agents:
+      queue: r5a-2xlarge
+
+  - label: 'Run clustertests (including slow :snail: tests)'
+    key: noria-clustertest
+    command:
+    - 'echo +++ Building binaries for clustertest'
+    - cargo --locked build --release --bin noria-server --bin noria-mysql --features failure_injection
+    - 'echo +++ Running Clustertests'
+    - cargo --locked test -p clustertest
+    timeout_in_minutes: 60
+
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - BINARY_PATH=/workdir/target/release
+          - MYSQL_ROOT_PASSWORD=noria
+          - RUN_SLOW_TESTS=1
+          volumes:
+          - 'target:/workdir/target'
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          mount-buildkite-agent: true
+          pull-retries: 3
+      - ecr#v2.2.0:
+          login: true
+    agents:
+      queue: r5a-2xlarge

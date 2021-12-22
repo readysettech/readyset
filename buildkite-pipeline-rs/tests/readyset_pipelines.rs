@@ -6,8 +6,11 @@ use serde_yaml as yaml;
 use buildkite_pipeline::Pipeline;
 
 fn open_pipeline(relative_path: &str) -> File {
-    let mut path = PathBuf::from("..").canonicalize().unwrap();
-    path.push(relative_path);
+    let path = PathBuf::from(".")
+        .canonicalize()
+        .unwrap()
+        .join("tests/fixtures")
+        .join(relative_path);
     File::open(path).unwrap()
 }
 
@@ -29,8 +32,8 @@ macro_rules! pipeline_tests {
 }
 
 pipeline_tests! {
-    // buildkite_yaml(".buildkite/pipeline.yml");
-    buildkite_common_yaml(".buildkite/pipeline.common.yml");
-    buildkite_nightly_yaml(".buildkite/pipeline.readyset-nightly.yml");
-    buildkite_fuzz_yaml(".buildkite/pipeline.readyset-fuzz.yml");
+    buildkite_yaml("pipeline.yml");
+    buildkite_common_yaml("pipeline.common.yml");
+    buildkite_nightly_yaml("pipeline.readyset-nightly.yml");
+    buildkite_fuzz_yaml("pipeline.readyset-fuzz.yml");
 }
