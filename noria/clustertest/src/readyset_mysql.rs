@@ -291,7 +291,7 @@ async fn query_cached_view_after_failure() {
 
 #[clustertest]
 async fn correct_data_after_restart() {
-    let mut deployment = readyset_mysql("ct_repeated_failure")
+    let mut deployment = readyset_mysql("ct_correct_data_after_restart")
         .quorum(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))
@@ -368,7 +368,7 @@ async fn end_to_end_with_restarts() {
         return;
     }
 
-    let mut deployment = readyset_mysql("ct_repeated_failure")
+    let mut deployment = readyset_mysql("ct_end_to_end_with_restarts")
         .quorum(2)
         .add_server(ServerParams::default().with_volume("v1"))
         .add_server(ServerParams::default().with_volume("v2"))

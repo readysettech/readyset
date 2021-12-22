@@ -38,10 +38,8 @@ mod processing;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time;
 use thiserror::Error;
 
 pub use crate::backlog::{LookupError, SingleReadHandle};
@@ -110,15 +108,10 @@ impl FromStr for DurabilityMode {
 #[derive(Clone, Debug, Serialize, Deserialize, Derivative)]
 #[derivative(PartialEq)]
 pub struct PersistenceParameters {
-    /// Force a flush if packets have been in the base table queue for this long.
-    pub flush_timeout: time::Duration,
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
-    /// Filename prefix for persistent log entries.
+    /// Filename prefix for the RocksDB database folder
     pub db_filename_prefix: String,
-    /// Absolute path where the log will be written. Defaults to the current directory.
-    #[derivative(PartialEq = "ignore")]
-    pub log_dir: Option<PathBuf>,
     /// Number of background threads PersistentState can use (shared acrosss all worker threads).
     pub persistence_threads: i32,
 }
@@ -126,10 +119,8 @@ pub struct PersistenceParameters {
 impl Default for PersistenceParameters {
     fn default() -> Self {
         Self {
-            flush_timeout: time::Duration::new(0, 100_000),
             mode: DurabilityMode::MemoryOnly,
             db_filename_prefix: String::from("soup"),
-            log_dir: None,
             persistence_threads: 1,
         }
     }
@@ -147,7 +138,6 @@ impl PersistenceParameters {
     ///     Useful for baseline numbers.
     pub fn new(
         mode: DurabilityMode,
-        flush_timeout: time::Duration,
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
     ) -> Self {
@@ -158,11 +148,9 @@ impl PersistenceParameters {
         let db_filename_prefix = db_filename_prefix.unwrap_or_else(|| String::from("soup"));
 
         Self {
-            flush_timeout,
             mode,
             db_filename_prefix,
             persistence_threads,
-            ..Default::default()
         }
     }
 }

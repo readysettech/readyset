@@ -86,12 +86,6 @@ pub struct DataflowState {
     ///     deleted once the `Controller` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
-    ///
-    /// Must be called before any domains have been created.
     persistence: PersistenceParameters,
     pub(super) materializations: Materializations,
 
@@ -864,10 +858,6 @@ impl DataflowState {
     ///     deleted once the `Controller` is dropped. Useful for tests.
     ///  3. `DurabilityMode::MemoryOnly`: no writes to disk, store all writes in memory.
     ///     Useful for baseline numbers.
-    ///
-    /// `queue_capacity` indicates the number of packets that should be buffered until
-    /// flushing, and `flush_timeout` indicates the length of time to wait before flushing
-    /// anyway.
     ///
     /// Must be called before any domains have been created.
     #[allow(unused)]

@@ -1091,7 +1091,6 @@ async fn it_recovers_persisted_bases() {
     let path = dir.path().join("it_recovers_persisted_bases");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
     );
@@ -1164,7 +1163,6 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         .join("it_recovers_persisted_bases_with_volume_id");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
     );
@@ -1232,7 +1230,6 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         .join("it_doesnt_recover_persisted_bases_with_wrong_volume_id");
     let persistence_params = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
     );
@@ -1453,7 +1450,6 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     let tables = vec!["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
     );
@@ -1522,7 +1518,6 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
     let tables = vec!["A", "B", "C"];
     let persistence_parameters = PersistenceParameters::new(
         DurabilityMode::Permanent,
-        Duration::from_millis(1),
         Some(path.to_string_lossy().into()),
         1,
     );

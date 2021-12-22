@@ -6,8 +6,6 @@ use noria::consensus::Authority;
 use noria::{Builder, DataType, DurabilityMode, Handle, PersistenceParameters, ZookeeperAuthority};
 use rand::prelude::*;
 use std::fs;
-
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -201,12 +199,6 @@ async fn main() {
                 .help("Read and write to a single secondary index key."),
         )
         .arg(
-            Arg::with_name("log-dir")
-                .long("log-dir")
-                .takes_value(true)
-                .help("Absolute path to the directory where the log files will be written."),
-        )
-        .arg(
             Arg::with_name("durability")
                 .long("durability")
                 .takes_value(false)
@@ -246,13 +238,6 @@ async fn main() {
                 .help("ZookeeperAuthority address"),
         )
         .arg(
-            Arg::with_name("flush-timeout")
-                .long("flush-timeout")
-                .takes_value(true)
-                .default_value("100000")
-                .help("Time to wait before processing a merged packet, in nanoseconds."),
-        )
-        .arg(
             Arg::with_name("persistence-threads")
                 .long("persistence-threads")
                 .takes_value(true)
@@ -277,10 +262,8 @@ async fn main() {
     let durable = args.is_present("durability");
     let no_recovery = args.is_present("no-recovery");
     let use_secondary = args.is_present("secondary-indices");
-    let flush_ns = value_t_or_exit!(args, "flush-timeout", u32);
 
     let persistence = PersistenceParameters {
-        flush_timeout: Duration::new(0, flush_ns),
         persistence_threads: value_t_or_exit!(args, "persistence-threads", i32),
         db_filename_prefix: "replay".to_string(),
         mode: if durable {
@@ -288,7 +271,6 @@ async fn main() {
         } else {
             DurabilityMode::MemoryOnly
         },
-        log_dir: args.value_of("log-dir").map(PathBuf::from),
     };
 
     let zk_address = args.value_of("zookeeper-address").unwrap();
