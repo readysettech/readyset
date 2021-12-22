@@ -31,8 +31,11 @@ impl<'a, T> UntilResults<'a, T> {
 }
 
 /// Returns true when a prepare and execute returns the expected results,
-/// [`UntilResults::expected`]. If `timeout` is reached, or the query returns a
-/// value that is not in [`UntilResults::intermediate`], return false.
+/// [`UntilResults::expected`]. This function returns false if:
+///   - The `timeout` is reached without the expected result being yielded.
+///   - The query returns a value that is neither [`UntilResults::expected`]
+///     nor in the [`UntilResults::intermediate`] list.
+///   - A query to the connection returns an error.
 ///
 /// This function should be used in place of sleeping and executing a query after
 /// the write propagation delay. It can also be used to assert that ReadySet
@@ -74,10 +77,13 @@ where
                 }
                 last = Some(r.clone());
             }
+            Ok(Err(e)) => {
+                println!("Returned an error when querying for results, {:?}", e);
+                return false;
+            }
             Err(_) => {
                 println!("Timed out when querying conn.");
             }
-            _ => {}
         }
 
         sleep(Duration::from_millis(10)).await;
@@ -147,10 +153,13 @@ where
                 }
                 last = Some(r.clone());
             }
+            Ok(Err(e)) => {
+                println!("Returned an error when querying for results, {:?}", e);
+                return false;
+            }
             Err(_) => {
                 println!("Timed out when querying conn.");
             }
-            _ => {}
         }
 
         sleep(Duration::from_millis(10)).await;
