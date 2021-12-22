@@ -2,7 +2,6 @@ use super::PostgresPosition;
 use chrono::{DateTime, FixedOffset};
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, StreamExt};
-use itertools::Itertools;
 use noria::{ReadySetError, ReadySetResult};
 use postgres_types::Type;
 use std::convert::{TryFrom, TryInto};
@@ -349,26 +348,35 @@ impl<'a> PostgresReplicator<'a> {
         // For each table, retreive its structure
         let mut tables = Vec::with_capacity(table_list.len());
         for table in table_list {
-            tables.push(table.get_table(&self.transaction).await?);
-        }
-
-        let mut views = Vec::with_capacity(view_list.len());
-        for view in view_list {
-            let create_view = view.get_create_view(&self.transaction).await?;
-            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL style
-            match nom_sql::parse_query(nom_sql::Dialect::PostgreSQL, &create_view) {
-                Ok(v) => views.push(v),
-                Err(err) => error!(?create_view, ?err, "Error parsing CREATE VIEW"),
+            let create_table = table.get_table(&self.transaction).await?;
+            debug!(%create_table, "Extending recipe");
+            match self
+                .noria
+                .extend_recipe_no_leader_ready(&create_table.to_string())
+                .await
+            {
+                Ok(_) => tables.push(create_table),
+                Err(err) => error!(%err, "Error extending CREATE TABLE, table will not be used"),
             }
         }
 
-        let recipe = tables.iter().join("\n\n") + &views.iter().join(";\n\n");
+        for view in view_list {
+            let create_view = view.get_create_view(&self.transaction).await?;
+            // Postgres returns a postgres style CREATE statement, but Noria only accepts MySQL style
+            let view = match nom_sql::parse_query(nom_sql::Dialect::PostgreSQL, &create_view) {
+                Ok(v) => v.to_string(),
+                Err(err) => {
+                    error!(%err, "Error parsing CREATE VIEW, view will not be used");
+                    continue;
+                }
+            };
 
-        debug!(%recipe, "Installing recipe");
+            debug!(%view, "Extending recipe");
+            if let Err(err) = self.noria.extend_recipe_no_leader_ready(&view).await {
+                error!(%view, %err, "Error extending CREATE VIEW, view will not be used")
+            }
+        }
 
-        self.noria
-            .install_recipe_without_leader_ready(&recipe)
-            .await?;
         self.noria
             .set_schema_replication_offset(Some(PostgresPosition::default().into()))
             .await?;
