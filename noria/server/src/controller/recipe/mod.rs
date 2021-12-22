@@ -31,7 +31,8 @@ pub(crate) struct Recipe {
     expressions: HashMap<QueryID, (Option<String>, SqlQuery, bool)>,
     /// Addition order for the recipe expressions
     expression_order: Vec<QueryID>,
-    /// Named read/write expression aliases, mapping to queries in `expressions`.
+    /// Aliases assigned to read query and CreateTable expressions. Each alias maps
+    /// to a `QueryId` in the expressions of the recipe.
     aliases: HashMap<String, QueryID>,
 
     /// Recipe revision.
@@ -335,10 +336,17 @@ impl Recipe {
                 duplicates += 1;
             }
 
-            // Treat views created using CREATE VIEW as leaf views too
-            if let (None, SqlQuery::CreateView(query)) = (&n, &q) {
-                n = Some(query.name.clone());
-                is_leaf = true;
+            match (&n, &q) {
+                // Treat views created using CREATE VIEW as leaf views too.
+                (None, SqlQuery::CreateView(query)) => {
+                    n = Some(query.name.clone());
+                    is_leaf = true;
+                }
+                // Tables are aliased by their table name.
+                (None, SqlQuery::CreateTable(query)) => {
+                    n = Some(query.table.name.clone());
+                }
+                (_, _) => {}
             }
 
             if let Some(ref name) = n {
@@ -620,7 +628,7 @@ impl Recipe {
         self.prior.as_deref()
     }
 
-    /// Remove the query with the given `name` from the recipe.
+    /// Remove the expression with the given alias, `qname`, from the recipe.
     pub(super) fn remove_query(&mut self, qname: &str) -> bool {
         let qid = self.aliases.get(qname).cloned();
         if qid.is_none() {
@@ -696,6 +704,7 @@ impl Recipe {
         }
     }
 
+    /// Gets the alias of the for the expression associated with each node in `nodes`.
     pub(super) fn queries_for_nodes(&self, nodes: Vec<NodeIndex>) -> Vec<String> {
         nodes
             .iter()
@@ -719,6 +728,7 @@ impl Recipe {
         // remove from recipe
         for q in affected_queries {
             warn!(query = %q, "query affected by failure");
+            // Remove the query from the recipe via its alias, `q`.
             if !recovery.remove_query(&q) {
                 warn!(query = %q, "Call to Recipe::remove_query() failed");
             }

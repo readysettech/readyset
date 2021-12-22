@@ -177,6 +177,7 @@ impl SqlIncorporator {
         self.leaf_addresses.values().any(|nn| *nn == ni)
     }
 
+    /// Retrieves the aliases for the expression associated with the data flow leaf.
     pub(super) fn get_queries_for_node(&self, ni: NodeIndex) -> Vec<String> {
         self.leaf_addresses
             .iter()
