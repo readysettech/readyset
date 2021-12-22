@@ -13,6 +13,7 @@ steps:
             - "{{ path }}"
           environment:
           - BUILDKITE_API_TOKEN
+          - VERCEL_TOKEN
       - ecr#v2.5.0:
           account_ids: "305232526136"
           login: true
