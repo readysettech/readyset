@@ -1033,14 +1033,20 @@ impl DataflowState {
                 "Notifying domain of node removals",
             );
 
-            self.domains
+            match self
+                .domains
                 .get_mut(&domain)
                 .ok_or_else(|| ReadySetError::NoSuchDomain {
                     domain_index: domain.index(),
                     shard: 0,
                 })?
                 .send_to_healthy::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
-                .await?;
+                .await
+            {
+                // The worker failing is an even more efficient way to remove nodes.
+                Ok(_) | Err(ReadySetError::WorkerFailed { .. }) => {}
+                Err(e) => return Err(e),
+            }
         }
 
         Ok(())
