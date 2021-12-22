@@ -382,7 +382,12 @@ async fn create_view_after_worker_failure() {
                 uid INT PRIMARY KEY,
                 value INT
               );
+              CREATE TABLE t2 (
+                uid INT PRIMARY KEY,
+                value INT
+              );
               INSERT INTO t1 VALUES (1,2);
+              INSERT INTO t2 VALUES (3,4);
             ",
         )
         .await
@@ -392,6 +397,10 @@ async fn create_view_after_worker_failure() {
     let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     adapter_conn
         .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1;")
+        .await
+        .unwrap();
+    adapter_conn
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t2;")
         .await
         .unwrap();
 
