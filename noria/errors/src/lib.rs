@@ -426,14 +426,6 @@ pub enum ReadySetError {
         domain_index: usize,
     },
 
-    /// A `DomainHandle` was passed a `workers` hashmap that couldn't spit out a `Worker`
-    /// for a given `WorkerIdentifier`.
-    #[error("Could not find RPC handle for worker identifier {ident}")]
-    UnmappableWorkerIdentifier {
-        /// The worker identifier we don't have a `Worker` RPC handle for.
-        ident: String,
-    },
-
     /// A migration tried to reference a domain that doesn't exist.
     #[error("Migration tried to reference domain {domain_index}.{shard:?}")]
     MigrationUnknownDomain {
