@@ -18,7 +18,7 @@ const BATCH_SIZE: usize = 1000; // How many queries to buffer before pushing to 
 
 /// Pass the error forward while logging it
 fn log_err<E: Error>(err: E) -> E {
-    error!(error = ?err);
+    error!(error = %err);
     err
 }
 
@@ -77,13 +77,16 @@ impl MySqlReplicator {
     /// and the transaction that holds the DDL locks for the tables.
     pub async fn load_recipe_with_meta_lock(
         &mut self,
-    ) -> mysql::Result<(String, Transaction<'static>)> {
+        noria: &mut noria::ControllerHandle,
+        install: bool,
+    ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
         if self.tables.is_none() {
             self.tables = Some(load_table_list(&mut tx, TableKind::BaseTable).await?);
         }
-        let tables = self.tables.as_ref().unwrap();
+
+        let tables = self.tables.clone().unwrap();
 
         // After we loaded the list of currently existing tables, we will acquire a metadata
         // lock on all of them to prevent DDL changes.
@@ -103,22 +106,42 @@ impl MySqlReplicator {
             tx.query_drop(metalock).await?;
         }
 
-        let mut recipe = String::new();
-        // Append `CREATE TABLE` statements
-        for table in tables {
-            let create = create_for_table(&mut tx, table, TableKind::BaseTable).await?;
-            recipe.push_str(&create);
-            recipe.push_str(";\n");
+        if !install {
+            info!("Not loading recipe as replication offset already exists for schema");
+            return Ok(tx);
         }
 
-        // Append `CREATE VIEW` statements
+        // Process `CREATE TABLE` statements
+        for table in &tables {
+            let create_table = create_for_table(&mut tx, table, TableKind::BaseTable).await?;
+            debug!(%create_table, "Extending recipe");
+            if let Err(err) = noria.extend_recipe_no_leader_ready(&create_table).await {
+                self.tables.as_mut().unwrap().retain(|t| t != table); // Prevent the table from being snapshotted as well
+                error!(%err, "Error extending CREATE TABLE, table will not be used");
+            }
+        }
+
+        // Process `CREATE VIEW` statements
         for view in load_table_list(&mut tx, TableKind::View).await? {
-            let create = create_for_table(&mut tx, &view, TableKind::View).await?;
-            recipe.push_str(&create);
-            recipe.push_str(";\n");
+            let create_view = create_for_table(&mut tx, &view, TableKind::View).await?;
+            debug!(%create_view, "Extending recipe");
+
+            if let Err(err) = noria.extend_recipe_no_leader_ready(&create_view).await {
+                error!(%view, %err, "Error extending CREATE VIEW, view will not be used");
+            }
         }
 
-        Ok((recipe, tx))
+        // Get the current binlog position, since at this point the tables are not locked, binlog
+        // will advance while we are taking the snapshot. This is fine, we will catch up later.
+        // We prefer to take the binlog position *after* the recipe is loaded in order to make sure
+        // no ddl changes took place between the binlog position and the schema that we loaded
+        let binlog_position = self.get_binlog_position().await?;
+
+        noria
+            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
+            .await?;
+
+        Ok(tx)
     }
 
     /// Call `SELECT * FROM table` and convert all rows into a Noria row
@@ -245,7 +268,7 @@ impl MySqlReplicator {
         noria: &mut noria::ControllerHandle,
         replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
-    ) -> ReadySetResult<BinlogPosition> {
+    ) -> ReadySetResult<()> {
         let result = self
             .replicate_to_noria_with_table_locks(noria, replication_offsets, install_recipe)
             .await;
@@ -265,7 +288,7 @@ impl MySqlReplicator {
         noria: &mut noria::ControllerHandle,
         replication_offsets: &ReplicationOffsets,
         install_recipe: bool,
-    ) -> ReadySetResult<BinlogPosition> {
+    ) -> ReadySetResult<()> {
         // NOTE: There are two ways to prevent DDL changes in MySQL:
         // `FLUSH TABLES WITH READ LOCK` or `LOCK INSTANCE FOR BACKUP`. Both are not
         // possible in RDS however.
@@ -291,32 +314,12 @@ impl MySqlReplicator {
             }
         };
 
-        let (recipe, _meta_lock) = self.load_recipe_with_meta_lock().await.map_err(log_err)?;
-        debug!(%recipe, "Loaded recipe");
+        let _meta_lock = self
+            .load_recipe_with_meta_lock(noria, install_recipe && !replication_offsets.has_schema())
+            .await
+            .map_err(log_err)?;
 
-        // Get the current binlog position, since at this point the tables are not locked, binlog
-        // will advance while we are taking the snapshot. This is fine, we will catch up later.
-        // We prefer to take the binlog position *after* the recipe is loaded in order to make sure
-        // no ddl changes took place between the binlog position and the schema that we loaded
-        let binlog_position = self.get_binlog_position().await?;
-
-        if replication_offsets.has_schema() {
-            // TODO: we can't assume the schema hasn't changed between two points in time.
-            // we have to check the two schemas match.
-            info!("Not loading recipe as replication offset already exists for schema");
-        } else {
-            if install_recipe {
-                noria.install_recipe_without_leader_ready(&recipe).await?;
-                debug!("Recipe installed");
-            }
-            noria
-                .set_schema_replication_offset(Some((&binlog_position).try_into()?))
-                .await?;
-        }
-
-        self.dump_tables(noria, replication_offsets).await?;
-
-        Ok(binlog_position)
+        self.dump_tables(noria, replication_offsets).await
     }
 
     /// Spawns a new tokio task that replicates a given table to noria, returning

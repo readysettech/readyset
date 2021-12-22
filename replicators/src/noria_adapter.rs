@@ -189,12 +189,12 @@ impl NoriaAdapter {
                     "status" => SnapshotStatusTag::Started.value(),
                 );
                 span.in_scope(|| info!("Starting snapshot"));
-                let curr_offset = replicator
+                let snapshot_result = replicator
                     .snapshot_to_noria(&mut noria, &replication_offsets, true)
                     .instrument(span.clone())
                     .await;
 
-                let status = if curr_offset.is_err() {
+                let status = if snapshot_result.is_err() {
                     SnapshotStatusTag::Failed.value()
                 } else {
                     SnapshotStatusTag::Successful.value()
@@ -206,6 +206,8 @@ impl NoriaAdapter {
                     "status" => status
                 );
 
+                snapshot_result?;
+
                 // Get updated offests, after potential replication happened
                 replication_offsets = noria.replication_offsets().await?;
 
@@ -213,17 +215,15 @@ impl NoriaAdapter {
                 // already snapshot before we started up. But if we're in this block
                 // (`max_offsets()` returned `None`), that means not *all* tables were already
                 // snapshot before we started up. So we've got some tables at an old offset that
-                // need to catch up to the just-snapshotted tables at `curr_offset`. We discard
+                // need to catch up to the just-snapshotted tables. We discard
                 // replication events for offsets < the replication offset of that table, so we can
                 // do this "catching up" by just starting replication at the old offset.
-                //
-                // Otherwise, if we *don't* have any offsets in `replication_offsets` (in which case
-                // `min_present_offset` would return `None`), we know we just did a full snapshot,
-                // in which case we can just start replicating at the current offset
-                let pos = replication_offsets
+                // Note that at the very least we will always have the schema offset for the minumum.
+                let pos: BinlogPosition = replication_offsets
                     .min_present_offset()?
-                    .map(|off| Ok(off.clone().into()))
-                    .unwrap_or(curr_offset)?;
+                    .expect("Minimal offset must be present after snapshot")
+                    .clone()
+                    .into();
 
                 span.in_scope(|| info!("Snapshot finished"));
                 histogram!(

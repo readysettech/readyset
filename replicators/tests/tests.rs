@@ -357,6 +357,18 @@ async fn mysql_datetime_replication() -> ReadySetResult<()> {
     mysql_datetime_replication_inner().await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn pgsql_skip_unparsable() -> ReadySetResult<()> {
+    replication_skip_unparsable_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_skip_unparsable() -> ReadySetResult<()> {
+    replication_skip_unparsable_inner(&mysql_url()).await
+}
+
 /// This test checks that when writes and replication happen in parallel
 /// noria correctly catches up from binlog
 /// NOTE: If this test flakes, please notify Vlad
@@ -589,5 +601,46 @@ async fn mysql_datetime_replication_inner() -> ReadySetResult<()> {
 
     client.stop().await;
     ctx.stop().await;
+    Ok(())
+}
+
+async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
+    let mut client = DbConnection::connect(url).await?;
+
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS t1 CASCADE; CREATE TABLE t1 (id polygon);
+            DROP TABLE IF EXISTS t2 CASCADE; CREATE TABLE t2 (id int);
+            DROP VIEW IF EXISTS t1_view; CREATE VIEW t1_view AS SELECT * FROM t1;
+            DROP VIEW IF EXISTS t2_view; CREATE VIEW t2_view AS SELECT * FROM t2;
+            INSERT INTO t2 VALUES (1),(2),(3);
+            ",
+        )
+        .await?;
+
+    let mut ctx = TestHandle::start_noria(url.to_string()).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    ctx.check_results(
+        "t2_view",
+        "skip_unparsable",
+        &[&[D::Int(1)], &[D::Int(2)], &[D::Int(3)]],
+    )
+    .await?;
+
+    ctx.noria
+        .table("t1")
+        .await
+        .expect_err("Table should be unparsable");
+
+    ctx.noria
+        .view("t1_view")
+        .await
+        .expect_err("Can't have view for nonexistent table");
+
+    ctx.stop().await;
+    client.stop().await;
+
     Ok(())
 }
