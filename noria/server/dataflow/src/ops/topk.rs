@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use launchpad::Indices;
 use maplit::hashmap;
 use noria::internal;
@@ -7,6 +8,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::convert::TryInto;
+use std::fmt::Display;
 use std::mem;
 use std::num::NonZeroUsize;
 use tracing::trace;
@@ -38,6 +40,28 @@ impl Order {
 impl From<Vec<(usize, OrderType)>> for Order {
     fn from(other: Vec<(usize, OrderType)>) -> Self {
         Order(other)
+    }
+}
+
+impl Display for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.0
+                .iter()
+                .map(|(c, dir)| {
+                    format!(
+                        "{}{}",
+                        match dir {
+                            OrderType::OrderAscending => "<",
+                            OrderType::OrderDescending => ">",
+                        },
+                        c,
+                    )
+                })
+                .join(", "),
+        )
     }
 }
 
@@ -476,13 +500,12 @@ impl Ingredient for TopK {
             return String::from("TopK");
         }
 
-        let group_cols = self
-            .group_by
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("TopK γ[{}]", group_cols)
+        format!(
+            "TopK k={} γ[{}] o[{}]",
+            self.k,
+            self.group_by.iter().join(", "),
+            self.order
+        )
     }
 
     fn is_selective(&self) -> bool {
