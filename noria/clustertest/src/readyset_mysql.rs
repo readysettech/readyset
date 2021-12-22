@@ -1,9 +1,6 @@
 use crate::utils::*;
 use crate::*;
 use mysql_async::prelude::Queryable;
-use mysql_async::Row;
-use noria::get_metric;
-use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
 use std::time::Duration;
 use test_utils::skip_slow_tests;
@@ -286,6 +283,9 @@ async fn query_cached_view_after_failure() {
     deployment.teardown().await.unwrap();
 }
 
+/// Creates a two servers deployment and performs a failure and recovery on one
+/// of the servers. After the failure, we verify that we can still perform the
+/// query on Noria and we return the correct results.
 #[clustertest]
 async fn correct_data_after_restart() {
     let mut deployment = readyset_mysql("ct_correct_data_after_restart")
@@ -338,14 +338,12 @@ async fn correct_data_after_restart() {
         .start_server(ServerParams::default().with_volume(&volume_id), false)
         .await
         .unwrap();
-    deployment
-        .backend_ready(Duration::from_secs(60))
-        .await
-        .unwrap();
 
+    // Query until we are able to get the results from Noria.
     assert!(
-        query_until_expected(
+        query_until_expected_from_noria(
             &mut conn,
+            deployment.metrics(),
             r"SELECT * FROM t1;",
             (),
             UntilResults::empty_or(&[(1, 4)]),
@@ -494,8 +492,9 @@ async fn end_to_end_with_restarts() {
             .unwrap();
 
         assert!(
-            query_until_expected(
+            query_until_expected_from_noria(
                 &mut conn,
+                deployment.metrics(),
                 r"SELECT * FROM t1;",
                 (),
                 UntilResults::empty_or(&[(1, 4)]),
