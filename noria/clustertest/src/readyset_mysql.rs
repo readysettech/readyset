@@ -361,10 +361,7 @@ async fn correct_data_after_restart() {
 }
 
 /// This test verifies that following a worker failure we can create new views.
-// This test is marked `should_panic` as we currently do not handle worker failures
-// without the leader also failing.
 #[clustertest]
-#[should_panic]
 async fn create_view_after_worker_failure() {
     let mut deployment = readyset_mysql("ct_create_view_after_worker_failure")
         .quorum(2)
@@ -419,10 +416,14 @@ async fn create_view_after_worker_failure() {
     };
     deployment.kill_server(&addr, false).await.unwrap();
 
+    // Create a new server and wait until the deployment has enough healthy workers.
     deployment
         .start_server(ServerParams::default().with_volume(&volume_id), true)
         .await
         .unwrap();
+
+    // Wait so that we trigger failure recovery behavior before CREATE CACHED QUERY.
+    sleep(Duration::from_secs(5)).await;
 
     // This currently fails as the leader crashes, so we cannot reach quorum.
     adapter_conn
