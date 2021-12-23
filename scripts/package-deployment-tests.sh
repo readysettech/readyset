@@ -41,7 +41,7 @@ done
 DATA_DIR_PATH=$TMP_DIR/src/data/
 mkdir -p $DATA_DIR_PATH
 cp -r benchmarks/src/data/* $DATA_DIR_PATH
-cp benchmarks/src/yaml/benchmarks/* $TMP_DIR
+cp benchmarks/src/yaml/benchmarks/test/* $TMP_DIR
 cp benchmarks/src/yaml/deployments/example.yaml $TMP_DIR/deployment.example.yaml
 cp scripts/test-deployment.sh $TMP_DIR
 
