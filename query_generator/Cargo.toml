@@ -39,3 +39,4 @@ bit-vec = { version = "0.6", features = ["serde"] }
 rand_regex = "0.15.1"
 zipf = "7.0.0"
 parking_lot = "0.11.2"
+growable-bloom-filter = "2.0.1"

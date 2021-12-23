@@ -2291,6 +2291,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
+name = "growable-bloom-filter"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8555f64d29ddd0c9a6ff88d3044b9566c77ad48dee6c30b3812c6e34dde90d9"
+dependencies = [
+ "serde",
+ "serde_bytes",
+ "serde_derive",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4759,6 +4771,7 @@ dependencies = [
  "derive_more",
  "eui48",
  "futures-util",
+ "growable-bloom-filter",
  "humantime",
  "indicatif 0.15.0",
  "itertools 0.10.3",
@@ -6850,6 +6863,12 @@ dependencies = [
  "which 4.2.2",
  "yaml-rust",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e575e15bedf6e57b5c2d763ffc6c3c760143466cbd09d762d539680ab5992ded"
 
 [[package]]
 name = "yaml-rust"
