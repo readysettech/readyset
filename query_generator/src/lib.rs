@@ -637,7 +637,7 @@ impl ColumnGenerator {
             | u @ ColumnGenerator::RandomString(_) => {
                 ColumnGenerator::NonRepeating(NonRepeatingGenerator {
                     generator: Box::new(u),
-                    generated: HashSet::new(),
+                    generated: growable_bloom_filter::GrowableBloom::new(0.01, 1_000_000),
                 })
             }
         }
@@ -851,10 +851,18 @@ impl RandomGenerator {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct NonRepeatingGenerator {
     generator: Box<ColumnGenerator>,
-    generated: HashSet<DataType>,
+    generated: growable_bloom_filter::GrowableBloom,
+}
+
+impl Eq for NonRepeatingGenerator {}
+
+impl PartialEq for NonRepeatingGenerator {
+    fn eq(&self, other: &Self) -> bool {
+        self.generator == other.generator
+    }
 }
 
 impl NonRepeatingGenerator {
