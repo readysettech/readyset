@@ -21,9 +21,8 @@ async fn create_table_insert_test() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut adapter = deployment.adapter().await;
+    let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -32,13 +31,14 @@ async fn create_table_insert_test() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
 
     assert!(
         query_until_expected(
-            &mut conn,
+            &mut adapter,
             r"SELECT * FROM t1;",
             (),
             UntilResults::empty_or(&[(1, 4)]),
@@ -61,9 +61,8 @@ async fn mirror_prepare_exec_test() {
         .unwrap();
 
     // Create a table and write to it through the adapter.
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    adapter_conn
+    let mut adapter = deployment.adapter().await;
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -73,18 +72,18 @@ async fn mirror_prepare_exec_test() {
         .await
         .unwrap();
 
-    adapter_conn
+    adapter
         .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
-    adapter_conn
+    adapter
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
         .await
         .unwrap();
 
     assert!(
         query_until_expected(
-            &mut adapter_conn,
+            &mut adapter,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
             UntilResults::empty_or(&[(2, 5)]),
@@ -97,7 +96,7 @@ async fn mirror_prepare_exec_test() {
         .kill_server(&deployment.server_addrs()[0], false)
         .await
         .unwrap();
-    let result: Vec<(i32, i32)> = adapter_conn
+    let result: Vec<(i32, i32)> = adapter
         .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
         .await
         .unwrap();
@@ -115,9 +114,8 @@ async fn async_migrations_confidence_check() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    adapter_conn
+    let mut adapter = deployment.adapter().await;
+    adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -126,18 +124,18 @@ async fn async_migrations_confidence_check() {
         )
         .await
         .unwrap();
-    adapter_conn
+    adapter
         .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
-    adapter_conn
+    adapter
         .query_drop(r"INSERT INTO t1 VALUES (2, 5);")
         .await
         .unwrap();
 
     assert!(
         query_until_expected(
-            &mut adapter_conn,
+            &mut adapter,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
             UntilResults::empty_or(&[(2, 5)]),
@@ -151,7 +149,7 @@ async fn async_migrations_confidence_check() {
 
     assert!(
         query_until_expected_from_noria(
-            &mut adapter_conn,
+            &mut adapter,
             deployment.metrics(),
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
@@ -173,20 +171,18 @@ async fn failure_during_query() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_db_str().unwrap()).unwrap();
-    let mut upstream_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    upstream_conn
+    let mut upstream = deployment.upstream().await;
+    upstream
         .query_drop("CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);")
         .await
         .unwrap();
-    upstream_conn
+    upstream
         .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    adapter_conn
+    let mut adapter = deployment.adapter().await;
+    adapter
         .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
@@ -197,7 +193,7 @@ async fn failure_during_query() {
     }
 
     // Should return the correct results from fallback.
-    let result: Vec<(i32, i32)> = adapter_conn
+    let result: Vec<(i32, i32)> = adapter
         .exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,))
         .await
         .unwrap();
@@ -214,9 +210,8 @@ async fn query_cached_view_after_failure() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut adapter = deployment.adapter().await;
+    let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -225,11 +220,13 @@ async fn query_cached_view_after_failure() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
         .await
         .unwrap();
 
-    conn.query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+    adapter
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
@@ -237,7 +234,7 @@ async fn query_cached_view_after_failure() {
     let query = "SELECT * FROM t1 WHERE uid = ?";
     assert!(
         query_until_expected_from_noria(
-            &mut conn,
+            &mut adapter,
             deployment.metrics(),
             query.clone(),
             (1,),
@@ -270,7 +267,7 @@ async fn query_cached_view_after_failure() {
     let query = "SELECT * FROM t1 WHERE uid = ?";
     assert!(
         query_until_expected_from_noria(
-            &mut conn,
+            &mut adapter,
             deployment.metrics(),
             query.clone(),
             (1,),
@@ -296,9 +293,8 @@ async fn correct_data_after_restart() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut adapter = deployment.adapter().await;
+    let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -307,13 +303,14 @@ async fn correct_data_after_restart() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
 
     assert!(
         query_until_expected(
-            &mut conn,
+            &mut adapter,
             r"SELECT * FROM t1;",
             (),
             UntilResults::empty_or(&[(1, 4)]),
@@ -342,7 +339,7 @@ async fn correct_data_after_restart() {
     // Query until we are able to get the results from Noria.
     assert!(
         query_until_expected_from_noria(
-            &mut conn,
+            &mut adapter,
             deployment.metrics(),
             r"SELECT * FROM t1;",
             (),
@@ -366,9 +363,8 @@ async fn create_view_after_worker_failure() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_db_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut upstream = deployment.upstream().await;
+    let _ = upstream
         .query_drop(
             r"CREATE TABLE t1 (
                 uid INT PRIMARY KEY,
@@ -385,13 +381,12 @@ async fn create_view_after_worker_failure() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut adapter_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    adapter_conn
+    let mut adapter = deployment.adapter().await;
+    adapter
         .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1;")
         .await
         .unwrap();
-    adapter_conn
+    adapter
         .query_drop("CREATE CACHED QUERY AS SELECT * FROM t2;")
         .await
         .unwrap();
@@ -421,7 +416,7 @@ async fn create_view_after_worker_failure() {
     sleep(Duration::from_secs(5)).await;
 
     // This currently fails as the leader crashes, so we cannot reach quorum.
-    adapter_conn
+    adapter
         .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?;")
         .await
         .unwrap();
@@ -445,9 +440,8 @@ async fn end_to_end_with_restarts() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut adapter = deployment.adapter().await;
+    let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -456,13 +450,14 @@ async fn end_to_end_with_restarts() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
 
     assert!(
         query_until_expected(
-            &mut conn,
+            &mut adapter,
             r"SELECT * FROM t1;",
             (),
             UntilResults::empty_or(&[(1, 4)]),
@@ -493,7 +488,7 @@ async fn end_to_end_with_restarts() {
 
         assert!(
             query_until_expected_from_noria(
-                &mut conn,
+                &mut adapter,
                 deployment.metrics(),
                 r"SELECT * FROM t1;",
                 (),
@@ -522,9 +517,8 @@ async fn view_survives_restart() {
         .await
         .unwrap();
 
-    let opts = mysql_async::Opts::from_url(&deployment.mysql_connection_str().unwrap()).unwrap();
-    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let _ = conn
+    let mut adapter = deployment.adapter().await;
+    let _ = adapter
         .query_drop(
             r"CREATE TABLE t1 (
         uid INT NOT NULL,
@@ -533,10 +527,12 @@ async fn view_survives_restart() {
         )
         .await
         .unwrap();
-    conn.query_drop(r"INSERT INTO t1 VALUES (1, 4);")
+    adapter
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4);")
         .await
         .unwrap();
-    conn.query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 WHERE uid = ?")
+    adapter
+        .query_drop(r"CREATE CACHED QUERY test AS SELECT * FROM t1 WHERE uid = ?")
         .await
         .unwrap();
 
