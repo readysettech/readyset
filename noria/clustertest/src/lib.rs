@@ -139,6 +139,11 @@
 //!   4. Querying metrics via the [`MetricsClient`] returned by
 //!      [`DeploymentHandle::metrics`].
 //!
+//! It also provides helper functions to create connections to a ReadySet adapter
+//! and an upstream database, if present. See [`DeploymentHandle::adapter`] and
+//! [`DeploymentHandle::upstream`], both of which return [`mysql_async::Conn`] to
+//! their respective database endpoints.
+//!
 //! ### [`DeploymentHandle::teardown`]
 //!
 //! All tests should end in a call to [`DeploymentHandle::teardown`]. To
@@ -364,7 +369,7 @@ impl DeploymentBuilder {
     }
 
     /// Whether to use an upstream database as part of this deployment. This
-    /// will populate [`DeploymentHandle::mysql_db_str`] with the upstream
+    /// will populate [`DeploymentHandle::upstream_connection_str`] with the upstream
     /// databases's connection string.
     pub fn deploy_mysql(mut self) -> Self {
         self.mysql = true;
@@ -414,7 +419,7 @@ impl DeploymentBuilder {
         self.check_deployment_params()?;
         let mut port = get_next_good_port(None);
         // If this deployment includes binlog replication and a mysql instance.
-        let mut mysql_addr = None;
+        let mut upstream_mysql_addr = None;
         if self.mysql {
             // TODO(justin): Parameterize port.
             let addr = format!(
@@ -427,7 +432,7 @@ impl DeploymentBuilder {
                 .query_drop(format!("CREATE DATABASE {};", &self.name))
                 .await
                 .unwrap();
-            mysql_addr = Some(format!("{}/{}", &addr, &self.name));
+            upstream_mysql_addr = Some(format!("{}/{}", &addr, &self.name));
         }
 
         // Create the noria-server instances.
@@ -444,7 +449,7 @@ impl DeploymentBuilder {
                 &self.authority_address,
                 &self.authority.to_string(),
                 port,
-                mysql_addr.as_ref(),
+                upstream_mysql_addr.as_ref(),
             )?;
 
             handles.insert(handle.addr.clone(), handle);
@@ -477,7 +482,7 @@ impl DeploymentBuilder {
                 &self.authority.to_string(),
                 port,
                 metrics_port,
-                mysql_addr.as_ref(),
+                upstream_mysql_addr.as_ref(),
                 self.async_migration_interval,
             )?;
             // Sleep to give the adapter time to startup.
@@ -496,7 +501,7 @@ impl DeploymentBuilder {
             name: self.name.clone(),
             authority_addr: self.authority_address,
             authority: self.authority,
-            mysql_addr,
+            upstream_mysql_addr,
             noria_server_handles: handles,
             shutdown: false,
             noria_binaries: self.noria_binaries,
@@ -574,8 +579,8 @@ pub struct DeploymentHandle {
     authority_addr: String,
     /// The authority type for the deployment.
     authority: AuthorityType,
-    /// The MySql connect string for the deployment.
-    mysql_addr: Option<String>,
+    /// The connection string of the upstream mysql database for the deployment.
+    upstream_mysql_addr: Option<String>,
     /// A handle to each noria server in the deployment.
     /// True if this deployment has already been torn down.
     shutdown: bool,
@@ -608,20 +613,26 @@ impl DeploymentHandle {
         &mut self.metrics
     }
 
-    /// Returns the MySQL connection string of the adapter that can be
-    /// passed to [`mysql_async::Opts::from_url`]. If this deployment does not
-    /// have an adapter, `None` is returned.
-    pub fn mysql_connection_str(&self) -> Option<String> {
-        self.mysql_adapter.as_ref().map(|h| h.conn_str.clone())
+    /// Creates a [`mysql_async::Conn`] to the MySQL adapter in the deployment.
+    /// Otherwise panics if the adapter does not exist or a connection can not
+    /// be made.
+    pub async fn adapter(&self) -> mysql_async::Conn {
+        let addr = &self.mysql_adapter.as_ref().unwrap().conn_str;
+        let opts = mysql_async::Opts::from_url(addr).unwrap();
+        mysql_async::Conn::new(opts.clone()).await.unwrap()
     }
 
-    /// Returns the MySQL connection string of the upstream database that
-    /// can be passed to [`'mysql_async::Opts::from-url`]. If this deployment
-    /// does not have an upstream database, `None` is returned.
-    pub fn mysql_db_str(&self) -> Option<String> {
-        self.mysql_addr.clone()
+    /// Creates a [`mysql_async::Conn`] to the upstream database in the deployment.
+    /// Otherwise panics if the upstream database does not exist or a connection
+    /// can not be made.
+    pub async fn upstream(&self) -> mysql_async::Conn {
+        let addr = self.upstream_mysql_addr.as_ref().unwrap();
+        let opts = mysql_async::Opts::from_url(addr).unwrap();
+        mysql_async::Conn::new(opts.clone()).await.unwrap()
     }
 
+    /// Returns the expected number of workers alive within the deployment based
+    /// on the liveness of the server processes.
     pub fn expected_workers(&mut self) -> HashSet<Url> {
         let mut alive = HashSet::new();
         for s in self.server_handles().values_mut() {
@@ -632,7 +643,10 @@ impl DeploymentHandle {
         alive
     }
 
-    // Queries the number of workers every half second until `max_wait`.
+    /// Queries the controller in the deployment for the number of workers and
+    /// loops until the number of healthy workers in the deployment matches the
+    /// expected number of worker processes that are expected. If a worker is
+    /// not found by `max_wait`, an error is returned.
     pub async fn wait_for_workers(&mut self, max_wait: Duration) -> Result<()> {
         if self.expected_workers().is_empty() {
             return Ok(());
@@ -685,7 +699,7 @@ impl DeploymentHandle {
             &self.authority_addr,
             &self.authority.to_string(),
             port,
-            self.mysql_addr.as_ref(),
+            self.upstream_mysql_addr.as_ref(),
         )?;
         let server_addr = handle.addr.clone();
         self.noria_server_handles
@@ -761,14 +775,6 @@ impl DeploymentHandle {
             return Ok(());
         }
 
-        // Clean up the existing mysql state.
-        if let Some(mysql_addr) = &self.mysql_addr {
-            let opts = mysql_async::Opts::from_url(mysql_addr).unwrap();
-            let mut conn = mysql_async::Conn::new(opts).await.unwrap();
-            conn.query_drop(format!("DROP DATABASE {};", &self.name))
-                .await?;
-        }
-
         // Drop any errors on failure to kill so we complete
         // cleanup.
         for h in &mut self.noria_server_handles {
@@ -776,6 +782,14 @@ impl DeploymentHandle {
         }
         if let Some(adapter_handle) = &mut self.mysql_adapter {
             let _ = adapter_handle.process.kill();
+        }
+
+        // Clean up the existing mysql state.
+        if let Some(upstream_mysql_addr) = &self.upstream_mysql_addr {
+            let opts = mysql_async::Opts::from_url(upstream_mysql_addr).unwrap();
+            let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+            conn.query_drop(format!("DROP DATABASE {};", &self.name))
+                .await?;
         }
 
         self.shutdown = true;
