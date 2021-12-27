@@ -247,8 +247,8 @@ steps:
     key: logictest-binlog
     command:
     - 'echo +++ Running noria-logictest with MySQL replication'
-    - cargo --locked run --bin noria-logictest -- verify --replication-url mysql://root:noria@mysql/sqllogictest logictests
-    - cargo --locked run --bin noria-logictest -- verify -r --replication-url  mysql://root:noria@mysql/sqllogictest logictests/requires-fallback
+    - cargo --locked run --bin noria-logictest -- verify --explain-last-statement --replication-url mysql://root:noria@mysql/sqllogictest logictests
+    - cargo --locked run --bin noria-logictest -- verify --explain-last-statement -r --replication-url  mysql://root:noria@mysql/sqllogictest logictests/requires-fallback
     timeout_in_minutes: 60
     depends_on:
     - build-image

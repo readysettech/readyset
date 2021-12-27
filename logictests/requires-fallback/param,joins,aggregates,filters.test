@@ -176,3 +176,8 @@ SELECT table_1.column_43, table_13.column_2, table_13.column_3 FROM table_1 INNE
 ? = 1
 ----
 27 values hashing to da8a72a7967c0c73d91239275230aed9
+
+query T nosort
+EXPLAIN LAST STATEMENT
+----
+fallback

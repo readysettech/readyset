@@ -77,7 +77,9 @@ impl noria_client_test_helpers::Adapter for MySQLAdapter {
 #[allow(dead_code)] // not all test files use this function
 pub fn setup(partial: bool) -> mysql::Opts {
     noria_client_test_helpers::setup::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
+        BackendBuilder::new()
+            .require_authentication(false)
+            .explain_last_statement(true),
         false,
         partial,
         true,
