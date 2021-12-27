@@ -190,6 +190,11 @@ pub struct Options {
     /// Specifies the polling interval in seconds for requesting outputs from the Leader.
     #[clap(long, env = "OUTPUTS_POLLING_INTERVAL", default_value = "300")]
     outputs_polling_interval: u64,
+
+    /// Provides support for the EXPLAIN LAST STATEMENT command, which returns metadata about the
+    /// last statement issued along the current connection.
+    #[clap(long, hidden = true, env = "EXPLAIN_LAST_STATEMENT")]
+    explain_last_statement: bool,
 }
 
 impl<H> NoriaAdapter<H>
@@ -431,7 +436,8 @@ where
                 .query_log(qlog_sender.clone(), options.query_log_ad_hoc)
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .allow_unsupported_set(options.allow_unsupported_set)
-                .migration_mode(migration_mode);
+                .migration_mode(migration_mode)
+                .explain_last_statement(options.explain_last_statement);
 
             // can't move query_status_cache into the async move block
             let query_status_cache = query_status_cache.clone();

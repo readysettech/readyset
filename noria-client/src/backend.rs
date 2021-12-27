@@ -15,8 +15,8 @@
 //! again against Noria, however, if a fallback database exists, may be executed against the
 //! fallback db.
 use std::borrow::Cow;
-use std::fmt;
 use std::fmt::Debug;
+use std::fmt::{self, Display};
 use std::sync::Arc;
 use std::time;
 use std::{collections::HashMap, str::FromStr};
@@ -182,6 +182,7 @@ pub struct BackendBuilder {
     fail_invalidated_queries: bool,
     allow_unsupported_set: bool,
     migration_mode: MigrationMode,
+    explain_last_statement: bool,
 }
 
 impl Default for BackendBuilder {
@@ -200,6 +201,7 @@ impl Default for BackendBuilder {
             fail_invalidated_queries: false,
             allow_unsupported_set: false,
             migration_mode: MigrationMode::InRequestPath,
+            explain_last_statement: false,
         }
     }
 }
@@ -236,6 +238,8 @@ impl BackendBuilder {
             fail_invalidated_queries: self.fail_invalidated_queries,
             allow_unsupported_set: self.allow_unsupported_set,
             migration_mode: self.migration_mode,
+            last_query: None,
+            explain_last_statement: self.explain_last_statement,
             _query_handler: PhantomData,
         }
     }
@@ -305,6 +309,11 @@ impl BackendBuilder {
         self.migration_mode = q;
         self
     }
+
+    pub fn explain_last_statement(mut self, enable: bool) -> Self {
+        self.explain_last_statement = enable;
+        self
+    }
 }
 
 pub struct Backend<DB, Handler> {
@@ -358,8 +367,43 @@ pub struct Backend<DB, Handler> {
 
     /// How this backend handles migrations, See MigrationMode.
     migration_mode: MigrationMode,
+    /// Information regarding the last query sent over this connection. If None, then no queries
+    /// have been handled using this connection (Backend) yet.
+    last_query: Option<QueryInfo>,
+
+    /// Whether the EXPLAIN LAST STATEMENT feature is enabled or not.
+    explain_last_statement: bool,
 
     _query_handler: PhantomData<Handler>,
+}
+
+/// QueryInfo holds information regarding the last query that was sent along this connection
+/// (Backend).
+/// For now it only includes whether the query went to fallback or not, but may be
+/// expanded in the future to contain more useful information.
+#[derive(Debug)]
+pub struct QueryInfo {
+    pub destination: QueryDestination,
+}
+
+#[derive(Debug)]
+pub enum QueryDestination {
+    Noria,
+    NoriaThenFallback,
+    Fallback,
+    Both,
+}
+
+impl Display for QueryDestination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            QueryDestination::Noria => "noria",
+            QueryDestination::NoriaThenFallback => "noria_then_fallback",
+            QueryDestination::Fallback => "fallback",
+            QueryDestination::Both => "both",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 impl<DB, Handler> Backend<DB, Handler> {
@@ -670,6 +714,9 @@ where
                     upstream.prepare(query),
                 );
                 handle.set_noria_duration();
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Both,
+                });
                 let upstream_res = upstream_res?;
 
                 // Make updates to the query status cache if neccessary. Make changes to the
@@ -750,6 +797,9 @@ where
                     .prepare_select(q.clone(), self.prepared_count, true)
                     .await;
                 t.set_noria_duration();
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Noria,
+                });
 
                 // Make updates to the query status cache if neccessary. Make changes to the
                 // migration status if the query is successfully migrated, unsupported in Noria, or
@@ -882,6 +932,9 @@ where
                         .update_query_migration_state(rewritten_stmt, MigrationState::Successful)
                         .await;
                 }
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Noria,
+                });
                 Ok(QueryResult::Noria(r))
             }
             Err(e) => {
@@ -906,6 +959,9 @@ where
 
                         let t = event.start_timer();
                         let res = connector.query(query_str).await.map(QueryResult::Upstream);
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::NoriaThenFallback,
+                        });
                         t.set_upstream_duration();
                         res
                     }
@@ -930,6 +986,9 @@ where
             let handle = event.start_timer();
             let res = upstream.prepare(query).await.map(PrepareResult::Upstream);
             handle.set_upstream_duration();
+            self.last_query = Some(QueryInfo {
+                destination: QueryDestination::Fallback,
+            });
             res
         } else {
             let handle = event.start_timer();
@@ -953,6 +1012,9 @@ where
                 _ => internal!(),
             };
             handle.set_noria_duration();
+            self.last_query = Some(QueryInfo {
+                destination: QueryDestination::Noria,
+            });
             Ok(PrepareResult::Noria(res))
         }
     }
@@ -1054,6 +1116,9 @@ where
                     self.store_prep_statement(self.prepared_count, result);
                     handle.set_upstream_duration();
                 }
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Fallback,
+                });
                 res
             }
             PrepareMeta::NoriaSelect {
@@ -1100,6 +1165,7 @@ where
     /// to the calling struct's map of prepared queries with a unique id.
     #[instrument(level = "debug", name = "prepare", skip(self))]
     pub async fn prepare(&mut self, query: &str) -> Result<PrepareResult<DB>, DB::Error> {
+        self.last_query = None;
         let mut query_event = QueryExecutionEvent::new(EventType::Prepare);
         //the updated count will serve as the id for the prepared statement
         self.prepared_count += 1;
@@ -1151,6 +1217,9 @@ where
             match res {
                 Ok(res) => {
                     handle.set_noria_duration();
+                    self.last_query = Some(QueryInfo {
+                        destination: QueryDestination::Noria,
+                    });
                     return Ok(res);
                 }
                 Err(e) => {
@@ -1183,6 +1252,9 @@ where
             .execute(statement_id, params)
             .await
             .map(QueryResult::Upstream);
+        self.last_query = Some(QueryInfo {
+            destination: QueryDestination::NoriaThenFallback,
+        });
         handle.set_upstream_duration();
         res
     }
@@ -1289,7 +1361,11 @@ where
                     .map(|ps| ps.upstream)
                     .flatten()
                     .ok_or(PreparedStatementMissing { statement_id: id })?;
-                self.execute_upstream(upstream_id, params, event).await
+                let res = self.execute_upstream(upstream_id, params, event).await;
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Fallback,
+                });
+                res
             }
             ExecutionMeta::Read { stmt, .. } => {
                 self.cascade_execute(id, params, stmt.as_ref(), event).await
@@ -1327,6 +1403,9 @@ where
                 .await
                 .map_err(|e| e.into());
                 handle.set_noria_duration();
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Noria,
+                });
                 res
             }
         }
@@ -1350,6 +1429,7 @@ where
         id: u32,
         params: &[DataType],
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
+        self.last_query = None;
         // Requires clone as no references are allowed after self.execute_inner
         // due to borrow checker rules.
         let query_logger = self.query_log_sender.clone();
@@ -1374,6 +1454,7 @@ where
         &mut self,
         query: &str,
         event: &mut QueryExecutionEvent,
+        parse_result: ReadySetResult<SqlQuery>,
     ) -> Result<QueryResult<'_, DB>, DB::Error> {
         let start = Instant::now();
         let slowlog = self.slowlog;
@@ -1385,11 +1466,11 @@ where
                 warn_on_slow_query(&start, query);
             }
             handle.set_upstream_duration();
+            self.last_query = Some(QueryInfo {
+                destination: QueryDestination::Fallback,
+            });
             return res;
         }
-
-        let parse_result = self.parse_query(query);
-        handle.set_parse_duration();
 
         // fallback to upstream database on query parse failure
         let parsed_query = match parse_result {
@@ -1408,6 +1489,9 @@ where
                         warn_on_slow_query(&start, query);
                     }
                     handle.set_upstream_duration();
+                    self.last_query = Some(QueryInfo {
+                        destination: QueryDestination::Fallback,
+                    });
                     return res;
                 } else {
                     error!("{}", e);
@@ -1428,6 +1512,9 @@ where
                     warn_on_slow_query(&start, query);
                 }
                 handle.set_upstream_duration();
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Fallback,
+                });
                 res
             } else {
                 // Fallback is not enabled, so let the handler return a default result or
@@ -1461,10 +1548,20 @@ where
                         if let Err(e) = self.noria.$noria_method($stmt).await {
                             event.set_noria_error(&e);
                         }
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Both,
+                        });
+                    } else {
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Fallback,
+                        });
                     }
                     let upstream_res = upstream.query(query).await;
                     Ok(QueryResult::Upstream(upstream_res?))
                 } else {
+                    self.last_query = Some(QueryInfo {
+                        destination: QueryDestination::Noria,
+                    });
                     Ok(QueryResult::Noria(self.noria.$noria_method($stmt).await?))
                 }
             };
@@ -1509,6 +1606,9 @@ where
                                 .await
                                 .map(QueryResult::Upstream);
                             handle.set_upstream_duration();
+                            self.last_query = Some(QueryInfo {
+                                destination: QueryDestination::Fallback,
+                            });
 
                             res
                         }
@@ -1559,6 +1659,9 @@ where
                                 .await
                                 .map(QueryResult::Upstream);
                             handle.set_upstream_duration();
+                            self.last_query = Some(QueryInfo {
+                                destination: QueryDestination::Fallback,
+                            });
 
                             res
                         }
@@ -1609,6 +1712,9 @@ where
                             upstream.query(query).await
                         };
                         handle.set_upstream_duration();
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Fallback,
+                        });
                         Ok(QueryResult::Upstream(query_result?))
                     }
 
@@ -1619,9 +1725,7 @@ where
                         .map(QueryResult::Noria)
                         .map_err(|e| e.into()),
                     SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
-                        // TODO(peter): Fill these in once implementation is complete.
-                        error!("unsupported query");
-                        unsupported!("query type unsupported");
+                        internal!("EXPLAIN LAST STATEMENT should have been handled already")
                     }
 
                     SqlQuery::CreateCachedQuery(CreateCachedQueryStatement {
@@ -1639,6 +1743,9 @@ where
                         self.query_status_cache
                             .update_query_migration_state(&statement, MigrationState::Successful)
                             .await;
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Noria,
+                        });
 
                         Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                     }
@@ -1651,6 +1758,9 @@ where
                                 .update_query_migration_state(&s, MigrationState::Pending)
                                 .await;
                         }
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Noria,
+                        });
                         Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                     }
 
@@ -1704,6 +1814,9 @@ where
                     | nom_sql::SqlQuery::Show(_) => {
                         let res = upstream.query(query).await.map(QueryResult::Upstream);
                         handle.set_upstream_duration();
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Fallback,
+                        });
                         res
                     }
                     nom_sql::SqlQuery::StartTransaction(_)
@@ -1711,6 +1824,9 @@ where
                     | nom_sql::SqlQuery::Rollback(_) => {
                         let res = self.handle_transaction_boundaries(&parsed_query).await;
                         handle.set_upstream_duration();
+                        self.last_query = Some(QueryInfo {
+                            destination: QueryDestination::Fallback,
+                        });
                         res
                     }
                     nom_sql::SqlQuery::Use(stmt) => {
@@ -1730,6 +1846,9 @@ where
                 //
                 // TODO(andrew, justin): Do we want RYW support with the NoriaConnector? Currently, no.
                 // TODO: Implement event execution metrics for Noria without upstream.
+                self.last_query = Some(QueryInfo {
+                    destination: QueryDestination::Noria,
+                });
                 let res = match parsed_query.as_ref() {
                     // CREATE VIEW will still trigger migrations with epxlicit-migrations enabled
                     SqlQuery::CreateView(q) => self.noria.handle_create_view(q).await,
@@ -1773,6 +1892,9 @@ where
                     SqlQuery::Explain(nom_sql::ExplainStatement::Graphviz { simplified }) => {
                         self.noria.graphviz(*simplified).await
                     }
+                    SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
+                        internal!("EXPLAIN LAST STATEMENT should have been handled already")
+                    }
                     SqlQuery::Show(ShowStatement::CachedQueries) => {
                         self.noria.verbose_outputs().await
                     }
@@ -1801,7 +1923,28 @@ where
     pub async fn query(&mut self, query: &str) -> Result<QueryResult<'_, DB>, DB::Error> {
         let mut query_event = QueryExecutionEvent::new(EventType::Query);
         let query_logger = self.query_log_sender.clone();
-        let res = self.query_inner(query, &mut query_event).await;
+        let handle = query_event.start_timer();
+        let parse_result = self.parse_query(query);
+        handle.set_parse_duration();
+        if let Ok(SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement)) = parse_result {
+            if self.explain_last_statement {
+                let value = self
+                    .last_query
+                    .as_ref()
+                    .map(|info| info.destination.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                return Ok(QueryResult::Noria(noria_connector::QueryResult::Meta {
+                    label: "destination".to_string(),
+                    value,
+                }));
+            } else {
+                internal!("EXPLAIN LAST STATEMENT feature is not enabled")
+            }
+        }
+        self.last_query = None;
+        let res = self
+            .query_inner(query, &mut query_event, parse_result)
+            .await;
 
         log_query(query_logger, query_event);
         res

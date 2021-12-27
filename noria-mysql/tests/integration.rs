@@ -1244,6 +1244,23 @@ fn explain_graphviz() {
 }
 
 #[test]
+fn explain_last_statement() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    conn.query_drop("CREATE TABLE test (x int, y int)").unwrap();
+    sleep();
+
+    conn.query_drop("INSERT INTO test (x, y) VALUES (4, 2)")
+        .unwrap();
+    sleep();
+
+    conn.query_drop("SELECT * FROM test").unwrap();
+    sleep();
+
+    let destination: String = conn.query_first("EXPLAIN LAST STATEMENT").unwrap().unwrap();
+    assert_eq!(&destination[..], "noria");
+}
+
+#[test]
 fn create_query_cache_where_in() {
     let mut conn = mysql::Conn::new(setup(true)).unwrap();
     conn.query_drop("CREATE TABLE t (id INT);").unwrap();
