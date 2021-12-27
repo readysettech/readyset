@@ -1618,6 +1618,11 @@ where
                         .await
                         .map(QueryResult::Noria)
                         .map_err(|e| e.into()),
+                    SqlQuery::Explain(nom_sql::ExplainStatement::LastStatement) => {
+                        // TODO(peter): Fill these in once implementation is complete.
+                        error!("unsupported query");
+                        unsupported!("query type unsupported");
+                    }
 
                     SqlQuery::CreateCachedQuery(CreateCachedQueryStatement {
                         ref name,
