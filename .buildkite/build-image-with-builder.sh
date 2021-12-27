@@ -41,9 +41,9 @@ else
 fi
 
 if [ "$BUILDKITE_BRANCH" = "refs/heads/main" ]; then
-    release_buildarg="--build-arg release=1"
+    release_buildargs=("--build-arg" "release=1")
 else
-    release_buildarg=""
+    release_buildargs=()
 fi
 
 build_cmd_prefix=(
@@ -60,12 +60,12 @@ build_cmd_suffix=(
     "$@" \
     "$context"
 )
-if [ -n "$cache_from" ] &&  [ -n "$release_buildarg" ]; then
-    build_cmd=("${build_cmd_prefix[@]}" "$release_buildarg" "$cache_from" "${build_cmd_suffix[@]}")
+if [ -n "$cache_from" ] &&  [ -n "${release_buildargs[*]-}" ]; then
+    build_cmd=("${build_cmd_prefix[@]}" "${release_buildargs[@]}" "$cache_from" "${build_cmd_suffix[@]}")
 elif [ -n "$cache_from" ]; then
     build_cmd=("${build_cmd_prefix[@]}" "$cache_from" "${build_cmd_suffix[@]}")
-elif [ -n "$release_buildarg" ]; then
-    build_cmd=("${build_cmd_prefix[@]}" "$release_buildarg" "${build_cmd_suffix[@]}")
+elif [ -n "${release_buildargs[*]-}" ]; then
+    build_cmd=("${build_cmd_prefix[@]}" "${release_buildargs[@]}" "${build_cmd_suffix[@]}")
 else
     build_cmd=("${build_cmd_prefix[@]}" "${build_cmd_suffix[@]}")
 fi
