@@ -8,6 +8,7 @@
 //! statement. Each parameter in a prepared statement is generated
 //! based on a DistributionAnnotation.
 
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
@@ -17,12 +18,19 @@ use nom_sql::SqlType;
 use query_generator::DistributionAnnotation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::utils::random::random_value_for_sql_type;
+
+/// The number of times we will try to generate a cache miss using the random
+/// generator before giving up. It is possible that we have generated cache hits
+/// on all values in the table, and as a result, will no longer be able to
+/// generate misses.
+const MAX_RANDOM_GENERATIONS: u32 = 100;
 
 #[derive(Parser, Clone, Default, Serialize, Deserialize)]
 pub struct ArbitraryQueryParameters {
@@ -228,6 +236,71 @@ impl PreparedStatement {
                     .unwrap(),
             })
             .collect()
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub struct Query {
+    pub prep: String,
+    pub params: Vec<String>,
+}
+
+// Values cannot be hashed so we turn them into sql text before putting
+// them in the Query struct.
+impl From<(String, Vec<Value>)> for Query {
+    fn from(v: (String, Vec<Value>)) -> Query {
+        Query {
+            prep: v.0,
+            params: v.1.into_iter().map(|s| s.as_sql(false)).collect(),
+        }
+    }
+}
+
+// Assumes that we don't ever perform eviction.
+pub struct CachingQueryGenerator {
+    prepared_statement: PreparedStatement,
+    /// A set of previously generated and executed statement. We can re-execute
+    /// this statement to guarentee a cache hit if we are not performing
+    /// eviction.
+    // TODO(justin): Replace with bloom filter for mem efficiency.
+    seen: HashSet<Query>,
+}
+
+impl From<PreparedStatement> for CachingQueryGenerator {
+    fn from(prepared_statement: PreparedStatement) -> CachingQueryGenerator {
+        CachingQueryGenerator {
+            prepared_statement,
+            seen: HashSet::new(),
+        }
+    }
+}
+
+impl CachingQueryGenerator {
+    pub fn generate_cache_miss(&mut self) -> Result<Query> {
+        let mut attempts = 0;
+        while attempts < MAX_RANDOM_GENERATIONS {
+            let q = Query::from(self.prepared_statement.generate_query());
+            if !self.seen.contains(&q) {
+                self.seen.insert(q.clone());
+                return Ok(q);
+            }
+
+            attempts += 1;
+        }
+
+        return Err(anyhow!(
+            "Unable to generate cache miss in {} attempts",
+            MAX_RANDOM_GENERATIONS
+        ));
+    }
+
+    pub fn generate_cache_hit(&self) -> Result<Query> {
+        match self.seen.iter().next() {
+            Some(q) => Ok(q.clone()),
+            None => Err(anyhow!(
+                "Unable to generate cache hit without first generating a cache miss"
+            )),
+        }
     }
 }
 

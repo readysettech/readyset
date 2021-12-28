@@ -1,26 +1,20 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Row, Value};
+use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
 use crate::benchmark::{BenchmarkControl, DeploymentParameters};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
-use crate::utils::query::{ArbitraryQueryParameters, PreparedStatement};
+use crate::utils::query::{ArbitraryQueryParameters, CachingQueryGenerator, Query};
 use crate::utils::us_to_ms;
-
-/// The number of times we will try to generate a cache miss using the random
-/// generator before giving up. It is possible that we have generated cache hits
-/// on all values in the table, and as a result, will no longer be able to
-/// generate misses.
-const MAX_RANDOM_GENERATIONS: u32 = 20;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct CacheHitBenchmark {
@@ -35,70 +29,6 @@ pub struct CacheHitBenchmark {
     /// The number of cache hits and cache misses to perform.
     #[clap(long, default_value = "1000")]
     num_queries_each: u32,
-}
-
-#[derive(PartialEq, Eq, Hash, Clone)]
-pub struct Query {
-    prep: String,
-    params: Vec<String>,
-}
-
-// Values cannot be hashed so we turn them into sql text before putting
-// them in the Query struct.
-impl From<(String, Vec<Value>)> for Query {
-    fn from(v: (String, Vec<Value>)) -> Query {
-        Query {
-            prep: v.0,
-            params: v.1.into_iter().map(|s| s.as_sql(false)).collect(),
-        }
-    }
-}
-
-// Assumes that we don't ever perform eviction.
-pub struct CachingQueryGenerator {
-    prepared_statement: PreparedStatement,
-    /// A set of previously generated and executed statement. We can re-execute
-    /// this statement to guarentee a cache hit if we are not performing
-    /// eviction.
-    seen: HashSet<Query>,
-}
-
-impl From<PreparedStatement> for CachingQueryGenerator {
-    fn from(prepared_statement: PreparedStatement) -> CachingQueryGenerator {
-        CachingQueryGenerator {
-            prepared_statement,
-            seen: HashSet::new(),
-        }
-    }
-}
-
-impl CachingQueryGenerator {
-    pub fn generate_cache_miss(&mut self) -> Result<Query> {
-        let mut attempts = 0;
-        while attempts < MAX_RANDOM_GENERATIONS {
-            let q = Query::from(self.prepared_statement.generate_query());
-            if !self.seen.contains(&q) {
-                self.seen.insert(q.clone());
-                return Ok(q);
-            }
-
-            attempts += 1;
-        }
-
-        return Err(anyhow!(
-            "Unable to generate cache miss in {} attempts",
-            MAX_RANDOM_GENERATIONS
-        ));
-    }
-
-    pub fn generate_cache_hit(&self) -> Result<Query> {
-        match self.seen.iter().next() {
-            Some(q) => Ok(q.clone()),
-            None => Err(anyhow!(
-                "Unable to generate cache hit without first generating a cache miss"
-            )),
-        }
-    }
 }
 
 #[async_trait]
