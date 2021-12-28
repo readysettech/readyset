@@ -227,7 +227,7 @@ pub enum HandleRequest {
     PerformMigration {
         /// The migration function to perform.
         func: Box<
-            dyn FnOnce(&mut crate::controller::migrate::Migration) -> ReadySetResult<()>
+            dyn FnOnce(&mut crate::controller::migrate::Migration<'_>) -> ReadySetResult<()>
                 + Send
                 + 'static,
         >,

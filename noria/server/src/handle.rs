@@ -84,12 +84,12 @@ impl Handle {
     #[doc(hidden)]
     pub async fn migrate<F, T>(&mut self, f: F) -> T
     where
-        F: FnOnce(&mut Migration) -> T + Send + 'static,
+        F: FnOnce(&mut Migration<'_>) -> T + Send + 'static,
         T: Send + 'static,
     {
         let (ret_tx, ret_rx) = tokio::sync::oneshot::channel();
         let (fin_tx, fin_rx) = tokio::sync::oneshot::channel();
-        let b = Box::new(move |m: &mut Migration| {
+        let b = Box::new(move |m: &mut Migration<'_>| {
             if ret_tx.send(f(m)).is_err() {
                 internal!("could not return migration result")
             }
