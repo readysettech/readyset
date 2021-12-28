@@ -391,7 +391,7 @@ impl Recipe {
     // crate viz for tests
     pub(crate) fn activate(
         &mut self,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
         debug!(
             num_queries = self.expressions.len(),

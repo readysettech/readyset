@@ -725,14 +725,12 @@ impl DataflowState {
     #[instrument(level = "info", name = "migrate", skip(self, f))]
     pub(crate) async fn migrate<F, T>(&mut self, f: F) -> Result<T, ReadySetError>
     where
-        F: FnOnce(&mut Migration) -> T,
+        F: FnOnce(&mut Migration<'_>) -> T,
     {
         info!("starting migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 1.0);
-        let ingredients = self.ingredients.clone();
         let mut m = Migration {
-            ingredients,
-            source: self.source,
+            dataflow_state: self,
             added: Default::default(),
             columns: Default::default(),
             readers: Default::default(),
@@ -741,7 +739,7 @@ impl DataflowState {
             start: time::Instant::now(),
         };
         let r = f(&mut m);
-        m.commit(self).await?;
+        m.commit().await?;
         info!("finished migration");
         gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS, 0.0);
         Ok(r)

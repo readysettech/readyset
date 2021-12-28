@@ -14,11 +14,14 @@ use std::collections::{HashMap, HashSet};
 use petgraph::graph::NodeIndex;
 
 use crate::controller::migrate::DomainMigrationPlan;
+use crate::controller::state::DataflowState;
 use dataflow::DomainRequest;
 
+/// Adds all the necessary messages to [`DomainMigrationPlan`] to inform
+/// the domains (present in the `nodes` map) about all the new nodes that were
+/// added.
 pub(super) fn inform(
-    source: NodeIndex,
-    ingredients: &mut Graph,
+    dataflow_state: &mut DataflowState,
     dmp: &mut DomainMigrationPlan,
     nodes: HashMap<DomainIndex, Vec<(NodeIndex, bool)>>,
 ) -> ReadySetResult<()> {
@@ -38,14 +41,19 @@ pub(super) fn inform(
                 continue;
             }
 
-            let node = ingredients.node_weight_mut(ni).unwrap().take();
-            let node = node.finalize(ingredients);
+            let node = dataflow_state
+                .ingredients
+                .node_weight_mut(ni)
+                .unwrap()
+                .take();
+            let node = node.finalize(&dataflow_state.ingredients);
             // new parents already have the right child list
-            let old_parents = ingredients
+            let old_parents = dataflow_state
+                .ingredients
                 .neighbors_directed(ni, petgraph::EdgeDirection::Incoming)
-                .filter(|&ni| ni != source)
+                .filter(|&ni| ni != dataflow_state.source)
                 .filter(|ni| old_nodes.contains(ni))
-                .map(|ni| &ingredients[ni])
+                .map(|ni| &dataflow_state.ingredients[ni])
                 .filter(|n| n.domain() == domain)
                 .map(|n| n.local_addr())
                 .collect();
