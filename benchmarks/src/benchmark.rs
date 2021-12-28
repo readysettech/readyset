@@ -124,10 +124,6 @@ pub trait BenchmarkControl {
     /// benchmarks.
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()>;
 
-    /// In order to support the runner short-circuiting setup, this function is
-    /// run to check whether or not setup is already complete.
-    async fn is_already_setup(&self, deployment: &DeploymentParameters) -> Result<bool>;
-
     /// Perform actual benchmarking, writing results to prometheus.
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()>;
 

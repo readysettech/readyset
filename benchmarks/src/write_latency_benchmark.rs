@@ -43,11 +43,6 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        // TODO(mc):  Implement
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         let mut db = deployment.connect_to_target().await?;
 

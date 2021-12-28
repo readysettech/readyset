@@ -41,12 +41,6 @@ impl BenchmarkControl for MigrationBenchmark {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        // TODO(mc):  If this uses a constant schema, implement a check here.  If not, keep
-        // returning false.
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();

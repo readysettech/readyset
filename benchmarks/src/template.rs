@@ -22,12 +22,7 @@ impl BenchmarkControl for Template {
         // supports being skipped if sharing setup with other benchmarks.
         Ok(())
     }
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        // You can write code to determine whether or not the benchmark is
-        // already setup (e.g. schema already exists, migrations already run,
-        // etc) here.
-        Ok(false)
-    }
+
     async fn benchmark(&self, _: &DeploymentParameters) -> Result<()> {
         // Performing of the actual thing we want to benchmark, along with recording metrics
         benchmark_gauge!(
@@ -40,9 +35,11 @@ impl BenchmarkControl for Template {
         );
         Ok(())
     }
+
     fn labels(&self) -> HashMap<String, String> {
         HashMap::new()
     }
+
     fn forward_metrics(&self, _: &DeploymentParameters) -> Vec<ForwardPrometheusMetrics> {
         vec![]
     }

@@ -78,10 +78,6 @@ impl BenchmarkControl for ScaleViews {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!(
             "Running benchmark with {} views, {} params per view",

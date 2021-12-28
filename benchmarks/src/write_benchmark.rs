@@ -79,10 +79,6 @@ impl BenchmarkControl for WriteBenchmark {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         multi_thread::run_multithread_benchmark::<Self>(
             self.threads,

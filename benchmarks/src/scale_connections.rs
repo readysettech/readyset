@@ -27,10 +27,6 @@ impl BenchmarkControl for ScaleConnections {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!(
             "Running benchmark connecting to {} connections.",

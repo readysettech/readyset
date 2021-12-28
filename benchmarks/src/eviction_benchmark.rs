@@ -74,12 +74,6 @@ impl BenchmarkControl for EvictionBenchmark {
         Ok(())
     }
 
-    async fn is_already_setup(&self, _: &DeploymentParameters) -> Result<bool> {
-        // TODO(mc):  If this uses a constant schema, implement a check here.  If not, keep
-        // returning false.
-        Ok(false)
-    }
-
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         let thread_data = EvictionBenchmarkReadThreadParams {
             query: self.query.clone(),

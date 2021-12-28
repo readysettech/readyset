@@ -35,18 +35,6 @@
 //!         Ok(())
 //!     }
 //!
-//!     async fn is_already_setup(&self, deployment: &DeploymentParameters) -> Result<bool> {
-//!         let mut conn = deployment.connect_to_setup().await?;
-//!         match r"DESCRIBE TABLE integers".ignore(&mut conn).await {
-//!             Ok(_) => (),
-//!             // 1146 is a "table doesn't exist" error
-//!             Err(mysql_async::Error::Server(e)) if e.code == 1146 => return Ok(false),
-//!             Err(e) => return Err(e.into())
-//!         };
-//!         let count: u32 = conn.query_first("SELECT COUNT(*) FROM integers").await?.unwrap();
-//!         Ok(count == self.row_count)
-//!     }
-//!
 //!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
 //!         let mut conn = deployment.connect_to_target().await?;
 //!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;

@@ -155,11 +155,7 @@ impl BenchmarkRunner {
         let prometheus_handle = self.init_prometheus().await?;
 
         let benchmark_cmd = self.benchmark_cmd.as_ref().unwrap();
-        if !self.skip_setup
-            && !benchmark_cmd
-                .is_already_setup(&self.deployment_params)
-                .await?
-        {
+        if !self.skip_setup {
             benchmark_cmd.setup(&self.deployment_params).await?;
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
