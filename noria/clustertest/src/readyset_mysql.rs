@@ -424,6 +424,103 @@ async fn create_view_after_worker_failure() {
     deployment.teardown().await.unwrap();
 }
 
+/// Fail the non-leader worker 10 times while issuing writes.
+// This test currently fails because we drop writes to failed workers.
+#[clustertest]
+#[should_panic]
+async fn update_during_failure() {
+    let mut deployment = readyset_mysql("ct_update_during_failure")
+        .quorum(2)
+        .add_server(ServerParams::default().with_volume("v1"))
+        .add_server(ServerParams::default().with_volume("v2"))
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    let _ = upstream
+        .query_drop(
+            r"CREATE TABLE t1 (
+                uid INT NOT NULL,
+                value INT NOT NULL
+            );
+            CREATE TABLE t2 (
+                uid INT NOT NULL,
+                value INT NOT NULL
+            );
+            INSERT INTO t1 VALUES (1,2);
+            INSERT INTO t2 VALUES (1,2);
+        ",
+        )
+        .await
+        .unwrap();
+    sleep(Duration::from_secs(5)).await;
+
+    let mut adapter = deployment.adapter().await;
+
+    // Perform the same writes on t1 and t1 so we use the same `results` struct
+    // for both.
+    let mut results = EventuallyConsistentResults::new();
+    results.write(&[(1, 2)]);
+
+    let (volume_id, addr) = {
+        let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
+        let server_handle = deployment
+            .server_handles()
+            .values_mut()
+            .find(|v| v.addr != controller_uri)
+            .unwrap();
+        let volume_id = server_handle.params.volume_id.clone().unwrap();
+        let addr = server_handle.addr.clone();
+        (volume_id, addr)
+    };
+    deployment.kill_server(&addr, false).await.unwrap();
+
+    // Update the value to (1,3).
+    upstream
+        .query_drop("UPDATE t1 SET value = 3 WHERE uid = 1;")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("UPDATE t2 SET value = 3 WHERE uid = 1;")
+        .await
+        .unwrap();
+    results.write(&[(1, 3)]);
+    // Let the write propagate while the worker is dead.
+    sleep(Duration::from_secs(10)).await;
+
+    // Wait for the deployment to completely recover from the failure.
+    deployment
+        .start_server(ServerParams::default().with_volume(&volume_id), true)
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            r"SELECT * FROM t1 WHERE uid = 1;",
+            (),
+            &results,
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            r"SELECT * FROM t2 WHERE uid = 1;",
+            (),
+            &results,
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
@@ -567,6 +664,109 @@ async fn view_survives_restart() {
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+    }
+
+    deployment.teardown().await.unwrap();
+}
+
+/// Fail the non-leader worker 10 times while issuing writes.
+// This test currently fails because we drop writes to failed workers.
+#[clustertest]
+#[ignore]
+async fn writes_survive_restarts() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let mut deployment = readyset_mysql("ct_writes_survive_restarts")
+        .quorum(2)
+        .add_server(ServerParams::default().with_volume("v1"))
+        .add_server(ServerParams::default().with_volume("v2"))
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    let _ = upstream
+        .query_drop(
+            r"CREATE TABLE t1 (
+                uid INT NOT NULL,
+                value INT NOT NULL
+            );
+            CREATE TABLE t2 (
+                uid INT NOT NULL,
+                value INT NOT NULL
+            );
+            INSERT INTO t1 VALUES (1,2);
+            INSERT INTO t2 VALUES (1,2);
+        ",
+        )
+        .await
+        .unwrap();
+    sleep(Duration::from_secs(5)).await;
+
+    let mut adapter = deployment.adapter().await;
+    adapter
+        .query_drop(r"CREATE CACHED QUERY AS SELECT * FROM t1 where uid = 1;")
+        .await
+        .unwrap();
+
+    // Perform the same writes on t1 and t1 so we use the same `results` struct
+    // for both.
+    let mut results = EventuallyConsistentResults::new();
+    results.write(&[(1, 2)]);
+
+    let mut counter = 3u32;
+    for _ in 0..10 {
+        let (volume_id, addr) = {
+            let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
+            let server_handle = deployment
+                .server_handles()
+                .values_mut()
+                .find(|v| v.addr != controller_uri)
+                .unwrap();
+            let volume_id = server_handle.params.volume_id.clone().unwrap();
+            let addr = server_handle.addr.clone();
+            (volume_id, addr)
+        };
+        println!("Killing server: {}", addr);
+        deployment.kill_server(&addr, false).await.unwrap();
+        let t1_write = format!("UPDATE t1 SET value = {} WHERE uid = 1;", counter);
+        let t2_write = format!("UPDATE t2 SET value = {} WHERE uid = 1;", counter);
+        upstream.query_drop(t1_write).await.unwrap();
+        upstream.query_drop(t2_write).await.unwrap();
+        results.write(&[(1, counter)]);
+
+        println!("Starting new server");
+        deployment
+            .start_server(ServerParams::default().with_volume(&volume_id), false)
+            .await
+            .unwrap();
+
+        assert!(
+            query_until_expected_from_noria(
+                &mut adapter,
+                deployment.metrics(),
+                r"SELECT * FROM t1 WHERE uid = 1;",
+                (),
+                &results,
+                PROPAGATION_DELAY_TIMEOUT,
+            )
+            .await
+        );
+        assert!(
+            query_until_expected_from_noria(
+                &mut adapter,
+                deployment.metrics(),
+                r"SELECT * FROM t2 WHERE uid = 1;",
+                (),
+                &results,
+                PROPAGATION_DELAY_TIMEOUT,
+            )
+            .await
+        );
+
+        counter = counter + 1;
     }
 
     deployment.teardown().await.unwrap();

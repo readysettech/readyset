@@ -29,7 +29,6 @@ where
     expected: Vec<T>,
 }
 
-#[allow(dead_code)]
 impl<T> EventuallyConsistentResults<T>
 where
     T: Clone,
@@ -118,21 +117,25 @@ where
             }
         }
 
-        sleep(Duration::from_millis(10)).await;
+        sleep(Duration::from_millis(100)).await;
     }
 }
 
 async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
-    let metrics_dumps = metrics.get_metrics().await.unwrap();
-    metrics_dumps
-        .iter()
-        .map(
-            |d| match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_RESULT) {
-                Some(DumpedMetricValue::Counter(n)) => n as u32,
-                _ => 0,
-            },
-        )
-        .sum()
+    match metrics.get_metrics().await {
+        Ok(metrics) => metrics
+            .iter()
+            .map(
+                |d| match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_RESULT) {
+                    Some(DumpedMetricValue::Counter(n)) => n as u32,
+                    _ => 0,
+                },
+            )
+            .sum(),
+        // If we cannot reach the metrics client we return 0 view queries, this will always fail a
+        // check that we executed the query against Noria.
+        Err(_) => 0,
+    }
 }
 
 /// Like [`query_until_expected`], except requires that the expected result was
@@ -194,6 +197,6 @@ where
             }
         }
 
-        sleep(Duration::from_millis(10)).await;
+        sleep(Duration::from_millis(100)).await;
     }
 }
