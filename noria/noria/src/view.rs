@@ -46,6 +46,12 @@ type Transport = AsyncBincodeStream<
     AsyncDestination,
 >;
 
+/// Index of a key column as it exists in the underlying state. During a migration this will be
+/// used throughout MIR. In steady state this will refer to the reader key columns.
+pub type KeyColumnIdx = usize;
+/// Index of a placeholder variable as it appears in the SQL query
+pub type PlaceholderIdx = usize;
+
 #[derive(Debug)]
 struct Endpoint(SocketAddr);
 
@@ -673,6 +679,9 @@ pub struct ViewReplica {
     pub columns: Arc<[String]>,
     pub schema: Option<ViewSchema>,
     pub shards: Vec<ReplicaShard>,
+    /// (placeholder_index, key_column_index) pairs according to their mapping. Contains exactly
+    /// one entry for each key column at the reader.
+    pub key_mapping: Vec<(PlaceholderIdx, KeyColumnIdx)>,
 }
 
 /// A shard of a reader replica.
@@ -722,6 +731,7 @@ impl ViewBuilder {
         let columns = replica.columns.clone();
         let shards = replica.shards.clone();
         let schema = replica.schema.clone();
+        let key_mapping = replica.key_mapping.clone();
 
         let mut addrs = Vec::with_capacity(shards.len());
         let mut conns = Vec::with_capacity(shards.len());
@@ -768,6 +778,7 @@ impl ViewBuilder {
             node,
             schema,
             columns,
+            key_mapping,
             shard_addrs: addrs,
             shards: Vec1::try_from_vec(conns)
                 .map_err(|_| internal_err("cannot create view '{}' without shards"))?,
@@ -785,6 +796,9 @@ pub struct View {
     node: NodeIndex,
     columns: Arc<[String]>,
     schema: Option<ViewSchema>,
+    /// (placeholder_index, key_column_index) pairs according to their mapping. Contains exactly
+    /// one entry for each key column at the reader.
+    key_mapping: Vec<(PlaceholderIdx, KeyColumnIdx)>,
 
     shards: Vec1<ViewRpc>,
     shard_addrs: Vec<SocketAddr>,
@@ -1074,6 +1088,12 @@ impl View {
         }
 
         Ok(nrows)
+    }
+
+    /// Get the placeholder to key column index mapping for the reader node
+    /// Each pair represents a mapping from placeholder index to reader key column index
+    pub fn key_map(&self) -> &[(PlaceholderIdx, KeyColumnIdx)] {
+        self.key_mapping.as_ref()
     }
 
     /// Get the current keys of this view. For debugging only.

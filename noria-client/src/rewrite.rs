@@ -1036,7 +1036,7 @@ mod tests {
         }
 
         #[test]
-        fn only_auto_params() {
+        fn numbered_auto_params() {
             let (keys, query) = process_and_make_keys("SELECT x, y FROM test WHERE x = 4", vec![]);
 
             assert_eq!(
@@ -1048,7 +1048,7 @@ mod tests {
         }
 
         #[test]
-        fn where_in_with_auto_params() {
+        fn numbered_where_in_with_auto_params() {
             let (keys, query) = process_and_make_keys(
                 "SELECT * FROM users WHERE x = ? AND y in (?, ?, ?) AND z = 4 AND w = 5 AND q = ?",
                 vec![0.into(), 1.into(), 2.into(), 3.into(), 6.into()],
@@ -1072,7 +1072,7 @@ mod tests {
         }
 
         #[test]
-        fn auto_parametrized_in() {
+        fn numbered_auto_parametrized_in() {
             let (keys, query) = process_and_make_keys(
                 "SELECT * FROM users WHERE x = 1 AND y IN (1, 2, 3) AND z = ?",
                 vec![1.into()],

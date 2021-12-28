@@ -344,6 +344,7 @@ async fn broad_recursing_upquery() {
             join,
             &Index::hash_map(vec![2]),
             Default::default(),
+            Default::default(),
         );
     })
     .await;
@@ -4350,6 +4351,7 @@ async fn range_upquery_after_point_queries() {
             join,
             &Index::btree_map(vec![0]),
             Default::default(),
+            Default::default(),
         );
 
         // each node can only have one reader, so add an identity node above the join for the hash
@@ -4361,6 +4363,7 @@ async fn range_upquery_after_point_queries() {
             "hash_reader".to_string(),
             hash_id,
             &Index::hash_map(vec![0]),
+            Default::default(),
             Default::default(),
         );
     })

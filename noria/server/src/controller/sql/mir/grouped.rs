@@ -223,7 +223,7 @@ pub(super) fn make_grouped(
                         .chain(
                             rel.parameters
                                 .iter()
-                                .map(|(col, _)| col)
+                                .map(|param| &param.col)
                                 .filter(|c| !gb_cols.contains(c)),
                         )
                         .collect()

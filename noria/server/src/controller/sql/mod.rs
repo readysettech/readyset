@@ -280,12 +280,14 @@ impl SqlIncorporator {
                     // parameters. (Note that simple range queries are expected to be implemented
                     // with range key lookups over equality parameter views. These views will be
                     // reused because of the equality parameters.)
-                    let are_all_parameters_equalities =
-                        qg.parameters().iter().all(|p| p.1 == BinaryOperator::Equal)
-                            && existing_qg
-                                .parameters()
-                                .iter()
-                                .all(|p| p.1 == BinaryOperator::Equal);
+                    let are_all_parameters_equalities = qg
+                        .parameters()
+                        .iter()
+                        .all(|p| p.op == BinaryOperator::Equal)
+                        && existing_qg
+                            .parameters()
+                            .iter()
+                            .all(|p| p.op == BinaryOperator::Equal);
 
                     // Leaf queries with no parameters require that a "bogokey" dummy literal column
                     // be projected to support lookups. The ReaderOntoExisting optimization below
@@ -311,17 +313,19 @@ impl SqlIncorporator {
                         let params = qg
                             .parameters()
                             .into_iter()
-                            .map(|(col, op)| -> ReadySetResult<_> {
-                                match IndexType::for_operator(*op) {
+                            .map(|param| -> ReadySetResult<_> {
+                                match IndexType::for_operator(param.op) {
                                     Some(it) if index_type.is_none() => index_type = Some(it),
                                     Some(it) if index_type == Some(it) => {}
                                     Some(_) => {
                                         unsupported!("Conflicting binary operators in query")
                                     }
-                                    None => unsupported!("Unsupported binary operator `{}`", op),
+                                    None => {
+                                        unsupported!("Unsupported binary operator `{}`", param.op)
+                                    }
                                 }
 
-                                Ok(Column::from(col))
+                                Ok(Column::from(param.col.clone()))
                             })
                             .collect::<Result<Vec<_>, _>>()?;
 

@@ -9,6 +9,7 @@ use noria::metrics::recorded;
 use noria::util::like::LikePattern;
 use noria::ViewQueryFilter;
 use noria::{consistency::Timestamp, KeyComparison};
+use noria::{KeyColumnIdx, PlaceholderIdx};
 use tracing::{trace, warn};
 
 use crate::backlog;
@@ -213,6 +214,13 @@ pub struct Reader {
 
     /// Operations to perform on the result set after the rows are returned from the lookup
     post_lookup: PostLookup,
+
+    /// Vector of (placeholder_number, key_column_index). The placeholder_number corresponds to
+    /// where the placeholder appears in the SQL query and the key_column_index corresponds to the
+    /// key column index in the reader state.
+    ///
+    /// The data is stored in this manner instead of in a Hashmap to support ordered iteration.
+    placeholder_map: Vec<(PlaceholderIdx, KeyColumnIdx)>,
 }
 
 impl Clone for Reader {
@@ -223,6 +231,7 @@ impl Clone for Reader {
             for_node: self.for_node,
             post_lookup: self.post_lookup.clone(),
             index: self.index.clone(),
+            placeholder_map: self.placeholder_map.clone(),
         }
     }
 }
@@ -234,6 +243,7 @@ impl Reader {
             for_node,
             post_lookup,
             index: None,
+            placeholder_map: Default::default(),
         }
     }
 
@@ -253,6 +263,7 @@ impl Reader {
             for_node: self.for_node,
             post_lookup: self.post_lookup.clone(),
             index: self.index.clone(),
+            placeholder_map: self.placeholder_map.clone(),
         }
     }
 
@@ -290,6 +301,28 @@ impl Reader {
         } else {
             self.index = Some(index.clone());
         }
+    }
+
+    /// Sets the placeholder to column mapping if it is not already set.
+    ///
+    /// We do not currently support multiple mappings from placeholders to key columns. That would
+    /// require a method for resolving which mapping should be used for each query.
+    ///
+    /// This method will need to be implemented before using the same reader for functionally
+    /// identical queries with different parameter orderings (e.g., 'SELECT * FROM t WHERE a = ?
+    /// AND b = ?' and 'SELECT * FROM t WHERE b = ? AND a = ?')
+    pub fn set_mapping(&mut self, mapping: Vec<(PlaceholderIdx, KeyColumnIdx)>) {
+        if !self.placeholder_map.is_empty() {
+            debug_assert_eq!(self.placeholder_map, mapping);
+        } else {
+            self.placeholder_map = mapping
+        }
+    }
+
+    /// Returns the mapping from placeholder to reader key column. There is exactly one value for
+    /// each reader key column in the map
+    pub fn mapping(&self) -> &[(PlaceholderIdx, KeyColumnIdx)] {
+        self.placeholder_map.as_ref()
     }
 
     pub(crate) fn state_size(&self) -> Option<u64> {

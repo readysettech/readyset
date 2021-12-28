@@ -6,6 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use itertools::Itertools;
 use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
+use noria::PlaceholderIdx;
 use noria_errors::{internal, ReadySetResult};
 use std::fmt::{self, Debug, Formatter};
 
@@ -94,7 +95,9 @@ pub enum MirNodeInner {
     /// leaf (reader) node, keys
     Leaf {
         node: MirNodeRef,
-        keys: Vec<Column>,
+        /// Keys is a tuple of the key column, and if the column was derived from a SQL
+        /// placeholder, the index of the placeholder in the SQL query.
+        keys: Vec<(Column, Option<PlaceholderIdx>)>,
         index_type: IndexType,
 
         /// Optional set of columns and direction to order the results of lookups to this leaf
@@ -117,7 +120,11 @@ pub enum MirNodeInner {
 impl MirNodeInner {
     /// Construct a new [`MirNodeInner::Leaf`] for the given node and with the given keys and index
     /// type, without any post-lookup operations
-    pub fn leaf(node: MirNodeRef, keys: Vec<Column>, index_type: IndexType) -> Self {
+    pub fn leaf(
+        node: MirNodeRef,
+        keys: Vec<(Column, Option<PlaceholderIdx>)>,
+        index_type: IndexType,
+    ) -> Self {
         Self::Leaf {
             node,
             keys,
@@ -482,7 +489,7 @@ impl Debug for MirNodeInner {
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
-                    .map(|k| k.name.clone())
+                    .map(|(column, _)| column.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "Leaf [⚷: {}]", key_cols)

@@ -1149,14 +1149,13 @@ impl NoriaConnector {
             .get_noria_view(&qname, self.region.as_deref(), view_failed)
             .await?;
 
-        let getter_schema = getter
-            .schema()
-            .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
-
-        let key_column_indices = getter_schema.indices_for_cols(
-            utils::select_statement_parameter_columns(&query).into_iter(),
-            SchemaType::ProjectedSchema,
-        )?;
+        // Currently there is exactly one key map entry per user parameter (ignoring limit/offset).
+        // TODO: update to ignore elements based on missing entries
+        let key_column_indices = getter
+            .key_map()
+            .iter()
+            .map(|(_, key_index)| *key_index)
+            .collect::<Vec<_>>();
 
         let keys = processed.make_keys(&[])?;
 
@@ -1187,12 +1186,6 @@ impl NoriaConnector {
         trace!("select::collapse where-in clauses");
         let processed_query_params = rewrite::process_query(&mut statement)?;
 
-        // extract parameter columns *for noria*
-        let noria_param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
-            .into_iter()
-            .cloned()
-            .collect();
-
         let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
             .into_iter()
             .map(|c| ColumnSchema {
@@ -1213,12 +1206,14 @@ impl NoriaConnector {
         // extract result schema
         trace!(qname = %qname, "select::extract schema");
         let view_failed = self.failed_views.take(&qname).is_some();
-        let getter_schema = self
+        let getter = self
             .inner
             .get_mut()
             .await?
             .get_noria_view(&qname, self.region.as_deref(), view_failed)
-            .await?
+            .await?;
+
+        let getter_schema = getter
             .schema()
             .ok_or_else(|| internal_err(format!("no schema for view '{}'", qname)))?;
 
@@ -1232,8 +1227,13 @@ impl NoriaConnector {
             })
             .collect();
 
-        let key_column_indices = getter_schema
-            .indices_for_cols(noria_param_columns.iter(), SchemaType::ProjectedSchema)?;
+        // Currently there is exactly one key map entry per user parameter (ignoring limit/offset).
+        // TODO: update to ignore elements based on missing entries
+        let key_column_indices = getter
+            .key_map()
+            .iter()
+            .map(|(_, key_index)| *key_index)
+            .collect::<Vec<_>>();
 
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {

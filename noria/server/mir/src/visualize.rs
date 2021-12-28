@@ -179,11 +179,10 @@ impl GraphViz for MirNodeInner {
                 write!(f, "⋈  | on: {}", jc)
             }
             MirNodeInner::JoinAggregates => write!(f, "AGG ⋈"),
-
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()
-                    .map(|k| print_col(k))
+                    .map(|k| print_col(&k.0))
                     .collect::<Vec<_>>()
                     .join(", ");
                 write!(f, "Leaf | ⚷: {}", key_cols)

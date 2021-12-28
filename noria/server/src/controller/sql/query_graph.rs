@@ -1,10 +1,11 @@
 use crate::controller::sql::query_utils::LogicalOp;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, JoinConstraint,
-    JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
 };
 use nom_sql::{OrderType, SelectStatement};
+use noria::PlaceholderIdx;
 use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
 
 use std::cmp::Ordering;
@@ -163,12 +164,20 @@ pub struct JoinPredicate {
     pub right: Expression,
 }
 
+/// An individual column on which a query is parameterized
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct Parameter {
+    pub col: Column,
+    pub op: nom_sql::BinaryOperator,
+    pub placeholder_idx: Option<PlaceholderIdx>,
+}
+
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct QueryGraphNode {
     pub rel_name: String,
     pub predicates: Vec<Expression>,
     pub columns: Vec<Column>,
-    pub parameters: Vec<(Column, nom_sql::BinaryOperator)>,
+    pub parameters: Vec<Parameter>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -210,14 +219,13 @@ impl QueryGraph {
 
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
-    pub fn parameters<'a>(&'a self) -> Vec<&'a (Column, nom_sql::BinaryOperator)> {
-        self.relations.values().fold(
-            Vec::new(),
-            |mut acc: Vec<&'a (Column, nom_sql::BinaryOperator)>, qgn| {
+    pub fn parameters<'a>(&'a self) -> Vec<&'a Parameter> {
+        self.relations
+            .values()
+            .fold(Vec::new(), |mut acc: Vec<&'a Parameter>, qgn| {
                 acc.extend(qgn.parameters.iter());
                 acc
-            },
-        )
+            })
     }
 
     pub fn exact_hash(&self) -> u64 {
@@ -285,7 +293,7 @@ fn classify_conditionals(
     local: &mut HashMap<String, Vec<Expression>>,
     join: &mut Vec<JoinPredicate>,
     global: &mut Vec<Expression>,
-    params: &mut Vec<(Column, nom_sql::BinaryOperator)>,
+    params: &mut Vec<Parameter>,
 ) -> ReadySetResult<()> {
     // Handling OR and AND expressions requires some care as there are some corner cases.
     //    a) we don't support OR expressions with predicates with placeholder parameters,
@@ -436,9 +444,19 @@ fn classify_conditionals(
                         }
                     }
                     // right-hand side is a placeholder, so this must be a query parameter
-                    Expression::Literal(Literal::Placeholder(_)) => {
+                    // We carry placeholder numbers all the way to reader nodes so that they can be
+                    // mapped to a reader key column
+                    Expression::Literal(Literal::Placeholder(ref placeholder)) => {
                         if let Expression::Column(ref lf) = **lhs {
-                            params.push((lf.clone(), *op));
+                            let idx = match placeholder {
+                                ItemPlaceholder::DollarNumber(idx) => Some(*idx as usize),
+                                _ => None,
+                            };
+                            params.push(Parameter {
+                                col: lf.clone(),
+                                op: *op,
+                                placeholder_idx: idx,
+                            });
                         }
                     }
                     // right-hand side is a non-placeholder literal, so this is a predicate
@@ -814,20 +832,20 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
         //    node for this query. Such columns will be carried all the way through the operators
         //    implementing the query (unlike in a traditional query plan, where the predicates on
         //    parameters might be evaluated sooner).
-        for (column, operator) in query_parameters.into_iter() {
-            match column.table {
+        for param in query_parameters.into_iter() {
+            match param.col.table {
                 None => {
-                    unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", column);
+                    unsupported!("each parameter's column must have an associated table! (no such column \"{}\")", param.col);
                 }
                 Some(ref table) => {
                     let rel = qg.relations.get_mut(table).unwrap();
-                    if !rel.columns.contains(&column) {
-                        rel.columns.push(column.clone());
+                    if !rel.columns.contains(&param.col) {
+                        rel.columns.push(param.col.clone());
                     }
                     // the parameter column is included in the projected columns of the output, but
                     // we also separately register it as a parameter so that we can set keys
                     // correctly on the leaf view
-                    rel.parameters.push((column.clone(), operator));
+                    rel.parameters.push(param.clone());
                 }
             }
         }
