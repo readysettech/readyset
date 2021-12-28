@@ -41,6 +41,11 @@ impl BenchmarkControl for MigrationBenchmark {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        // Benchmark cleans up its own Noria state.
+        Ok(())
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Prepare the query to retrieve the query schema.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();

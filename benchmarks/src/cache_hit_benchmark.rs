@@ -43,11 +43,17 @@ impl BenchmarkControl for CacheHitBenchmark {
         Ok(())
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
-        // Prepare the query to retrieve the query schema.
+    async fn reset(&self, deployment: &DeploymentParameters) -> Result<()> {
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let _ = self.query.unmigrate(&mut conn).await;
+        Ok(())
+    }
+
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Explicitely migrate the query before benchmarking.
+        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
+        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         self.query.migrate(&mut conn).await?;
 
         let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);

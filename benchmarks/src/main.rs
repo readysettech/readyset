@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
-use benchmarks::benchmark_gauge;
+use benchmarks::benchmark_histogram;
 use benchmarks::utils;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -22,11 +22,15 @@ struct BenchmarkRunner {
     #[clap(long)]
     skip_setup: bool,
 
-    /// The duartion, specified as the number of seconds that the experiment
-    /// should be running. If `None` is provided, the experiment will run
+    /// The duration, specified as the number of seconds that the benchmark
+    /// should be running. If `None` is provided, the benchmark will run
     /// until it is interrupted.
     #[clap(long, parse(try_from_str = utils::seconds_as_str_to_duration))]
     pub run_for: Option<Duration>,
+
+    /// The number of times we should run the benchmark.
+    #[clap(long, default_value = "1")]
+    iterations: u32,
 
     /// Instead of running the benchmark_cmd, write the parameters to a benchmark_cmd
     /// specification file, to be run with the from-file subcommand.
@@ -162,25 +166,30 @@ impl BenchmarkRunner {
 
         let importer = self.start_metric_readers();
 
-        let start_time = Instant::now();
-        utils::run_for(
-            benchmark_cmd.benchmark(&self.deployment_params),
-            self.run_for,
-        )
-        .await?;
-        let duration = start_time.elapsed();
+        for i in 0..self.iterations {
+            if self.iterations > 1 {
+                println!("Iteration: {}", i);
+            }
+            let start_time = Instant::now();
+            utils::run_for(
+                benchmark_cmd.benchmark(&self.deployment_params),
+                self.run_for,
+            )
+            .await?;
+            let duration = start_time.elapsed();
+            benchmark_histogram!(
+                "benchmark_duration",
+                Microseconds,
+                "Time, in microseconds, that it took to run the benchmark.",
+                duration.as_micros() as f64
+            );
+            benchmark_cmd.reset(&self.deployment_params).await?;
+        }
 
         if let Some((handle, tx)) = importer {
             drop(tx);
             handle.await?;
         }
-
-        benchmark_gauge!(
-            "benchmark_duration",
-            Microseconds,
-            "Time, in microseconds, that it took to run the benchmark_cmd",
-            duration.as_micros() as f64
-        );
 
         // Push metrics recorded in the push gateway manually before exiting.
         if let (Some(addr), Some(prometheus_handle)) = (

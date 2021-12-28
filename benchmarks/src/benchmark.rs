@@ -124,6 +124,11 @@ pub trait BenchmarkControl {
     /// benchmarks.
     async fn setup(&self, deployment: &DeploymentParameters) -> Result<()>;
 
+    /// Code required to reset the benchmark for running in a second iteration.
+    /// If this returns an error, a benchmark cannot be run for more than
+    /// one iteration.
+    async fn reset(&self, deployment: &DeploymentParameters) -> Result<()>;
+
     /// Perform actual benchmarking, writing results to prometheus.
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()>;
 

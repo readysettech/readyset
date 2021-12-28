@@ -79,6 +79,10 @@ impl BenchmarkControl for WriteBenchmark {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         multi_thread::run_multithread_benchmark::<Self>(
             self.threads,

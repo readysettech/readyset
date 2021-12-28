@@ -35,6 +35,10 @@
 //!         Ok(())
 //!     }
 //!
+//!     async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+//!         Err(anyhow::anyhow!("reset unsupported"))
+//!     }
+//!
 //!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
 //!         let mut conn = deployment.connect_to_target().await?;
 //!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;

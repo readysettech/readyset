@@ -74,6 +74,10 @@ impl BenchmarkControl for EvictionBenchmark {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         let thread_data = EvictionBenchmarkReadThreadParams {
             query: self.query.clone(),

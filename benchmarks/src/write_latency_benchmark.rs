@@ -43,6 +43,10 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         let mut db = deployment.connect_to_target().await?;
 

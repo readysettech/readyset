@@ -83,6 +83,10 @@ impl BenchmarkControl for ReadWriteBenchmark {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();

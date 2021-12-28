@@ -27,6 +27,10 @@ impl BenchmarkControl for ScaleConnections {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
         info!(
             "Running benchmark connecting to {} connections.",

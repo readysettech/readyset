@@ -23,6 +23,10 @@ impl BenchmarkControl for Template {
         Ok(())
     }
 
+    async fn reset(&self, _: &DeploymentParameters) -> Result<()> {
+        Err(anyhow::anyhow!("reset unsupported"))
+    }
+
     async fn benchmark(&self, _: &DeploymentParameters) -> Result<()> {
         // Performing of the actual thing we want to benchmark, along with recording metrics
         benchmark_gauge!(
