@@ -112,15 +112,15 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DataType>> {
 /// Configuration for how SQL is converted to MIR
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
-    /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node, which
-    /// currently crashes if it ever receives negative deltas that bring /// it below K records (see
-    /// [ENG-56][]). If set to `false`, the SQL conversion process to return a
-    /// [`ReadySetError::Unsupported`] (causing the adapter to send the query to fallback).
-    /// Defaults to `false`.
-    ///
-    /// [`TopK`]: MirNodeInner::TopK
-    /// [ENG-56]: https://readysettech.atlassian.net/browse/ENG-56
+    /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node. If set to
+    /// `false`, the SQL conversion process to return a [`ReadySetError::Unsupported`] (causing the
+    /// adapter to send the query to fallback).  Defaults to `false`.
     pub(crate) allow_topk: bool,
+
+    /// If set to `true`, allow creating partially materialized range queries (queries that do `>`,
+    /// `>=`, `<`, or `<=` comparisons on columns). If set to `false`, attempting to install these
+    /// queries will return a [`ReadySetError::Unsupported`]. Defaults to `false`.
+    pub(crate) allow_range_queries: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1782,7 +1782,8 @@ impl SqlToMirConverter {
                 _ => {
                     let mut index_type = None;
                     for (pc, op) in qg.parameters() {
-                        if !(matches!(*op, BinaryOperator::Equal)) {
+                        if !self.config.allow_range_queries && !matches!(*op, BinaryOperator::Equal)
+                        {
                             unsupported!("Unsupported binary operator '{}'", *op);
                         }
                         match IndexType::for_operator(*op) {
