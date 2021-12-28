@@ -258,7 +258,11 @@ mod tests {
             "d",
             0,
             vec![Column::from("aa"), Column::from("ba")],
-            MirNodeInner::leaf(c.clone(), vec![Column::from("ba")], IndexType::HashMap),
+            MirNodeInner::leaf(
+                c.clone(),
+                vec![(Column::from("ba"), None)],
+                IndexType::HashMap,
+            ),
             vec![],
             vec![],
         );

@@ -336,6 +336,8 @@ impl DataflowState {
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| internal_err("Schema expects valid column indices"))?;
 
+            let key_mapping = Vec::from(reader.mapping());
+
             let schema = self.view_schema(r)?;
             let domain =
                 self.domains
@@ -368,6 +370,7 @@ impl DataflowState {
                 columns: columns.into(),
                 schema,
                 shards,
+                key_mapping,
             });
         }
 

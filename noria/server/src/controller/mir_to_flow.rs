@@ -12,6 +12,7 @@ use nom_sql::{
     OrderType, UnaryOperator,
 };
 use noria::internal::{Index, IndexType};
+use noria::PlaceholderIdx;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -1193,7 +1194,7 @@ fn make_post_lookup(
 fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
-    key_cols: &[Column],
+    key_cols: &[(Column, Option<PlaceholderIdx>)],
     index_type: IndexType,
     post_lookup: PostLookup,
     mig: &mut Migration,
@@ -1208,14 +1209,39 @@ fn materialize_leaf_node(
     // TODO(malte): consider the case when the projected columns need reordering
 
     if !key_cols.is_empty() {
-        let key_cols: Vec<_> = key_cols
+        let columns: Vec<_> = key_cols
             .iter()
-            .map(|c| parent.borrow().column_id_for_column(c))
+            .map(|(c, _)| parent.borrow().column_id_for_column(c))
             .collect::<ReadySetResult<Vec<_>>>()?;
-        mig.maintain(name, na, &Index::new(index_type, key_cols), post_lookup);
+
+        // Only retain entries that correspond to a SQL placeholder
+        let mut placeholder_map = key_cols
+            .iter()
+            .zip(columns.iter())
+            .filter_map(|((_, placeholder_index), col_index)| {
+                placeholder_index.map(|v| (v, *col_index))
+            })
+            .collect::<Vec<_>>();
+
+        // Sort the placeholder map for in order iteration
+        placeholder_map.sort_by(|a, b| a.0.cmp(&b.0));
+
+        mig.maintain(
+            name,
+            na,
+            &Index::new(index_type, columns),
+            post_lookup,
+            placeholder_map,
+        );
     } else {
         // if no key specified, default to the first column
-        mig.maintain(name, na, &Index::new(index_type, vec![0]), post_lookup);
+        mig.maintain(
+            name,
+            na,
+            &Index::new(index_type, vec![0]),
+            post_lookup,
+            Vec::default(),
+        );
     }
     Ok(())
 }

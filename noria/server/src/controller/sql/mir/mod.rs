@@ -28,6 +28,7 @@ use std::ops::Deref;
 use std::vec::Vec;
 
 use crate::ReadySetResult;
+use noria::PlaceholderIdx;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
 
@@ -197,6 +198,9 @@ impl SqlToMirConverter {
             )
         };
 
+        // TODO(DAN): placeholder to key mappings are not fully supported for reuse
+        let params: Vec<(_, Option<PlaceholderIdx>)> =
+            params.iter().map(|c| (c.clone(), None)).collect();
         let new_leaf = MirNode::new(
             name,
             self.schema_version,
@@ -207,7 +211,7 @@ impl SqlToMirConverter {
                     c
                 })
                 .collect(),
-            MirNodeInner::leaf(n.clone(), Vec::from(params), index_type),
+            MirNodeInner::leaf(n.clone(), params, index_type),
             vec![MirNodeRef::downgrade(&n)],
             vec![],
         );
@@ -1660,7 +1664,7 @@ impl SqlToMirConverter {
                 } else {
                     qg.parameters()
                         .into_iter()
-                        .map(|(col, _)| Column::from(col))
+                        .map(|param| Column::from(param.col.clone()))
                         .collect()
                 };
 
@@ -1755,7 +1759,10 @@ impl SqlToMirConverter {
                     if !projected_columns.contains(&Column::new(None, "bogokey")) {
                         projected_literals.push(("bogokey".into(), DataType::from(0i32)));
                     }
-                    Some((vec![Column::new(None, "bogokey")], IndexType::HashMap))
+                    Some((
+                        vec![(Column::new(None, "bogokey"), None)],
+                        IndexType::HashMap,
+                    ))
                 }
 
                 #[cfg(feature = "param_filter")]
@@ -1781,29 +1788,30 @@ impl SqlToMirConverter {
                 _ => {
                     let has_aggregates = st.contains_aggregate_select();
                     let mut index_type = None;
-                    for (pc, op) in qg.parameters() {
-                        if !self.config.allow_range_queries && !matches!(*op, BinaryOperator::Equal)
+                    for param in qg.parameters() {
+                        if !self.config.allow_range_queries
+                            && !matches!(param.op, BinaryOperator::Equal)
                         {
-                            unsupported!("Unsupported binary operator '{}'", *op);
+                            unsupported!("Unsupported binary operator '{}'", param.op);
                         }
 
                         // Aggregates don't currently work with range queries (since we don't
                         // re-aggregate at the reader), so check here and return an error if the
                         // query has both aggregates and range params
-                        if has_aggregates && *op != BinaryOperator::Equal {
+                        if has_aggregates && param.op != BinaryOperator::Equal {
                             unsupported!(
                                 "Aggregates are not currently supported with non-equal parameters"
                             )
                         }
 
-                        match IndexType::for_operator(*op) {
+                        match IndexType::for_operator(param.op) {
                             Some(it) if index_type.is_none() => index_type = Some(it),
                             Some(it) if index_type == Some(it) => {}
                             Some(_) => unsupported!("Conflicting binary operators in query"),
-                            None => unsupported!("Unsupported binary operator `{}`", op),
+                            None => unsupported!("Unsupported binary operator `{}`", param.op),
                         }
 
-                        let pc = Column::from(pc);
+                        let pc = Column::from(param.col.clone());
                         if !projected_columns.contains(&pc) {
                             projected_columns.push(pc);
                         }
@@ -1811,7 +1819,7 @@ impl SqlToMirConverter {
                     Some((
                         qg.parameters()
                             .into_iter()
-                            .map(|(col, _)| Column::from(col))
+                            .map(|param| (Column::from(param.col.clone()), param.placeholder_idx))
                             .collect(),
                         index_type.expect("Checked qg.parameters() isn't empty above"),
                     ))
