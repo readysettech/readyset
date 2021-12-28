@@ -379,7 +379,7 @@ impl<'a> PostgresReplicator<'a> {
         }
 
         self.noria
-            .set_schema_replication_offset(Some(PostgresPosition::default().into()))
+            .set_schema_replication_offset(Some(&PostgresPosition::default().into()))
             .await?;
 
         // Finally copy each table into noria

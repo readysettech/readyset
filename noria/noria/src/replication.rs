@@ -199,12 +199,14 @@ impl ReplicationOffsets {
         Ok(res)
     }
 
-    /// Set the replication offset for the schema and all tables to the given offset
-    pub fn set_offset(&mut self, offset: ReplicationOffset) {
+    /// Advance replication offset for the schema and all tables to the given offset.
+    /// Replication offsets will not change if they are ahead of the provided offset.
+    pub fn advance_offset(&mut self, offset: ReplicationOffset) -> ReadySetResult<()> {
         for table_offset in self.tables.values_mut() {
-            *table_offset = Some(offset.clone());
+            offset.try_max_into(table_offset)?;
         }
-        self.schema = Some(offset);
+
+        offset.try_max_into(&mut self.schema)
     }
 }
 

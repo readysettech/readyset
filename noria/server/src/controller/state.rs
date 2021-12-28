@@ -1389,7 +1389,8 @@ impl DataflowState {
                 let new = old.replace(r);
                 match self.apply_recipe(new).await {
                     Ok(x) => {
-                        self.schema_replication_offset = r_txt_spec.replication_offset.clone();
+                        self.schema_replication_offset =
+                            r_txt_spec.replication_offset.as_deref().cloned();
 
                         let node_restrictions = self.node_restrictions.clone();
                         let recipe_version = self.recipe.version();
@@ -1404,7 +1405,7 @@ impl DataflowState {
                                         // When installing a recipe, the new replication offset overwrites the existing
                                         // offset entirely
                                         state.schema_replication_offset =
-                                            r_txt_spec.replication_offset.clone();
+                                            r_txt_spec.replication_offset.as_deref().cloned();
                                         Ok(state)
                                     }
                                 }

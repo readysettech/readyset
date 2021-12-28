@@ -237,6 +237,7 @@ use crate::internal::*;
 use noria_data::DataType;
 pub use noria_errors::{ReadySetError, ReadySetResult};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::task_local;
@@ -360,7 +361,7 @@ pub struct RecipeSpec<'a> {
     /// The recipe string
     pub recipe: &'a str,
     /// Optional replication offset if recipe is installed from replication or binlog
-    pub replication_offset: Option<ReplicationOffset>,
+    pub replication_offset: Option<Cow<'a, ReplicationOffset>>,
     /// Optional parameter that indicates if the leader is required to be ready before handling
     /// this RecipeSpec.
     /// If not supplied, defaults to true.

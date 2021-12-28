@@ -640,6 +640,30 @@ async fn replication_skip_unparsable_inner(url: &str) -> ReadySetResult<()> {
         .await
         .expect_err("Can't have view for nonexistent table");
 
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS t3 CASCADE; CREATE TABLE t3 (id polygon);
+            DROP VIEW IF EXISTS t3_view; CREATE VIEW t3_view AS SELECT * FROM t3;
+            INSERT INTO t2 VALUES (4),(5),(6);
+            ",
+        )
+        .await?;
+
+    ctx.check_results(
+        "t2_view",
+        "skip_unparsable",
+        &[
+            &[D::Int(1)],
+            &[D::Int(2)],
+            &[D::Int(3)],
+            &[D::Int(4)],
+            &[D::Int(5)],
+            &[D::Int(6)],
+        ],
+    )
+    .await?;
+
     ctx.stop().await;
     client.stop().await;
 

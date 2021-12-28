@@ -138,7 +138,7 @@ impl MySqlReplicator {
         let binlog_position = self.get_binlog_position().await?;
 
         noria
-            .set_schema_replication_offset(Some((&binlog_position).try_into()?))
+            .set_schema_replication_offset(Some(&binlog_position.try_into()?))
             .await?;
 
         Ok(tx)
