@@ -41,7 +41,7 @@ async fn create_table_insert_test() {
             &mut adapter,
             r"SELECT * FROM t1;",
             (),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -86,7 +86,7 @@ async fn mirror_prepare_exec_test() {
             &mut adapter,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            UntilResults::empty_or(&[(2, 5)]),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -138,7 +138,7 @@ async fn async_migrations_confidence_check() {
             &mut adapter,
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            UntilResults::empty_or(&[(2, 5)]),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -153,7 +153,7 @@ async fn async_migrations_confidence_check() {
             deployment.metrics(),
             r"SELECT * FROM t1 WHERE uid = ?;",
             (2,),
-            UntilResults::empty_or(&[(2, 5)]),
+            &EventuallyConsistentResults::empty_or(&[(2, 5)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -238,7 +238,7 @@ async fn query_cached_view_after_failure() {
             deployment.metrics(),
             query.clone(),
             (1,),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -271,7 +271,7 @@ async fn query_cached_view_after_failure() {
             deployment.metrics(),
             query.clone(),
             (1,),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -313,7 +313,7 @@ async fn correct_data_after_restart() {
             &mut adapter,
             r"SELECT * FROM t1;",
             (),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -343,7 +343,7 @@ async fn correct_data_after_restart() {
             deployment.metrics(),
             r"SELECT * FROM t1;",
             (),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -460,7 +460,7 @@ async fn end_to_end_with_restarts() {
             &mut adapter,
             r"SELECT * FROM t1;",
             (),
-            UntilResults::empty_or(&[(1, 4)]),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
             PROPAGATION_DELAY_TIMEOUT,
         )
         .await
@@ -492,7 +492,7 @@ async fn end_to_end_with_restarts() {
                 deployment.metrics(),
                 r"SELECT * FROM t1;",
                 (),
-                UntilResults::empty_or(&[(1, 4)]),
+                &EventuallyConsistentResults::empty_or(&[(1, 4)]),
                 PROPAGATION_DELAY_TIMEOUT,
             )
             .await

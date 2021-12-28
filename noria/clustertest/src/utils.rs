@@ -14,27 +14,59 @@ where
     matching == a.len() && matching == b.len()
 }
 
-pub struct UntilResults<'a, T> {
-    intermediate: &'a [&'a [T]],
-    expected: &'a [T],
+/// Tracks the set of allowed values after a set of writes with eventual
+/// consistency. This is intended to be used with [`query_until_expected`]
+/// and [`query_until_expected_from_noria`] via [`as_expected_results`].
+///
+/// Writes indicated via the [`write`] function, will populate the
+/// intermediate and expected results to meet eventual consistency
+/// correctness accordingly.
+pub struct EventuallyConsistentResults<T>
+where
+    T: Clone,
+{
+    intermediate: Vec<Vec<T>>,
+    expected: Vec<T>,
 }
 
-impl<'a, T> UntilResults<'a, T> {
+#[allow(dead_code)]
+impl<T> EventuallyConsistentResults<T>
+where
+    T: Clone,
+{
+    /// Create an empty set of results. This includes the empty result
+    /// set as the initial expected value.
+    pub fn new() -> Self {
+        Self {
+            intermediate: vec![vec![]],
+            expected: vec![],
+        }
+    }
+
     /// The results to a query should either be empty or the expected
     /// value. All other values should be rejected.
-    pub fn empty_or(expected: &'a [T]) -> Self {
+    pub fn empty_or(expected: &[T]) -> Self {
         Self {
-            intermediate: &[&[]],
-            expected,
+            intermediate: Vec::new(),
+            expected: expected.to_vec(),
         }
+    }
+
+    /// Perform an eventually consistent write. This includes the write in the
+    /// set of writes we expected to see in the intermediate set. If it is the
+    /// last write in the system, it adds it as the expected write, the write
+    /// the system should converge to.
+    pub fn write(&mut self, res: &[T]) {
+        self.intermediate.push(res.to_vec());
+        self.expected = res.to_vec();
     }
 }
 
 /// Returns true when a prepare and execute returns the expected results,
-/// [`UntilResults::expected`]. This function returns false if:
+/// [`EventuallyConsistentResults::expected`]. This function returns false if:
 ///   - The `timeout` is reached without the expected result being yielded.
-///   - The query returns a value that is neither [`UntilResults::expected`]
-///     nor in the [`UntilResults::intermediate`] list.
+///   - The query returns a value that is neither [`EventuallyConsistentResults::expected`]
+///     nor in the [`EventuallyConsistentResults::intermediate`] list.
 ///   - A query to the connection returns an error.
 ///
 /// This function should be used in place of sleeping and executing a query after
@@ -44,7 +76,7 @@ pub async fn query_until_expected<S, T, P>(
     conn: &mut Conn,
     query: S,
     params: P,
-    results: UntilResults<'_, T>,
+    results: &EventuallyConsistentResults<T>,
     timeout: Duration,
 ) -> bool
 where
@@ -64,7 +96,7 @@ where
             tokio::time::timeout(remaining, conn.exec(query.clone(), params.clone())).await;
         match result {
             Ok(Ok(r)) => {
-                if equal_rows(&r, results.expected) {
+                if equal_rows(&r, &results.expected) {
                     return true;
                 }
                 if !results
@@ -111,7 +143,7 @@ pub async fn query_until_expected_from_noria<S, T, P>(
     metrics: &mut MetricsClient,
     query: S,
     params: P,
-    results: UntilResults<'_, T>,
+    results: &EventuallyConsistentResults<T>,
     timeout: Duration,
 ) -> bool
 where
@@ -134,7 +166,7 @@ where
         match result {
             Ok(Ok(r)) => {
                 let noria_queried = get_num_view_queries(metrics).await > num_view_queries_before;
-                let has_expected_result = equal_rows(&r, results.expected);
+                let has_expected_result = equal_rows(&r, &results.expected);
                 if has_expected_result && noria_queried {
                     return true;
                 }
