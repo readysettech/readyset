@@ -1,4 +1,4 @@
-#![feature(never_type)]
+#![feature(never_type, hash_raw_entry)]
 
 pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;

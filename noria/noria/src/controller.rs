@@ -1,3 +1,4 @@
+use crate::consensus::{Authority, AuthorityControl, ZookeeperAuthority};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
@@ -6,12 +7,8 @@ use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
-    consensus::{Authority, AuthorityControl, ZookeeperAuthority},
-    RecipeSpec,
-};
-use crate::{
-    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, ReplicationOffset,
-    ViewFilter, ViewRequest,
+    ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
+    ReplicationOffset, ViewFilter, ViewRequest,
 };
 use futures_util::future;
 use futures_util::future::Either;
@@ -21,15 +18,13 @@ use noria_errors::{
 };
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::{
-    future::Future,
-    task::{Context, Poll},
-    time,
-};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 use tower::buffer::Buffer;
 use tower::timeout::Timeout;
 use tower::ServiceExt;
@@ -82,15 +77,14 @@ impl Service<ControllerRequest> for Controller {
         let auth = self.authority.clone();
         let path = req.path;
         let body = req.request;
-        let start = time::Instant::now();
+        let start = Instant::now();
         let mut last_error_desc: Option<String> = None;
 
         async move {
             let mut url = None;
 
             loop {
-                if time::Instant::now().duration_since(start).as_secs() >= RPC_REQUEST_TIMEOUT_SECS
-                {
+                if Instant::now().duration_since(start).as_secs() >= RPC_REQUEST_TIMEOUT_SECS {
                     internal!(
                         "request timeout reached; last error: {}",
                         last_error_desc.unwrap_or_else(|| "(none)".into())
@@ -516,12 +510,12 @@ impl ControllerHandle {
     pub fn extend_recipe_with_offset(
         &mut self,
         recipe_addition: &str,
-        replication_offset: ReplicationOffset,
+        replication_offset: &ReplicationOffset,
         require_leader_ready: bool,
     ) -> impl Future<Output = ReadySetResult<ActivationResult>> + '_ {
         let request = RecipeSpec {
             recipe: recipe_addition,
-            replication_offset: Some(replication_offset),
+            replication_offset: Some(Cow::Borrowed(replication_offset)),
             require_leader_ready: Some(require_leader_ready),
         };
 
@@ -555,7 +549,7 @@ impl ControllerHandle {
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn set_schema_replication_offset(
         &mut self,
-        replication_offset: Option<ReplicationOffset>,
+        replication_offset: Option<&ReplicationOffset>,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         self.rpc("set_schema_replication_offset", replication_offset)
     }

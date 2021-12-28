@@ -1051,7 +1051,7 @@ mod tests {
         };
 
         noria
-            .set_schema_replication_offset(Some(offset.clone()))
+            .set_schema_replication_offset(Some(&offset))
             .await
             .unwrap();
         noria
