@@ -1,11 +1,4 @@
 steps:
-  # Zero the failure status
-  - label: ':buildkite:'
-    command: buildkite-agent meta-data set 'failure' '0'
-    agents:
-      queue: t3a-small
-
-
   - label: ':bk-status-pending:'
     command: .buildkite/set_gerrit_running.sh
     agents:
@@ -206,9 +199,11 @@ steps:
 
   - wait: ~
     continue_on_failure: true
+
   - command: ".buildkite/set_gerrit_status.sh"
     agents:
       queue: t3a-small
+
   - wait
 
   - trigger: "docker-release"

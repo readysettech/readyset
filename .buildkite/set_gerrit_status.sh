@@ -23,12 +23,17 @@ if [ "$#" -ge 1 ]; then
             ;;
     esac
 else
-    if [ "$(buildkite-agent meta-data get 'failure')" = 0 ]; then
-        verified="1"
-        verb="passed"
-    else
+    failed_jobs=$(curl 'https://graphql.buildkite.com/v1' \
+            --silent \
+            -H "Authorization: Bearer $BUILDKITE_GRAPHQL_API_TOKEN" \
+            -d "{\"query\": \"query BuildStatusQuery { build(uuid: \\\"$BUILDKITE_BUILD_ID\\\") { jobs(passed: false) { count } } }\"}" | \
+            jq -r '.data.build.jobs.count')
+    if (( failed_jobs > 0 )); then
         verified="-1"
         verb="failed"
+    else
+        verified="1"
+        verb="passed"
     fi
 fi
 
