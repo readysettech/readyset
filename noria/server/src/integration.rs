@@ -1093,6 +1093,7 @@ async fn it_recovers_persisted_bases() {
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
         1,
+        None,
     );
 
     {
@@ -1165,6 +1166,7 @@ async fn it_recovers_persisted_bases_with_volume_id() {
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
         1,
+        None,
     );
 
     {
@@ -1232,6 +1234,7 @@ async fn it_doesnt_recover_persisted_bases_with_wrong_volume_id() {
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
         1,
+        None,
     );
 
     {
@@ -1452,6 +1455,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
         1,
+        None,
     );
 
     {
@@ -1520,6 +1524,7 @@ async fn it_recovers_persisted_bases_w_multiple_nodes_and_volume_id() {
         DurabilityMode::Permanent,
         Some(path.to_string_lossy().into()),
         1,
+        None,
     );
 
     {
