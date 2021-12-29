@@ -139,8 +139,8 @@ impl KeyedState {
                 let key = MakeKey::from_row($key_cols, &*$row);
                 use $entry as Entry;
                 match $map.entry(key) {
-                    Entry::Occupied(mut rs) => {
-                        rs.get_mut().insert($row);
+                    Entry::Occupied(rs) => {
+                        rs.into_mut().insert($row);
                     }
                     Entry::Vacant(..) if $partial => return false,
                     rs @ Entry::Vacant(..) => {

@@ -140,14 +140,17 @@ where
     /// supported, there's no reason not to add it.
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
         match self.map.entry(key) {
-            btree_map::Entry::Vacant(inner) => Entry::Vacant(VacantEntry {
-                tree: &mut self.interval_tree,
-                inner,
-            }),
-            btree_map::Entry::Occupied(inner) => Entry::Occupied(OccupiedEntry {
-                tree: &mut self.interval_tree,
-                inner,
-            }),
+            btree_map::Entry::Vacant(inner) => {
+                if self.interval_tree.contains_point(inner.key()) {
+                    Entry::Occupied(OccupiedEntry::Default { inner })
+                } else {
+                    Entry::Vacant(VacantEntry {
+                        tree: &mut self.interval_tree,
+                        inner,
+                    })
+                }
+            }
+            btree_map::Entry::Occupied(inner) => Entry::Occupied(OccupiedEntry::Present { inner }),
         }
     }
 
@@ -251,25 +254,28 @@ where
     }
 }
 
-pub struct OccupiedEntry<'a, K, V>
+pub enum OccupiedEntry<'a, K, V>
 where
     K: Ord + Clone,
 {
-    #[allow(dead_code)]
-    tree: &'a mut IntervalTree<K>,
-    inner: btree_map::OccupiedEntry<'a, K, V>,
+    Default {
+        inner: btree_map::VacantEntry<'a, K, V>,
+    },
+    Present {
+        inner: btree_map::OccupiedEntry<'a, K, V>,
+    },
 }
 
 impl<'a, K, V> OccupiedEntry<'a, K, V>
 where
     K: Ord + Clone,
+    V: Default,
 {
     pub fn into_mut(self) -> &'a mut V {
-        self.inner.into_mut()
-    }
-
-    pub fn get_mut(&mut self) -> &mut V {
-        self.inner.get_mut()
+        match self {
+            OccupiedEntry::Default { inner } => inner.insert(Default::default()),
+            OccupiedEntry::Present { inner } => inner.into_mut(),
+        }
     }
 }
 
@@ -291,5 +297,17 @@ where
             Self::Occupied(entry) => entry.into_mut(),
             Self::Vacant(entry) => entry.insert(V::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entry_filled() {
+        let mut map: PartialMap<i32, ()> = PartialMap::new();
+        map.insert_range(1..);
+        assert!(matches!(map.entry(2), Entry::Occupied(_)));
     }
 }
