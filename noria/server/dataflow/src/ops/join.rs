@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use launchpad::intervals::into_bound_endpoint;
 use launchpad::Indices;
 use maplit::hashmap;
 use serde::{Deserialize, Serialize};
@@ -827,30 +828,78 @@ impl Ingredient for Join {
         let mut left_keys = Vec::with_capacity(miss.missed_key.len());
         let mut right_keys = Vec::with_capacity(miss.missed_key.len());
         for key in miss.missed_key {
-            let key = match key {
-                KeyComparison::Equal(k) => k,
-                KeyComparison::Range(_) => {
-                    internal!("Join's handle_upquery does not handle range queries yet")
+            let (left_key, right_key) = match key {
+                KeyComparison::Equal(key) => {
+                    let mut left_key = Vec::with_capacity(left_cols.len());
+                    let mut right_key = Vec::with_capacity(right_cols.len());
+                    for (value, side) in key.into_iter().zip(&col_sides) {
+                        match side {
+                            Side::Left => left_key.push(value),
+                            Side::Right => right_key.push(value),
+                        }
+                    }
+
+                    // If either of these is empty, that means the columns weren't actually
+                    // straddling both parents - which is an invariant of this function!
+                    (
+                        left_key.try_into().map_err(|_| {
+                            internal_err("Join handle_upquery passed a non-straddled join key")
+                        })?,
+                        right_key.try_into().map_err(|_| {
+                            internal_err("Join handle_upquery passed a non-straddled join key")
+                        })?,
+                    )
+                }
+                KeyComparison::Range((lower, upper)) => {
+                    let mut left_lower =
+                        lower.as_ref().map(|_| Vec::with_capacity(left_cols.len()));
+                    let mut right_lower =
+                        lower.as_ref().map(|_| Vec::with_capacity(right_cols.len()));
+                    let mut left_upper =
+                        upper.as_ref().map(|_| Vec::with_capacity(left_cols.len()));
+                    let mut right_upper =
+                        upper.as_ref().map(|_| Vec::with_capacity(right_cols.len()));
+
+                    if let Some(lower_endpoint) = into_bound_endpoint(lower) {
+                        for (value, side) in lower_endpoint.into_iter().zip(&col_sides) {
+                            into_bound_endpoint(match side {
+                                Side::Left => left_lower.as_mut(),
+                                Side::Right => right_lower.as_mut(),
+                            })
+                            .unwrap()
+                            .push(value);
+                        }
+                    }
+
+                    if let Some(upper_endpoint) = into_bound_endpoint(upper) {
+                        for (value, side) in upper_endpoint.into_iter().zip(&col_sides) {
+                            into_bound_endpoint(match side {
+                                Side::Left => left_upper.as_mut(),
+                                Side::Right => right_upper.as_mut(),
+                            })
+                            .unwrap()
+                            .push(value);
+                        }
+                    }
+
+                    #[allow(clippy::unwrap_used)]
+                    // If any of these is empty, that means the columns weren't actually straddling
+                    // both parents - which is an invariant of this function!
+                    (
+                        KeyComparison::Range((
+                            left_lower.map(|k| k.try_into().unwrap()),
+                            left_upper.map(|k| k.try_into().unwrap()),
+                        )),
+                        KeyComparison::Range((
+                            right_lower.map(|k| k.try_into().unwrap()),
+                            right_upper.map(|k| k.try_into().unwrap()),
+                        )),
+                    )
                 }
             };
 
-            let mut left_key = Vec::with_capacity(left_cols.len());
-            let mut right_key = Vec::with_capacity(right_cols.len());
-            for (value, side) in key.into_iter().zip(&col_sides) {
-                match side {
-                    Side::Left => left_key.push(value),
-                    Side::Right => right_key.push(value),
-                }
-            }
-
-            // If either of these is empty, that means the columns weren't actually straddling both
-            // parents - which is an invariant of this function!
-            left_keys.push(left_key.try_into().map_err(|_| {
-                internal_err("Join handle_upquery passed a non-straddled join key")
-            })?);
-            right_keys.push(right_key.try_into().map_err(|_| {
-                internal_err("Join handle_upquery passed a non-straddled join key")
-            })?);
+            left_keys.push(left_key);
+            right_keys.push(right_key);
         }
 
         Ok(vec![
@@ -1158,6 +1207,8 @@ mod tests {
     }
 
     mod handle_upquery {
+        use std::ops::Bound;
+
         use super::*;
 
         #[test]
@@ -1245,6 +1296,110 @@ mod tests {
                     vec1![DataType::from(3)].into(),
                     vec1![DataType::from(6)].into()
                 ]
+            );
+        }
+
+        #[test]
+        fn range_key_double_ended() {
+            let (j, l, r) = setup();
+            let join_index = j.node().global_addr();
+            let res = j
+                .node_mut()
+                .handle_upquery(ColumnMiss {
+                    missed_columns: ColumnRef {
+                        node: join_index,
+                        columns: vec1![0, 1, 2],
+                    },
+                    missed_key: vec1![KeyComparison::Range((
+                        Bound::Included(vec1![
+                            DataType::from(1),
+                            DataType::from(2),
+                            DataType::from(3)
+                        ]),
+                        Bound::Excluded(vec1![
+                            DataType::from(4),
+                            DataType::from(5),
+                            DataType::from(6)
+                        ])
+                    ))],
+                })
+                .unwrap();
+
+            let left_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == l.as_global())
+                .unwrap();
+            let right_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == r.as_global())
+                .unwrap();
+
+            assert_eq!(left_miss.missed_columns.columns, vec1![0, 1]);
+            assert_eq!(right_miss.missed_columns.columns, vec1![1]);
+
+            assert_eq!(
+                left_miss.missed_key,
+                vec1![KeyComparison::Range((
+                    Bound::Included(vec1![DataType::from(1), DataType::from(2)]),
+                    Bound::Excluded(vec1![DataType::from(4), DataType::from(5)])
+                ))]
+            );
+            assert_eq!(
+                right_miss.missed_key,
+                vec1![KeyComparison::Range((
+                    Bound::Included(vec1![DataType::from(3)]),
+                    Bound::Excluded(vec1![DataType::from(6)])
+                ))]
+            );
+        }
+
+        #[test]
+        fn range_key_one_side_unbounded() {
+            let (j, l, r) = setup();
+            let join_index = j.node().global_addr();
+            let res = j
+                .node_mut()
+                .handle_upquery(ColumnMiss {
+                    missed_columns: ColumnRef {
+                        node: join_index,
+                        columns: vec1![0, 1, 2],
+                    },
+                    missed_key: vec1![KeyComparison::Range((
+                        Bound::Included(vec1![
+                            DataType::from(1),
+                            DataType::from(2),
+                            DataType::from(3)
+                        ]),
+                        Bound::Unbounded
+                    ))],
+                })
+                .unwrap();
+
+            let left_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == l.as_global())
+                .unwrap();
+            let right_miss = res
+                .iter()
+                .find(|miss| miss.missed_columns.node == r.as_global())
+                .unwrap();
+
+            assert_eq!(left_miss.missed_columns.columns, vec1![0, 1]);
+            assert_eq!(right_miss.missed_columns.columns, vec1![1]);
+
+            assert_eq!(
+                left_miss.missed_key,
+                vec1![KeyComparison::Range((
+                    Bound::Included(vec1![DataType::from(1), DataType::from(2)]),
+                    Bound::Unbounded
+                ))]
+            );
+            assert_eq!(
+                right_miss.missed_key,
+                vec1![KeyComparison::Range((
+                    Bound::Included(vec1![DataType::from(3)]),
+                    Bound::Unbounded
+                ))]
             );
         }
     }
