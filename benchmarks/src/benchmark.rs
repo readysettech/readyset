@@ -12,6 +12,7 @@
 
 use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
+use crate::fallback_benchmark::FallbackBenchmark;
 use crate::migration_benchmark::MigrationBenchmark;
 use crate::query_benchmark::QueryBenchmark;
 use crate::read_write_benchmark::ReadWriteBenchmark;
@@ -48,6 +49,7 @@ pub enum Benchmark {
     MigrationBenchmark,
     EvictionBenchmark,
     ReadWriteBenchmark,
+    FallbackBenchmark,
 }
 
 impl Benchmark {
@@ -63,6 +65,7 @@ impl Benchmark {
             Self::MigrationBenchmark(_) => "migration_benchmark",
             Self::EvictionBenchmark(_) => "eviction",
             Self::ReadWriteBenchmark(_) => "read_write_benchmark",
+            Self::FallbackBenchmark(_) => "fallback_benchmark",
         }
     }
 }
@@ -150,6 +153,42 @@ impl BenchmarkResults {
         for (k, v) in results {
             self.results.insert(k.to_string(), v.clone().into());
         }
+    }
+
+    /// Prefixes the set of keys in this set of results with `p`.
+    /// If a key with it's prefix already exists, the key may be
+    /// value may be overwritten.
+    pub fn prefix(mut self, p: &str) -> Self {
+        // Make a copy of all the keys so we can mutably borrow the map as we
+        // iterate.
+        let keys: Vec<_> = self.results.keys().cloned().collect();
+        for k in keys.iter() {
+            // Iterating over the set of keys that are in the map.
+            #[allow(clippy::unwrap_used)]
+            self.results
+                .insert(format!("{} {}", p, k), *self.results.get(k).unwrap());
+            self.results.remove(k);
+        }
+
+        self
+    }
+
+    /// Merges a set of benchmark results into a single set of results.
+    /// The set of benchmark results should have *different* keys otherwise
+    /// keys will be overwritten by other benchmark results.
+    ///
+    /// [`BenchmarkResults::prefix`] can be used to give different sets of
+    /// results unique keys, via unique prefixes.
+    pub fn merge(results: Vec<BenchmarkResults>) -> Self {
+        let mut merged = BenchmarkResults {
+            results: HashMap::new(),
+        };
+
+        for r in results {
+            merged.results.extend(r.results);
+        }
+
+        merged
     }
 
     /// Aggregates a set of benchmark results into a single set of
