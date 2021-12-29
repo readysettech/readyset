@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::benchmark_gauge;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 
@@ -27,7 +27,7 @@ impl BenchmarkControl for Template {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, _: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, _: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Performing of the actual thing we want to benchmark, along with recording metrics
         benchmark_gauge!(
             "template.fake_number_of_queries",
@@ -37,7 +37,7 @@ impl BenchmarkControl for Template {
             "label_key_1" => "label_value_1",
             "label_key_2" => "label_value_2"
         );
-        Ok(())
+        Ok(BenchmarkResults::new())
     }
 
     fn labels(&self) -> HashMap<String, String> {

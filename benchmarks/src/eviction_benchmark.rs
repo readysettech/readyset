@@ -18,9 +18,9 @@ use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task;
-use tracing::error;
+use tracing::{debug, error};
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::{forward, ForwardPrometheusMetrics};
@@ -75,7 +75,7 @@ impl BenchmarkControl for EvictionBenchmark {
             "CREATE TABLE eviction_benchmark_empty (id BIGINT UNSIGNED NOT NULL PRIMARY KEY)",
         )
         .await?;
-        println!("created table");
+        debug!("created table");
 
         Ok(())
     }
@@ -84,7 +84,7 @@ impl BenchmarkControl for EvictionBenchmark {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         let thread_data = EvictionBenchmarkReadThreadParams {
             query: self.query.clone(),
             mysql_conn_str: deployment.target_conn_str.clone(),
@@ -98,7 +98,7 @@ impl BenchmarkControl for EvictionBenchmark {
         let terminate_eviction = Arc::new(AtomicBool::from(false));
         let eviction_tasks = self.run_eviction_tasks(deployment, terminate_eviction.clone());
 
-        multi_thread::run_multithread_benchmark::<Self>(
+        let result = multi_thread::run_multithread_benchmark::<Self>(
             self.threads as u64,
             thread_data.clone(),
             self.run_for,
@@ -108,7 +108,7 @@ impl BenchmarkControl for EvictionBenchmark {
         terminate_eviction.store(true, Ordering::Relaxed);
         eviction_tasks.await??;
 
-        Ok(())
+        Ok(result)
     }
 
     fn labels(&self) -> HashMap<String, String> {
@@ -151,13 +151,13 @@ impl EvictionBenchmark {
             loop {
                 interval.tick().await;
                 if terminate.load(Ordering::Relaxed) {
-                    println!("--- Terminating");
+                    debug!("--- Terminating");
                     terminate_eviction_tasks(&mut eviction_tasks).await;
                     break;
                 }
                 if !is_evicting(&forward).await? {
                     let cap = eviction_tasks.capacity();
-                    println!(
+                    debug!(
                         "--- Not evicting; increasing eviction threads to {}",
                         cap * 2
                     );
@@ -173,7 +173,7 @@ impl EvictionBenchmark {
                         )));
                     }
                 } else {
-                    println!("--- Evicting");
+                    debug!("--- Evicting");
                 }
             }
             Ok(())
@@ -245,6 +245,7 @@ impl MultithreadBenchmark for EvictionBenchmark {
     async fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
         interval: Duration,
+        benchmark_results: &mut BenchmarkResults,
     ) -> Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut queries_this_interval = 0;
@@ -267,7 +268,7 @@ impl MultithreadBenchmark for EvictionBenchmark {
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
         benchmark_histogram!("query_benchmark.qps", Count, "Queries per second", qps);
-        println!(
+        debug!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,
             us_to_ms(hist.value_at_quantile(0.5)),
@@ -275,6 +276,16 @@ impl MultithreadBenchmark for EvictionBenchmark {
             us_to_ms(hist.value_at_quantile(0.99)),
             us_to_ms(hist.value_at_quantile(0.9999))
         );
+
+        // This benchmark returns the last seen benchmark results.
+        *benchmark_results = BenchmarkResults::from(&[
+            ("qps", qps),
+            ("latency p50", us_to_ms(hist.value_at_quantile(0.5))),
+            ("latency p90", us_to_ms(hist.value_at_quantile(0.9))),
+            ("latency p99", us_to_ms(hist.value_at_quantile(0.99))),
+            ("latency p99.99", us_to_ms(hist.value_at_quantile(0.9999))),
+        ]);
+
         Ok(())
     }
 

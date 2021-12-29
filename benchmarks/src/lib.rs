@@ -11,7 +11,7 @@
 //! use metrics::Unit;
 //! use mysql_async::prelude::*;
 //!
-//! use benchmarks::benchmark::{BenchmarkControl, DeploymentParameters};
+//! use benchmarks::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 //! use benchmarks::benchmark_gauge;
 //! use benchmarks::utils::prometheus::ForwardPrometheusMetrics;
 //!
@@ -39,7 +39,7 @@
 //!         Err(anyhow::anyhow!("reset unsupported"))
 //!     }
 //!
-//!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+//!     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
 //!         let mut conn = deployment.connect_to_target().await?;
 //!         let stmt = conn.prep(r"SELECT * FROM integers WHERE id = ?").await?;
 //!         for _ in 0..10_000_000 {
@@ -51,7 +51,7 @@
 //!             "Number of queries executed in this benchmark run",
 //!             self.row_count as f64
 //!         );
-//!         Ok(())
+//!         Ok(BenchmarkResults::new())
 //!     }
 //!
 //!     fn labels(&self) -> HashMap<String, String> {

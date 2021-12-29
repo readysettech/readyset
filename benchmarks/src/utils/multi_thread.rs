@@ -1,3 +1,4 @@
+use crate::benchmark::BenchmarkResults;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::futures_unordered::FuturesUnordered;
@@ -22,6 +23,7 @@ pub(crate) trait MultithreadBenchmark {
     async fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
         interval: Duration,
+        results: &mut BenchmarkResults,
     ) -> Result<()>;
 
     /// Benchmarking code that is initialized using `params` that sends `BenchmarkResult`
@@ -48,7 +50,7 @@ async fn return_after_duration(duration: Option<Duration>) {
 async fn benchmark_results_thread<B>(
     mut reciever: UnboundedReceiver<B::BenchmarkResult>,
     run_for: Option<Duration>,
-) -> Result<()>
+) -> Result<BenchmarkResults>
 where
     B: MultithreadBenchmark,
 {
@@ -60,6 +62,8 @@ where
     let return_after = return_after_duration(run_for);
     tokio::pin!(return_after);
 
+    let mut results = BenchmarkResults::new();
+
     loop {
         select! {
             // If we reach our thread update interval, run the provided function
@@ -67,7 +71,7 @@ where
             _ = interval.tick() => {
                 let mut new_updates = Vec::new();
                 std::mem::swap(&mut new_updates, &mut updates);
-                B::handle_benchmark_results(new_updates, THREAD_UPDATE_INTERVAL).await?
+                B::handle_benchmark_results(new_updates, THREAD_UPDATE_INTERVAL, &mut results).await?
             }
             // If we receive an update push it to the next batch of updates.
             r = reciever.recv() => {
@@ -83,7 +87,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(results)
 }
 
 /// Spawns a multi-threaded benchmark across `num_threads` threads running
@@ -94,7 +98,7 @@ pub(crate) async fn run_multithread_benchmark<B>(
     num_threads: u64,
     params: B::Parameters,
     run_for: Option<Duration>,
-) -> Result<()>
+) -> Result<BenchmarkResults>
 where
     B: MultithreadBenchmark + 'static,
 {
@@ -125,12 +129,12 @@ where
                     None => break,
                 }
             }
-            _ = &mut results => {
-                break;
+            res = &mut results => {
+                return res?;
             }
         }
     }
-    Ok(())
+    Ok(BenchmarkResults::new())
 }
 
 pub(crate) fn throttle_interval(target_qps: Option<u64>, num_threads: u64) -> Option<Interval> {

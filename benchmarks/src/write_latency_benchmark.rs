@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::convert::TryInto;
+use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
@@ -7,15 +9,16 @@ use clap::Parser;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Row, Value};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{debug, info};
 
 use nom_sql::{parse_query, Dialect, SqlQuery};
 use query_generator::{ColumnName, TableName};
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::{forward, ForwardPrometheusMetrics};
 use crate::utils::query::ArbitraryQueryParameters;
+use crate::utils::us_to_ms;
 
 #[derive(Parser, Clone, Serialize, Deserialize)]
 pub struct WriteLatencyBenchmark {
@@ -47,7 +50,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         let mut db = deployment.connect_to_target().await?;
 
         let mut data_spec = self
@@ -76,7 +79,7 @@ impl BenchmarkControl for WriteLatencyBenchmark {
             .lock()
             .generator
             .gen();
-        info!("Keying on {} <= {}", self.key_field, key_value);
+        debug!("Keying on {} <= {}", self.key_field, key_value);
         let key_value: Value = key_value.try_into()?;
 
         let select = db
@@ -86,17 +89,26 @@ impl BenchmarkControl for WriteLatencyBenchmark {
             ))
             .await?;
         let rows = db.exec::<Row, _, _>(&select, (&key_value,)).await?.len();
-        info!("{} rows match", rows);
-        info!("View created");
+        debug!("{} rows match", rows);
+        debug!("View created");
 
+        let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let (update, _) = prepared_statement.generate_query();
         for _i in 0..self.updates {
+            let start = Instant::now();
             db.exec_drop(&update, prepared_statement.generate_parameters())
                 .await?;
+            let elapsed = start.elapsed();
+            hist.record(u64::try_from(elapsed.as_micros()).unwrap())
+                .unwrap();
         }
-        info!("Rows updated");
 
-        Ok(())
+        Ok(BenchmarkResults::from(&[
+            ("latency p50", us_to_ms(hist.value_at_quantile(0.5))),
+            ("latency p90", us_to_ms(hist.value_at_quantile(0.9))),
+            ("latency p99", us_to_ms(hist.value_at_quantile(0.99))),
+            ("latency p99.99", us_to_ms(hist.value_at_quantile(0.9999))),
+        ]))
     }
 
     fn labels(&self) -> HashMap<String, String> {

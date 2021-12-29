@@ -6,7 +6,7 @@
 //! it takes to create the connection and the number of views.
 //! `--param_count` can be specified to modify the number of
 //! parameters in the view.
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::{bail, Result};
@@ -17,7 +17,7 @@ use mysql_async::prelude::Queryable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
-use tracing::info;
+use tracing::{debug, info};
 
 const MAX_MYSQL_COLUMN_COUNT: usize = 4096;
 
@@ -82,7 +82,7 @@ impl BenchmarkControl for ScaleViews {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         info!(
             "Running benchmark with {} views, {} params per view",
             self.num_views, self.param_count
@@ -91,8 +91,9 @@ impl BenchmarkControl for ScaleViews {
         let permutations: Vec<Vec<&String>> =
             columns.iter().combinations(self.param_count).collect();
 
+        let mut results = BenchmarkResults::new();
         assert!(permutations.len() >= self.num_views);
-        for c in permutations.iter().take(self.num_views) {
+        for (i, c) in permutations.iter().enumerate().take(self.num_views) {
             let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
@@ -112,11 +113,24 @@ impl BenchmarkControl for ScaleViews {
                 .unwrap();
             let prepare_time = start.elapsed();
 
-            info!(
+            debug!(
                 "connection:\t{:.1}ms\tprepare:\t{:.1}ms",
                 connection_time.as_secs_f64() * 1000.0,
                 prepare_time.as_secs_f64() * 1000.0
             );
+
+            if i == 0 || i == self.num_views || i == self.num_views / 2 {
+                results.append(&[
+                    (
+                        &format!("connect @ view {}", i),
+                        connection_time.as_secs_f64() * 1000.0,
+                    ),
+                    (
+                        &format!("prepare @ view {}", i),
+                        connection_time.as_secs_f64() * 1000.0,
+                    ),
+                ]);
+            }
 
             benchmark_histogram!(
                 "scale_views.connection_duration",
@@ -139,7 +153,7 @@ impl BenchmarkControl for ScaleViews {
             )
         }
 
-        Ok(())
+        Ok(results)
     }
 
     fn labels(&self) -> HashMap<String, String> {

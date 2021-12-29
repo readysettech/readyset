@@ -10,8 +10,6 @@
 //!     - Create a type that implements `BenchmarkControl`,
 //!     - Add the type's name as a variant `Benchmark`.
 
-use std::collections::HashMap;
-
 use crate::cache_hit_benchmark::CacheHitBenchmark;
 use crate::eviction_benchmark::EvictionBenchmark;
 use crate::migration_benchmark::MigrationBenchmark;
@@ -28,8 +26,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use clap::Parser;
 use enum_dispatch::enum_dispatch;
+use itertools::Itertools;
 use mysql_async::{Conn, Opts};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
 
 #[allow(clippy::large_enum_variant)]
 #[enum_dispatch(BenchmarkControl)]
@@ -114,6 +115,91 @@ impl DeploymentParameters {
     }
 }
 
+/// Key-value pair of benchmark results that can be used to calculate
+/// distributions across multiple benchmark iterations.
+#[derive(Debug)]
+pub struct BenchmarkResults {
+    results: HashMap<String, f64>,
+}
+
+impl BenchmarkResults {
+    pub fn new() -> Self {
+        Self {
+            results: HashMap::new(),
+        }
+    }
+
+    pub fn from<T>(results: &[(&str, T)]) -> Self
+    where
+        T: fmt::Display + Clone,
+        f64: From<T>,
+    {
+        Self {
+            results: results
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone().into()))
+                .collect(),
+        }
+    }
+
+    pub fn append<T>(&mut self, results: &[(&str, T)])
+    where
+        T: fmt::Display + Clone,
+        f64: From<T>,
+    {
+        for (k, v) in results {
+            self.results.insert(k.to_string(), v.clone().into());
+        }
+    }
+
+    /// Aggregates a set of benchmark results into a single set of
+    /// results. For each metric in the benchmark results, we calculate
+    /// the min, max, median and mean for each metric. This assumes that
+    /// each result in `results` has the same set of metrics.
+    pub fn aggregate(results: &[BenchmarkResults]) -> Self {
+        let mut agg = BenchmarkResults {
+            results: HashMap::new(),
+        };
+
+        // For each metric get all values from the set of benchmarks. Calculate the
+        // min, max, median, mean over the values for the result.
+
+        let keys = results[0].results.keys().clone();
+        for k in keys {
+            let mut values: Vec<_> = results.iter().map(|r| r.results.get(k).unwrap()).collect();
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let len = values.len();
+
+            agg.results.insert(k.clone() + " min", *values[0]);
+            agg.results
+                .insert(k.clone() + " max", *values[values.len() - 1]);
+            agg.results
+                .insert(k.clone() + " median", *values[values.len() / 2]);
+            agg.results.insert(
+                k.clone() + " mean",
+                values.into_iter().sum::<f64>() / len as f64,
+            );
+        }
+
+        agg
+    }
+}
+
+impl Default for BenchmarkResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for BenchmarkResults {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for key in self.results.keys().sorted() {
+            writeln!(f, "{}: {}", key, self.results[key])?;
+        }
+        Ok(())
+    }
+}
+
 /// The set of control functions needed to execute the benchmark in
 /// the `BenchmarkRunner`.
 #[async_trait]
@@ -130,7 +216,7 @@ pub trait BenchmarkControl {
     async fn reset(&self, deployment: &DeploymentParameters) -> Result<()>;
 
     /// Perform actual benchmarking, writing results to prometheus.
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()>;
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults>;
 
     /// Get Prometheus labels for this benchmark run.
     fn labels(&self) -> HashMap<String, String>;

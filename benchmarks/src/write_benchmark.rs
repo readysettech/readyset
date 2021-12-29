@@ -13,8 +13,9 @@ use query_generator::TableSpec;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::debug;
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::utils::spec::{DatabaseGenerationSpec, DatabaseSchema};
@@ -89,7 +90,7 @@ impl BenchmarkControl for WriteBenchmark {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         multi_thread::run_multithread_benchmark::<Self>(
             self.threads,
             WriteBenchmarkThreadData::new(self, deployment)?,
@@ -140,6 +141,7 @@ impl MultithreadBenchmark for WriteBenchmark {
     async fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
         interval: Duration,
+        benchmark_results: &mut BenchmarkResults,
     ) -> Result<()> {
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut queries_this_interval = 0;
@@ -163,7 +165,7 @@ impl MultithreadBenchmark for WriteBenchmark {
         );
         let qps = hist.len() as f64 / interval.as_secs() as f64;
         benchmark_histogram!("write_benchmark.qps", Count, "Queries per second", qps);
-        println!(
+        debug!(
             "qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             qps,
             us_to_ms(hist.value_at_quantile(0.5)),
@@ -171,6 +173,16 @@ impl MultithreadBenchmark for WriteBenchmark {
             us_to_ms(hist.value_at_quantile(0.99)),
             us_to_ms(hist.value_at_quantile(0.9999))
         );
+
+        // This benchmark returns the last seen benchmark results.
+        *benchmark_results = BenchmarkResults::from(&[
+            ("qps", qps),
+            ("latency p50", us_to_ms(hist.value_at_quantile(0.5))),
+            ("latency p90", us_to_ms(hist.value_at_quantile(0.9))),
+            ("latency p99", us_to_ms(hist.value_at_quantile(0.99))),
+            ("latency p99.99", us_to_ms(hist.value_at_quantile(0.9999))),
+        ]);
+
         Ok(())
     }
 

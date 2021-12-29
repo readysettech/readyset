@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, DeploymentParameters};
+use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use benchmarks::benchmark_histogram;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -159,12 +159,13 @@ impl BenchmarkRunner {
 
         let importer = self.start_metric_readers();
 
+        let mut results = Vec::new();
         for i in 0..self.iterations {
             if self.iterations > 1 {
-                println!("Iteration: {}", i);
+                println!("Iteration: {} ---------------------------", i);
             }
             let start_time = Instant::now();
-            benchmark_cmd.benchmark(&self.deployment_params).await?;
+            let result = benchmark_cmd.benchmark(&self.deployment_params).await?;
             let duration = start_time.elapsed();
             benchmark_histogram!(
                 "benchmark_duration",
@@ -172,8 +173,13 @@ impl BenchmarkRunner {
                 "Time, in microseconds, that it took to run the benchmark.",
                 duration.as_micros() as f64
             );
+            println!("{}", result);
+            results.push(result);
             benchmark_cmd.reset(&self.deployment_params).await?;
         }
+
+        println!("Benchmark Results -----------------------");
+        println!("{}", BenchmarkResults::aggregate(&results));
 
         if let Some((handle, tx)) = importer {
             drop(tx);

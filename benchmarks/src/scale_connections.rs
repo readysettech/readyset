@@ -1,4 +1,4 @@
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
 use crate::{benchmark_counter, benchmark_histogram};
 use anyhow::Result;
@@ -31,14 +31,15 @@ impl BenchmarkControl for ScaleConnections {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         info!(
             "Running benchmark connecting to {} connections.",
             self.num_connections
         );
 
         let mut connections = Vec::new();
-        for _ in 0..self.num_connections {
+        let mut results = BenchmarkResults::new();
+        for i in 0..self.num_connections {
             let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
 
             let start = Instant::now();
@@ -55,6 +56,13 @@ impl BenchmarkControl for ScaleConnections {
                 connection_time.as_secs_f64() * 1000.0,
             );
 
+            if i == 0 || i == self.num_connections || i == self.num_connections / 2 {
+                results.append(&[(
+                    &format!("connect @ {}", i),
+                    connection_time.as_secs_f64() * 1000.0,
+                )]);
+            }
+
             benchmark_histogram!(
                 "scale_connections.connection_duration",
                 Seconds,
@@ -70,7 +78,7 @@ impl BenchmarkControl for ScaleConnections {
             )
         }
 
-        Ok(())
+        Ok(results)
     }
 
     fn labels(&self) -> HashMap<String, String> {

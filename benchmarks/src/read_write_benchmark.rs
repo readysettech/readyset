@@ -11,9 +11,9 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::error;
+use tracing::{debug, error};
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::utils::generate::DataGenerator;
 use crate::utils::multi_thread::{self, MultithreadBenchmark};
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -93,7 +93,7 @@ impl BenchmarkControl for ReadWriteBenchmark {
         Err(anyhow::anyhow!("reset unsupported"))
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
@@ -181,6 +181,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
     async fn handle_benchmark_results(
         results: Vec<Self::BenchmarkResult>,
         interval: Duration,
+        benchmark_results: &mut BenchmarkResults,
     ) -> Result<()> {
         let mut read_hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
         let mut update_hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
@@ -219,7 +220,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             "Queries per second",
             update_qps
         );
-        println!(
+        debug!(
             "read qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             read_qps,
             us_to_ms(read_hist.value_at_quantile(0.5)),
@@ -228,7 +229,7 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             us_to_ms(read_hist.value_at_quantile(0.9999))
         );
 
-        println!(
+        debug!(
             "update qps: {:.0}\tp50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
             update_qps,
             us_to_ms(update_hist.value_at_quantile(0.5)),
@@ -236,6 +237,44 @@ impl MultithreadBenchmark for ReadWriteBenchmark {
             us_to_ms(update_hist.value_at_quantile(0.99)),
             us_to_ms(update_hist.value_at_quantile(0.9999))
         );
+
+        // This benchmark returns the last seen benchmark results.
+        *benchmark_results = BenchmarkResults::from(&[
+            ("read qps", read_qps),
+            (
+                "read latency p50",
+                us_to_ms(read_hist.value_at_quantile(0.5)),
+            ),
+            (
+                "read latency p90",
+                us_to_ms(read_hist.value_at_quantile(0.9)),
+            ),
+            (
+                "read latency p99",
+                us_to_ms(read_hist.value_at_quantile(0.99)),
+            ),
+            (
+                "read latency p99.99",
+                us_to_ms(read_hist.value_at_quantile(0.9999)),
+            ),
+            ("update qps", update_qps),
+            (
+                "update latency p50",
+                us_to_ms(update_hist.value_at_quantile(0.5)),
+            ),
+            (
+                "update latency p90",
+                us_to_ms(update_hist.value_at_quantile(0.9)),
+            ),
+            (
+                "update latency p99",
+                us_to_ms(update_hist.value_at_quantile(0.99)),
+            ),
+            (
+                "update latency p99.99",
+                us_to_ms(update_hist.value_at_quantile(0.9999)),
+            ),
+        ]);
 
         Ok(())
     }

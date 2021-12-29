@@ -9,7 +9,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::benchmark::{BenchmarkControl, DeploymentParameters};
+use crate::benchmark::{BenchmarkControl, BenchmarkResults, DeploymentParameters};
 use crate::benchmark_histogram;
 use crate::utils::generate::DataGenerator;
 use crate::utils::prometheus::ForwardPrometheusMetrics;
@@ -50,20 +50,23 @@ impl BenchmarkControl for CacheHitBenchmark {
         Ok(())
     }
 
-    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<()> {
+    async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
         // Explicitely migrate the query before benchmarking.
         let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
         let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
         self.query.migrate(&mut conn).await?;
 
         let mut gen = CachingQueryGenerator::from(self.query.prepared_statement(&mut conn).await?);
+        let mut results = BenchmarkResults::new();
 
         // Generate the cache misses.
-        self.run_queries(&mut conn, &mut gen, true).await?;
+        self.run_queries(&mut conn, &mut gen, true, &mut results)
+            .await?;
         // Generate the cache hits.
-        self.run_queries(&mut conn, &mut gen, false).await?;
+        self.run_queries(&mut conn, &mut gen, false, &mut results)
+            .await?;
 
-        Ok(())
+        Ok(results)
     }
 
     fn labels(&self) -> HashMap<String, String> {
@@ -84,6 +87,7 @@ impl CacheHitBenchmark {
         conn: &mut mysql_async::Conn,
         gen: &mut CachingQueryGenerator,
         cache_miss: bool,
+        results: &mut BenchmarkResults,
     ) -> Result<()> {
         // Generates 1000 cache misses.
         let mut hist = hdrhistogram::Histogram::<u64>::new(3).unwrap();
@@ -110,17 +114,26 @@ impl CacheHitBenchmark {
                 elapsed.as_micros() as f64
             );
         }
-        println!(
-            "Over 1000 cache {}",
-            if cache_miss { "misses" } else { "hits" }
-        );
-        println!(
-            "p50: {:.1} ms\tp90: {:.1} ms\tp99: {:.1} ms\tp99.99: {:.1} ms",
-            us_to_ms(hist.value_at_quantile(0.5)),
-            us_to_ms(hist.value_at_quantile(0.9)),
-            us_to_ms(hist.value_at_quantile(0.99)),
-            us_to_ms(hist.value_at_quantile(0.9999))
-        );
+
+        let query_type = if cache_miss { "misses" } else { "hits" };
+        results.append(&[
+            (
+                &format!("{} {}", query_type, "latency p50"),
+                us_to_ms(hist.value_at_quantile(0.5)),
+            ),
+            (
+                &format!("{} {}", query_type, "latency p90"),
+                us_to_ms(hist.value_at_quantile(0.9)),
+            ),
+            (
+                &format!("{} {}", query_type, "latency p99"),
+                us_to_ms(hist.value_at_quantile(0.99)),
+            ),
+            (
+                &format!("{} {}", query_type, "latency p99.99"),
+                us_to_ms(hist.value_at_quantile(0.9999)),
+            ),
+        ]);
 
         Ok(())
     }
