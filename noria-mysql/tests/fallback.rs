@@ -126,22 +126,28 @@ fn range_query() {
 #[serial]
 fn aggregate_in() {
     let mut conn = mysql::Conn::new(setup()).unwrap();
-
-    println!("yay");
     conn.query_drop("CREATE TABLE cats (id int PRIMARY KEY, cuteness int)")
         .unwrap();
-    println!("1");
     conn.query_drop("INSERT INTO cats (id, cuteness) values (1, 10), (2, 8)")
         .unwrap();
     sleep();
 
-    println!("Made it here");
     let rows: Vec<(i32,)> = conn
         .exec(
             "SELECT sum(cuteness) FROM cats WHERE id IN (?, ?)",
             vec![1, 2],
         )
         .unwrap();
-    println!("done");
     assert_eq!(rows, vec![(18,)]);
+}
+
+#[test]
+#[serial]
+fn set_autocommit() {
+    let mut conn = mysql::Conn::new(setup()).unwrap();
+    // We do not support SET autocommit = 0;
+    assert!(conn.query_drop("SET @@SESSION.autocommit = 1;").is_ok());
+    assert!(conn.query_drop("SET @@SESSION.autocommit = 0;").is_err());
+    assert!(conn.query_drop("SET @@LOCAL.autocommit = 1;").is_ok());
+    assert!(conn.query_drop("SET @@LOCAL.autocommit = 0;").is_err());
 }
