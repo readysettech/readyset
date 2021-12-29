@@ -32,11 +32,22 @@ pub(crate) trait MultithreadBenchmark {
     ) -> Result<()>;
 }
 
+/// Returns after `duration` if it is Some, otherwise, never returns. Useful
+/// within select! loops to optional break after a duration.
+async fn return_after_duration(duration: Option<Duration>) {
+    if let Some(d) = duration {
+        tokio::time::sleep(d).await;
+    } else {
+        let () = futures::future::pending().await;
+    }
+}
+
 /// Aggregates benchmark results received over `THREAD_UPDATE_INTERVAL`.
 /// Every `THREAD_UPDATE_INTERVAL`, the batch of benchmark results is
 /// passed to the MultithreadBenchmark's function: handle_benchmark_results().
 async fn benchmark_results_thread<B>(
     mut reciever: UnboundedReceiver<B::BenchmarkResult>,
+    run_for: Option<Duration>,
 ) -> Result<()>
 where
     B: MultithreadBenchmark,
@@ -44,6 +55,11 @@ where
     const THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
     let mut interval = tokio::time::interval(THREAD_UPDATE_INTERVAL);
     let mut updates = Vec::new();
+
+    // Pin the future so we can poll on it repeatedly in the select loop.
+    let return_after = return_after_duration(run_for);
+    tokio::pin!(return_after);
+
     loop {
         select! {
             // If we reach our thread update interval, run the provided function
@@ -58,8 +74,11 @@ where
                 if let Some(r) = r {
                     updates.push(r);
                 } else {
-                    break;// All threads have dropped their sender.
+                    break; // All threads have dropped their sender.
                 }
+            }
+            _ = &mut return_after => {
+                break;
             }
         }
     }
@@ -74,33 +93,41 @@ where
 pub(crate) async fn run_multithread_benchmark<B>(
     num_threads: u64,
     params: B::Parameters,
+    run_for: Option<Duration>,
 ) -> Result<()>
 where
     B: MultithreadBenchmark + 'static,
 {
     let (sender, receiver) = unbounded_channel::<B::BenchmarkResult>();
 
-    let mut futures: FuturesUnordered<_> = (0..num_threads)
+    let mut workers: FuturesUnordered<_> = (0..num_threads)
         .map(|_| tokio::spawn(B::benchmark_thread(params.clone(), sender.clone())))
         .collect();
-    futures.push(tokio::spawn(benchmark_results_thread::<B>(receiver)));
+    let mut results = tokio::spawn(benchmark_results_thread::<B>(receiver, run_for));
 
     loop {
-        match futures.next().await {
-            // Error returned from future.
-            Some(Err(e)) => {
-                error!("Error executing future in multi-threaded benchmark");
-                return Err(e.into());
+        select! {
+            w = workers.next() => {
+                match w {
+                    // Error returned from future.
+                    Some(Err(e)) => {
+                        error!("Error executing future in multi-threaded benchmark");
+                        return Err(e.into());
+                    }
+                    // Error returned from benchmark thread.
+                    Some(Ok(Err(e))) => {
+                        error!("Error executing benchmark thread: {}", e);
+                        return Err(e);
+                    }
+                    // Success returned from benchmark thread.
+                    Some(_) => {}
+                    // No more threads to run.
+                    None => break,
+                }
             }
-            // Error returned from benchmark thread.
-            Some(Ok(Err(e))) => {
-                error!("Error executing benchmark thread: {}", e);
-                return Err(e);
+            _ = &mut results => {
+                break;
             }
-            // Success returned from benchmark thread.
-            Some(_) => {}
-            // No more threads to run.
-            None => break,
         }
     }
     Ok(())

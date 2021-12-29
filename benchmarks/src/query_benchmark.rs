@@ -43,6 +43,12 @@ pub struct QueryBenchmark {
     /// Install and generate from an arbitrary schema.
     #[clap(flatten)]
     data_generator: DataGenerator,
+
+    /// The duration, specified as the number of seconds that the benchmark
+    /// should be running. If `None` is provided, the benchmark will run
+    /// until it is interrupted.
+    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    pub run_for: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -102,7 +108,12 @@ impl BenchmarkControl for QueryBenchmark {
             Count,
             "Number of queries executed in this benchmark run"
         );
-        multi_thread::run_multithread_benchmark::<Self>(self.threads, thread_data.clone()).await
+        multi_thread::run_multithread_benchmark::<Self>(
+            self.threads,
+            thread_data.clone(),
+            self.run_for,
+        )
+        .await
     }
 
     fn labels(&self) -> HashMap<String, String> {

@@ -38,6 +38,12 @@ pub struct WriteBenchmark {
     /// The number of threads to execute the read benchmark across.
     #[clap(long, default_value = "1")]
     threads: u64,
+
+    /// The duration, specified as the number of seconds that the benchmark
+    /// should be running. If `None` is provided, the benchmark will run
+    /// until it is interrupted.
+    #[clap(long, parse(try_from_str = crate::utils::seconds_as_str_to_duration))]
+    pub run_for: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -87,6 +93,7 @@ impl BenchmarkControl for WriteBenchmark {
         multi_thread::run_multithread_benchmark::<Self>(
             self.threads,
             WriteBenchmarkThreadData::new(self, deployment)?,
+            self.run_for,
         )
         .await
     }

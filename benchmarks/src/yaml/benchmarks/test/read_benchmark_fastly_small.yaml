@@ -9,3 +9,6 @@ QueryBenchmark:
   data_generator:
     schema: src/data/fastly/fastly_db_tiny.sql
     var_overrides: {}
+  run_for:
+    secs: 20
+    nanos: 0

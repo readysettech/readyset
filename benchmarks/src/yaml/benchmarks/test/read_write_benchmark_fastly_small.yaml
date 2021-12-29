@@ -13,3 +13,6 @@ ReadWriteBenchmark:
   data_generator:
     schema: data/fastly/fastly_db_tiny.sql
     var_overrides: {}
+  run_for:
+    secs: 20
+    nanos: 0
