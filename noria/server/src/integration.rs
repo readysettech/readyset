@@ -6699,6 +6699,64 @@ async fn straddled_join_range_query() {
     assert_eq!(res, vec![(2, 2)]);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[ignore] // Unions can't handle range queries yet
+async fn range_query_through_union() {
+    readyset_logging::init_test_logging();
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
+        builder.set_allow_range_queries(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe(
+        "CREATE TABLE t (a int, b int);
+         QUERY q: SELECT a, b FROM t WHERE (a = 1 OR a = 2) AND b > ?",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+    let mut q = g.view("q").await.unwrap();
+
+    t.insert_many(vec![
+        vec![DataType::from(1), DataType::from(1)],
+        vec![DataType::from(2), DataType::from(1)],
+        vec![DataType::from(1), DataType::from(2)],
+        vec![DataType::from(2), DataType::from(2)],
+        vec![DataType::from(3), DataType::from(2)],
+    ])
+    .await
+    .unwrap();
+
+    let rows = q
+        .multi_lookup(
+            vec![KeyComparison::Range((
+                Bound::Excluded(vec1![1.into()]),
+                Bound::Unbounded,
+            ))],
+            true,
+        )
+        .await
+        .unwrap();
+
+    let res = rows
+        .into_iter()
+        .flatten()
+        .map(|r| (get_col!(r, "a", i32), get_col!(r, "b", i32)))
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(1, 2), (2, 2)]);
+}
+
 // FIXME(fran): This test is ignored because the Controller
 //  is not noticing that the Worker it is trying to replicate domains to
 //  is no longer available.
