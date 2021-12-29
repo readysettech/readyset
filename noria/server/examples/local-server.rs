@@ -23,6 +23,7 @@ async fn main() {
         noria_server::DurabilityMode::Permanent,
         Some(String::from("example")),
         1,
+        None,
     );
 
     // set up Soup via recipe

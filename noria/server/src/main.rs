@@ -1,6 +1,7 @@
 #![warn(clippy::dbg_macro)]
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::time::Duration;
@@ -188,6 +189,10 @@ struct Opts {
     /// Sets the number of concurrent replay requests in a noria-server.
     #[clap(long, hidden = true)]
     max_concurrent_replays: Option<usize>,
+
+    /// Directory in which to store replicated table data. If not specified, defaults to the current working directory.
+    #[clap(long)]
+    db_dir: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -273,6 +278,7 @@ fn main() -> anyhow::Result<()> {
         opts.durability,
         Some(opts.deployment.clone()),
         opts.persistence_threads,
+        opts.db_dir,
     );
     builder.set_persistence(persistence_params);
 

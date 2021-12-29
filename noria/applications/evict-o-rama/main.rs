@@ -27,6 +27,7 @@ async fn main() {
         noria::DurabilityMode::Permanent,
         Some(String::from("evictorama")),
         1,
+        None,
     );
 
     // set up Soup via recipe

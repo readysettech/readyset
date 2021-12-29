@@ -38,6 +38,7 @@ mod processing;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -114,6 +115,9 @@ pub struct PersistenceParameters {
     pub db_filename_prefix: String,
     /// Number of background threads PersistentState can use (shared acrosss all worker threads).
     pub persistence_threads: i32,
+    /// An optional path to a directory where to store the DB files, if None will be stored in the
+    /// current working directory
+    pub db_dir: Option<PathBuf>,
 }
 
 impl Default for PersistenceParameters {
@@ -122,6 +126,7 @@ impl Default for PersistenceParameters {
             mode: DurabilityMode::MemoryOnly,
             db_filename_prefix: String::from("soup"),
             persistence_threads: 1,
+            db_dir: None,
         }
     }
 }
@@ -140,6 +145,7 @@ impl PersistenceParameters {
         mode: DurabilityMode,
         db_filename_prefix: Option<String>,
         persistence_threads: i32,
+        db_dir: Option<PathBuf>,
     ) -> Self {
         // NOTE(fran): DO NOT impose a particular format on `db_filename_prefix`. If you need to, modify
         // it before use, but do not make assertions on it. The reason being, we use Noria's deployment
@@ -151,6 +157,7 @@ impl PersistenceParameters {
             mode,
             db_filename_prefix,
             persistence_threads,
+            db_dir,
         }
     }
 }

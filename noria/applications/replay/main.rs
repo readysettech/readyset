@@ -271,6 +271,7 @@ async fn main() {
         } else {
             DurabilityMode::MemoryOnly
         },
+        db_dir: None,
     };
 
     let zk_address = args.value_of("zookeeper-address").unwrap();

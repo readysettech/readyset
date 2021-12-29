@@ -168,7 +168,7 @@ pub struct PersistentState {
     replication_offset: Option<ReplicationOffset>,
     // With DurabilityMode::DeleteOnExit,
     // RocksDB files are stored in a temporary directory.
-    _directory: Option<TempDir>,
+    _tmpdir: Option<TempDir>,
     /// When set to true [`SnapshotMode::SnapshotModeEnabled`] compaction will be disabled and writes will
     /// bypass WAL and fsync
     pub(crate) snapshot_mode: SnapshotMode,
@@ -441,13 +441,22 @@ impl PersistentState {
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
         use rocksdb::{ColumnFamilyDescriptor, DB};
-        let (directory, full_name) = match params.mode {
-            DurabilityMode::Permanent => (None, format!("{}.db", name)),
+        let (tmpdir, full_path) = match params.mode {
+            DurabilityMode::Permanent => {
+                let mut path = params.db_dir.clone().unwrap_or_else(|| ".".into());
+                if !path.is_dir() {
+                    std::fs::create_dir_all(&path).expect("Could not create DB directory");
+                }
+                path.push(&name);
+                path.set_extension("db");
+
+                (None, path)
+            }
             _ => {
                 let dir = tempdir().unwrap();
-                let path = dir.path().join(name.clone());
-                let full_name = format!("{}.db", path.to_str().unwrap());
-                (Some(dir), full_name)
+                let mut path = dir.path().join(&name);
+                path.set_extension("db");
+                (Some(dir), path)
             }
         };
 
@@ -455,7 +464,7 @@ impl PersistentState {
         // We use a column family for each index, and one for metadata.
         // When opening the DB the exact same column families needs to be used,
         // so we'll have to retrieve the existing ones first:
-        let cf_names = match DB::list_cf(&opts, &full_name) {
+        let cf_names = match DB::list_cf(&opts, &full_path) {
             Ok(cfs) => cfs,
             Err(_err) => vec![DEFAULT_CF.to_string()],
         };
@@ -471,7 +480,7 @@ impl PersistentState {
         let mut retry = 0;
         let mut db = loop {
             // TODO: why is this loop even needed?
-            match DB::open_cf_descriptors(&opts, &full_name, make_cfs()) {
+            match DB::open_cf_descriptors(&opts, &full_path, make_cfs()) {
                 Ok(db) => break db,
                 _ if retry < 100 => {
                     retry += 1;
@@ -505,7 +514,7 @@ impl PersistentState {
             replication_offset: meta.replication_offset.map(|ro| ro.into_owned()),
             db_opts: opts,
             db,
-            _directory: directory,
+            _tmpdir: tmpdir,
             snapshot_mode: SnapshotMode::SnapshotModeDisabled,
         };
 
@@ -1747,7 +1756,7 @@ mod tests {
                 Vec::<Box<[usize]>>::new(),
                 &PersistenceParameters::default(),
             );
-            let path = state._directory.as_ref().unwrap().path().clone();
+            let path = state._tmpdir.as_ref().unwrap().path().clone();
             assert!(path.exists());
             String::from(path.to_str().unwrap())
         };
