@@ -71,78 +71,9 @@ where
 }
 
 impl<Q: fmt::Display + Ord + Clone> IntervalTree<Q> {
+    /// Return a representation of the tree in graphviz dot format
     pub fn graphviz(&self) -> String {
-        fn describe_range<Q: fmt::Display>(r: &(Bound<Q>, Bound<Q>)) -> String {
-            format!(
-                "{},{}",
-                match &r.0 {
-                    Unbounded => "(-∞".to_owned(),
-                    Included(x) => format!("[{}", x),
-                    Excluded(x) => format!("({}", x),
-                },
-                match &r.1 {
-                    Unbounded => "∞)".to_owned(),
-                    Included(x) => format!("{}]", x),
-                    Excluded(x) => format!("{})", x),
-                }
-            )
-        }
-
-        fn walk<Q: fmt::Display + Ord + Clone>(
-            node: &Node<Q>,
-            nodes: &mut String,
-            edges: &mut String,
-            invisible_edges: &mut String,
-            ni: &mut u32,
-        ) -> u32 {
-            *ni += 1;
-            let me = *ni;
-            nodes.push_str(&format!(
-                "{} [label=\"{}\"]\n",
-                ni,
-                describe_range(&node.key)
-            ));
-
-            let left_i = node
-                .left
-                .as_ref()
-                .map(|n| walk(n, nodes, edges, invisible_edges, ni));
-            let right_i = node
-                .right
-                .as_ref()
-                .map(|n| walk(n, nodes, edges, invisible_edges, ni));
-
-            if let Some(left_i) = left_i {
-                edges.push_str(&format!("{} -> {};\n", me, left_i))
-            }
-            if let Some(right_i) = right_i {
-                edges.push_str(&format!("{} -> {};\n", me, right_i))
-            }
-
-            if let (Some(left_i), Some(right_i)) = (left_i, right_i) {
-                invisible_edges.push_str(&format!("{}:e -> {}:w;\n", left_i, right_i));
-                edges.push_str(&format!("{{ rank=same; {} {} }}", left_i, right_i));
-            }
-
-            me
-        }
-
-        let mut nodes = String::new();
-        let mut edges = String::new();
-        let mut invisible_edges = String::new();
-        let mut ni = 0u32;
-
-        let root = match &self.root {
-            Some(n) => n,
-            None => return "".to_owned(),
-        };
-
-        walk(root, &mut nodes, &mut edges, &mut invisible_edges, &mut ni);
-
-        format!(
-            "digraph {{\n{}\n\n{}\n\n{{edge[style=invis];\n{}\n}}\n}}",
-            nodes, edges, invisible_edges
-        )
+        self.root.as_ref().map(|n| n.graphviz()).unwrap_or_default()
     }
 }
 
@@ -1309,6 +1240,78 @@ where
             curr: Some(self),
             to_visit: vec![],
         }
+    }
+}
+
+impl<Q: fmt::Display + Ord + Clone> Node<Q> {
+    fn graphviz(&self) -> String {
+        fn describe_range<Q: fmt::Display>(r: &(Bound<Q>, Bound<Q>)) -> String {
+            format!(
+                "{},{}",
+                match &r.0 {
+                    Unbounded => "(-∞".to_owned(),
+                    Included(x) => format!("[{}", x),
+                    Excluded(x) => format!("({}", x),
+                },
+                match &r.1 {
+                    Unbounded => "∞)".to_owned(),
+                    Included(x) => format!("{}]", x),
+                    Excluded(x) => format!("{})", x),
+                }
+            )
+        }
+
+        fn walk<Q: fmt::Display + Ord + Clone>(
+            node: &Node<Q>,
+            nodes: &mut String,
+            edges: &mut String,
+            invisible_edges: &mut String,
+            ni: &mut u32,
+        ) -> u32 {
+            *ni += 1;
+            let me = *ni;
+            nodes.push_str(&format!(
+                "{} [label=\"{} \\ h{}\"]\n",
+                ni,
+                describe_range(&node.key),
+                node.height,
+            ));
+
+            let left_i = node
+                .left
+                .as_ref()
+                .map(|n| walk(n, nodes, edges, invisible_edges, ni));
+            let right_i = node
+                .right
+                .as_ref()
+                .map(|n| walk(n, nodes, edges, invisible_edges, ni));
+
+            if let Some(left_i) = left_i {
+                edges.push_str(&format!("{} -> {};\n", me, left_i))
+            }
+            if let Some(right_i) = right_i {
+                edges.push_str(&format!("{} -> {};\n", me, right_i))
+            }
+
+            if let (Some(left_i), Some(right_i)) = (left_i, right_i) {
+                invisible_edges.push_str(&format!("{}:e -> {}:w;\n", left_i, right_i));
+                edges.push_str(&format!("{{ rank=same; {} {} }}", left_i, right_i));
+            }
+
+            me
+        }
+
+        let mut nodes = String::new();
+        let mut edges = String::new();
+        let mut invisible_edges = String::new();
+        let mut ni = 0u32;
+
+        walk(self, &mut nodes, &mut edges, &mut invisible_edges, &mut ni);
+
+        format!(
+            "digraph {{\n{}\n\n{}\n\n{{edge[style=invis];\n{}\n}}\n}}",
+            nodes, edges, invisible_edges
+        )
     }
 }
 
