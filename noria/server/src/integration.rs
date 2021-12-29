@@ -34,6 +34,7 @@ use noria_errors::ReadySetError::MigrationPlanFailed;
 use rusty_fork::rusty_fork_test;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
@@ -6627,6 +6628,75 @@ async fn join_straddled_columns() {
         .collect::<Vec<(i32, i32)>>();
 
     assert_eq!(res, vec![(1, 2)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_range_query() {
+    readyset_logging::init_test_logging();
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
+        builder.set_allow_range_queries(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe(
+        "CREATE TABLE a (a1 int, a2 int);
+         CREATE TABLE b (b1 int, b2 int);
+         QUERY straddle: SELECT * FROM a INNER JOIN b ON a.a2 = b.b1 WHERE a.a1 > ? AND b.b2 > ?;",
+    )
+    .await
+    .unwrap();
+
+    let mut a = g.table("a").await.unwrap();
+    let mut b = g.table("b").await.unwrap();
+    let mut q = g.view("straddle").await.unwrap();
+
+    a.insert_many(vec![
+        vec![DataType::from(1i32), DataType::from(2i32)],
+        vec![DataType::from(1i32), DataType::from(4i32)],
+        vec![DataType::from(2i32), DataType::from(2i32)],
+        vec![DataType::from(2i32), DataType::from(4i32)],
+    ])
+    .await
+    .unwrap();
+
+    b.insert_many(vec![
+        vec![DataType::from(2i32), DataType::from(1i32)],
+        vec![DataType::from(2i32), DataType::from(2i32)],
+    ])
+    .await
+    .unwrap();
+
+    sleep().await;
+
+    eprintln!("{}", g.graphviz().await.unwrap());
+
+    let rows = q
+        .multi_lookup(
+            vec![KeyComparison::Range((
+                Bound::Excluded(vec1![1i32.into(), 1i32.into()]),
+                Bound::Unbounded,
+            ))],
+            true,
+        )
+        .await
+        .unwrap();
+
+    let res = rows
+        .into_iter()
+        .flatten()
+        .map(|r| (get_col!(r, "a1", i32), get_col!(r, "a2", i32)))
+        .sorted()
+        .collect::<Vec<(i32, i32)>>();
+
+    assert_eq!(res, vec![(2, 2)]);
 }
 
 // FIXME(fran): This test is ignored because the Controller
