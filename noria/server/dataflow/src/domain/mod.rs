@@ -2366,6 +2366,7 @@ impl Domain {
             trace!(
                 %tag,
                 keys = ?found_keys,
+                ?records,
                 "satisfied replay request"
             );
 
@@ -2671,6 +2672,7 @@ impl Domain {
                                 // triggered this replay initially.
                                 if let Some(state) = self.state.get_mut(segment.node) {
                                     for key in backfill_keys.iter() {
+                                        trace!(?key, ?tag, local = %segment.node, "Marking filled");
                                         state.mark_filled(key.clone(), tag);
                                     }
                                 } else {
@@ -2682,6 +2684,7 @@ impl Domain {
                                     // filled, even if that hole is empty!
                                     if let Some(wh) = r.writer_mut() {
                                         for key in backfill_keys.iter() {
+                                            trace!(?key, local = %segment.node, "Marking filled in reader");
                                             wh.mark_filled(key.clone())?;
                                         }
                                     }
@@ -2698,6 +2701,7 @@ impl Domain {
                                     // have multiple indices for the same set of columns, so marking
                                     // this tag as filled will mark other remapped replay paths'
                                     // tags as filled, too
+                                    trace!(?keys, ?tag, local = %segment.node, "Marking filled");
                                     state.mark_filled(keys, tag);
                                 }
                             }
