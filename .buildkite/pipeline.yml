@@ -148,7 +148,12 @@ steps:
                 - "ops/readyset-substrate/**"
                 - "ops/substrate/**"
 
-            - label: ":pipeline: Upload Validate All Pipeline"
+            - label: ":rust: :terraform: Run validate on all Substrate root-modules"
+              include:
+                - "ops/readyset-substrate/**"
+                - "ops/substrate/**"
+
+            - label: ":rust: :terraform: Run plan on all Substrate root-modules"
               include:
                 - "ops/readyset-substrate/**"
                 - "ops/substrate/**"

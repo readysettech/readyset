@@ -21,8 +21,10 @@ enum Subcommand {
     // }
     BuildkiteTerraformGenerateValidateAllPipeline,
     BuildkiteTerraformUploadValidateAllPipeline,
+    BuildkiteTerraformRunValidateAll,
     BuildkiteTerraformGeneratePlanAllPipeline,
     BuildkiteTerraformUploadPlanAllPipeline,
+    BuildkiteTerraformRunPlanAll,
 }
 
 #[derive(Parser, Debug)]
@@ -50,7 +52,7 @@ fn main() -> Result<()> {
             commands::buildkite::terraform_validate(&root_module)
         }
         Subcommand::BuildkiteTerraformPlan { root_module } => {
-            commands::buildkite::terraform_plan(&root_module)
+            commands::buildkite::terraform_plan(&root_module).map(|_| ())
         }
         Subcommand::BuildkiteTerraformGenerateValidateAllPipeline => {
             commands::buildkite::terraform_generate_validate_all_pipeline()
@@ -58,11 +60,15 @@ fn main() -> Result<()> {
         Subcommand::BuildkiteTerraformUploadValidateAllPipeline => {
             commands::buildkite::terraform_upload_validate_all_pipeline()
         }
+        Subcommand::BuildkiteTerraformRunValidateAll => {
+            commands::buildkite::terraform_run_validate_all()
+        }
         Subcommand::BuildkiteTerraformGeneratePlanAllPipeline => {
             commands::buildkite::terraform_generate_plan_all_pipeline()
         }
         Subcommand::BuildkiteTerraformUploadPlanAllPipeline => {
             commands::buildkite::terraform_upload_plan_all_pipeline()
         }
+        Subcommand::BuildkiteTerraformRunPlanAll => commands::buildkite::terraform_run_plan_all(),
     }
 }

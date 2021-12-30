@@ -2,21 +2,17 @@
 //! interact with Buildkite.
 
 // pub(crate) is used for things that are commands.
+use std::io::{ErrorKind, Write};
+use std::process::{Command, Stdio};
+
 use anyhow::{anyhow, bail, Result};
 use handlebars::Handlebars;
-use std::{
-    io::{ErrorKind, Write},
-    process::{Command, Stdio},
-};
+use serde::Serialize;
 use tracing::{event, Level};
 
-use serde::Serialize;
-
+use crate::gerrit;
+use crate::substrate::{self, RootModule};
 use crate::terraform;
-use crate::{
-    gerrit,
-    substrate::{self, RootModule},
-};
 
 #[derive(Serialize)]
 struct TerraformValidateAllPipelineTemplateData {
@@ -86,6 +82,58 @@ fn generate_validate_all_pipeline() -> Result<String> {
     Ok(pipeline_defintion)
 }
 
+fn run_validate_all() -> Result<()> {
+    let root_modules: Vec<RootModule> = substrate::root_modules()?;
+
+    let mut errors: Vec<anyhow::Error> = Vec::new();
+
+    for root_module in root_modules {
+        println!("--- :terraform: Validating {}", root_module);
+        match terraform_validate(&root_module) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("^^^ +++");
+                println!("Error: {}", &e);
+                errors.push(e);
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!("{} workspaces had validation errors", errors.len())
+    }
+}
+
+fn run_plan_all() -> Result<()> {
+    let root_modules: Vec<RootModule> = substrate::root_modules()?;
+
+    let mut errors: Vec<anyhow::Error> = Vec::new();
+
+    for root_module in root_modules {
+        println!("--- :terraform: Planning {}", root_module);
+        match terraform_plan(&root_module) {
+            Ok(plan) => {
+                if plan.has_diff() {
+                    println!("^^^ +++");
+                }
+            }
+            Err(e) => {
+                println!("^^^ +++");
+                println!("Error: {}", &e);
+                errors.push(e);
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!("{} workspaces could not be planned", errors.len())
+    }
+}
+
 pub(crate) fn terraform_validate(root_module: &substrate::RootModule) -> Result<()> {
     let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
@@ -93,19 +141,19 @@ pub(crate) fn terraform_validate(root_module: &substrate::RootModule) -> Result<
     Ok(())
 }
 
-pub(crate) fn terraform_plan(root_module: &substrate::RootModule) -> Result<()> {
+pub(crate) fn terraform_plan(root_module: &substrate::RootModule) -> Result<terraform::Plan> {
     let terraform_path = root_module.to_terraform_path()?;
     terraform::run_init(&terraform_path)?;
     let plan = terraform::run_plan(&terraform_path, false)?;
     if plan.has_diff() {
         event!(Level::DEBUG, "Plan has changes so upload plan artifact");
         upload_plan_artifact(&plan)?;
-        gerrit::post_terraform_plan(root_module, &plan)
+        gerrit::post_terraform_plan(root_module, &plan)?;
         // TODO: Upload pipeline for apply if we are in that mode.
     } else {
         event!(Level::DEBUG, "No changes in plan so nothing more to do");
-        Ok(())
     }
+    Ok(plan)
 }
 
 fn buildkite_pipeline_upload(pipeline_definition: String) -> Result<()> {
@@ -154,6 +202,11 @@ fn buildkite_pipeline_upload(pipeline_definition: String) -> Result<()> {
     }
 }
 
+pub(crate) fn terraform_run_validate_all() -> Result<()> {
+    run_validate_all()?;
+    Ok(())
+}
+
 pub(crate) fn terraform_generate_validate_all_pipeline() -> Result<()> {
     let pipeline_definition = generate_validate_all_pipeline()?;
     println!("{}", pipeline_definition);
@@ -163,6 +216,11 @@ pub(crate) fn terraform_generate_validate_all_pipeline() -> Result<()> {
 pub(crate) fn terraform_upload_validate_all_pipeline() -> Result<()> {
     let pipeline_definition = generate_validate_all_pipeline()?;
     buildkite_pipeline_upload(pipeline_definition)
+}
+
+pub(crate) fn terraform_run_plan_all() -> Result<()> {
+    run_plan_all()?;
+    Ok(())
 }
 
 pub(crate) fn terraform_generate_plan_all_pipeline() -> Result<()> {
