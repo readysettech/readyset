@@ -1,0 +1,21 @@
+version: "3.8"
+services:
+  zookeeper:
+    network_mode: host
+  consul-server:
+    ports:
+      - "8300:8300"
+      - "8301:8301"
+      - "8301:8301/udp"
+      - "8302:8302"
+      - "8302:8302/udp"
+      - "8500:8500"
+      - "8600:8600"
+      - "8600:8600/udp"
+    command: 'agent -bootstrap-expect=1 -bind=0.0.0.0'
+  mysql:
+    network_mode: host
+  postgres:
+    network_mode: host
+  redis:
+    network_mode: host
