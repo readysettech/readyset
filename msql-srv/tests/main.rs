@@ -451,11 +451,11 @@ fn multi_result() {
         let mut result = db
             .query_iter("SELECT a FROM foo; SELECT a FROM foo")
             .unwrap();
-        let mut set1 = result.next_set().unwrap().unwrap();
+        let mut set1 = result.iter().unwrap();
         let row1 = set1.next().unwrap().unwrap();
         assert_eq!(row1.get::<i16, _>(0), Some(1024));
         drop(set1);
-        let mut set2 = result.next_set().unwrap().unwrap();
+        let mut set2 = result.iter().unwrap();
         let row2 = set2.next().unwrap().unwrap();
         assert_eq!(row2.get::<i16, _>(0), Some(1025));
     })

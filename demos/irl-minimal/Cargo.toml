@@ -8,7 +8,7 @@ edition = "2018"
 tokio = { version = "1.8.1", features = ["full"] }
 futures = "0.3.0"
 futures-util = "0.3.0"
-mysql = { git = "https://github.com/readysettech/rust-mysql-simple.git", branch = "lru-fix" }
+mysql = "22.0.0"
 clap = "3.0.0-beta.4"
 tracing = "0.1.29"
 tracing-subscriber = { version = "0.2.25", features = ["fmt"] }

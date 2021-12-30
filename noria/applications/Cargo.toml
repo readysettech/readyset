@@ -25,7 +25,7 @@ tokio = { version = "1.8.4", features = ["full"] }
 tower-service = "0.3.0"
 vec_map = { version = "0.8.0" }
 zookeeper = "0.5.3"
-mysql = "21.0.1"
+mysql = "22.0.0"
 vec1 = "1.6.0"
 tracing = "0.1.26"
 

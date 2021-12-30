@@ -3300,11 +3300,14 @@ dependencies = [
 
 [[package]]
 name = "mysql"
-version = "21.0.3"
-source = "git+https://github.com/readysettech/rust-mysql-simple.git?branch=lru-fix#009bfa4fd3fbffa600658edfe624003e8149809b"
+version = "22.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a32b29b43b185fdbe1b399ef11d9dae9dfc79890d91364338708dea6eeafacc0"
 dependencies = [
  "bufstream",
  "bytes 1.1.0",
+ "crossbeam 0.8.1",
+ "flate2",
  "io-enum",
  "libc",
  "lru",
@@ -3313,7 +3316,7 @@ dependencies = [
  "native-tls",
  "nix",
  "once_cell",
- "pem 0.8.3",
+ "pem",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -3355,7 +3358,7 @@ dependencies = [
  "mysql_common",
  "native-tls",
  "once_cell",
- "pem 1.0.1",
+ "pem",
  "percent-encoding",
  "pin-project 1.0.8",
  "serde",
@@ -3373,7 +3376,8 @@ dependencies = [
 [[package]]
 name = "mysql_common"
 version = "0.28.0"
-source = "git+https://github.com/readysettech/rust_mysql_common.git?branch=zero-terminated-nonce#4bbf8c1a818cbee15f84fda2c0091a2176dcf540"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24164fdbb4e4da19a37ad39f92faac0b09b3c8d8eca4104b0ec81807f39a893d"
 dependencies = [
  "base64 0.13.0",
  "bigdecimal",
@@ -3403,7 +3407,6 @@ dependencies = [
  "smallvec",
  "subprocess",
  "thiserror",
- "time 0.2.27",
  "time 0.3.5",
  "uuid",
 ]
@@ -3844,6 +3847,7 @@ dependencies = [
  "mysql",
  "mysql-time",
  "mysql_async",
+ "mysql_common",
  "native-tls",
  "nom 5.1.2",
  "nom-sql",
@@ -4326,17 +4330,6 @@ name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
-
-[[package]]
-name = "pem"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd56cbd21fea48d0c440b41cd69c589faacade08c992d9a54e471b79d0fd13eb"
-dependencies = [
- "base64 0.13.0",
- "once_cell",
- "regex",
-]
 
 [[package]]
 name = "pem"

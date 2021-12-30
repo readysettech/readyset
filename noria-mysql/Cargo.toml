@@ -13,7 +13,7 @@ jemallocator = "0.3"
 clap = "3.0.0-beta.2"
 async-trait = "0.1.51"
 msql-srv = { path = "../msql-srv" }
-mysql = "21.0.1"
+mysql = "22.0.0"
 mysql_async = "0.29"
 
 noria = { path = "../noria/noria" }
