@@ -17,7 +17,7 @@ use bit_vec::BitVec;
 use chrono::{NaiveDate, NaiveTime, Utc};
 use derive_more::{From, TryInto};
 use itertools::Itertools;
-use mysql::chrono::NaiveDateTime;
+use mysql_common::chrono::NaiveDateTime;
 use mysql_time::MysqlTime;
 use nom_sql::{Literal, SqlQuery};
 use noria::{DataType, TIMESTAMP_FORMAT};

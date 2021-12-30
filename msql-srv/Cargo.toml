@@ -28,7 +28,7 @@ mysql-time = { path = "../mysql-time" }
 
 [dev-dependencies]
 postgres = "0.19.1"
-mysql = "21.0.1"
+mysql = "22.0.0"
 
 slab = "0.4.2"
 futures = "0.1.26"

@@ -1,5 +1,5 @@
 use msql_srv::{Value, ValueInner};
-use mysql::chrono::NaiveDate;
+use mysql_common::chrono::NaiveDate;
 use noria::{DataType, ReadySetError, ReadySetResult};
 use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
