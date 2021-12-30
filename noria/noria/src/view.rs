@@ -279,6 +279,21 @@ impl KeyComparison {
         }
     }
 
+    /// Convert a KeyComparison into an optional equality predicate, consuming the key comparison,
+    /// or return None if it's a range predicate. Handles both [`Equal`] and single-length
+    /// [`Range`]s
+    pub fn into_equal(self) -> Option<Vec1<DataType>> {
+        match self {
+            KeyComparison::Equal(key) => Some(key),
+            KeyComparison::Range((Bound::Included(key), Bound::Included(ref key2)))
+                if key == *key2 =>
+            {
+                Some(key)
+            }
+            _ => None,
+        }
+    }
+
     /// Project a KeyComparison into an optional range predicate, or return None if it's a range
     /// predicate
     pub fn range(&self) -> Option<&BoundPair<Vec1<DataType>>> {

@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
 
+use ahash::RandomState;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use launchpad::Indices;
@@ -182,6 +183,119 @@ struct Waiting {
     redos: HashMap<Hole, HashSet<Redo>>,
 }
 
+/// Data structure representing the set of keys that have been requested by a reader.
+///
+/// As an optimization, this structure is backed by either a [`HashSet`] if the reader's index is a
+/// [`HashMap`], or an [`IntervalTree`] if the reader's index is a [`BTreeMap`] - interval trees can
+/// act as sets of points, but are much slower than hash sets for that purpose.
+///
+/// [`HashMap`]: IndexType::HashMap
+/// [`BTreeMap`]: IndexType::BTreeMap
+enum RequestedKeys {
+    Points(HashSet<Vec1<DataType>, RandomState>),
+    Ranges(IntervalTree<Vec1<DataType>>),
+}
+
+impl RequestedKeys {
+    /// Create a new set of requested keys for storing requests to the given [`IndexType`].
+    fn new(index_type: IndexType) -> Self {
+        match index_type {
+            IndexType::HashMap => Self::Points(Default::default()),
+            IndexType::BTreeMap => Self::Ranges(Default::default()),
+        }
+    }
+
+    /// Returns true if `self` contains no keys
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            RequestedKeys::Points(requested) => requested.is_empty(),
+            RequestedKeys::Ranges(requested) => requested.is_empty(),
+        }
+    }
+
+    /// Extend `self` with the given `keys`, mutating `keys` in-place such that it contains only
+    /// those keys or subranges of keys that were not already in `self`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is a set of keys for a [`HashMap`] index and any of the keys in `keys` are
+    /// ranges.
+    ///
+    /// [`HashMap`]: IndexType::HashMap`
+    fn extend(&mut self, keys: &mut Vec<KeyComparison>) {
+        match self {
+            RequestedKeys::Points(requested) => keys.retain(|key| {
+                requested.insert(
+                    key.equal()
+                        .expect("RequestedKeys::Points received range key")
+                        .clone(),
+                )
+            }),
+            RequestedKeys::Ranges(requested) => {
+                *keys = keys
+                    .iter()
+                    .flat_map(|key| {
+                        let diff = requested.get_interval_difference(key);
+                        requested.insert(key);
+                        diff
+                    })
+                    .map(|r| KeyComparison::from_range(&r))
+                    .collect()
+            }
+        }
+    }
+
+    /// Mutate `keys` in place such that it only contains keys or subranges of keys that are already
+    /// in `self`
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is a set of keys for a [`HashMap`] index and any of the keys in `keys` are
+    /// ranges.
+    ///
+    /// [`HashMap`]: IndexType::HashMap`
+    fn filter_keys(&self, keys: &mut HashSet<KeyComparison>) {
+        match self {
+            RequestedKeys::Points(requested) => keys.retain(|key| {
+                requested.contains(
+                    key.equal()
+                        .expect("RequestedKeys::Points received range key"),
+                )
+            }),
+            RequestedKeys::Ranges(requested) => {
+                *keys = keys
+                    .iter()
+                    .flat_map(|key| {
+                        requested
+                            .get_interval_intersection(key)
+                            .into_iter()
+                            .map(|r| KeyComparison::from_range(&r))
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Remove `key` from `self`
+    ///
+    /// # Panics
+    ///
+    /// Panics if `self` is a set of keys for a [`HashMap`] index and `key` is a range
+    pub(crate) fn remove(&mut self, key: &KeyComparison) {
+        match self {
+            RequestedKeys::Points(requested) => {
+                requested.remove(
+                    key.equal()
+                        .expect("RequestedKeys::Points received range key"),
+                );
+            }
+            RequestedKeys::Ranges(requested) => {
+                requested.remove(key);
+            }
+        }
+    }
+}
+
 /// Struct sent to a worker to start a domain.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DomainBuilder {
@@ -324,9 +438,7 @@ pub struct Domain {
 
     /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
     /// node
-    // TODO(grfn): Interval trees are slow; we should make this conditionally use an IntervalTree or
-    // a HashSet depending on the index type of the reader.
-    reader_triggered: NodeMap<IntervalTree<Vec1<DataType>>>,
+    reader_triggered: NodeMap<RequestedKeys>,
 
     /// Queue of purge operations to be performed on reader nodes at some point in the future, used
     /// as part of the implementation of materialization frontiers
@@ -2011,12 +2123,9 @@ impl Domain {
                 w.swap();
 
                 // don't request keys that have been filled since the request was sent
-                let writer = r.writer().ok_or_else(|| {
-                    internal_err("reader replay request for non-materialized reader")
-                })?;
                 let mut whoopsed = false;
                 keys.retain(|key| {
-                    !writer.contains(key).unwrap_or_else(|| {
+                    !w.contains(key).unwrap_or_else(|| {
                         whoopsed = true;
                         true
                     })
@@ -2025,22 +2134,21 @@ impl Domain {
                     internal!("reader replay requested for non-ready reader")
                 }
 
+                let reader_index_type = r.index_type().ok_or_else(|| {
+                    internal_err("reader replay requested for non-indexed reader")
+                })?;
                 drop(n); // NLL needs a little help. don't we all, sometimes?
 
                 // ensure that we haven't already requested a replay of this key
-                let already_requested = self.reader_triggered.entry(node).or_default();
-                keys = keys
-                    .iter()
-                    .flat_map(|key| {
-                        let diff = already_requested.get_interval_difference(key);
-                        already_requested.insert(key);
-                        diff
-                    })
-                    .map(|r| KeyComparison::from_range(&r))
-                    .collect();
+                let already_requested = self
+                    .reader_triggered
+                    .entry(node)
+                    .or_insert_with(|| RequestedKeys::new(reader_index_type));
+                already_requested.extend(&mut keys);
                 if !keys.is_empty() {
                     self.find_tags_and_replay(keys, &cols[..], node)?;
                 }
+
                 self.total_replay_time.stop();
                 histogram!(
                     recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
@@ -2569,14 +2677,7 @@ impl Domain {
                                 // discard all the keys or subranges of keys that we aren't waiting
                                 // for
                                 if !prev.is_empty() {
-                                    *for_keys = for_keys
-                                        .iter()
-                                        .flat_map(|key| {
-                                            prev.get_interval_intersection(key)
-                                                .into_iter()
-                                                .map(|r| KeyComparison::from_range(&r))
-                                        })
-                                        .collect();
+                                    prev.filter_keys(for_keys);
                                 }
                             } else {
                                 // this packet contained no keys that we're waiting for, so it's

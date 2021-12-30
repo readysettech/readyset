@@ -243,10 +243,6 @@ impl Reader {
         self.for_node
     }
 
-    pub(crate) fn writer(&self) -> Option<&backlog::WriteHandle> {
-        self.writer.as_ref()
-    }
-
     pub(crate) fn writer_mut(&mut self) -> Option<&mut backlog::WriteHandle> {
         self.writer.as_mut()
     }
