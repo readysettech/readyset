@@ -400,7 +400,8 @@ steps:
 
   - label: ":rust: :docker: Build Substrate Runtime Image"
     key: build-runtime-image
-    command: .buildkite/build-image.sh ops/readyset-substrate/Dockerfile substrate-runtime .
+    depends_on: build-builder-base-image
+    command: .buildkite/build-image-with-builder.sh ops/readyset-substrate/Dockerfile substrate-runtime .
     plugins:
       - ecr#v2.5.0:
           login: true

@@ -1,61 +1,83 @@
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/rustlang/rust:nightly as chef
-WORKDIR /workdir
-COPY rust-toolchain ./rust-toolchain
-RUN rustup toolchain install "$(cat ./rust-toolchain)"
-RUN cargo install cargo-chef
-RUN apt-get update
-RUN apt-get install -y \
-    clang \
-    cmake \
-    libclang-dev \
-    libssl-dev \
-    liblz4-dev \
-    librdkafka-dev \
-    build-essential \
-    llvm
+ARG READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG=latest
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-rust-ubuntu2004-builder-base:${READYSET_RUST_UBUNTU2004_BUILDER_BASE_TAG} as builder
 
-FROM chef as planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+ENV CARGO_INCREMENTAL=0
 
-FROM chef as builder
-WORKDIR /workdir
-COPY rust-toolchain ./rust-toolchain
-RUN rustup toolchain install "$(cat ./rust-toolchain)"
-RUN cargo install cargo-chef
-COPY --from=planner /workdir/recipe.json recipe.json
-COPY --from=planner $CARGO_HOME $CARGO_HOME
-RUN cargo chef cook --check -p readyset-substrate --recipe-path recipe.json
-COPY . .
-RUN cargo --offline build -p readyset-substrate
+ARG CACHEPOT_BUCKET
+ARG CACHEPOT_REGION
 
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as fetcher
-WORKDIR /workdir
+WORKDIR /tmp
+COPY . readyset
+
+WORKDIR /tmp/readyset
+RUN set -eux; \
+    cargo --locked build -p readyset-substrate
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04 as fetcher
+
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        curl \
+        unzip; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+
+FROM fetcher as terraform-fetcher
 
 RUN set -eux; \
     curl -o terraform.zip https://releases.hashicorp.com/terraform/1.0.2/terraform_1.0.2_linux_amd64.zip; \
     echo "7329f887cc5a5bda4bedaec59c439a4af7ea0465f83e3c1b0f4d04951e1181f4 terraform.zip" | sha256sum -c -; \
-    unzip -d /usr/local/bin terraform.zip
+    unzip terraform.zip
+
+FROM fetcher as sops-fetcher
 
 RUN set -eux; \
-    curl -o /usr/local/bin/sops -L https://github.com/mozilla/sops/releases/download/v3.7.1/sops-v3.7.1.linux; \
-    echo "185348fd77fc160d5bdf3cd20ecbc796163504fd3df196d7cb29000773657b74 /usr/local/bin/sops" | sha256sum -c; \
-    chmod a+x /usr/local/bin/sops
+    curl -o sops -L https://github.com/mozilla/sops/releases/download/v3.7.1/sops-v3.7.1.linux; \
+    echo "185348fd77fc160d5bdf3cd20ecbc796163504fd3df196d7cb29000773657b74 sops" | sha256sum -c; \
+    chmod a+x sops
 
-FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/rust:1.54 as runtime
-WORKDIR /workdir
-ENV SUBSTRATE_ROOT /workdir/ops/substrate
-
-COPY --from=builder /workdir/target/debug/readyset-substrate /usr/local/bin/readyset-substrate
-COPY --from=fetcher /usr/local/bin/* /usr/local/bin/
+FROM fetcher as substrate-fetcher
 
 RUN set -eux; \
     curl -o substrate.tar.gz https://src-bin.com/substrate-2021.09-1174b29-linux-amd64.tar.gz; \
-    tar -C /usr/local/bin --strip-components=1 -xvf substrate.tar.gz
+    mkdir -p substrate; \
+    tar -C substrate --strip-components=1 -xvf substrate.tar.gz
+
+FROM fetcher as awscli-fetcher
 
 RUN set -eux; \
     curl -o "awscliv2.zip" "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.2.32.zip"; \
     unzip awscliv2.zip; \
-    ./aws/install -i /usr/local/aws-cli -b /usr/local/bin
+    mkdir aws-cli-bin; \
+    ./aws/install --bin-dir aws-cli-bin
+
+FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/ubuntu:20.04 as runtime
+WORKDIR /workdir
+ENV SUBSTRATE_ROOT /workdir/ops/substrate
+
+COPY --from=builder /tmp/readyset/target/debug/readyset-substrate /usr/local/bin/readyset-substrate
+COPY --from=terraform-fetcher /tmp/terraform /usr/local/bin/
+COPY --from=sops-fetcher /tmp/sops /usr/local/bin/
+COPY --from=substrate-fetcher /tmp/substrate/ /usr/local/bin/
+COPY --from=awscli-fetcher /usr/local/aws-cli/ /usr/local/aws-cli/
+COPY --from=awscli-fetcher /tmp/aws-cli-bin/ /usr/local/bin/
+
+RUN set -eux; \
+    # Install minimal dependencies
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git; \
+    rm -rf /var/lib/apt/lists/*; \
+    # Validate all programs are installed correctly
+    terraform --version; \
+    sops --version; \
+    aws --version; \
+    substrate -help; \
+    readyset-substrate --help
 
 ENTRYPOINT [ "readyset-substrate" ]
