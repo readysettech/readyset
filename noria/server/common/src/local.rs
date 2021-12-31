@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
+use test_strategy::Arbitrary;
 use vec1::Vec1;
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -112,7 +113,9 @@ impl<'de> Deserialize<'de> for IndexPair {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize, Arbitrary,
+)]
 pub struct Tag(u32);
 
 impl Tag {

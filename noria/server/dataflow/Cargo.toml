@@ -42,8 +42,9 @@ maplit = "1.0.2"
 derivative = "2.2.0"
 dataflow_expression = { path = "expression" }
 criterion = { version = "0.3", features=['real_blackbox'], optional = true }
-thiserror = "1.0.26"
 test-strategy = "0.1.1"
+thiserror = "1.0.26"
+proptest = "1.0.0"
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
@@ -62,7 +63,6 @@ noria-data = { path = "../../data" }
 
 [dev-dependencies]
 pretty_assertions = "0.7.2"
-proptest = "1.0.0"
 
 [features]
 bench = ["criterion"]

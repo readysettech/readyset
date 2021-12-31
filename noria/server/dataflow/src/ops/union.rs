@@ -1,10 +1,15 @@
 use itertools::Itertools;
 use launchpad::hash::hash;
+use launchpad::intervals::{cmp_endbound, cmp_startbound};
+use launchpad::Indices;
 use noria::KeyComparison;
 use noria_errors::invariant;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
+use test_strategy::Arbitrary;
 use tracing::{debug, error, trace};
 use vec1::Vec1;
 
@@ -125,6 +130,43 @@ impl BagUnionState {
     }
 }
 
+/// Key type for [`Union::replay_pieces`]. See the documentation on that field for more information
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct BufferedReplayKey {
+    tag: Tag,
+    key: KeyComparison,
+    requesting_shard: usize,
+}
+
+impl Ord for BufferedReplayKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.tag
+            .cmp(&other.tag)
+            .then_with(|| match (&self.key, &other.key) {
+                (KeyComparison::Equal(k1), KeyComparison::Equal(k2)) => k1.cmp(k2),
+                (KeyComparison::Range((l1, u1)), KeyComparison::Range((l2, u2))) => {
+                    cmp_startbound(l1.as_ref(), l2.as_ref())
+                        .then_with(|| cmp_endbound(u1.as_ref(), u2.as_ref()))
+                }
+                (KeyComparison::Equal(k), KeyComparison::Range((l, u))) => {
+                    cmp_startbound(Bound::Included(k), l.as_ref())
+                        .then_with(|| cmp_endbound(Bound::Included(k), u.as_ref()))
+                }
+                (KeyComparison::Range((u, l)), KeyComparison::Equal(k)) => {
+                    cmp_startbound(l.as_ref(), Bound::Included(k))
+                        .then_with(|| cmp_endbound(u.as_ref(), Bound::Included(k)))
+                }
+            })
+            .then_with(|| self.requesting_shard.cmp(&other.requesting_shard))
+    }
+}
+
+impl PartialOrd for BufferedReplayKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// A union of a set of views.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Union {
@@ -142,11 +184,9 @@ pub struct Union {
     /// Stored as a btreemap so that when we iterate, we first get all the replays of one tag, then
     /// all the records of another tag, etc. This lets us avoid looking up info related to the same
     /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
-    /// check the replay pieces for all values of `requesting_shard` (the `usize`) if we do find a
-    /// key match for an update.
-    ///
-    /// This map's key is really (Tag, Key, requesting_shard)
-    replay_pieces: BTreeMap<(Tag, Vec1<DataType>, usize), ReplayPieces>,
+    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_shard`]  if we do
+    /// find a key match for an update.
+    replay_pieces: BTreeMap<BufferedReplayKey, ReplayPieces>,
 
     required: usize,
 
@@ -459,7 +499,15 @@ impl Ingredient for Union {
                     from.id()
                 };
 
-                for (&(tag, ref replaying_key, _), ref mut pieces) in replays {
+                for (
+                    &BufferedReplayKey {
+                        tag,
+                        key: ref replaying_key,
+                        ..
+                    },
+                    ref mut pieces,
+                ) in replays
+                {
                     invariant!(
                         !pieces.buffered.is_empty(),
                         "empty pieces bucket left in replay pieces"
@@ -486,11 +534,7 @@ impl Ingredient for Union {
 
                     // and finally, check all the records
                     for r in &rs {
-                        let hit = k
-                            .iter()
-                            .enumerate()
-                            .all(|(ki, &c)| r[c] == replaying_key[ki]);
-                        if !hit {
+                        if !replaying_key.contains(r.indices(k.iter().copied()).unwrap()) {
                             // this record is irrelevant as far as this buffered upquery response
                             // goes, since its key does not match the upquery's key.
                             continue;
@@ -712,16 +756,14 @@ impl Ingredient for Union {
                     .into_iter()
                     .map(|r| {
                         (
-                            Vec1::try_from(
-                                key_cols.iter().map(|&c| r[c].clone()).collect::<Vec<_>>(),
-                            )
-                            .unwrap(),
+                            Vec1::try_from(r.cloned_indices(key_cols.iter().copied()).unwrap())
+                                .unwrap(),
                             r,
                         )
                     })
-                    .fold(HashMap::new(), |mut hm, (key, r)| {
-                        hm.entry(key).or_insert_with(Records::default).push(r);
-                        hm
+                    .fold(BTreeMap::new(), |mut m, (key, r)| {
+                        m.entry(key).or_insert_with(Records::default).push(r);
+                        m
                     });
 
                 // we're going to pull a little hack here for the sake of performance.
@@ -738,12 +780,18 @@ impl Ingredient for Union {
                 let rs = {
                     keys.iter()
                         .filter_map(|key| {
-                            let key = key.equal().expect("Unions can't handle range queries yet");
-                            let rs = rs_by_key.remove(key).unwrap_or_default();
+                            let rs = rs_by_key
+                                .range_mut::<Vec1<DataType>, _>(key)
+                                .flat_map(|(_, rs)| mem::take(rs))
+                                .collect();
 
                             // store this replay piece
                             use std::collections::btree_map::Entry;
-                            match replay_pieces_tmp.entry((tag, key.clone(), requesting_shard)) {
+                            match replay_pieces_tmp.entry(BufferedReplayKey {
+                                tag,
+                                key: key.clone(),
+                                requesting_shard
+                            }) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
                                         // This is a serious problem if we get two upquery
@@ -773,7 +821,7 @@ impl Ingredient for Union {
                                         Some((key, m))
                                     } else {
                                         e.into_mut().buffered.insert(from, rs);
-                                        captured.insert(KeyComparison::from(key.clone()));
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
@@ -793,7 +841,7 @@ impl Ingredient for Union {
                                             buffered: m,
                                             evict: false,
                                         });
-                                        captured.insert(KeyComparison::from(key.clone()));
+                                        captured.insert(key.clone());
                                         None
                                     }
                                 }
@@ -804,7 +852,7 @@ impl Ingredient for Union {
                                 // TODO XXX TODO XXX TODO XXX TODO
                                 error!("!!! need to issue an eviction after replaying key");
                             }
-                            released.insert(KeyComparison::from(key.clone()));
+                            released.insert(key.clone());
                             pieces.buffered.into_iter()
                         })
                         .map(|(from, rs)| {
@@ -883,12 +931,18 @@ impl Ingredient for Union {
 
     fn on_eviction(&mut self, from: LocalNodeIndex, tag: Tag, keys: &[KeyComparison]) {
         for key in keys {
-            let key = key.equal().expect("Unions can't handle range queries yet");
             // TODO: the key.clone()s here are really sad
-            for (_, e) in self
-                .replay_pieces
-                .range_mut((tag, key.clone(), 0)..=(tag, key.clone(), usize::max_value()))
-            {
+            for (_, e) in self.replay_pieces.range_mut(
+                BufferedReplayKey {
+                    tag,
+                    key: key.clone(),
+                    requesting_shard: 0,
+                }..=BufferedReplayKey {
+                    tag,
+                    key: key.clone(),
+                    requesting_shard: usize::max_value(),
+                },
+            ) {
                 if e.buffered.contains_key(&from) {
                     // we've already received something from left, but it has now been evicted.
                     // we can't remove the buffered replay, since we'll then get confused when the
@@ -1056,6 +1110,58 @@ mod tests {
             .unwrap()
             .iter()
             .any(|&(n, c)| n == r.as_global() && c == 2));
+    }
+
+    mod buffered_replay_key {
+        use super::*;
+
+        use test_strategy::proptest;
+
+        #[proptest]
+        fn ord_dual(a: BufferedReplayKey, b: BufferedReplayKey) {
+            if a < b {
+                assert!(b > a);
+            }
+            if b < a {
+                assert!(a > b);
+            }
+        }
+
+        #[proptest]
+        fn le_transitive(a: BufferedReplayKey, b: BufferedReplayKey, c: BufferedReplayKey) {
+            if a < b && b < c {
+                assert!(a < c);
+            }
+        }
+
+        #[proptest]
+        fn gt_transitive(a: BufferedReplayKey, b: BufferedReplayKey, c: BufferedReplayKey) {
+            if a > b && b > c {
+                assert!(a > c);
+            }
+        }
+
+        #[proptest]
+        fn ord_trichotomy(a: BufferedReplayKey, b: BufferedReplayKey) {
+            let less = a < b;
+            let greater = a > b;
+            let eq = a == b;
+
+            if less {
+                assert!(!greater);
+                assert!(!eq);
+            }
+
+            if greater {
+                assert!(!less);
+                assert!(!eq);
+            }
+
+            if eq {
+                assert!(!less);
+                assert!(!greater);
+            }
+        }
     }
 
     mod replay_capturing {

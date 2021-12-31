@@ -6863,7 +6863,6 @@ async fn overlapping_remapped_range_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore] // Unions can't handle range queries yet
 async fn range_query_through_union() {
     readyset_logging::init_test_logging();
     let mut g = {
