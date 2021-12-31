@@ -1360,6 +1360,7 @@ pub struct QueryParameter {
     /// any. This value is used when generating values for query parameters to generate multiple
     /// values when the same column appears in multiple parameters
     index: Option<u32>,
+    generator: Arc<Mutex<ColumnGenerator>>,
 }
 
 pub struct QueryState<'a> {
@@ -1459,10 +1460,38 @@ impl<'a> QueryState<'a> {
     /// Record a new (positional) parameter for the query, comparing against the given column of the
     /// given table
     pub fn add_parameter(&mut self, table_name: TableName, column_name: ColumnName) {
+        let col_type = self.gen.table(&table_name).unwrap().columns[&column_name]
+            .sql_type
+            .clone();
         self.parameters.push(QueryParameter {
             table_name,
             column_name,
             index: None,
+            generator: Arc::new(Mutex::new(ColumnGenerator::Constant(col_type.into()))),
+        })
+    }
+
+    /// Record a new (positional) parameter for the query, comparing against the given column
+    /// of the given table, and with the given value recorded for the key.
+    ///
+    /// It is the responsibility of the caller to ensure, by calling methods like
+    /// [`TableSpec::set_column_generator_spec`], that the value given will match rows at least some
+    /// of the time.
+    pub fn add_parameter_with_value<V>(
+        &mut self,
+        table_name: TableName,
+        column_name: ColumnName,
+        value: V,
+    ) where
+        DataType: From<V>,
+    {
+        self.parameters.push(QueryParameter {
+            table_name,
+            column_name,
+            index: None,
+            generator: Arc::new(Mutex::new(ColumnGenerator::Constant(
+                DataType::from(value).into(),
+            ))),
         })
     }
 
@@ -1476,14 +1505,15 @@ impl<'a> QueryState<'a> {
         index: u32,
     ) {
         let table = self.gen.table_mut(&table_name).unwrap();
-        let sql_type = &table.columns[&column_name].sql_type;
-        let val = unique_value_of_type(sql_type, index);
+        let sql_type = table.columns[&column_name].sql_type.clone();
+        let val = unique_value_of_type(&sql_type, index);
         table.expect_value(column_name.clone(), val);
 
         self.parameters.push(QueryParameter {
             table_name,
             column_name,
             index: Some(index),
+            generator: Arc::new(Mutex::new(ColumnGenerator::Unique(sql_type.into()))),
         });
     }
 
@@ -1521,11 +1551,12 @@ impl<'a> QueryState<'a> {
                      table_name,
                      column_name,
                      index,
+                     generator,
                  }| {
                     let sql_type = &self.gen.tables[table_name].columns[column_name].sql_type;
                     match index {
                         Some(idx) => unique_value_of_type(sql_type, *idx),
-                        None => value_of_type(sql_type),
+                        None => generator.lock().gen(),
                     }
                 },
             )
@@ -1794,6 +1825,10 @@ pub enum QueryOperation {
     InParameter {
         num_values: u8,
     },
+    #[weight(if args.in_subquery { 0 } else { 1 })]
+    RangeParameter,
+    #[weight(if args.in_subquery { 0 } else { 1 })]
+    MultipleRangeParameters,
     ProjectBuiltinFunction(BuiltinFunction),
     TopK {
         order_type: OrderType,
@@ -1988,6 +2023,8 @@ impl QueryOperation {
             QueryOperation::MultipleParameters
                 | QueryOperation::SingleParameter
                 | QueryOperation::InParameter { .. }
+                | QueryOperation::RangeParameter
+                | QueryOperation::MultipleRangeParameters
         )
     }
 
@@ -2192,6 +2229,36 @@ impl QueryOperation {
                 QueryOperation::SingleParameter.add_to_query(state, query);
                 QueryOperation::SingleParameter.add_to_query(state, query);
             }
+
+            QueryOperation::RangeParameter => {
+                let tbl = state.some_table_in_query_mut(query);
+                let col = tbl.some_column_with_type(SqlType::Int(None));
+                and_where(
+                    query,
+                    Expression::BinaryOp {
+                        lhs: Box::new(Expression::Column(Column {
+                            table: Some(tbl.name.clone().into()),
+                            ..col.clone().into()
+                        })),
+                        op: BinaryOperator::Greater,
+                        rhs: Box::new(Expression::Literal(Literal::Placeholder(
+                            ItemPlaceholder::QuestionMark,
+                        ))),
+                    },
+                );
+                tbl.set_column_generator_spec(
+                    col.clone(),
+                    ColumnGenerationSpec::Uniform(1.into(), 20.into()),
+                );
+                let tbl_name = tbl.name.clone();
+                state.add_parameter_with_value(tbl_name, col, 10i32);
+            }
+
+            QueryOperation::MultipleRangeParameters => {
+                QueryOperation::RangeParameter.add_to_query(state, query);
+                QueryOperation::RangeParameter.add_to_query(state, query);
+            }
+
             QueryOperation::InParameter { num_values } => {
                 let col = column_in_query(state, query);
                 and_where(
@@ -2350,9 +2417,11 @@ impl QueryOperation {
 /// | inner_join                              | `INNER JOIN`s                     |
 /// | left_join                               | `LEFT JOIN`s                      |
 /// | single_parameter / single_param / param | A single query parameter          |
-/// | project_literal                         | A projected literal value         |
+/// | range_param                             | A range query parameter           |
 /// | multiple_parameters / params            | Multiple query parameters         |
+/// | multiple_range_params                   | Multiple range query parameters   |
 /// | in_parameter                            | IN with multiple query parameters |
+/// | project_literal                         | A projected literal value         |
 /// | project_builtin                         | Project a built-in function       |
 /// | subqueries                              | All subqueries                    |
 /// | cte                                     | CTEs (WITH statements)            |
@@ -2468,9 +2537,11 @@ impl FromStr for Operations {
             "inner_join" => Ok(vec![Join(JoinOperator::InnerJoin)].into()),
             "left_join" => Ok(vec![Join(JoinOperator::LeftJoin)].into()),
             "single_parameter" | "single_param" | "param" => Ok(vec![SingleParameter].into()),
-            "project_literal" => Ok(vec![ProjectLiteral].into()),
             "multiple_parameters" | "params" => Ok(vec![MultipleParameters].into()),
+            "range_param" => Ok(vec![RangeParameter].into()),
+            "multiple_range_params" => Ok(vec![MultipleRangeParameters].into()),
             "in_parameter" => Ok(vec![InParameter { num_values: 3 }].into()),
+            "project_literal" => Ok(vec![ProjectLiteral].into()),
             "project_builtin" => Ok(BuiltinFunction::iter()
                 .map(ProjectBuiltinFunction)
                 .collect()),
