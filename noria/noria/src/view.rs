@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -371,17 +372,53 @@ impl KeyComparison {
 
     /// Returns true if the given `key` is covered by this [`KeyComparsion`].
     ///
-    /// Concretely, this is the case if the [`KeyComparsion`] is either an
-    /// [equality](KeyComparison::equal) match on `key`, or a [range](KeyComparison::range) match
-    /// that covers `key`.
-    pub fn contains(&self, key: &[DataType]) -> bool {
+    /// Concretely, this is the case if the [`KeyComparsion`] is either an [equality][] match on
+    /// `key`, or a [range][] match that covers `key`.
+    ///
+    /// [equality]: KeyComparison::equal
+    /// [range]: KeyComparison::range
+    ///
+    /// # Examples
+    ///
+    /// Equal keys contain themselves and only themselves:
+    ///
+    /// ```rust
+    /// use noria_data::DataType;
+    /// use noria::{KeyComparison};
+    /// use vec1::vec1;
+    ///
+    /// let key = KeyComparison::Equal(vec1![1.into(), 2.into()]);
+    /// assert!(key.contains(&[1.into(), 2.into()]));
+    /// assert!(!key.contains(&[1.into(), 3.into()]));
+    /// ```
+    ///
+    /// Range keys contain anything in the range, comparing lexicographically
+    ///
+    /// ```rust
+    /// use noria_data::DataType;
+    /// use noria::{KeyComparison};
+    /// use vec1::vec1;
+    /// use std::ops::Bound::*;
+    ///
+    /// let key = KeyComparison::Range((
+    ///     Included(vec1![1.into(), 2.into()]),
+    ///     Excluded(vec1![1.into(), 5.into()])
+    /// ));
+    ///
+    /// assert!(key.contains(&[1.into(), 3.into()]));
+    /// assert!(!key.contains(&[2.into(), 2.into()]));
+    /// ```
+    pub fn contains<'a, I>(&'a self, key: I) -> bool
+    where
+        I: IntoIterator<Item = &'a DataType>,
+    {
         match self {
-            Self::Equal(equal) => key == equal.as_slice(),
+            Self::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
             Self::Range((lower, upper)) => (
-                lower.as_ref().map(Vec1::as_slice),
-                upper.as_ref().map(Vec1::as_slice),
+                lower.as_ref().map(|x| x.iter().collect::<Vec<_>>()),
+                upper.as_ref().map(|x| x.iter().collect::<Vec<_>>()),
             )
-                .contains(key),
+                .contains(&key.into_iter().collect::<Vec<_>>()),
         }
     }
 
