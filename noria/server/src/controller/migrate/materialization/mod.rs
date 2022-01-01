@@ -266,7 +266,7 @@ impl Materializations {
             if indices.is_empty() && n.is_base() {
                 // we must *always* materialize base nodes
                 // so, just make up some column to index on
-                indices.insert(ni, IndexObligation::Lookup(Index::btree_map(vec![0])));
+                indices.insert(ni, IndexObligation::Lookup(Index::hash_map(vec![0])));
             }
 
             for (ni, obligation) in indices {

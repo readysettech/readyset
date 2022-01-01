@@ -136,7 +136,7 @@ impl From<Tag> for u32 {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeyType<'a> {
     Single(&'a DataType),
     Double((DataType, DataType)),
@@ -375,6 +375,22 @@ impl<'a> RangeKey<'a> {
                 "RangeKey cannot be built from keys of length greater than 6 (got {})",
                 n
             ),
+        }
+    }
+
+    /// Returns the upper bound of the range key
+    pub fn upper_bound(&self) -> Bound<Vec<&'a DataType>> {
+        use tuple::TupleElements;
+
+        match self {
+            RangeKey::Unbounded => Bound::Unbounded,
+            RangeKey::Single((_, upper)) => upper.map(|dt| vec![dt]),
+            RangeKey::Double((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
+            RangeKey::Tri((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
+            RangeKey::Quad((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
+            RangeKey::Quin((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
+            RangeKey::Sex((_, upper)) => upper.map(|dts| dts.into_elements().collect()),
+            RangeKey::Multi((_, upper)) => upper.map(|dts| dts.iter().collect()),
         }
     }
 
