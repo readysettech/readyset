@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 
 use nom_sql::BinaryOperator;
 use serde::{Deserialize, Serialize};
+use test_strategy::Arbitrary;
 
 use crate::KeyComparison;
 
@@ -10,7 +11,7 @@ use crate::KeyComparison;
 /// See [the design doc][0] for more information
 ///
 /// [0]: https://www.notion.so/readyset/Index-Selection-f91b2a873dda4b63a4b5d9d14bbee266
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Hash, Arbitrary)]
 pub enum IndexType {
     /// An index backed by a [`HashMap`](std::collections::HashMap).
     HashMap,
