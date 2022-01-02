@@ -44,6 +44,7 @@ criterion = { version = "0.3", features=['real_blackbox'], optional = true }
 test-strategy = "0.1.1"
 thiserror = "1.0.26"
 proptest = "1.0.0"
+fail = "0.5.0"
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }
@@ -61,9 +62,11 @@ noria-errors = { path = "../../errors" }
 noria-data = { path = "../../data" }
 reader_map = { path = "reader_map" }
 partial_map = { path = "partial_map" }
+failpoint-macros = { path = "../../../failpoint-macros" }
 
 [dev-dependencies]
 pretty_assertions = "0.7.2"
 
 [features]
 bench = ["criterion"]
+failure_injection = ["fail/failpoints"]

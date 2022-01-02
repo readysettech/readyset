@@ -25,6 +25,7 @@ use tracing::{debug, error, info, trace, warn};
 use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
 
+use failpoint_macros::failpoint;
 pub use internal::DomainIndex;
 use noria::channel;
 use noria::metrics::recorded;
@@ -4010,6 +4011,7 @@ impl Domain {
     }
 
     /// Handle a single message for this domain
+    #[failpoint("handle-packet")]
     pub fn handle_packet(
         &mut self,
         packet: Box<Packet>,
