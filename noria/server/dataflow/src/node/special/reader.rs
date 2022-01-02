@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::time::SystemTime;
 
+use failpoint_macros::failpoint;
 use nom_sql::OrderType;
 use noria::metrics::recorded;
 use noria::util::like::LikePattern;
@@ -351,6 +352,7 @@ impl Reader {
     }
 
     #[allow(clippy::unreachable)]
+    #[failpoint("reader-handle-packet")]
     pub(in crate::node) fn process(&mut self, m: &mut Option<Box<Packet>>, swap: bool) {
         if let Some(ref mut state) = self.writer {
             let m = m.as_mut().unwrap();

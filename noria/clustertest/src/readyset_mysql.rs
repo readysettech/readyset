@@ -4,6 +4,7 @@ use mysql_async::prelude::Queryable;
 use serial_test::serial;
 use std::time::Duration;
 use test_utils::skip_slow_tests;
+use tokio::time::{sleep, timeout};
 
 const PROPAGATION_DELAY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -523,6 +524,183 @@ async fn update_during_failure() {
     deployment.teardown().await.unwrap();
 }
 
+#[clustertest]
+async fn upquery_to_failed_reader_domain() {
+    let mut deployment = readyset_mysql("ct_upquery_failed_domain_immediately")
+        .with_servers(1, ServerParams::default())
+        .quorum(1)
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    upstream
+        .query_drop("CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);")
+        .await
+        .unwrap();
+    upstream
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+    adapter
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
+
+    // The upquery will fail on the reader that handles it.
+    for s in deployment.server_handles().values_mut() {
+        s.set_failpoint("handle-packet", "panic").await;
+    }
+
+    // Should return the correct results from fallback.
+    let result: Result<mysql_async::Result<Vec<(i32, i32)>>, _> = timeout(
+        Duration::from_secs(5),
+        adapter.exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().unwrap(), vec![(2, 5)]);
+
+    deployment.teardown().await.unwrap();
+}
+
+/// This fails the *second* domain that an upquery is issued to. In this case the
+/// upquery hangs until the view query timeout.
+// This test introduces a 5 second query timeout that fails due to the upquery hanging
+// until RPC timeout.
+#[clustertest]
+#[should_panic]
+async fn upquery_through_failed_domain() {
+    let mut deployment = readyset_mysql("ct_failure_during_query")
+        .with_servers(1, ServerParams::default())
+        .quorum(1)
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    upstream
+        .query_drop("CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);")
+        .await
+        .unwrap();
+    upstream
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+    adapter
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
+
+    // The upquery will fail on the second domain that handles it.
+    for s in deployment.server_handles().values_mut() {
+        s.set_failpoint("handle-packet", "1*off->1*panic->off")
+            .await;
+    }
+
+    // Should return the correct results from fallback.
+    let result: Result<mysql_async::Result<Vec<(i32, i32)>>, _> = timeout(
+        Duration::from_secs(5),
+        adapter.exec(r"SELECT * FROM t1 WHERE uid = ?;", (2,)),
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().unwrap(), vec![(2, 5)]);
+
+    deployment.teardown().await.unwrap();
+}
+
+#[clustertest]
+#[should_panic]
+async fn update_propagation_through_failed_domain() {
+    let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
+        .with_servers(2, ServerParams::default())
+        .quorum(2)
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    upstream
+        .query_drop("CREATE TABLE t1 (uid INT NOT NULL, value INT NOT NULL);")
+        .await
+        .unwrap();
+    upstream
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+    adapter
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
+
+    let mut results = EventuallyConsistentResults::new();
+    results.write(&[(2, 5)]);
+
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            r"SELECT * FROM t1 where uid = ?;",
+            (2,),
+            &results,
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    // Fail the reader node when it receives the update.
+    for s in deployment.server_handles().values_mut() {
+        s.set_failpoint("reader-handle-packet", "panic").await;
+    }
+
+    upstream
+        .query_drop(r"UPDATE t1 SET value = 4 WHERE uid = 2")
+        .await
+        .unwrap();
+    results.write(&[(2, 4)]);
+
+    // Sleep so that if the UPDATE would have cascade failed, we would never
+    // reach quorum.
+    sleep(Duration::from_secs(5)).await;
+
+    // Turn off the panic so we don't fail on subsequent updates.
+    for s in deployment.server_handles().values_mut() {
+        s.set_failpoint("reader-handle-packet", "off").await;
+    }
+
+    upstream
+        .query_drop(r"UPDATE t1 SET value = 12 WHERE uid = 2")
+        .await
+        .unwrap();
+    results.write(&[(2, 12)]);
+
+    deployment
+        .start_server(ServerParams::default(), false)
+        .await
+        .unwrap();
+
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            r"SELECT * FROM t1 where uid = ?;",
+            (2,),
+            &results,
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Fail the controller 10 times and check if we can execute the query. This
 /// test will pass if we correctly execute queries against fallback.
 #[clustertest]
@@ -641,7 +819,7 @@ async fn view_survives_restart() {
             break;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        sleep(std::time::Duration::from_millis(100)).await;
     }
 
     for _ in 0..10 {
@@ -664,7 +842,7 @@ async fn view_survives_restart() {
                 break;
             }
 
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 

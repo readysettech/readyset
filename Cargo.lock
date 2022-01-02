@@ -3820,6 +3820,8 @@ dependencies = [
  "dataflow_expression",
  "derivative",
  "derive_more",
+ "fail",
+ "failpoint-macros",
  "futures-util",
  "hashbag",
  "indexmap",

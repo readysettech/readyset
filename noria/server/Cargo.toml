@@ -23,7 +23,7 @@ default = []
 generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
-failure_injection = ["fail/failpoints"]
+failure_injection = ["fail/failpoints", "dataflow/failure_injection"]
 
 [target.'cfg(not(target_env="msvc"))'.dependencies]
 jemallocator = "0.3"
