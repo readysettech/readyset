@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -xeuo pipefail
 
 if [ -z ${GERRIT_CHANGE_ID+x} ] && [ -z ${GERRIT_PATCHSET+x} ]; then
     echo "Not a CL build, skipping"
@@ -23,12 +23,35 @@ if [ "$#" -ge 1 ]; then
             ;;
     esac
 else
-    failed_jobs=$(curl 'https://graphql.buildkite.com/v1' \
+    set +e
+    read -r -d '' query <<EOF
+query BuildStatusQuery(\$buildID: ID!) {
+  build(uuid: \$buildID) {
+    jobs(first: 15, passed: false) {
+      edges {
+        node {
+          ...on JobTypeCommand {
+            softFailed
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+    set -e
+
+    failed_jobs=$(
+        jq -n \
+            --arg query "$query" \
+            --arg buildID "$BUILDKITE_BUILD_ID" \
+            '{ query: $query, variables: { buildID: $buildID } }' \
+            | curl 'https://graphql.buildkite.com/v1' \
             --silent \
             -H "Authorization: Bearer $BUILDKITE_GRAPHQL_API_TOKEN" \
-            -d "{\"query\": \"query BuildStatusQuery { build(uuid: \\\"$BUILDKITE_BUILD_ID\\\") { jobs(passed: false) { count } } }\"}" | \
-            jq -r '.data.build.jobs.count')
-    if (( failed_jobs > 0 )); then
+            -d@- \
+            | jq -r '.data.build.jobs.edges | map(select(.node.softFailed | not)) | length')
+    if [ "$failed_jobs" -gt 0 ]; then
         verified="-1"
         verb="failed"
     else
