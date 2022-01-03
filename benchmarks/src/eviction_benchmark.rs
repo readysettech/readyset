@@ -85,6 +85,19 @@ impl BenchmarkControl for EvictionBenchmark {
     }
 
     async fn benchmark(&self, deployment: &DeploymentParameters) -> Result<BenchmarkResults> {
+        // Explicitely migrate the query before benchmarking.
+        let opts = mysql_async::Opts::from_url(&deployment.target_conn_str).unwrap();
+        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        // For now drop the result of migrate as CREATE CACHED QUERY does not support
+        // non-select queries.
+        let _ = self.query.migrate(&mut conn).await;
+        // Migrate the eviction query too
+        let _ = conn
+            .query_drop(
+                "CREATE CACHED QUERY e AS SELECT * FROM eviction_benchmark_empty WHERE id = ?;",
+            )
+            .await;
+
         let thread_data = EvictionBenchmarkReadThreadParams {
             query: self.query.clone(),
             mysql_conn_str: deployment.target_conn_str.clone(),
