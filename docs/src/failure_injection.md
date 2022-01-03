@@ -43,7 +43,7 @@ fn critical_function() -> Result<()> {
 If the feature flag does not exist for the crate it should be added and
 should enable fail-rs's failpoints feature.
 
-```
+```toml
 [features]
 failure_injection = ["fail/failpoints"]
 
@@ -61,7 +61,7 @@ own file and run using `serial_test::serial`. When used in clustertests, the
 Enabled failpoints should also be disabled following a test run. The fail-rs
 library provides [`FailScenario`](https://docs.rs/fail/0.5.0/fail/struct.FailScenario.html) to wrap enabling and disabling failpoints for a specific test.
 
-```
+```rust
 use fail::FailScenario;
 use failpoint_macros::failpoint;
 use serial_test::serial
@@ -74,7 +74,7 @@ fn do_fallible_work() {
 
 #[test]
 #[serial]
-fn example_test {
+fn example_test() {
     let scenario = FailScenario::setup();
     do_fallible_work();
     scenario.teardown();
@@ -129,7 +129,7 @@ For more information `cargo run --bin failpoint -- --help`
 Clustertests can be used to trigger failpoints that crash the process and
 verify the correct recovery behavior occured.
 
-```
+```rust
 impl ServerHandle {
   async fn set_failpoint(&self, name: &str, action: &str);
 }
@@ -138,27 +138,26 @@ impl ServerHandle {
 Example clustertest crashing the leader by setting a failpoint on controller
 RPC to panic. When the second `healthy_workers` call is made, the server
 running the controller panics.
-```
-    /// Test that setting a failpoint triggers a panic on RPC.
-    #[clustertest]
-    async fn leader_failure_with_failpoints() {
-        ...
-        assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 1);
+```rust
+/// Test that setting a failpoint triggers a panic on RPC.
+#[clustertest]
+async fn leader_failure_with_failpoints() {
+    ...
+    assert_eq!(deployment.handle.healthy_workers().await.unwrap().len(), 1);
 
-        let controller_uri = deployment.handle.controller_uri().await.unwrap();
-        let server_handle = deployment.server_handle(&controller_uri).unwrap();
-        server_handle
-            .set_failpoint("controller-request", "panic")
-            .await;
+    let controller_uri = deployment.handle.controller_uri().await.unwrap();
+    let server_handle = deployment.server_handle(&controller_uri).unwrap();
+    server_handle
+       .set_failpoint("controller-request", "panic")
+       .await;
 
-        // Request times out because the server panics.
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), deployment.handle.healthy_workers())
-                .await
-                .is_err()
-        );
-        deployment.teardown().await.unwrap();
-    }
+    // Request times out because the server panics.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), deployment.handle.healthy_workers())
+            .await
+            .is_err()
+    );
+    deployment.teardown().await.unwrap();
 }
 ```
 
