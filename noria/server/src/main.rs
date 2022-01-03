@@ -99,11 +99,11 @@ struct Opts {
     /// Authority connection string.
     // TODO(justin): The default address should depend on the authority
     // value.
-    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:2181")]
+    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:8500")]
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "zookeeper", possible_values = &["consul", "zookeeper"])]
+    #[clap(long, env = "AUTHORITY", default_value = "consul", possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
     /// Memory, in bytes, available for partially materialized state (0 = unlimited)
