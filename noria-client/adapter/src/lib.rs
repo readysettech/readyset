@@ -88,11 +88,11 @@ pub struct Options {
 
     /// Authority connection string.
     // TODO(justin): The default_value should depend on the value of authority.
-    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:2181")]
+    #[clap(long, env = "AUTHORITY_ADDRESS", default_value = "127.0.0.1:8500")]
     authority_address: String,
 
     /// The authority to use. Possible values: zookeeper, consul.
-    #[clap(long, env = "AUTHORITY", default_value = "zookeeper", possible_values = &["consul", "zookeeper"])]
+    #[clap(long, env = "AUTHORITY", default_value = "consul", possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
 
     /// Log slow queries (> 5ms)
