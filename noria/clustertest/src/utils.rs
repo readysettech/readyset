@@ -126,7 +126,10 @@ async fn get_num_view_queries(metrics: &mut MetricsClient) -> u32 {
         Ok(metrics) => metrics
             .iter()
             .map(
-                |d| match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_RESULT) {
+                |d| match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_HIT) {
+                    Some(DumpedMetricValue::Counter(n)) => n as u32,
+                    _ => 0,
+                } + match get_metric!(d.metrics, recorded::SERVER_VIEW_QUERY_MISS) {
                     Some(DumpedMetricValue::Counter(n)) => n as u32,
                     _ => 0,
                 },
