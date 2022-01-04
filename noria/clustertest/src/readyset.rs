@@ -86,12 +86,21 @@ async fn query_regional_routing_test() {
         .await
         .unwrap()
         .metrics;
+
     assert_eq!(
-        get_metric!(r1_metrics, recorded::SERVER_VIEW_QUERY_RESULT),
+        get_metric!(r1_metrics, recorded::SERVER_VIEW_QUERY_MISS),
         None
     );
     assert_eq!(
-        get_metric!(r2_metrics, recorded::SERVER_VIEW_QUERY_RESULT),
+        get_metric!(r1_metrics, recorded::SERVER_VIEW_QUERY_HIT),
+        None
+    );
+    assert_eq!(
+        get_metric!(r2_metrics, recorded::SERVER_VIEW_QUERY_MISS),
+        None
+    );
+    assert_eq!(
+        get_metric!(r2_metrics, recorded::SERVER_VIEW_QUERY_HIT),
         Some(DumpedMetricValue::Counter(1.0))
     );
 

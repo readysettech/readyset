@@ -106,20 +106,11 @@ async fn it_works_basic() {
         1.0
     );
     assert_eq!(
-        get_metric!(
-            metrics_dump,
-            recorded::SERVER_VIEW_QUERY_RESULT,
-            "result" => recorded::ViewQueryResultTag::Replay.value()
-        )
-        .unwrap(),
-        DumpedMetricValue::Counter(1.0)
+        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_MISS),
+        Some(DumpedMetricValue::Counter(1.0))
     );
     assert_eq!(
-        get_metric!(
-            metrics_dump,
-            recorded::SERVER_VIEW_QUERY_RESULT,
-            "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
-        ),
+        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
         None
     );
 
@@ -153,13 +144,8 @@ async fn it_works_basic() {
         1.0
     );
     assert_eq!(
-        get_metric!(
-            metrics_dump,
-            recorded::SERVER_VIEW_QUERY_RESULT,
-            "result" => recorded::ViewQueryResultTag::ServedFromCache.value()
-        )
-        .unwrap(),
-        DumpedMetricValue::Counter(1.0)
+        get_metric!(metrics_dump, recorded::SERVER_VIEW_QUERY_HIT),
+        Some(DumpedMetricValue::Counter(1.0))
     );
 
     assert!(matches!(

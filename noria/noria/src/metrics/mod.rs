@@ -341,30 +341,11 @@ pub mod recorded {
     /// | shard | The shard identifier of the domain. |
     pub const DOMAIN_EVICTION_FREED_MEMORY: &str = "domain.eviction_freed_memory";
 
-    /// How the view processed a query;
-    pub enum ViewQueryResultTag {
-        /// A replay was required to serve the ViewQuery.
-        Replay,
-        /// The ViewQuery was served entirely from cache.
-        ServedFromCache,
-    }
-    impl ViewQueryResultTag {
-        /// Returns the enum tag as a &str for use in metrics labels.
-        pub fn value(&self) -> &str {
-            match self {
-                ViewQueryResultTag::Replay => "replay",
-                ViewQueryResultTag::ServedFromCache => "served_from_cache",
-            }
-        }
-    }
+    /// Counter: The number of times a query was served entirely from reader cache.
+    pub const SERVER_VIEW_QUERY_HIT: &str = "server.view_query_result_hit";
 
-    /// Counter: The number of times a specific view query result occured at a
-    /// server.
-    ///
-    /// | Tag | Description |
-    /// | --- | ----------- |
-    /// | result | ViewQueryResultTag |
-    pub const SERVER_VIEW_QUERY_RESULT: &str = "server.view_query_result";
+    /// Counter: The number of times a query required at least a partial replay.
+    pub const SERVER_VIEW_QUERY_MISS: &str = "server.view_query_result_miss";
 
     /// Counter: The number of times a dataflow node type is added to the
     /// dataflow graph. Recorded at the time the new graph is committed.
@@ -629,10 +610,11 @@ impl DumpedMetricValue {
 /// syntax: label1 => label_value.
 ///
 /// Example usage:
-///    get_metric!(
+///     get_metric!(
 ///         metrics_dump,
-///         recorded::SERVER_VIEW_QUERY_RESULT,
-///         "result" => recorded::ViewQueryResult::REPLAY);
+///         recorded::DOMAIN_NODE_ADDED,
+///         "ntype" => "Reader"
+///     );
 #[macro_export]
 macro_rules! get_metric {
     (
@@ -657,10 +639,11 @@ macro_rules! get_metric {
 /// syntax: label1 => label_value.
 ///
 /// Example usage:
-///    get_all_metrics!(
+///     get_all_metrics!(
 ///         metrics_dump,
-///         recorded::SERVER_VIEW_QUERY_RESULT,
-///         "result" => recorded::ViewQueryResult::REPLAY);
+///         recorded::DOMAIN_NODE_ADDED,
+///         "ntype" => "Reader"
+///     );
 #[macro_export]
 macro_rules! get_all_metrics {
     (
