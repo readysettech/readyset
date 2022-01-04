@@ -56,6 +56,7 @@ where
 {
     const THREAD_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
     let mut interval = tokio::time::interval(THREAD_UPDATE_INTERVAL);
+    interval.tick().await; // First tick is immediate
     let mut updates = Vec::new();
 
     // Pin the future so we can poll on it repeatedly in the select loop.
@@ -64,6 +65,7 @@ where
 
     let mut results = BenchmarkResults::new();
 
+    let mut last_update = std::time::Instant::now();
     loop {
         select! {
             // If we reach our thread update interval, run the provided function
@@ -71,7 +73,9 @@ where
             _ = interval.tick() => {
                 let mut new_updates = Vec::new();
                 std::mem::swap(&mut new_updates, &mut updates);
-                B::handle_benchmark_results(new_updates, THREAD_UPDATE_INTERVAL, &mut results).await?
+                let elapsed = last_update.elapsed();
+                last_update = std::time::Instant::now();
+                B::handle_benchmark_results(new_updates, elapsed, &mut results).await?;
             }
             // If we receive an update push it to the next batch of updates.
             r = reciever.recv() => {

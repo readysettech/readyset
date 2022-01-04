@@ -82,7 +82,7 @@ impl ForwardPrometheusMetrics {
 /// [clap::Parser].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrometheusEndpoint {
-    metrics_url: String,
+    pub metrics_url: String,
 }
 
 impl FromStr for PrometheusEndpoint {

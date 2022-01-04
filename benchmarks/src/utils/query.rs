@@ -15,6 +15,7 @@ use mysql_async::prelude::Queryable;
 use mysql_async::Statement;
 use mysql_async::Value;
 use nom_sql::SqlType;
+use query_generator::ColumnGenerator;
 use query_generator::DistributionAnnotation;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -222,6 +223,25 @@ impl PreparedStatement {
         (self.query.clone(), self.generate_parameters())
     }
 
+    /// Returns the query text and a set of generators that can be used to
+    /// execute this prepared statement.
+    pub fn query_generators(&self) -> (String, GeneratorSet) {
+        (
+            self.query.clone(),
+            GeneratorSet(
+                self.params
+                    .iter()
+                    .map(|t| match &t.annotation {
+                        None => ColumnGenerator::Random(t.column_type.clone().into()),
+                        Some(annotation) => {
+                            annotation.spec.generator_for_col(t.column_type.clone())
+                        }
+                    })
+                    .collect(),
+            ),
+        )
+    }
+
     /// Returns just the parameters to execute our prepared statement
     pub fn generate_parameters(&self) -> Vec<Value> {
         self.params
@@ -234,6 +254,44 @@ impl PreparedStatement {
                     .gen()
                     .try_into()
                     .unwrap(),
+            })
+            .collect()
+    }
+}
+
+pub struct GeneratorSet(Vec<ColumnGenerator>);
+
+impl GeneratorSet {
+    /// Generate a value from each generator into a vector
+    pub fn generate(&mut self) -> Vec<Value> {
+        self.0
+            .iter_mut()
+            .map(|g| g.gen().try_into().unwrap())
+            .collect()
+    }
+
+    /// Generate a value from each generator into a vector but scaling the output
+    /// of Uniform and Zipfian down by the factor scale.
+    ///
+    /// # Panics
+    ///
+    /// If scale > 1.0 or scale <= 0.0
+    pub fn generate_scaled(&mut self, scale: f64) -> Vec<Value> {
+        // Can only scale down, scaling integers up doesn't make much sense
+        assert!(scale <= 1.0 && scale > 0.0);
+        self.0
+            .iter_mut()
+            .map(|g| {
+                let v = g.gen().try_into().unwrap();
+                if matches!(g, ColumnGenerator::Uniform(_) | ColumnGenerator::Zipfian(_)) {
+                    match v {
+                        Value::Int(i) => Value::Int((i as f64 * scale) as i64),
+                        Value::UInt(i) => Value::UInt((i as f64 * scale) as u64),
+                        _ => unreachable!("Uniform and Zipfian generate integers"),
+                    }
+                } else {
+                    v
+                }
             })
             .collect()
     }

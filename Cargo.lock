@@ -809,6 +809,7 @@ dependencies = [
  "noria-server",
  "num-integer",
  "parking_lot",
+ "prometheus-parse",
  "query_generator",
  "rand 0.8.4",
  "readyset-logging",
@@ -4744,6 +4745,17 @@ dependencies = [
  "serde_json",
  "time 0.2.27",
  "url",
+]
+
+[[package]]
+name = "prometheus-parse"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c996f3caea1c51aa034c0d2dfd8447a12c555f4567b02677ef8a865ac4cce712"
+dependencies = [
+ "chrono",
+ "lazy_static",
+ "regex",
 ]
 
 [[package]]
