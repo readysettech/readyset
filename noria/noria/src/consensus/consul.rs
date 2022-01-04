@@ -32,9 +32,9 @@ pub const STATE_KEY: &str = "state";
 pub const ADAPTER_PREFIX: &str = "adapters/";
 /// The delay before another client can claim a lock.
 const SESSION_LOCK_DELAY: u64 = 0;
-/// When the authority releases locks on keys, the keys should
-/// be deleted.
-const SESSION_RELEASE_BEHAVIOR: &str = "delete";
+/// When the authority releases a session, release the locks held
+/// by the session.
+const SESSION_RELEASE_BEHAVIOR: &str = "release";
 /// The amount of time to wait for a heartbeat before declaring a
 /// session as dead.
 const SESSION_TTL: &str = "20s";
@@ -227,6 +227,14 @@ impl ConsulAuthority {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    async fn delete_all_keys(&self) {
+        self.consul
+            .delete(&self.prefix_with_deployment("?recurse"), None)
+            .await
+            .unwrap();
+    }
 }
 
 fn is_new_index(current_index: Option<u64>, kv: &KVPair) -> bool {
@@ -412,14 +420,48 @@ impl AuthorityControl for ConsulAuthority {
         }
     }
 
-    async fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    /// Updates the controller state only if we are the leader. This is guaranteed by holding a
+    /// session that locks both the leader key and the state key. If the leader session dies
+    /// both locks will be released.
+    async fn update_controller_state<F, P, E>(&self, mut f: F) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
-        self.read_modify_write(&self.prefix_with_deployment(STATE_KEY), f)
+        let my_session = Some(self.get_session()?);
+        if let Ok((Some(kv), _)) = self
+            .consul
+            .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
             .await
+        {
+            if kv.Session != my_session {
+                bail!("Cannot update controller state if not the leader");
+            }
+        }
+
+        loop {
+            // TODO(justin): Use cas parameter to only modify if we have the same
+            // ModifyIndex when we write.
+            let current_val = self.try_read(STATE_KEY).await?;
+            let modified = f(current_val);
+
+            if let Ok(r) = modified {
+                let new_val = serde_json::to_string(&r)?;
+                let pair = KVPair {
+                    Key: self.prefix_with_deployment(STATE_KEY),
+                    Value: new_val,
+                    Session: my_session.clone(),
+                    ..Default::default()
+                };
+
+                match self.consul.acquire(&pair, None).await {
+                    Ok((true, _)) => return Ok(Ok(r)),
+                    Ok((false, _)) => continue,
+                    Err(e) => bail!(e.to_string()),
+                }
+            }
+        }
     }
 
     async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
@@ -479,6 +521,9 @@ impl AuthorityControl for ConsulAuthority {
         })
     }
 
+    // TODO(justin): The set of workers includes failed workers, this set will grow
+    // unbounded over a long-lived deployment with many failures. Introduce cleanup by
+    // deleting keys without a session.
     async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
         Ok(
             match consul::kv::KV::list(
@@ -490,7 +535,13 @@ impl AuthorityControl for ConsulAuthority {
             {
                 Ok((children, _)) => children
                     .into_iter()
-                    .map(|kv| path_to_worker_id(&kv.Key))
+                    .filter_map(|kv| {
+                        if kv.Session.is_some() {
+                            Some(path_to_worker_id(&kv.Key))
+                        } else {
+                            None
+                        }
+                    })
                     .collect(),
                 // The API currently throws an error that it cannot parse the json
                 // if the key does not exist.
@@ -553,7 +604,13 @@ impl AuthorityControl for ConsulAuthority {
         {
             Ok((children, _)) => children
                 .into_iter()
-                .map(|kv| path_to_adapter_id(&kv.Key))
+                .filter_map(|kv| {
+                    if kv.Session.is_some() {
+                        Some(path_to_adapter_id(&kv.Key))
+                    } else {
+                        None
+                    }
+                })
                 .collect(),
             // The API currently throws an error that it cannot parse the json
             // if the key does not exist.
@@ -593,15 +650,19 @@ fn value_to_socket_addr(value: String) -> Result<SocketAddr, Error> {
 mod tests {
     use super::*;
     use reqwest::Url;
+    use serial_test::serial;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::time::Duration;
 
     #[tokio::test]
+    #[serial]
     #[ignore]
     async fn read_write_operations() {
         let authority =
             Arc::new(ConsulAuthority::new("http://127.0.0.1:8500/read_write_operations").unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
 
         assert!(authority.try_read::<Duration>("a").await.unwrap().is_none());
         assert_eq!(
@@ -620,10 +681,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     #[ignore]
     async fn leader_election_operations() {
         let authority_address = "http://127.0.0.1:8500/leader_election";
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
@@ -642,6 +706,7 @@ mod tests {
         // This authority can't become the leader because it doesn't hold the lock on the
         // leader key.
         let authority_2 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority_2.init().await.unwrap();
         let payload_2 = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2182").unwrap(),
             nonce: 2,
@@ -664,6 +729,7 @@ mod tests {
         authority_2.surrender_leadership().await.unwrap();
 
         let authority_3 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority_3.init().await.unwrap();
         let payload_3 = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2183").unwrap(),
             nonce: 3,
@@ -673,10 +739,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     #[ignore]
     async fn retrieve_workers() {
         let authority_address = "http://127.0.0.1:8500/retrieve_workers";
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
 
         let worker = WorkerDescriptor {
             worker_uri: Url::parse("http://127.0.0.1").unwrap(),
@@ -711,6 +780,7 @@ mod tests {
         );
 
         let authority_2 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority_2.init().await.unwrap();
         let worker_id = authority_2.register_worker(worker).await.unwrap().unwrap();
         let workers = authority_2.get_workers().await.unwrap();
         assert_eq!(workers.len(), 2);
@@ -726,10 +796,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     #[ignore]
     async fn leader_indexes() {
         let authority_address = "http://127.0.0.1:8500/leader_indexes";
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
 
         let payload = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
@@ -761,11 +834,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     #[ignore]
     async fn retrieve_adapter_endpoints() {
         let authority_address = "http://127.0.0.1:8500/retrieve_adapter_endpoints";
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
         authority.init().await.unwrap();
+        authority.delete_all_keys().await;
 
         let adapter_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234);
 
@@ -788,5 +863,87 @@ mod tests {
         let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
         let adapter_addrs = authority.get_adapters().await.unwrap();
         assert_eq!(adapter_addrs.len(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    #[ignore]
+    async fn only_leader_can_update_state() {
+        let authority_address = "http://127.0.0.1:8500/leader_updates_state";
+        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let payload = LeaderPayload {
+            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            nonce: 1,
+        };
+
+        assert_eq!(
+            authority.become_leader(payload.clone()).await.unwrap(),
+            Some(payload)
+        );
+
+        assert_eq!(
+            0,
+            authority
+                .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
+                    match n {
+                        None => Ok(0),
+                        Some(mut n) => Ok({
+                            n += 1;
+                            n
+                        }),
+                    }
+                })
+                .await
+                .unwrap()
+                .unwrap()
+        );
+
+        let authority_new = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        authority_new.init().await.unwrap();
+
+        assert!(authority_new
+            .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
+                match n {
+                    None => Ok(40),
+                    Some(mut n) => Ok({
+                        n += 1;
+                        n
+                    }),
+                }
+            })
+            .await
+            .is_err());
+
+        authority.destroy_session().await.unwrap();
+
+        let payload = LeaderPayload {
+            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            nonce: 2,
+        };
+
+        assert_eq!(
+            authority_new.become_leader(payload.clone()).await.unwrap(),
+            Some(payload)
+        );
+
+        assert_eq!(
+            1,
+            authority_new
+                .update_controller_state(|n: Option<u32>| -> Result<u32, ()> {
+                    match n {
+                        None => Ok(0),
+                        Some(mut n) => Ok({
+                            n += 1;
+                            n
+                        }),
+                    }
+                })
+                .await
+                .unwrap()
+                .unwrap()
+        );
     }
 }
