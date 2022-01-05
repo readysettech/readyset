@@ -37,7 +37,7 @@ steps:
     key: logictest-generated-mysql
     command:
     - 'echo +++ Running noria-logictest'
-    - LOG_LEVEL=error cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 4 --database-type mysql
+    - cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 4 --database-type mysql
     depends_on:
     - build-image
     plugins:
@@ -47,6 +47,7 @@ steps:
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
+          - LOG_LEVEL=error
           config:
             - docker-compose.yml
             - build/docker-compose.ci-test.yaml
@@ -56,6 +57,32 @@ steps:
           retries: 3
     agents:
       queue: r5a-2xlarge
+
+  - label: 'Run Postgres generated logictests'
+    key: logictest-generated-psql
+    command:
+    - 'echo +++ Running noria-logictest'
+    - cargo run --bin noria-logictest --release -- verify logictests/generated/psql -t 4 --database-type postgresql
+    depends_on:
+    - build-image
+    plugins:
+      - docker-compose#v3.7.0:
+          run: app
+          env:
+          - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
+          - CACHEPOT_REGION=us-east-2
+          - CARGO_INCREMENTAL=0
+          - LOG_LEVEL=error
+          config:
+            - docker-compose.yml
+            - build/docker-compose.ci-test.yaml
+          pull-retries: 3
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+    agents:
+      queue: r5a-2xlarge
+    soft_fail: true
 
   - label: ':arrow_up: Run vertical tests'
     key: vertical-tests
