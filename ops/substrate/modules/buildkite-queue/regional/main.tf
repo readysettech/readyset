@@ -21,6 +21,18 @@ data "aws_subnets" "public_subnets" {
   }
 }
 
+data "aws_subnets" "private_subnets" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.vpc.id]
+  }
+
+  filter {
+    name   = "tag:Connectivity"
+    values = ["private"]
+  }
+}
+
 data "aws_s3_bucket" "secrets_bucket" {
   bucket = var.secrets_bucket
 }
@@ -31,7 +43,7 @@ resource "aws_cloudformation_stack" "main" {
   template_url = "https://s3.amazonaws.com/buildkite-aws-stack/${local.stack_version}/aws-stack.yml"
 
   capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
-  parameters = {
+  parameters = merge({
     "ArtifactsBucket"     = var.artifacts_bucket
     "SecretsBucket"       = var.secrets_bucket
     "SecretsBucketRegion" = data.aws_s3_bucket.secrets_bucket.region
@@ -49,8 +61,9 @@ resource "aws_cloudformation_stack" "main" {
     "MinSize" = var.min_size
 
     "VpcId"   = data.aws_vpc.vpc.id
-    "Subnets" = join(",", data.aws_subnets.public_subnets.ids)
-  }
+    "Subnets" = local.subnet_ids
+  },
+  local.ssh_key_pair_config)
 }
 
 data "aws_iam_roles" "iam_roles" {

@@ -62,3 +62,15 @@ variable "extra_iam_policy_arns" {
   description = "List of ARNs for extra IAM policies to grant to the Role for the agent instances"
   default     = []
 }
+
+variable "ssh_key_pair_name" {
+  type = string
+  description = "Name of the EC2 key pair to be applied to the Buildkite agents."
+  default = ""
+}
+
+variable "use_private_subnets" {
+  type = bool
+  description = "Toggles the usage of private subnets within the target VPC, vs public."
+  default = false
+}

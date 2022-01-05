@@ -39,6 +39,7 @@ module "buildkite_queue_shared" {
   agent_token_allowed_roles = concat(
     tolist(module.buildkite_ops_queue.iam_roles),
     tolist(module.buildkite_default_queue.iam_roles),
+    tolist(module.buildkite_benchmark_queue.iam_roles),
     flatten(values(module.buildkite_queue)[*].iam_roles),
   )
 }
@@ -109,6 +110,8 @@ module "buildkite_default_queue" {
   buildkite_queue = "default"
   instance_type   = "c5a.2xlarge"
 
+  max_size = 20
+
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
 
   extra_iam_policy_arns = local.extra_iam_policy_arns
@@ -142,8 +145,8 @@ module "buildkite_benchmark_queue" {
   min_size = 0
   max_size = 5
 
+  ssh_key_pair_name                          = "readyset-devops"
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
-
   extra_iam_policy_arns = concat(
     local.extra_iam_policy_arns, [
       aws_iam_policy.bk-benchmarking-assume-role[0].arn
