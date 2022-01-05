@@ -14,15 +14,16 @@ use noria::internal::{DomainIndex, LocalOrNot};
 use noria::{KeyComparison, PacketData, PacketPayload, Tagged};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashSet, VecDeque};
+use std::net::SocketAddr;
 use std::sync::{atomic, Arc};
 use std::time;
 use strawpoll::Strawpoll;
 use time::Duration;
 use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
-use tracing::{debug, info_span, warn, Span};
+use tracing::{debug, error, info_span, instrument, warn, Span};
 
 pub(super) type ReplicaAddr = (DomainIndex, usize);
 
@@ -238,10 +239,12 @@ impl Replica {
     /// Sends response packets asynchronously, the future takes ownership of a set of packets and
     /// their destination, therefore it can't be dropped before completion without risking some
     /// packets being lost
+    #[instrument(level = "debug", name = "send_packets", skip_all)]
     async fn send_packets(
         to_send: Vec<(ReplicaAddr, VecDeque<Box<Packet>>)>,
         connections: &tokio::sync::Mutex<Outputs>,
         coord: &ChannelCoordinator,
+        failed: &Mutex<HashSet<SocketAddr>>,
     ) -> ReadySetResult<()> {
         let mut lock = connections.lock().await;
 
@@ -253,18 +256,58 @@ impl Replica {
 
             let tx = match connections.entry(replica_address) {
                 Occupied(entry) => entry.into_mut(),
-                Vacant(entry) => entry.insert({
-                    while !coord.has(&replica_address) {
-                        tokio::task::yield_now().await;
-                    }
-                    coord.builder_for(&replica_address)?.build_async()?
-                }),
+                Vacant(entry) => {
+                    // Only add  new entry if: coord.has(n) and coord.get_addr(n) is not banned or
+                    // None.
+                    entry.insert({
+                        while !coord.has(&replica_address) {
+                            tokio::task::yield_now().await;
+                        }
+                        // If the channel is to a remote domain that has failed,
+                        // drop the packets for the domain from this batch.
+                        if let Some(addr) = coord.get_addr(&replica_address) {
+                            if failed.lock().await.contains(&addr) {
+                                warn!(target = ?replica_address, "Skipping packets to domain as it may have failed");
+                                continue;
+                            }
+                        }
+
+                        coord.builder_for(&replica_address)?.build_async()?
+                    })
+                }
             };
 
+            // Send the messages to the sink associated with each target domain.
+            // If an error occurs when performing `feed` or `flush`, add the address
+            // for the domain to the failed set, remove the channel rom the local
+            // channel coordinator, and skip the remaining packets.
+            //
+            // The next time a batch of packets is sent to a domain, a new connection
+            // will be established if the domain has been repaired.
+            let mut send_err = false;
             while let Some(m) = messages.pop_front() {
-                tx.feed(m).await?;
+                if let Err(e) = tx.feed(m).await {
+                    error!(err = ?e, "Error on feed.");
+                    send_err = true;
+                    break;
+                }
             }
-            tx.flush().await?;
+
+            if !send_err {
+                if let Err(e) = tx.flush().await {
+                    error!(err = ?e, "Error on flush.");
+                    send_err = true;
+                }
+            }
+
+            if send_err {
+                connections.remove(&replica_address);
+                if let Some(addr) = coord.get_addr(&replica_address) {
+                    failed.lock().await.insert(addr);
+                } else {
+                    warn!(target = ?replica_address, "Failure on sending packet to domain")
+                }
+            }
         }
         Ok(())
     }
@@ -278,7 +321,9 @@ impl Replica {
         // A cache of established connections to other Replicas we may send messages to
         // sadly have to use Mutex here to make it possible to pass a mutable reference to outputs to an async
         // function
-        let outputs = tokio::sync::Mutex::new(Outputs::default());
+        let outputs = Mutex::new(Outputs::default());
+        let failed = Mutex::new(HashSet::new());
+
         // Will only ever hold a single future that handles sending packets, wrap it for convenience into FuturesUnordered
         // in general we don't want to drop the future for send_packets until it finished, otherwise some packets might get
         // lost. So the solution for that is to do a `pin_mut` on a `Fuse` future (which requires first issuing a fake call)
@@ -382,7 +427,7 @@ impl Replica {
             // Check if the previous batch of send packets is done, and issue a new batch if needed
             if send_packets.is_empty() && !out.domains.is_empty() {
                 let to_send: Vec<_> = out.domains.drain().collect();
-                send_packets.push(Self::send_packets(to_send, &outputs, coord));
+                send_packets.push(Self::send_packets(to_send, &outputs, coord, &failed));
             }
         }
     }
