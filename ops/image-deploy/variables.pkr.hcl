@@ -16,32 +16,38 @@ variable "release_name" {
   default     = env("RELEASE_NAME")
 }
 
-variable "readyset_authority_consul_ami_id" {
+variable "readyset_authority_consul_region_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-authority-consul image"
-  default     = env("READYSET_AUTHORITY_CONSUL_AMI_ID")
+  description = "Colon separated region and AMI ID for the readyset-authority-consul image"
+  default     = env("READYSET_AUTHORITY_CONSUL_REGION_AMI_ID")
 }
 
-variable "readyset_monitor_ami_id" {
+variable "readyset_bastion_region_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-monitor image"
-  default     = env("READYSET_MONITOR_AMI_ID")
+  description = "Colon separated region and AMI ID for the readyset-bastion image"
+  default     = env("READYSET_BASTION_REGION_AMI_ID")
 }
 
-variable "readyset_mysql_adapter_ami_id" {
+variable "readyset_monitor_region_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-mysql-adapter image"
-  default     = env("READYSET_MYSQL_ADAPTER_AMI_ID")
+  description = "Colon separated region and AMI ID for the readyset-monitor image"
+  default     = env("READYSET_MONITOR_REGION_AMI_ID")
 }
 
-variable "readyset_psql_adapter_ami_id" {
+variable "readyset_mysql_adapter_region_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-psql-adapter image"
-  default     = env("READYSET_PSQL_ADAPTER_AMI_ID")
+  description = "Colon separated region and AMI ID for the readyset-mysql-adapter image"
+  default     = env("READYSET_MYSQL_ADAPTER_REGION_AMI_ID")
 }
 
-variable "readyset_server_ami_id" {
+variable "readyset_psql_adapter_region_ami_id" {
   type        = string
-  description = "AMI ID for the readyset-server image"
-  default     = env("READYSET_SERVER_AMI_ID")
+  description = "Colon separated region and AMI ID for the readyset-psql-adapter image"
+  default     = env("READYSET_PSQL_ADAPTER_REGION_AMI_ID")
+}
+
+variable "readyset_server_region_ami_id" {
+  type        = string
+  description = "Colon separated region and AMI ID for the readyset-server image"
+  default     = env("READYSET_SERVER_REGION_AMI_ID")
 }

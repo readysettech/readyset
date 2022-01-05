@@ -4,6 +4,9 @@ locals {
     local.destination_ami_version,
     local.destination_ami_suffix
   )
+  readyset_authority_consul_region_ami_id = split(":", var.readyset_authority_consul_region_ami_id)
+  readyset_authority_consul_source_ami_id = local.readyset_authority_consul_region_ami_id[1]
+  readyset_authority_consul_source_region = local.readyset_authority_consul_region_ami_id[0]
 }
 
 source "amazon-ebs" "readyset-authority-consul" {
@@ -15,8 +18,8 @@ source "amazon-ebs" "readyset-authority-consul" {
   ssh_username            = local.ssh_username
   ami_virtualization_type = local.ami_virtualization_type
 
-  source_ami = var.readyset_authority_consul_ami_id
-  region     = local.source_region
+  source_ami = local.readyset_authority_consul_source_ami_id
+  region     = local.readyset_authority_consul_source_region
 
   ami_name = local.readyset_authority_consul_destination_ami_name
 

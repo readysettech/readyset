@@ -15,7 +15,6 @@ locals {
   sandbox_account_id = "069491470376"
 
   source_account = var.production ? local.build_account_id : local.sandbox_account_id
-  source_region  = "us-east-2"
 
   internal_account_ids = [local.build_account_id, local.sandbox_account_id]
   customer_account_ids = [

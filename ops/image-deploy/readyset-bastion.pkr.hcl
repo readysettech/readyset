@@ -1,16 +1,16 @@
 locals {
-  readyset_server_destination_ami_name = format("readyset/images/%s-ssd/readyset-server-%s-amd64-%s",
+  readyset_bastion_destination_ami_name = format("readyset/images/%s-ssd/readyset-bastion-%s-amd64-%s",
     local.ami_virtualization_type,
     local.destination_ami_version,
     local.destination_ami_suffix
   )
 
-  readyset_server_region_ami_id = split(":", var.readyset_server_region_ami_id)
-  readyset_server_source_ami_id = local.readyset_server_region_ami_id[1]
-  readyset_server_source_region = local.readyset_server_region_ami_id[0]
+  readyset_bastion_region_ami_id = split(":", var.readyset_bastion_region_ami_id)
+  readyset_bastion_source_ami_id = local.readyset_bastion_region_ami_id[1]
+  readyset_bastion_source_region = local.readyset_bastion_region_ami_id[0]
 }
 
-source "amazon-ebs" "readyset-server" {
+source "amazon-ebs" "readyset-bastion" {
   # Settings to allow development of images outside of CI.
   skip_create_ami       = local.skip_create_ami
   force_deregister      = local.force_degregister
@@ -19,10 +19,10 @@ source "amazon-ebs" "readyset-server" {
   ssh_username            = local.ssh_username
   ami_virtualization_type = local.ami_virtualization_type
 
-  source_ami = local.readyset_server_source_ami_id
-  region     = local.readyset_server_source_region
+  source_ami = local.readyset_bastion_source_ami_id
+  region     = local.readyset_bastion_source_region
 
-  ami_name = local.readyset_server_destination_ami_name
+  ami_name = local.readyset_bastion_destination_ami_name
 
   # This is only used for starting up and then shutting down again
   instance_type = "t3.micro"
@@ -32,6 +32,6 @@ source "amazon-ebs" "readyset-server" {
 }
 
 build {
-  sources = ["source.amazon-ebs.readyset-server"]
+  sources = ["source.amazon-ebs.readyset-bastion"]
   post-processor "manifest" {}
 }

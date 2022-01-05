@@ -4,6 +4,10 @@ locals {
     local.destination_ami_version,
     local.destination_ami_suffix
   )
+
+  readyset_mysql_adapter_region_ami_id = split(":", var.readyset_mysql_adapter_region_ami_id)
+  readyset_mysql_adapter_source_ami_id = local.readyset_mysql_adapter_region_ami_id[1]
+  readyset_mysql_adapter_source_region = local.readyset_mysql_adapter_region_ami_id[0]
 }
 
 source "amazon-ebs" "readyset-mysql-adapter" {
@@ -15,8 +19,8 @@ source "amazon-ebs" "readyset-mysql-adapter" {
   ssh_username            = local.ssh_username
   ami_virtualization_type = local.ami_virtualization_type
 
-  source_ami = var.readyset_mysql_adapter_ami_id
-  region     = local.source_region
+  source_ami = local.readyset_mysql_adapter_source_ami_id
+  region     = local.readyset_mysql_adapter_source_region
 
   ami_name = local.readyset_mysql_adapter_destination_ami_name
 
