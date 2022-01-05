@@ -27,7 +27,7 @@ fn main() -> anyhow::Result<()> {
                 .long("zookeeper")
                 .takes_value(true)
                 .default_value("127.0.0.1:2181")
-                .about("Zookeeper connection info."),
+                .help("Zookeeper connection info."),
         )
         .arg(
             Arg::new("deployment")
@@ -35,21 +35,21 @@ fn main() -> anyhow::Result<()> {
                 .short('d')
                 .required(true)
                 .takes_value(true)
-                .about("Soup deployment ID."),
+                .help("Soup deployment ID."),
         )
         .arg(
             Arg::new("clean")
                 .short('c')
                 .long("clean")
                 .takes_value(false)
-                .about("Remove existing configuration."),
+                .help("Remove existing configuration."),
         )
         .arg(
             Arg::new("show")
                 .short('s')
                 .long("show")
                 .takes_value(false)
-                .about("Print current configuration to stdout."),
+                .help("Print current configuration to stdout."),
         )
         .get_matches();
 

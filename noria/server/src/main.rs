@@ -172,26 +172,26 @@ struct Opts {
     volume_id: Option<VolumeId>,
 
     /// Enable (experimental, currently broken) support for TopK in dataflow
-    #[clap(long, hidden = true)]
+    #[clap(long, hide = true)]
     enable_experimental_topk_support: bool,
 
     /// Enable (experimental) support for range queries in dataflow
-    #[clap(long, hidden = true)]
+    #[clap(long, hide = true)]
     enable_experimental_range_query_support: bool,
 
     #[clap(flatten)]
     logging: readyset_logging::Options,
 
     /// Indicate if deployment state should be reset to upstream DDL
-    #[clap(long, hidden = true)]
+    #[clap(long, hide = true)]
     reset_deployment_state: bool,
 
     /// Sets the server id when acquiring a binlog replication slot.
-    #[clap(long, hidden = true)]
-    repliation_server_id: Option<u32>,
+    #[clap(long, hide = true)]
+    replication_server_id: Option<u32>,
 
     /// Sets the number of concurrent replay requests in a noria-server.
-    #[clap(long, hidden = true)]
+    #[clap(long, hide = true)]
     max_concurrent_replays: Option<usize>,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the current working directory.

@@ -787,7 +787,7 @@ dependencies = [
  "async-trait",
  "atomic-counter",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "enum_dispatch",
  "futures 0.3.17",
  "hdrhistogram",
@@ -1175,9 +1175,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.0.0-beta.5"
+version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feff3878564edb93745d58cf63e17b63f24142506e7a20c87a5521ed7bfb1d63"
+checksum = "d01c9347757e131122b19cd19a05c85805b68c2352a97b623efdc3c295290299"
 dependencies = [
  "atty",
  "bitflags",
@@ -1188,16 +1188,15 @@ dependencies = [
  "strsim 0.10.0",
  "termcolor",
  "textwrap 0.14.2",
- "unicase",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "3.0.0-beta.5"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b15c6b4f786ffb6192ffe65a36855bc1fc2444bcd0945ae16748dcd6ed7d0d3"
+checksum = "448c8b00367288ad41804ac7a9e0fe58f2324a36901cb5d6b6db58be86d1db8f"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1673,7 +1672,7 @@ name = "deployment-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "console",
  "indicatif 0.16.2",
  "mysql_async",
@@ -1857,7 +1856,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-sdk-sqs",
  "aws-types",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "futures 0.3.17",
  "lazy_static",
  "nix",
@@ -2384,6 +2383,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "heck"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2635,7 +2640,7 @@ dependencies = [
 name = "irl_demo"
 version = "0.1.0"
 dependencies = [
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "futures 0.3.17",
  "futures-util",
  "mysql",
@@ -2649,7 +2654,7 @@ dependencies = [
 name = "irl_minimal"
 version = "0.1.0"
 dependencies = [
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "futures 0.3.17",
  "futures-util",
  "mysql",
@@ -3092,7 +3097,7 @@ dependencies = [
  "async-trait",
  "bit-vec",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "derive_more",
  "futures 0.3.17",
  "futures-executor",
@@ -3636,7 +3641,7 @@ version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 2.33.3",
+ "clap 3.0.4",
  "futures-core",
  "futures-util",
  "hdrhistogram",
@@ -3707,7 +3712,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "futures-util",
  "maplit",
  "metrics",
@@ -3872,7 +3877,7 @@ dependencies = [
  "bit-vec",
  "bytes 1.1.0",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "colored",
  "derive_more",
  "enum-display-derive",
@@ -3934,7 +3939,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "derive_more",
  "itertools 0.10.3",
  "jemallocator",
@@ -3967,7 +3972,7 @@ dependencies = [
  "async-trait",
  "bit-vec",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "eui48",
  "futures 0.3.17",
  "itertools 0.10.3",
@@ -4010,7 +4015,7 @@ dependencies = [
  "backtrace",
  "bincode",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "criterion",
  "diff",
  "fail",
@@ -4083,7 +4088,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "hyper",
  "noria",
  "noria-server",
@@ -4296,9 +4301,9 @@ dependencies = [
 
 [[package]]
 name = "os_str_bytes"
-version = "4.2.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "addaa943333a514159c80c97ff4a93306530d965d27e139188283cd13e06a799"
+checksum = "8e22443d1643a904602595ba1cd8f7d896afe56d26712531c5ff73a15b2fbf64"
 dependencies = [
  "memchr",
 ]
@@ -4806,7 +4811,7 @@ dependencies = [
  "anyhow",
  "bit-vec",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "derive_more",
  "eui48",
  "futures-util",
@@ -5065,7 +5070,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-sdk-rds",
  "aws-types",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "console",
  "derive_more",
  "dialoguer",
@@ -5096,7 +5101,7 @@ name = "readyset-logging"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -5107,7 +5112,7 @@ name = "readyset-substrate"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "handlebars",
  "nix",
  "reqwest",
@@ -5198,7 +5203,7 @@ dependencies = [
  "bit-vec",
  "bytes 1.1.0",
  "chrono",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "futures 0.3.17",
  "hex",
  "itertools 0.10.3",
@@ -5945,7 +5950,7 @@ version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
 dependencies = [
- "heck",
+ "heck 0.3.3",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -5964,7 +5969,7 @@ version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee8bc6b87a5112aeeab1f4a9f7ab634fe6cbefc4850006df31267f4cfb9e3149"
 dependencies = [
- "heck",
+ "heck 0.3.3",
  "proc-macro2",
  "quote",
  "syn",
@@ -6077,9 +6082,6 @@ name = "textwrap"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0066c8d12af8b5acd21e00547c3797fde4e8677254a7ee429176ccebbe93dd80"
-dependencies = [
- "unicode-width",
-]
 
 [[package]]
 name = "thiserror"
@@ -6541,15 +6543,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "unicase"
-version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50f37be617794602aabbeee0be4f259dc1778fabe05e2d67ee8f79326d5cb4f6"
-dependencies = [
- "version_check",
-]
-
-[[package]]
 name = "unicode-bidi"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6888,7 +6881,7 @@ dependencies = [
  "buildkite-pipeline",
  "camino",
  "cargo_metadata",
- "clap 3.0.0-beta.5",
+ "clap 3.0.4",
  "directories 3.0.2",
  "futures 0.3.17",
  "maplit",

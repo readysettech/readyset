@@ -1,7 +1,7 @@
 #![warn(clippy::dbg_macro)]
 #![allow(clippy::many_single_char_names)]
 
-use clap::{value_t_or_exit, App, Arg};
+use clap::{App, Arg};
 use hdrhistogram::Histogram;
 use noria::{Builder, DurabilityMode, FrontierStrategy, PersistenceParameters};
 use noria_data::DataType;
@@ -27,21 +27,21 @@ async fn main() {
     let args = App::new("purge-stress")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
         .arg(
-            Arg::with_name("replay-timeout")
+            Arg::new("replay-timeout")
                 .long("replay-timeout")
                 .takes_value(true)
                 .default_value("100000")
                 .help("Time to batch replay requests for, in nanoseconds."),
         )
         .arg(
-            Arg::with_name("time")
-                .short("t")
+            Arg::new("time")
+                .short('t')
                 .takes_value(true)
                 .default_value("10")
                 .help("Time to run benchmark for, in seconds."),
         )
         .arg(
-            Arg::with_name("purge")
+            Arg::new("purge")
                 .long("purge")
                 .takes_value(true)
                 .possible_values(&["none", "reader", "all"])
@@ -50,7 +50,7 @@ async fn main() {
         )
         .get_matches();
 
-    let runtime = value_t_or_exit!(args, "time", u64);
+    let runtime: u64 = args.value_of_t_or_exit("time");
     let mut builder = Builder::default();
 
     builder.set_persistence(PersistenceParameters {

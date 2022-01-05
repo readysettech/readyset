@@ -1,6 +1,5 @@
 mod populate;
 
-use clap::value_t_or_exit;
 use noria::{Builder, Handle};
 use tracing::info;
 
@@ -120,81 +119,81 @@ async fn main() {
         .version("0.1")
         .about("Soupy conference management system for your HotCRP needs.")
         .arg(
-            Arg::with_name("graphs")
-                .short("g")
+            Arg::new("graphs")
+                .short('g')
                 .value_name("DIR")
                 .help("Directory to dump graphs for each schema version into (if set)."),
         )
         .arg(
-            Arg::with_name("populate_from")
-                .short("p")
+            Arg::new("populate_from")
+                .short('p')
                 .required(true)
                 .default_value("benchmarks/hotsoup/testdata")
                 .help("Location of the HotCRP test data for population."),
         )
         .arg(
-            Arg::with_name("schemas")
-                .short("s")
+            Arg::new("schemas")
+                .short('s')
                 .required(true)
                 .default_value("benchmarks/hotsoup/schemas")
                 .help("Location of the HotCRP query recipes to move through."),
         )
         .arg(
-            Arg::with_name("queries")
-                .short("q")
+            Arg::new("queries")
+                .short('q')
                 .required(true)
                 .default_value("benchmarks/hotsoup/queries")
                 .help("Location of the HotCRP schema recipes to move through."),
         )
         .arg(
-            Arg::with_name("blacklist")
-                .short("b")
+            Arg::new("blacklist")
+                .short('b')
                 .default_value("benchmarks/hotsoup/query_blacklist.txt")
                 .help("File with blacklisted queries to skip."),
         )
         .arg(
-            Arg::with_name("no-partial")
+            Arg::new("no-partial")
                 .long("no-partial")
                 .help("Disable partial materialization"),
         )
         .arg(
-            Arg::with_name("no-sharding")
+            Arg::new("no-sharding")
                 .long("no-sharding")
                 .help("Disable partial materialization"),
         )
         .arg(
-            Arg::with_name("populate_at")
+            Arg::new("populate_at")
                 .default_value("11")
                 .long("populate_at")
                 .help("Schema version to populate database at; must be compatible with test data."),
         )
         .arg(
-            Arg::with_name("reuse")
+            Arg::new("reuse")
                 .long("reuse")
                 .default_value("finkelstein")
                 .possible_values(&["noreuse", "finkelstein", "relaxed", "full"])
                 .help("Query reuse algorithm to use."),
         )
         .arg(
-            Arg::with_name("start_at")
+            Arg::new("start_at")
                 .default_value("1")
                 .long("start_at")
                 .help("Schema version to start at; versions prior to this will be skipped."),
         )
         .arg(
-            Arg::with_name("stop_at")
+            Arg::new("stop_at")
                 .default_value("161")
                 .long("stop_at")
                 .help("Schema version to stop at; versions after this will be skipped."),
         )
         .arg(
-            Arg::with_name("base_only")
+            Arg::new("base_only")
                 .long("base_only")
                 .help("Only add base tables, not queries."),
         )
         .arg(
-            Arg::with_name("transactional")
-                .short("t")
+            Arg::new("transactional")
+                .short('t')
                 .help("Use transactional writes."),
         )
         .get_matches();
@@ -215,9 +214,9 @@ async fn main() {
     };*/
     let disable_sharding = matches.is_present("no-sharding");
     let disable_partial = matches.is_present("no-partial");
-    let start_at_schema = value_t_or_exit!(matches, "start_at", u64);
-    let stop_at_schema = value_t_or_exit!(matches, "stop_at", u64);
-    let populate_at_schema = value_t_or_exit!(matches, "populate_at", u64);
+    let start_at_schema: u64 = matches.value_of_t_or_exit("start_at");
+    let stop_at_schema: u64 = matches.value_of_t_or_exit("stop_at");
+    let populate_at_schema: u64 = matches.value_of_t_or_exit("populate_at");
 
     let mut backend = make(blloc, !disable_sharding, !disable_partial).await;
 

@@ -9,7 +9,7 @@ tokio = { version = "1.8.4", features = ["full"] }
 futures = "0.3.0"
 futures-util = "0.3.0"
 mysql = "22.0.0"
-clap = "3.0.0-beta.4"
+clap = { version = "3.0", features = ["derive", "env"] }
 tracing = "0.1.29"
 tracing-subscriber = { version = "0.2.25", features = ["fmt"] }
 time = { version = "0.2", features = ["std"], optional = true, default-features = false }

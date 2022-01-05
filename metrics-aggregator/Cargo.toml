@@ -37,7 +37,7 @@ stream-cancel = "0.8.0"
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
 async-trait = "0.1"
-clap = "3.0.0-beta.2"
+clap = { version = "3.0", features = ["derive","env"] }
 tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time", "net"] }
 tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing-subscriber = "0.2.20"

@@ -93,55 +93,51 @@ async fn main() {
         .version("0.1")
         .about("Benchmarks HotCRP-like application with security policies.")
         .arg(
-            Arg::with_name("schema")
-                .short("s")
+            Arg::new("schema")
+                .short('s')
                 .required(true)
                 .default_value("benchmarks/securecrp/jeeves_schema.sql")
                 .help("SQL schema file"),
         )
         .arg(
-            Arg::with_name("queries")
-                .short("q")
+            Arg::new("queries")
+                .short('q')
                 .required(true)
                 .default_value("benchmarks/securecrp/jeeves_queries.sql")
                 .help("SQL query file"),
         )
         .arg(
-            Arg::with_name("policies")
+            Arg::new("policies")
                 .long("policies")
                 .required(true)
                 .default_value("benchmarks/securecrp/jeeves_policies.json")
                 .help("Security policies file"),
         )
         .arg(
-            Arg::with_name("graph")
-                .short("g")
+            Arg::new("graph")
+                .short('g')
                 .default_value("graph.gv")
                 .help("File to dump graph"),
         )
         .arg(
-            Arg::with_name("reuse")
+            Arg::new("reuse")
                 .long("reuse")
                 .default_value("full")
                 .possible_values(&["noreuse", "finkelstein", "relaxed", "full"])
                 .help("Query reuse algorithm"),
         )
+        .arg(Arg::new("shard").long("shard").help("Enable sharding"))
         .arg(
-            Arg::with_name("shard")
-                .long("shard")
-                .help("Enable sharding"),
-        )
-        .arg(
-            Arg::with_name("partial")
+            Arg::new("partial")
                 .long("partial")
                 .help("Enable partial materialization"),
         )
         .arg(
-            Arg::with_name("populate")
+            Arg::new("populate")
                 .long("populate")
                 .help("Populate app with randomly generated data"),
         )
-        .arg(Arg::with_name("user").long("user").default_value("malte"))
+        .arg(Arg::new("user").long("user").default_value("malte"))
         .get_matches();
 
     println!("Starting SecureCRP...");

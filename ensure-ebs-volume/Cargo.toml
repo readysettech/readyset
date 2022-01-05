@@ -13,7 +13,7 @@ aws-sdk-ec2 = "0.3.0"
 aws-sdk-sqs = "0.3.0"
 aws-sdk-autoscaling = "0.3.0"
 aws-types = "0.3.0"
-clap = "3.0.0-beta.4"
+clap = { version = "3.0", features = ["derive","env"] }
 lazy_static = "1.4.0"
 regex = "1.5.4"
 serde = { version = "1.0.130", features = ["derive"] }
