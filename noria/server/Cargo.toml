@@ -107,14 +107,6 @@ criterion = "0.3"
 include_dir = "0.6.2"
 rusty-fork = "0.3.0"
 
-[lib]
-name = "noria_server"
-path = "src/lib.rs"
-
-[[bin]]
-name = "noria-server"
-path = "src/main.rs"
-
 [[bin]]
 name = "noria-zk"
 path = "src/bin/zk.rs"
