@@ -243,6 +243,8 @@ steps:
 
   - label: ':rust: Build readyset release binaries'
     key: build-binaries
+    depends_on:
+      - build-image
     commands:
       - 'echo +++ :rust: Running cargo build'
       - RUSTFLAGS='-D warnings' cargo build --release --bin noria-server --bin noria-mysql --bin noria-psql --bin ensure-ebs-volume --bin metrics-aggregator

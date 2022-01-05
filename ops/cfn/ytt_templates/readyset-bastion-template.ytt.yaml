@@ -19,7 +19,6 @@ Metadata:
         Parameters:
           - KeyPairName
           - BastionInstanceType
-          - ReadySetBastionAmiId
     ParameterLabels:
       BastionInstanceType:
         default: Bastion instance type
@@ -35,11 +34,6 @@ Metadata:
         default: VPC ID
 
 Parameters:
-  ReadySetBastionAmiId:
-    Description: AMI for the bastion image
-    Type: AWS::EC2::Image::Id
-    Default: ami-00f92a30f943cdf43
-
   BastionInstanceType:
     Description: Amazon EC2 instance type for the bastion instances.
     Type: String
@@ -89,6 +83,15 @@ Parameters:
   VPCID:
     Description: ID of the VPC (e.g., vpc-0343606e).
     Type: AWS::EC2::VPC::Id
+
+Mappings:
+  AWSAMIRegionMap:
+    us-east-1:
+      READYSETBASTION: #@ {readyset_bastion_us_east_1}
+    us-east-2:
+      READYSETBASTION: #@ {readyset_bastion_us_east_2}
+    us-west-2:
+      READYSETBASTION: #@ {readyset_bastion_us_west_2}
 
 Resources:
   BastionMainLogGroup:
@@ -163,7 +166,10 @@ Resources:
       AssociatePublicIpAddress: true
       KeyName: !Ref KeyPairName
       IamInstanceProfile: !Ref BastionHostProfile
-      ImageId: !Ref ReadySetBastionAmiId
+      ImageId: !FindInMap
+        - AWSAMIRegionMap
+        - !Ref "AWS::Region"
+        - READYSETBASTION
       SecurityGroups:
         - !Ref BastionSecurityGroup
       InstanceType: !Ref BastionInstanceType

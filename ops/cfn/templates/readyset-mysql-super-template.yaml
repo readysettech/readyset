@@ -47,6 +47,7 @@ Metadata:
           default: ReadySet Configuration
         Parameters:
           - ReadySetS3BucketName
+          - ReadySetS3KeyPrefix
           - ReadySetAdapterInstanceType
           - ReadySetAdapterNodes
           - ReadySetServerInstanceType
@@ -75,11 +76,17 @@ Parameters:
     ConstraintDescription: Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
 
   ReadySetS3BucketName:
-    # Default: tbd
     Description: S3 bucket name for the ReadySet assets. ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
     Type: String
     AllowedPattern: ^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$
     ConstraintDescription: ReadySet bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).
+
+  ReadySetS3KeyPrefix:
+    Description: S3 key prefix for the ReadySet assets. S3 key prefix can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
+    Type: String
+    Default: /readyset/
+    AllowedPattern: ^[0-9a-zA-Z-/]*$
+    ConstraintDescription: ReadySet S3 key prefix can include numbers, lowercase letters, uppercase letters, and hyphens (-) and forward slashes (/).
 
   PrivateSubnet1CIDR:
     Description: CIDR block for private subnet 1 located in Availability Zone 1.
@@ -277,9 +284,8 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/bastion.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-bastion-template.yaml
       Parameters:
-        BastionAMIOS: Ubuntu-Server-20.04-LTS-HVM
         BastionInstanceType: t3.medium
         KeyPairName: !Ref KeyPairName
         PublicSubnet1ID: !GetAtt VPCStack.Outputs.PublicSubnet1ID
@@ -293,7 +299,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-vpc-supplemental-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-vpc-supplemental-template.yaml
       Parameters:
         VPCPrivateSubnetIds: !Join [',', [!GetAtt VPCStack.Outputs.PrivateSubnet1AID, !GetAtt VPCStack.Outputs.PrivateSubnet2AID, !GetAtt VPCStack.Outputs.PrivateSubnet3AID]]
         VPCID: !GetAtt VPCStack.Outputs.VPCID
@@ -306,7 +312,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-authority-consul-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-authority-consul-template.yaml
       Parameters:
         KeyPairName: !Ref KeyPairName
         PrivateSubnet1ID: !GetAtt VPCStack.Outputs.PrivateSubnet1AID
@@ -323,7 +329,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-rds-mysql-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-rds-mysql-template.yaml
       Parameters:
         PrivateSubnet1ID: !GetAtt VPCStack.Outputs.PrivateSubnet1AID
         PrivateSubnet2ID: !GetAtt VPCStack.Outputs.PrivateSubnet2AID
@@ -343,7 +349,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub >-
-        https://${ReadySetS3BucketName}.s3.amazonaws.com/readyset/templates/readyset-mysql-template.yaml
+        https://${ReadySetS3BucketName}.s3.amazonaws.com${ReadySetS3KeyPrefix}templates/readyset-mysql-template.yaml
       Parameters:
         ConsulJoinManagedPolicyArn: !GetAtt ReadySetConsulStack.Outputs.ConsulJoinManagedPolicyArn
         PrivateSubnet1ID: !GetAtt VPCStack.Outputs.PrivateSubnet1AID
