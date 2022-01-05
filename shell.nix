@@ -1,6 +1,6 @@
 with import (builtins.fetchTarball {
-  url = "https://github.com/nixos/nixpkgs/archive/6cc260cfd60f094500b79e279069b499806bf6d8.tar.gz";
-  sha256 = "0vak6jmsd33a7ippnrypqmsga1blf3qzsnfy7ma6kqrpp9k26cf6";
+  url = "https://github.com/nixos/nixpkgs/archive/adf7f03d3bfceaba64788e1e846191025283b60d.tar.gz";
+  sha256 = "13586j87n8jxin940rcr0q74bfv4zbmwz02l2p923dcgksvfjxds";
 }) {};
 mkShell {
   name = "readyset";
@@ -16,6 +16,7 @@ mkShell {
     libxml2
     zstd
     ncurses
+    openssl.out
     openssl.dev
     pkg-config
     rdkafka
@@ -28,6 +29,15 @@ mkShell {
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib/libclang.so";
   CC="sccache clang";
   CXX="sccache clang++";
+  LD="${pkgs.mold}/bin/mold";
+  # Necessary for executables linked by mold to be able to find these shared
+  # libraries
+  LD_LIBRARY_PATH = lib.strings.makeLibraryPath [
+    openssl
+    lz4
+    zstd
+    zlib
+  ];
 
   PGHOST="localhost";
   PGUSER="postgres";
