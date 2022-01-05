@@ -1018,3 +1018,62 @@ fn explain_graphviz() {
     assert_eq!(row.columns().len(), 1);
     assert_eq!(row.columns().first().unwrap().name(), "GRAPHVIZ");
 }
+
+#[ignore]
+#[test]
+fn unordered_params_are_unsupported() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (1, 2, 'Alice')")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (2, 1, 'Bob')")
+        .unwrap();
+    sleep();
+
+    let name: String = conn
+        .query_one(
+            "SELECT Cats.name FROM Cats WHERE Cats.id = $1 AND Cats.val = $2",
+            &[&1, &2],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(name, String::from("Alice"));
+
+    let name: String = conn
+        .query_one(
+            "SELECT Cats.name FROM Cats WHERE Cats.id = $2 AND Cats.val = $1",
+            &[&1, &2],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(name, String::from("Bob"));
+}
+
+#[ignore]
+#[test]
+fn reusing_params_is_unsupported() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    conn.simple_query("CREATE TABLE Cats (id int PRIMARY KEY, val int, name VARCHAR(255))")
+        .unwrap();
+    sleep();
+
+    conn.simple_query("INSERT INTO Cats (id, val, name) VALUES (1, 1, 'Alice')")
+        .unwrap();
+    sleep();
+
+    let name: String = conn
+        .query_one(
+            "SELECT Cats.name FROM Cats WHERE Cats.id = $1 AND Cats.val = $1",
+            &[&1],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(name, String::from("Bob"));
+}
