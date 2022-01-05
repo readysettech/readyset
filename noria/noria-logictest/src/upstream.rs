@@ -157,7 +157,7 @@ impl DatabaseConnection {
         match self {
             DatabaseConnection::MySQL(conn) => Ok(conn.query_drop(stmt).await?),
             DatabaseConnection::PostgreSQL(client) => {
-                client.execute(stmt.as_ref(), &[]).await?;
+                client.simple_query(stmt.as_ref()).await?;
                 Ok(())
             }
         }
