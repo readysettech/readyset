@@ -6702,7 +6702,9 @@ async fn straddled_join_range_query() {
     assert_eq!(res, vec![(2, 2)]);
 }
 
+// TODO(ENG-927): Flaky test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+#[ignore]
 async fn overlapping_range_queries() {
     readyset_logging::init_test_logging();
     let mut g = {
@@ -6777,7 +6779,9 @@ async fn overlapping_range_queries() {
     );
 }
 
+// TODO(ENG-927): Flaky test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 20)]
+#[ignore]
 async fn overlapping_remapped_range_queries() {
     readyset_logging::init_test_logging();
     let mut g = {
