@@ -158,20 +158,21 @@ where
     /// in `range`, or an [`Err`](std::Result::Err) containing a list of sub-ranges of `range` that
     /// were missing.
     #[allow(clippy::type_complexity)]
-    pub fn range<R>(
-        &self,
-        range: R,
-    ) -> Result<btree_map::Range<'_, K, V>, Vec<(Bound<K>, Bound<K>)>>
+    pub fn range<'a, R>(
+        &'a self,
+        range: &R,
+    ) -> Result<btree_map::Range<'a, K, V>, Vec<(Bound<K>, Bound<K>)>>
     where
         R: RangeBounds<K> + Clone,
     {
-        let diff = self
-            .interval_tree
-            .get_interval_difference((range.start_bound(), range.end_bound()));
+        let diff = self.interval_tree.get_interval_difference(range);
         if diff.is_empty() {
-            Ok(self.map.range(range))
+            Ok(self.map.range((range.start_bound(), range.end_bound())))
         } else {
-            Err(diff)
+            Err(diff
+                .into_iter()
+                .map(|(lower, upper)| (lower.cloned(), upper.cloned()))
+                .collect())
         }
     }
 

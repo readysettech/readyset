@@ -3,10 +3,7 @@ use common::DataType;
 use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
-use reader_map::{
-    self,
-    refs::{Miss, Values},
-};
+use reader_map::refs::Values;
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
@@ -267,9 +264,10 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
+                let range = (start_bound, end_bound);
                 let records = map
-                    .range((start_bound.cloned(), end_bound.cloned()))
-                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
+                    .range(&range)
+                    .map_err(|misses| LookupError::MissRangeSingle(misses.cloned().0, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
             Handle::Double(ref h) => {
@@ -283,17 +281,19 @@ impl Handle {
                     assert_eq!(r.len(), 2);
                     (r[0].clone(), r[1].clone())
                 });
+                let range = (start_bound, end_bound);
                 let records = map
-                    .range((start_bound, end_bound))
-                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
+                    .range(&range)
+                    .map_err(|misses| LookupError::MissRangeDouble(misses.cloned().0, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let meta = *map.meta();
+                let range = (range.start_bound(), range.end_bound());
                 let records = map
-                    .range((range.start_bound(), range.end_bound()))
-                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
+                    .range(&range)
+                    .map_err(|misses| LookupError::MissRangeMany(misses.cloned().0, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
         }
@@ -318,7 +318,7 @@ impl Handle {
                     assert!(v.len() == 1);
                     &v[0]
                 });
-                Some(map.contains_range((start_bound, end_bound)))
+                Some(map.contains_range(&(start_bound, end_bound)))
             }
             Handle::Double(ref h) => {
                 let map = h.enter()?;
@@ -330,11 +330,11 @@ impl Handle {
                     assert_eq!(r.len(), 2);
                     (r[0].clone(), r[1].clone())
                 });
-                Some(map.contains_range((start_bound, end_bound)))
+                Some(map.contains_range(&(start_bound, end_bound)))
             }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
-                Some(map.contains_range((range.start_bound(), range.end_bound())))
+                Some(map.contains_range(&(range.start_bound(), range.end_bound())))
             }
         }
     }

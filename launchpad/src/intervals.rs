@@ -45,7 +45,7 @@ pub fn into_bound_endpoint<A>(bound: Bound<A>) -> Option<A> {
 /// ```
 pub fn covers<Q, R, S>(outer: &R, inner: &S) -> bool
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
     R: RangeBounds<Q>,
     S: RangeBounds<Q>,
 {
@@ -97,7 +97,7 @@ where
 /// ```
 pub fn overlaps<Q, R, S>(r1: &R, r2: &S) -> bool
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
     R: RangeBounds<Q>,
     S: RangeBounds<Q>,
 {
@@ -132,7 +132,7 @@ where
 /// ```
 pub fn is_empty<Q, R>(r: &R) -> bool
 where
-    Q: Eq,
+    Q: Eq + ?Sized,
     R: RangeBounds<Q>,
 {
     matches!(
@@ -156,7 +156,7 @@ where
 /// ```
 pub fn cmp_startbound<Q>(b1: Bound<&Q>, b2: Bound<&Q>) -> Ordering
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
 {
     let r1_min = match b1 {
         Included(x) => Some((x, 1)),
@@ -193,7 +193,7 @@ where
 /// ```
 pub fn cmp_endbound<Q>(e1: Bound<&Q>, e2: Bound<&Q>) -> Ordering
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
 {
     // Based on the encoding idea used in `cmp_startbound`.
     // Note that we have inversed the 2nd value in the tuple,
@@ -232,7 +232,7 @@ where
 /// ```
 pub fn cmp_start_end<Q>(b1: Bound<&Q>, b2: Bound<&Q>) -> Ordering
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
 {
     let r1_min = match b1 {
         Included(x) => Some((x, 1)),
@@ -268,7 +268,7 @@ where
 /// ```
 pub fn cmp_end_start<Q>(e1: Bound<&Q>, e2: Bound<&Q>) -> Ordering
 where
-    Q: Ord,
+    Q: Ord + ?Sized,
 {
     // Based on the encoding idea used in `cmp_startbound`.
     // Note that we have inversed the 2nd value in the tuple,
