@@ -161,7 +161,7 @@ pub struct Options {
     query_log: bool,
 
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
-    #[clap(long, hidden = true, requires = "query-log")]
+    #[clap(long, hide = true, requires = "query-log")]
     query_log_ad_hoc: bool,
 
     /// Use the AWS EC2 metadata service to determine the external address of this noria adapter's
@@ -174,11 +174,11 @@ pub struct Options {
 
     /// Test feature to fail invalidated queries in the serving path instead of going
     /// to fallback.
-    #[clap(long, hidden = true)]
+    #[clap(long, hide = true)]
     fail_invalidated_queries: bool,
 
     /// Allow executing, but ignore, unsupported `SET` statements
-    #[clap(long, hidden = true, env = "ALLOW_UNSUPPORTED_SET")]
+    #[clap(long, hide = true, env = "ALLOW_UNSUPPORTED_SET")]
     allow_unsupported_set: bool,
 
     /// Only run migrations through CREATE CACHED QUERY statements. Async migrations are not
@@ -193,7 +193,7 @@ pub struct Options {
 
     /// Provides support for the EXPLAIN LAST STATEMENT command, which returns metadata about the
     /// last statement issued along the current connection.
-    #[clap(long, hidden = true, env = "EXPLAIN_LAST_STATEMENT")]
+    #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
     explain_last_statement: bool,
 }
 

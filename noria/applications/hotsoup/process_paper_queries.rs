@@ -118,8 +118,8 @@ fn main() {
         .get_matches();
 
     let path = matches.value_of("source").unwrap();
-    let start_at_schema = value_t_or_exit!(matches, "start_at", usize);
-    let stop_at_schema = value_t_or_exit!(matches, "stop_at", usize);
+    let start_at_schema: usize = matches.value_of_t_or_exit("start_at");
+    let stop_at_schema: uszie = matches.value_of_t_or_exit("stop_at");
 
     let files = traverse(Path::new(path), start_at_schema, stop_at_schema);
 

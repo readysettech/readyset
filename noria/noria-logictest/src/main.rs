@@ -296,7 +296,7 @@ struct Verify {
 
     /// Provides support for the EXPLAIN LAST STATEMENT command, which returns metadata about the
     /// last statement issued along the current connection.
-    #[clap(long, hidden = true, env = "EXPLAIN_LAST_STATEMENT")]
+    #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
     explain_last_statement: bool,
 }
 

@@ -1,5 +1,4 @@
 #![allow(dead_code, unused_variables)]
-use clap::value_t_or_exit;
 use noria::{Builder, Handle, ReuseConfigType};
 use noria_data::DataType;
 use std::collections::HashMap;
@@ -122,90 +121,81 @@ async fn main() {
         .version("0.1")
         .about("Benchmarks Piazza-like application with security policies.")
         .arg(
-            Arg::with_name("schema")
-                .short("s")
+            Arg::new("schema")
+                .short('s')
                 .required(true)
                 .default_value("benchmarks/piazza/schema.sql")
                 .help("Schema file for Piazza application"),
         )
         .arg(
-            Arg::with_name("queries")
-                .short("q")
+            Arg::new("queries")
+                .short('q')
                 .required(true)
                 .default_value("benchmarks/piazza/post-queries.sql")
                 .help("Query file for Piazza application"),
         )
         .arg(
-            Arg::with_name("policies")
+            Arg::new("policies")
                 .long("policies")
                 .required(true)
                 .default_value("benchmarks/piazza/complex-policies.json")
                 .help("Security policies file for Piazza application"),
         )
         .arg(
-            Arg::with_name("graph")
-                .short("g")
+            Arg::new("graph")
+                .short('g')
                 .default_value("pgraph.gv")
                 .help("File to dump application's soup graph, if set"),
         )
         .arg(
-            Arg::with_name("info")
-                .short("i")
+            Arg::new("info")
+                .short('i')
                 .takes_value(true)
                 .help("Directory to dump runtime process info (doesn't work on OSX)"),
         )
         .arg(
-            Arg::with_name("reuse")
+            Arg::new("reuse")
                 .long("reuse")
                 .default_value("full")
                 .possible_values(&["noreuse", "finkelstein", "relaxed", "full"])
                 .help("Query reuse algorithm"),
         )
+        .arg(Arg::new("shard").long("shard").help("Enable sharding"))
         .arg(
-            Arg::with_name("shard")
-                .long("shard")
-                .help("Enable sharding"),
-        )
-        .arg(
-            Arg::with_name("partial")
+            Arg::new("partial")
                 .long("partial")
                 .help("Enable partial materialization"),
         )
         .arg(
-            Arg::with_name("populate")
+            Arg::new("populate")
                 .long("populate")
                 .default_value("nopopulate")
                 .possible_values(&["after", "before", "nopopulate"])
                 .help("Populate app with randomly generated data"),
         )
         .arg(
-            Arg::with_name("nusers")
-                .short("u")
+            Arg::new("nusers")
+                .short('u')
                 .default_value("1000")
                 .help("Number of users in the db"),
         )
+        .arg(Arg::new("nlogged").short('l').default_value("1000").help(
+            "Number of logged users. Must be less or equal than the number of users in the db",
+        ))
         .arg(
-            Arg::with_name("nlogged")
-                .short("l")
-                .default_value("1000")
-                .help(
-                "Number of logged users. Must be less or equal than the number of users in the db",
-            ),
-        )
-        .arg(
-            Arg::with_name("nclasses")
-                .short("c")
+            Arg::new("nclasses")
+                .short('c')
                 .default_value("100")
                 .help("Number of classes in the db"),
         )
         .arg(
-            Arg::with_name("nposts")
-                .short("p")
+            Arg::new("nposts")
+                .short('p')
                 .default_value("100000")
                 .help("Number of posts in the db"),
         )
         .arg(
-            Arg::with_name("private")
+            Arg::new("private")
                 .long("private")
                 .default_value("0.0")
                 .help("Percentage of private posts"),
@@ -224,11 +214,11 @@ async fn main() {
     let shard = args.is_present("shard");
     let reuse = args.value_of("reuse").unwrap();
     let populate = args.value_of("populate").unwrap_or("nopopulate");
-    // let nusers = value_t_or_exit!(args, "nusers", i32);
-    // let nlogged = value_t_or_exit!(args, "nlogged", i32);
-    // let nclasses = value_t_or_exit!(args, "nclasses", i32);
-    // let nposts = value_t_or_exit!(args, "nposts", i32);
-    let private = value_t_or_exit!(args, "private", f32);
+    // let nusers: i32 = args.value_of_t_or_exit("nusers");
+    // let nlogged: i32 = args.value_of_t_or_exit("nlogged");
+    // let nclasses: i32 = args.value_of_t_or_exit("nclasses");
+    // let nposts: i32 = args.value_of_t_or_exit("nposts");
+    let private: f32 = args.value_of_t_or_exit("private");
     let nusers = 5;
     let nlogged = 5;
     let nclasses = 1;

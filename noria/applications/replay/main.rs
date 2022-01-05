@@ -1,5 +1,5 @@
 #![warn(clippy::dbg_macro)]
-use clap::{value_t_or_exit, App, Arg};
+use clap::{App, Arg};
 use hdrhistogram::Histogram;
 use itertools::Itertools;
 use noria::consensus::Authority;
@@ -175,38 +175,38 @@ async fn main() {
         .version("0.1")
         .about("Benchmarks the latency of full replays in a user-curated news aggregator")
         .arg(
-            Arg::with_name("rows")
+            Arg::new("rows")
                 .long("rows")
                 .value_name("N")
                 .default_value("100000")
                 .help("Number of rows to prepopulate the database with."),
         )
         .arg(
-            Arg::with_name("reads")
+            Arg::new("reads")
                 .long("reads")
                 .default_value("10000")
                 .help("Number of rows to read while benchmarking."),
         )
         .arg(
-            Arg::with_name("secondary-indices")
+            Arg::new("secondary-indices")
                 .long("secondary-indices")
                 .help("Read from secondary indices."),
         )
         .arg(
-            Arg::with_name("skewed")
+            Arg::new("skewed")
                 .long("skewed")
                 .requires("secondary-indices")
                 .takes_value(false)
                 .help("Read and write to a single secondary index key."),
         )
         .arg(
-            Arg::with_name("durability")
+            Arg::new("durability")
                 .long("durability")
                 .takes_value(false)
                 .help("Enable durability for Base nodes"),
         )
         .arg(
-            Arg::with_name("no-recovery")
+            Arg::new("no-recovery")
                 .long("no-recovery")
                 .requires("durability")
                 .takes_value(false)
@@ -218,42 +218,42 @@ async fn main() {
                 ),
         )
         .arg(
-            Arg::with_name("retain-logs-on-exit")
+            Arg::new("retain-logs-on-exit")
                 .long("retain-logs-on-exit")
                 .takes_value(false)
                 .requires("durability")
                 .help("Do not delete the base node logs on exit."),
         )
         .arg(
-            Arg::with_name("use-existing-data")
+            Arg::new("use-existing-data")
                 .long("use-existing-data")
                 .requires("retain-logs-on-exit")
                 .takes_value(false)
                 .help("Skips pre-population and instead uses already persisted data."),
         )
         .arg(
-            Arg::with_name("zookeeper-address")
+            Arg::new("zookeeper-address")
                 .long("zookeeper-address")
                 .takes_value(true)
                 .default_value("127.0.0.1:2181/replay")
                 .help("ZookeeperAuthority address"),
         )
         .arg(
-            Arg::with_name("persistence-threads")
+            Arg::new("persistence-threads")
                 .long("persistence-threads")
                 .takes_value(true)
                 .default_value("1")
                 .help("Number of background threads used by PersistentState."),
         )
-        .arg(Arg::with_name("verbose").long("verbose").short("v"))
+        .arg(Arg::new("verbose").long("verbose").short('v'))
         .get_matches();
 
     let skewed = args.is_present("skewed");
-    let rows = value_t_or_exit!(args, "rows", i64);
-    let reads = if skewed {
+    let rows: i64 = args.value_of_t_or_exit("rows");
+    let reads: i64 = if skewed {
         1
     } else {
-        value_t_or_exit!(args, "reads", i64)
+        args.value_of_t_or_exit("reads")
     };
 
     assert!(reads < rows);
@@ -265,7 +265,7 @@ async fn main() {
     let use_secondary = args.is_present("secondary-indices");
 
     let persistence = PersistenceParameters {
-        persistence_threads: value_t_or_exit!(args, "persistence-threads", i32),
+        persistence_threads: args.value_of_t_or_exit("persistence-threads"),
         db_filename_prefix: "replay".to_string(),
         mode: if durable {
             DurabilityMode::Permanent

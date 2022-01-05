@@ -9,7 +9,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.38"
-clap = "3.0.0-beta.2"
+clap = { version = "3.0", features = ["derive","env"] }
 colored = "2.0.0"
 derive_more = "0.99.11"
 hex = "0.4.3"

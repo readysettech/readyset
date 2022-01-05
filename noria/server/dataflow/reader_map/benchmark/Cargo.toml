@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 reader_map = { path = "../" }
 chashmap = "2.1.0"
-clap = "2.20.3"
+clap = { version = "3.0.4", features = ["derive", "env"] }
 zipf = "6"
 rand = "0.7"
 parking_lot = "0.10.1"

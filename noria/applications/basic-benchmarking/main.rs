@@ -16,14 +16,14 @@ async fn main() {
         .version("0.1")
         .about("Benchmarks noria reads")
         .arg(
-            Arg::with_name("ntests")
-                .short("n")
+            Arg::new("ntests")
+                .short('n')
                 .default_value("1000")
                 .help("Number of employees to query for benchmarking."),
         )
         .arg(
-            Arg::with_name("nemployees")
-                .short("e")
+            Arg::new("nemployees")
+                .short('e')
                 .default_value("50000")
                 .help("Total number of employees to populate tables with"),
         )

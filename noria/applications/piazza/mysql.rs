@@ -224,11 +224,11 @@ fn main() {
         .get_matches();
 
     let dbn = args.value_of("dbname").unwrap();
-    let nusers = value_t_or_exit!(args, "nusers", i32);
-    let nlogged = value_t_or_exit!(args, "nlogged", i32);
-    let nclasses = value_t_or_exit!(args, "nclasses", i32);
-    let nposts = value_t_or_exit!(args, "nposts", i32);
-    let private = value_t_or_exit!(args, "private", f32);
+    let nusers: i32 = args.value_of_t_or_exit("nusers");
+    let nlogged: i32 = args.value_of_t_or_exit("nlogged");
+    let nclasses: i32 = args.value_of_t_or_exit("nclasses");
+    let nposts: i32 = args.value_of_t_or_exit("nposts");
+    let private: f32 = args.value_of_t_or_exit("private");
 
     let backend = Backend::new(dbn);
 

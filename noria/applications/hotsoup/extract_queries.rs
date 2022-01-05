@@ -94,22 +94,22 @@ fn main() {
         .version("0.1")
         .about("Extracts queries from HotCRP code.")
         .arg(
-            Arg::with_name("source")
+            Arg::new("source")
                 .index(1)
                 .help("Location of the HotCRP code to work on.")
                 .required(true),
         )
         .arg(
-            Arg::with_name("output")
-                .short("o")
+            Arg::new("output")
+                .short('o')
                 .long("output")
                 .value_name("FILE")
                 .help("Location to write output recipe to.")
                 .required(true),
         )
         .arg(
-            Arg::with_name("git_rev")
-                .short("g")
+            Arg::new("git_rev")
+                .short('g')
                 .long("git_rev")
                 .value_name("REV")
                 .help("Git revision that we're extracting for.")
