@@ -16,6 +16,18 @@ use noria::internal::IndexType;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Miss<K>(pub Vec<(Bound<K>, Bound<K>)>);
 
+impl<K: Clone> Miss<&K> {
+    /// Map a `Miss<&K>` to a `Miss<K>` by cloning the key in the bounds of the missed ranges
+    pub fn cloned(&self) -> Miss<K> {
+        Miss(
+            self.0
+                .iter()
+                .map(|(l, u)| (l.cloned(), u.cloned()))
+                .collect(),
+        )
+    }
+}
+
 pub(crate) enum Data<K, V, S, D = crate::aliasing::NoDrop>
 where
     K: Ord + Clone,
@@ -164,18 +176,18 @@ where
         }
     }
 
-    pub(crate) fn range<R>(
-        &self,
-        range: R,
-    ) -> Result<btree_map::Range<'_, K, ValuesInner<V, S, D>>, Miss<K>>
+    pub(crate) fn range<'a, R>(
+        &'a self,
+        range: &'a R,
+    ) -> Result<btree_map::Range<'a, K, ValuesInner<V, S, D>>, Miss<&'a K>>
     where
         R: Clone + RangeBounds<K>,
     {
         match self {
             Self::BTreeMap { map, intervals } => {
-                let diff = intervals.get_interval_difference(range.clone());
+                let diff = intervals.get_interval_difference(range);
                 if diff.is_empty() {
-                    Ok(map.range(range))
+                    Ok(map.range(range.clone()))
                 } else {
                     Err(Miss(diff))
                 }
@@ -209,7 +221,7 @@ where
         }
     }
 
-    pub(crate) fn contains_range<R>(&self, range: R) -> bool
+    pub(crate) fn contains_range<R>(&self, range: &R) -> bool
     where
         R: RangeBounds<K> + Clone,
     {

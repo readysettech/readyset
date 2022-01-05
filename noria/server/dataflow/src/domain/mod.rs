@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::mem;
+use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time;
@@ -235,7 +236,18 @@ impl RequestedKeys {
                 *keys = keys
                     .iter()
                     .flat_map(|key| {
-                        let diff = requested.get_interval_difference(key);
+                        let diff = requested
+                            .get_interval_difference(key)
+                            .into_iter()
+                            .map(
+                                |(lower, upper): (
+                                    Bound<&Vec1<DataType>>,
+                                    Bound<&Vec1<DataType>>,
+                                )| {
+                                    (lower.cloned(), upper.cloned())
+                                },
+                            )
+                            .collect::<Vec<_>>();
                         requested.insert(key);
                         diff
                     })

@@ -72,7 +72,7 @@ where
     /// # Panics
     ///
     /// Panics if the underlying map is not a [`BTreeMap`](noria::internal::IndexType::BTreeMap).
-    pub fn range<R>(&self, range: R) -> Result<RangeIter<'_, K, V, S>, Miss<K>>
+    pub fn range<'a, R>(&'a self, range: &'a R) -> Result<RangeIter<'a, K, V, S>, Miss<&'a K>>
     where
         R: RangeBounds<K> + Clone,
     {
@@ -183,7 +183,7 @@ where
     }
 
     /// Returns true if the map contains the specified range of keys.
-    pub fn contains_range<R>(&self, range: R) -> bool
+    pub fn contains_range<R>(&self, range: &R) -> bool
     where
         R: RangeBounds<K> + Clone,
     {
