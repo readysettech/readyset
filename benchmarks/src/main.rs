@@ -163,6 +163,7 @@ impl BenchmarkRunner {
         for i in 0..self.iterations {
             if self.iterations > 1 {
                 println!("Iteration: {} ---------------------------", i);
+                benchmark_cmd.reset(&self.deployment_params).await?;
             }
             let start_time = Instant::now();
             let result = benchmark_cmd.benchmark(&self.deployment_params).await?;
@@ -175,7 +176,6 @@ impl BenchmarkRunner {
             );
             println!("{}", result);
             results.push(result);
-            benchmark_cmd.reset(&self.deployment_params).await?;
         }
 
         println!("Benchmark Results -----------------------");

@@ -58,7 +58,7 @@ sleep 2m
 
 echo "Testing IRL demo queries"
 # TODO (justin): Add explicit migrations flag when merged.
-./irl_minimal --mysql-url $READYSET_ADAPTER 
+./irl_minimal --mysql-url $READYSET_ADAPTER --explicit-migrations
 
 echo "Beginning benchmark!"
 ./benchmarks --run-for 120 --skip-setup --benchmark $BENCHMARK_FILE --deployment $DEPLOYMENT_FILE

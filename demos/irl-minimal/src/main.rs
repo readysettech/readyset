@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 #[derive(Parser, Debug)]
 struct IrlQueryTest {
     /// The URL to the MySQL database.
-    #[clap(default_value = "mysql://127.0.0.1:3307")]
+    #[clap(long, default_value = "mysql://127.0.0.1:3307")]
     mysql_url: String,
 
     #[clap(long)]
@@ -61,7 +61,7 @@ impl IrlQueryTest {
              (r"select external_calendars.*, external_invites.invite_id from external_calendars inner join external_invites on external_invites.external_calendar_id=external_calendars.id where external_invites.invite_id in (?, ?, ?)", (1,2,3));
              (r"SELECT count(*) FROM invites_users WHERE invite_id=? and is_host=?", (1,0));
              (r"SELECT count(*) FROM invites_users WHERE invite_id=? and attending=?", (1,0));
-             (r"SELECT count(*) FROM invites_users WHERE group_id=? and joined_at is not null", (1,));
+             (r"SELECT count(*) FROM users_groups WHERE group_id=? and joined_at is not null", (1,));
         );
 
         info!(

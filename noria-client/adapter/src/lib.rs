@@ -625,7 +625,6 @@ async fn query_logger(
                             "event_type" => SharedString::from(event.event),
                             "query_type" => SharedString::from(event.sql_type)
                         );
-
                     }
 
                     if let Some(noria) = event.noria_duration {

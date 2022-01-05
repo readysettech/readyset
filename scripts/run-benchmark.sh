@@ -34,14 +34,14 @@ EOF
 
 echo "Beginning benchmarks"
 
-./benchmarks --run-for 120 --benchmark read_benchmark_irl_small.yaml --deployment $DEPLOYMENT_FILE
+./benchmarks --benchmark read_benchmark_irl_small.yaml --deployment $DEPLOYMENT_FILE
 
 # Binlog replication from this shouldn't bleed over into the next test.
 sleep 120
 
 ./benchmarks --benchmark cache_hit_fastly_small.yaml --deployment $DEPLOYMENT_FILE
 
-./benchmarks --run-for 120 --skip-setup --benchmark read_benchmark_fastly_small.yaml --deployment $DEPLOYMENT_FILE
+./benchmarks --benchmark read_benchmark_fastly_small.yaml --deployment $DEPLOYMENT_FILE
 
 ./benchmarks --benchmark scale_connections_small.yaml --deployment $DEPLOYMENT_FILE
 
