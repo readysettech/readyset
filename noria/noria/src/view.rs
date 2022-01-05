@@ -1306,7 +1306,9 @@ mod tests {
 
         #[proptest]
         fn eq_transitive(k1: KeyComparison, k2: KeyComparison, k3: KeyComparison) {
-            assert_eq!(k1 == k2 && k2 == k3, k1 == k3)
+            if k1 == k2 && k2 == k3 {
+                assert_eq!(k1, k3)
+            }
         }
     }
 }
