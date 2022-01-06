@@ -1,6 +1,7 @@
 use eui48::MacAddress;
 use noria_data::DataType;
 use psql_srv as ps;
+use rust_decimal::Decimal;
 use std::convert::TryFrom;
 use tokio_postgres::types::Type;
 use tracing::error;
@@ -38,6 +39,9 @@ impl TryFrom<Value> for ps::Value {
             (Type::INT8, DataType::Int(v)) => Ok(ps::Value::Bigint(v as _)),
             (Type::FLOAT4, DataType::Float(f, _)) => Ok(ps::Value::Float(f)),
             (Type::FLOAT8, DataType::Double(f, _)) => Ok(ps::Value::Double(f)),
+            (Type::NUMERIC, DataType::Double(f, _)) => Ok(ps::Value::Numeric(
+                <Decimal>::try_from(f).map_err(|e| ps::Error::InternalError(e.to_string()))?,
+            )),
             (Type::NUMERIC, DataType::Numeric(ref d)) => Ok(ps::Value::Numeric(*d.as_ref())),
             (Type::TEXT, DataType::Text(v)) => Ok(ps::Value::Text(v)),
             (Type::TEXT, DataType::TinyText(t)) => Ok(ps::Value::Text(t.as_str().into())),
