@@ -111,6 +111,7 @@ mod types {
         // TODO(fran): Add numeric with precision and scale when we start correctly
         //  handling them.
         numeric_decimal("numeric", #[strategy(arbitrary_decimal())] Decimal);
+        decimal("decimal", #[strategy(arbitrary_decimal())] Decimal);
         timestamp_systemtime("timestamp", #[strategy(arbitrary_systemtime())] std::time::SystemTime);
         macaddr_string("macaddr", #[strategy(arbitrary_mac_address())] MacAddress);
         uuid_string("uuid", #[strategy(arbitrary_uuid())] Uuid);

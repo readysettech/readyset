@@ -98,7 +98,7 @@ pub fn type_to_pgsql(col_type: &SqlType) -> Result<pgsql::types::Type, Error> {
         SqlType::Binary(_) => unsupported_type!(),
         SqlType::Varbinary(_) => unsupported_type!(),
         SqlType::Enum(_) => unsupported_type!(),
-        SqlType::Decimal(_, _) => unsupported_type!(),
+        SqlType::Decimal(_, _) => Ok(Type::NUMERIC),
         SqlType::ByteArray => Ok(Type::BYTEA),
         SqlType::Numeric(_) => Ok(Type::NUMERIC),
         SqlType::MacAddr => Ok(Type::MACADDR),
