@@ -10,6 +10,49 @@ use serde_bytes::{ByteBuf, Bytes};
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
+use strum::VariantNames;
+use strum_macros::{EnumString, EnumVariantNames, FromRepr};
+
+#[derive(EnumVariantNames, EnumString, FromRepr, Clone, Copy)]
+enum Field {
+    None,
+    Int,
+    Double,
+    Text,
+    Timestamp,
+    Time,
+    TinyText,
+    Float,
+    ByteArray,
+    Numeric,
+    BitVector,
+    TimestampTz,
+}
+
+#[inline(always)]
+fn serialize_variant<S, T>(serializer: S, variant: Field, value: &T) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+    T: ?Sized + serde::Serialize,
+{
+    // The compiler should be able to inline the constant name here, so no lookups are done at runtime
+    let variant_name = Field::VARIANTS[variant as usize];
+    serializer.serialize_newtype_variant("DataType", variant as _, variant_name, value)
+}
+
+#[inline(always)]
+fn serialize_tuple<S>(
+    serializer: S,
+    variant: Field,
+    len: usize,
+) -> Result<S::SerializeTupleVariant, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    // The compiler should be able to inline the constant name here, so no lookups are done at runtime
+    let variant_name = Field::VARIANTS[variant as usize];
+    serializer.serialize_tuple_variant("DataType", variant as _, variant_name, len)
+}
 
 impl serde::ser::Serialize for DataType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -17,62 +60,48 @@ impl serde::ser::Serialize for DataType {
         S: serde::ser::Serializer,
     {
         match &self {
-            DataType::None => serializer.serialize_unit_variant("DataType", 0, "None"),
-            DataType::Int(v) => {
-                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
-            }
-            DataType::UnsignedInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
-            }
-            DataType::BigInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
-            }
+            DataType::None => serializer.serialize_unit_variant(
+                "DataType",
+                Field::None as _,
+                Field::VARIANTS[Field::None as usize],
+            ),
+            DataType::Int(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
+            DataType::UnsignedInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
+            DataType::BigInt(v) => serialize_variant(serializer, Field::Int, &i128::from(*v)),
             DataType::UnsignedBigInt(v) => {
-                serializer.serialize_newtype_variant("DataType", 1, "Int", &i128::from(*v))
+                serialize_variant(serializer, Field::Int, &i128::from(*v))
             }
             DataType::Float(f, prec) => {
-                let mut tv = serializer.serialize_tuple_variant("DataType", 7, "Float", 2)?;
+                let mut tv = serialize_tuple(serializer, Field::Float, 2)?;
                 tv.serialize_field(f)?;
                 tv.serialize_field(prec)?;
                 tv.end()
             }
             DataType::Double(f, prec) => {
-                let mut tv = serializer.serialize_tuple_variant("DataType", 2, "Double", 2)?;
+                let mut tv = serialize_tuple(serializer, Field::Double, 2)?;
                 tv.serialize_field(f)?;
                 tv.serialize_field(prec)?;
                 tv.end()
             }
-            DataType::Text(v) => serializer.serialize_newtype_variant(
-                "DataType",
-                3,
-                "Text",
-                Bytes::new(v.as_bytes()),
-            ),
+            DataType::Text(v) => {
+                serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
+            }
             DataType::Timestamp(v) => {
                 // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec nanos in the high 64 bits
                 // NOTE: don't be tempted to remove the intermediate step of casting to u64, as it will propagate the sign bit
                 let ts =
                     v.timestamp() as u64 as u128 + ((v.timestamp_subsec_nanos() as u128) << 64);
-                serializer.serialize_newtype_variant("DataType", 4, "Timestamp", &ts)
+                serialize_variant(serializer, Field::Timestamp, &ts)
             }
-            DataType::Time(v) => serializer.serialize_newtype_variant("DataType", 5, "Time", &v),
-            DataType::TinyText(v) => {
-                serializer.serialize_newtype_variant("DataType", 6, "TinyText", &v.to_i128())
+            DataType::Time(v) => serialize_variant(serializer, Field::Time, &v),
+            DataType::TinyText(v) => serialize_variant(serializer, Field::TinyText, &v.to_i128()),
+            DataType::ByteArray(a) => {
+                serialize_variant(serializer, Field::ByteArray, Bytes::new(a.as_ref()))
             }
-            DataType::ByteArray(array) => serializer.serialize_newtype_variant(
-                "DataType",
-                8,
-                "ByteArray",
-                Bytes::new(array.as_ref()),
-            ),
-            DataType::Numeric(d) => {
-                serializer.serialize_newtype_variant("DataType", 9, "Numeric", &d)
-            }
-            DataType::BitVector(bits) => {
-                serializer.serialize_newtype_variant("DataType", 10, "BitVector", &bits)
-            }
+            DataType::Numeric(d) => serialize_variant(serializer, Field::Numeric, &d),
+            DataType::BitVector(bits) => serialize_variant(serializer, Field::BitVector, &bits),
             DataType::TimestampTz(ts) => {
-                serializer.serialize_newtype_variant("DataType", 11, "TimestampTz", ts.as_ref())
+                serialize_variant(serializer, Field::TimestampTz, ts.as_ref())
             }
         }
     }
@@ -83,21 +112,6 @@ impl<'de> Deserialize<'de> for DataType {
     where
         D: serde::Deserializer<'de>,
     {
-        enum Field {
-            None,
-            Int,
-            Double,
-            Text,
-            Timestamp,
-            Time,
-            TinyText,
-            Float,
-            ByteArray,
-            Numeric,
-            BitVector,
-            TimestampTz,
-        }
-
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
             type Value = Field;
@@ -109,23 +123,13 @@ impl<'de> Deserialize<'de> for DataType {
             where
                 E: serde::de::Error,
             {
-                match val {
-                    0u64 => Ok(Field::None),
-                    1u64 => Ok(Field::Int),
-                    2u64 => Ok(Field::Double),
-                    3u64 => Ok(Field::Text),
-                    4u64 => Ok(Field::Timestamp),
-                    5u64 => Ok(Field::Time),
-                    6u64 => Ok(Field::TinyText),
-                    7u64 => Ok(Field::Float),
-                    8u64 => Ok(Field::ByteArray),
-                    9u64 => Ok(Field::Numeric),
-                    10u64 => Ok(Field::BitVector),
-                    11u64 => Ok(Field::TimestampTz),
-                    _ => Err(serde::de::Error::invalid_value(
+                if let Some(f) = Field::from_repr(val as _) {
+                    Ok(f)
+                } else {
+                    Err(serde::de::Error::invalid_value(
                         serde::de::Unexpected::Unsigned(val),
                         &"variant index 0 <= i < 12",
-                    )),
+                    ))
                 }
             }
 
@@ -133,43 +137,19 @@ impl<'de> Deserialize<'de> for DataType {
             where
                 E: serde::de::Error,
             {
-                match val {
-                    "None" => Ok(Field::None),
-                    "Int" => Ok(Field::Int),
-                    "Float" => Ok(Field::Float),
-                    "Double" => Ok(Field::Double),
-                    "Text" => Ok(Field::Text),
-                    "Timestamp" => Ok(Field::Timestamp),
-                    "Time" => Ok(Field::Time),
-                    "TinyText" => Ok(Field::TinyText),
-                    "ByteArray" => Ok(Field::ByteArray),
-                    "Numeric" => Ok(Field::Numeric),
-                    "BitVector" => Ok(Field::BitVector),
-                    "TimestampTz" => Ok(Field::TimestampTz),
-                    _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
-                }
+                val.parse()
+                    .map_err(|_| serde::de::Error::unknown_variant(val, Field::VARIANTS))
             }
 
             fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                match val {
-                    b"None" => Ok(Field::None),
-                    b"Int" => Ok(Field::Int),
-                    b"Float" => Ok(Field::Float),
-                    b"Double" => Ok(Field::Double),
-                    b"Text" => Ok(Field::Text),
-                    b"Timestamp" => Ok(Field::Timestamp),
-                    b"Time" => Ok(Field::Time),
-                    b"TinyText" => Ok(Field::TinyText),
-                    b"ByteArray" => Ok(Field::ByteArray),
-                    b"Numeric" => Ok(Field::Numeric),
-                    b"BitVector" => Ok(Field::BitVector),
-                    b"TimestampTz" => Ok(Field::TimestampTz),
+                match std::str::from_utf8(val).map(|s| s.parse()) {
+                    Ok(Ok(field)) => Ok(field),
                     _ => Err(serde::de::Error::unknown_variant(
                         &String::from_utf8_lossy(val),
-                        VARIANTS,
+                        Field::VARIANTS,
                     )),
                 }
             }
@@ -301,21 +281,7 @@ impl<'de> Deserialize<'de> for DataType {
             }
         }
 
-        const VARIANTS: &[&str] = &[
-            "None",
-            "Int",
-            "Double",
-            "Text",
-            "Timestamp",
-            "Time",
-            "TinyText",
-            "Float",
-            "ByteArray",
-            "BitVector",
-            "TimestampTz",
-        ];
-
-        deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
+        deserializer.deserialize_enum("DataType", Field::VARIANTS, Visitor)
     }
 }
 
@@ -348,7 +314,7 @@ impl<'de: 'a, 'a> Deserialize<'de> for Text {
                 Ok(unsafe { Text::from_slice_unchecked(&bytes) })
             }
 
-            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
