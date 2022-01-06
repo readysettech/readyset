@@ -21,12 +21,16 @@ enum Field {
     Text,
     Timestamp,
     Time,
-    TinyText,
     Float,
     ByteArray,
     Numeric,
     BitVector,
     TimestampTz,
+}
+
+enum TextOrTinyText {
+    Text(Text),
+    TinyText(TinyText),
 }
 
 #[inline(always)]
@@ -86,6 +90,9 @@ impl serde::ser::Serialize for DataType {
             DataType::Text(v) => {
                 serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
             }
+            DataType::TinyText(v) => {
+                serialize_variant(serializer, Field::Text, Bytes::new(v.as_bytes()))
+            }
             DataType::Timestamp(v) => {
                 // We serialize the NaiveDateTime as seconds in the low 64 bits of u128 and subsec nanos in the high 64 bits
                 // NOTE: don't be tempted to remove the intermediate step of casting to u64, as it will propagate the sign bit
@@ -94,7 +101,6 @@ impl serde::ser::Serialize for DataType {
                 serialize_variant(serializer, Field::Timestamp, &ts)
             }
             DataType::Time(v) => serialize_variant(serializer, Field::Time, &v),
-            DataType::TinyText(v) => serialize_variant(serializer, Field::TinyText, &v.to_i128()),
             DataType::ByteArray(a) => {
                 serialize_variant(serializer, Field::ByteArray, Bytes::new(a.as_ref()))
             }
@@ -256,15 +262,17 @@ impl<'de> Deserialize<'de> for DataType {
                     (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
                         .map(|d| DataType::Numeric(Arc::new(d))),
                     (Field::Text, variant) => {
-                        VariantAccess::newtype_variant::<Text>(variant).map(DataType::Text)
+                        VariantAccess::newtype_variant::<TextOrTinyText>(variant).map(|tt| match tt
+                        {
+                            TextOrTinyText::TinyText(tt) => DataType::TinyText(tt),
+                            TextOrTinyText::Text(t) => DataType::Text(t),
+                        })
                     }
                     // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
                     (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
                         .map(|r| NaiveDateTime::from_timestamp(r as _, (r >> 64) as _).into()),
                     (Field::Time, variant) => VariantAccess::newtype_variant::<MysqlTime>(variant)
                         .map(|v| DataType::Time(Arc::new(v))),
-                    (Field::TinyText, variant) => VariantAccess::newtype_variant::<i128>(variant)
-                        .map(|r| DataType::TinyText(unsafe { TinyText::from_i128_unchecked(r) })),
                     (Field::ByteArray, variant) => {
                         VariantAccess::newtype_variant::<ByteBuf>(variant)
                             .map(|v| DataType::ByteArray(Arc::new(v.into_vec())))
@@ -285,7 +293,7 @@ impl<'de> Deserialize<'de> for DataType {
     }
 }
 
-impl<'de: 'a, 'a> Deserialize<'de> for Text {
+impl<'de: 'a, 'a> Deserialize<'de> for TextOrTinyText {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -293,7 +301,7 @@ impl<'de: 'a, 'a> Deserialize<'de> for Text {
         struct TextVisitor;
 
         impl<'de> Visitor<'de> for TextVisitor {
-            type Value = Text;
+            type Value = TextOrTinyText;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a byte array")
@@ -311,7 +319,12 @@ impl<'de: 'a, 'a> Deserialize<'de> for Text {
                 }
 
                 // SAFETY: this is only safe because we assume we always serialize ourselves
-                Ok(unsafe { Text::from_slice_unchecked(&bytes) })
+                match unsafe { TinyText::from_slice_unchecked(&bytes) } {
+                    Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
+                    _ => Ok(TextOrTinyText::Text(unsafe {
+                        Text::from_slice_unchecked(&bytes)
+                    })),
+                }
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
@@ -319,7 +332,12 @@ impl<'de: 'a, 'a> Deserialize<'de> for Text {
                 E: serde::de::Error,
             {
                 // SAFETY: this is only safe because we assume we always serialize ourselves
-                Ok(unsafe { Text::from_slice_unchecked(v) })
+                match unsafe { TinyText::from_slice_unchecked(v) } {
+                    Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
+                    _ => Ok(TextOrTinyText::Text(unsafe {
+                        Text::from_slice_unchecked(v)
+                    })),
+                }
             }
         }
 
