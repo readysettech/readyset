@@ -239,11 +239,13 @@ steps:
     async: true
 
   - block: "Build :amazon-ec2: AMIs and :cloud: CFN templates"
+    key: block-ami-cfn
     prompt: "Build AMIs and CFN templates?"
 
   - label: ':rust: Build readyset release binaries'
     key: build-binaries
     depends_on:
+      - block-ami-cfn
       - build-image
     commands:
       - 'echo +++ :rust: Running cargo build'
