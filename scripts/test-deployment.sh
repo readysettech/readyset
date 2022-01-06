@@ -15,8 +15,11 @@ set -euf -o pipefail
 #   RDS_PORT: The port of the RDS instance.
 #   RDS_USER: The username of the RDS database.
 #   RDS_PASS: The password used for the RDS database.
+#   RDS_DATABASE: The database noria is caching in RDS.
 #   READYSET_ADAPTER: The adapter's NLB endpoint.
+#                     i.e. mysql://<username>:<password>@<addr>:<port>
 #   PROMETHEUS_ADDRESS: The address of the monitor's prometheus server.
+#                        i.e. 127.0.0.1:9091 on the monitor instance.
 
 DATA_DIR="./"
 if [ "$#" -eq 1 ]; then
@@ -61,7 +64,7 @@ echo "Testing IRL demo queries"
 ./irl_minimal --mysql-url $READYSET_ADAPTER --explicit-migrations
 
 echo "Beginning benchmark!"
-./benchmarks --run-for 120 --skip-setup --benchmark $BENCHMARK_FILE --deployment $DEPLOYMENT_FILE
+./benchmarks --skip-setup --benchmark $BENCHMARK_FILE --deployment $DEPLOYMENT_FILE
 
 echo "Verifying end-to-end latency numbers are < 20ms at 90p"
 ./verify_prometheus_metrics end-to-end-latency
