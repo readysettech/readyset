@@ -105,6 +105,17 @@ impl Text {
         // SAFETY: Safe because we validate UTF-8 at creation time
         unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
     }
+
+    /// Create a new `Text` by copying a byte slice.
+    ///
+    /// # Safety
+    ///
+    /// Does not validate that the slice contains valid UTF-8. The user
+    /// must be sure that it does.
+    #[inline]
+    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Self {
+        Self(triomphe::ThinArc::from_header_and_slice((), v))
+    }
 }
 
 impl TryFrom<&[u8]> for Text {

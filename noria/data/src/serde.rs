@@ -1,12 +1,12 @@
-use crate::{DataType, TinyText};
+use crate::{DataType, Text, TinyText};
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use mysql_time::MysqlTime;
 use rust_decimal::Decimal;
-use serde::de::{EnumAccess, VariantAccess};
+use serde::de::{EnumAccess, VariantAccess, Visitor};
 use serde::ser::SerializeTupleVariant;
+use serde::{Deserialize, Deserializer};
 use serde_bytes::{ByteBuf, Bytes};
-use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
@@ -78,7 +78,7 @@ impl serde::ser::Serialize for DataType {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for DataType {
+impl<'de> Deserialize<'de> for DataType {
     fn deserialize<D>(deserializer: D) -> Result<DataType, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -97,12 +97,14 @@ impl<'de> serde::Deserialize<'de> for DataType {
             BitVector,
             TimestampTz,
         }
+
         struct FieldVisitor;
         impl<'de> serde::de::Visitor<'de> for FieldVisitor {
             type Value = Field;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("variant identifier")
             }
+
             fn visit_u64<E>(self, val: u64) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -126,6 +128,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     )),
                 }
             }
+
             fn visit_str<E>(self, val: &str) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -146,6 +149,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     _ => Err(serde::de::Error::unknown_variant(val, VARIANTS)),
                 }
             }
+
             fn visit_bytes<E>(self, val: &[u8]) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
@@ -170,6 +174,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                 }
             }
         }
+
         impl<'de> serde::Deserialize<'de> for Field {
             #[inline]
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -193,13 +198,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
             {
                 match EnumAccess::variant(data)? {
                     (Field::None, variant) => {
-                        match VariantAccess::unit_variant(variant) {
-                            Ok(val) => val,
-                            Err(err) => {
-                                return Err(err);
-                            }
-                        };
-                        Ok(DataType::None)
+                        VariantAccess::unit_variant(variant).map(|_| DataType::None)
                     }
                     (Field::Int, variant) => VariantAccess::newtype_variant::<i128>(variant)
                         .and_then(|x| {
@@ -277,10 +276,7 @@ impl<'de> serde::Deserialize<'de> for DataType {
                     (Field::Numeric, variant) => VariantAccess::newtype_variant::<Decimal>(variant)
                         .map(|d| DataType::Numeric(Arc::new(d))),
                     (Field::Text, variant) => {
-                        VariantAccess::newtype_variant::<Cow<'_, [u8]>>(variant).map(|v| {
-                            // This is safe, becaus we always serialize ourselves
-                            DataType::Text(unsafe { std::str::from_utf8_unchecked(&v).into() })
-                        })
+                        VariantAccess::newtype_variant::<Text>(variant).map(DataType::Text)
                     }
                     // We deserialize the NaiveDateTime by extracting nsecs from the top 64 bits of the encoded i128, and secs from the low 64 bits
                     (Field::Timestamp, variant) => VariantAccess::newtype_variant::<u128>(variant)
@@ -318,6 +314,49 @@ impl<'de> serde::Deserialize<'de> for DataType {
             "BitVector",
             "TimestampTz",
         ];
+
         deserializer.deserialize_enum("DataType", VARIANTS, Visitor)
+    }
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for Text {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TextVisitor;
+
+        impl<'de> Visitor<'de> for TextVisitor {
+            type Value = Text;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a byte array")
+            }
+
+            fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
+            where
+                V: serde::de::SeqAccess<'de>,
+            {
+                let len = std::cmp::min(visitor.size_hint().unwrap_or(0), 4096);
+                let mut bytes = Vec::with_capacity(len);
+
+                while let Some(b) = visitor.next_element()? {
+                    bytes.push(b);
+                }
+
+                // SAFETY: this is only safe because we assume we always serialize ourselves
+                Ok(unsafe { Text::from_slice_unchecked(&bytes) })
+            }
+
+            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                // SAFETY: this is only safe because we assume we always serialize ourselves
+                Ok(unsafe { Text::from_slice_unchecked(v) })
+            }
+        }
+
+        deserializer.deserialize_bytes(TextVisitor)
     }
 }
