@@ -32,27 +32,6 @@ impl TinyText {
         &self.t[..self.len as usize]
     }
 
-    /// A convinience method to encode the `TinyText` as an `i128`
-    pub(crate) fn to_i128(&self) -> i128 {
-        let mut b = [0u8; 16];
-        b[..TINYTEXT_WIDTH].copy_from_slice(&self.t);
-        i128::from_le_bytes(b) | (self.len as i128) << 120
-    }
-
-    /// A convinience method to decode the `TinyText` from `i128`
-    ///
-    /// # Safety
-    ///
-    /// i128 should have been previousely created using `to_i128`
-    /// otherwise the length component might be wrong, or it may
-    /// contain non-UTF8 characters.
-    pub(crate) unsafe fn from_i128_unchecked(v: i128) -> Self {
-        let mut t = [0u8; TINYTEXT_WIDTH];
-        let b = v.to_le_bytes();
-        t.copy_from_slice(&b[..TINYTEXT_WIDTH]);
-        TinyText { len: b[15], t }
-    }
-
     /// A convinience method to create constant ASCII `TinyText`
     /// NOTE: this is not implemented as trait, so it can be a `const fn`
     pub const fn from_arr<const N: usize>(arr: &[u8; N]) -> Self {
@@ -71,24 +50,40 @@ impl TinyText {
 
         TinyText { len: i as u8, t }
     }
+
+    /// Create a new `TinyText` by copying a byte slice.
+    /// Errors if slice is too long.
+    ///
+    /// # Safety
+    ///
+    /// Does not validate that the slice contains valid UTF-8. The user
+    /// must be sure that it does.
+    #[inline]
+    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Result<Self, &'static str> {
+        if v.len() > TINYTEXT_WIDTH {
+            return Err("slice too long");
+        }
+
+        // For reasons I can't say using MaybeUninit::zeroed() is much faster
+        // than assigning an array of zeroes (which uses memset instead). Don't remove
+        // this without benchmarking (or at least looking at godbolt first).
+        // SAFETY: it is safe because u8 is a zeroable type
+        let mut t: [u8; TINYTEXT_WIDTH] = std::mem::MaybeUninit::zeroed().assume_init();
+        t[..v.len()].copy_from_slice(v);
+        Ok(TinyText {
+            len: v.len() as _,
+            t,
+        })
+    }
 }
 
 impl TryFrom<&str> for TinyText {
-    type Error = ();
+    type Error = &'static str;
 
     /// If an str can fit inside a `TinyText` returns new `TinyText` with that str
-    fn try_from(s: &str) -> Result<Self, ()> {
-        if s.len() > TINYTEXT_WIDTH {
-            return Err(());
-        }
-
-        let b = s.as_bytes();
-        let mut t = [0u8; TINYTEXT_WIDTH];
-        t[..b.len()].copy_from_slice(b);
-        Ok(TinyText {
-            len: b.len() as u8,
-            t,
-        })
+    fn try_from(s: &str) -> Result<Self, &'static str> {
+        // SAFETY: safe because s is known to be UTF-8
+        unsafe { Self::from_slice_unchecked(s.as_bytes()) }
     }
 }
 
@@ -175,12 +170,10 @@ mod tests {
 
     proptest! {
         #[test]
-        fn tiny_i128_round_trip(s in "[a-bA-B0-9]{0,14}") {
+        fn tiny_str_round_trip(s in "[a-bA-B0-9]{0,14}") {
             let tt: TinyText = s.as_str().try_into().unwrap();
             assert_eq!(tt.as_str(), s);
-            assert_eq!(tt, unsafe{ TinyText::from_i128_unchecked( tt.to_i128())});
         }
-
 
         #[test]
         fn text_str_round_trip(s: String) {
