@@ -18,6 +18,8 @@ rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"]
 serde = { version = "1.0.8", features = ["rc", "derive"] }
 serde_bytes = "0.11"
 serde_json = { version = "1.0.2", features = ["arbitrary_precision"] }
+strum = "0.23"
+strum_macros = "0.23"
 test-strategy = "0.1.1"
 time = { version = "0.3", features = ["local-offset"] }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
