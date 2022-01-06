@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 const TINYTEXT_WIDTH: usize = 14;
 
@@ -11,10 +12,10 @@ pub struct TinyText {
     t: [u8; TINYTEXT_WIDTH],
 }
 
-/// A thin pointer over an Arc<[u8]> storing a valid UTF-8 string
+/// A thin pointer over an Arc<[u8]> with lazy UTF-8 validation
 #[repr(transparent)]
 #[derive(Clone)]
-pub struct Text(triomphe::ThinArc<(), u8>);
+pub struct Text(triomphe::ThinArc<AtomicBool, u8>);
 
 unsafe impl Send for Text {}
 
@@ -54,21 +55,22 @@ impl TinyText {
     /// Create a new `TinyText` by copying a byte slice.
     /// Errors if slice is too long.
     ///
-    /// # Safety
+    /// # Panics
     ///
-    /// Does not validate that the slice contains valid UTF-8. The user
-    /// must be sure that it does.
+    /// Panics if not valid UTF-8.
     #[inline]
-    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Result<Self, &'static str> {
+    pub fn from_slice(v: &[u8]) -> Result<Self, &'static str> {
         if v.len() > TINYTEXT_WIDTH {
             return Err("slice too long");
         }
+
+        std::str::from_utf8(v).expect("Must always be UTF8");
 
         // For reasons I can't say using MaybeUninit::zeroed() is much faster
         // than assigning an array of zeroes (which uses memset instead). Don't remove
         // this without benchmarking (or at least looking at godbolt first).
         // SAFETY: it is safe because u8 is a zeroable type
-        let mut t: [u8; TINYTEXT_WIDTH] = std::mem::MaybeUninit::zeroed().assume_init();
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
         t[..v.len()].copy_from_slice(v);
         Ok(TinyText {
             len: v.len() as _,
@@ -82,8 +84,20 @@ impl TryFrom<&str> for TinyText {
 
     /// If an str can fit inside a `TinyText` returns new `TinyText` with that str
     fn try_from(s: &str) -> Result<Self, &'static str> {
-        // SAFETY: safe because s is known to be UTF-8
-        unsafe { Self::from_slice_unchecked(s.as_bytes()) }
+        if s.len() > TINYTEXT_WIDTH {
+            return Err("slice too long");
+        }
+
+        // For reasons I can't say using MaybeUninit::zeroed() is much faster
+        // than assigning an array of zeroes (which uses memset instead). Don't remove
+        // this without benchmarking (or at least looking at godbolt first).
+        // SAFETY: it is safe because u8 is a zeroable type
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        t[..s.len()].copy_from_slice(s.as_bytes());
+        Ok(TinyText {
+            len: s.len() as _,
+            t,
+        })
     }
 }
 
@@ -97,19 +111,26 @@ impl Text {
     /// Returns the underlying byte slice as an `str`
     #[inline]
     pub fn as_str(&self) -> &str {
-        // SAFETY: Safe because we validate UTF-8 at creation time
-        unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
+        // Check if already validated
+        if self.0.header.header.load(Relaxed) {
+            // SAFETY: Safe because we checked validation flag
+            unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
+        } else {
+            let validated = std::str::from_utf8(self.as_bytes()).expect("Must always be UTF8");
+            self.0.header.header.store(true, Relaxed);
+            validated
+        }
     }
 
-    /// Create a new `Text` by copying a byte slice.
-    ///
-    /// # Safety
-    ///
-    /// Does not validate that the slice contains valid UTF-8. The user
-    /// must be sure that it does.
+    /// Create a new `Text` by copying a byte slice. It does not check if the
+    /// slice contains valid UTF-8 text, and may panic later if `as_str` is
+    /// called later if it does not.
     #[inline]
-    pub unsafe fn from_slice_unchecked(v: &[u8]) -> Self {
-        Self(triomphe::ThinArc::from_header_and_slice((), v))
+    pub fn from_slice_unchecked(v: &[u8]) -> Self {
+        Self(triomphe::ThinArc::from_header_and_slice(
+            AtomicBool::new(false),
+            v,
+        ))
     }
 }
 
@@ -124,7 +145,7 @@ impl TryFrom<&[u8]> for Text {
 impl From<&str> for Text {
     fn from(t: &str) -> Self {
         Self(triomphe::ThinArc::from_header_and_iter(
-            (),
+            AtomicBool::new(true),
             t.as_bytes().iter().copied(),
         ))
     }
@@ -180,5 +201,20 @@ mod tests {
             let t: Text = s.as_str().into();
             assert_eq!(t.as_str(), s);
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn text_panics_non_utf8() {
+        let s = [255, 255, 255, 255];
+        let t = Text::from_slice_unchecked(&s);
+        t.as_str();
+    }
+
+    #[test]
+    #[should_panic]
+    fn tiny_text_panics_non_utf8() {
+        let s = [255, 255, 255, 255];
+        TinyText::from_slice(&s).expect("ok");
     }
 }
