@@ -327,12 +327,9 @@ impl<'de: 'a, 'a> Deserialize<'de> for TextOrTinyText {
                     bytes.push(b);
                 }
 
-                // SAFETY: this is only safe because we assume we always serialize ourselves
-                match unsafe { TinyText::from_slice_unchecked(&bytes) } {
+                match TinyText::from_slice(&bytes) {
                     Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                    _ => Ok(TextOrTinyText::Text(unsafe {
-                        Text::from_slice_unchecked(&bytes)
-                    })),
+                    _ => Ok(TextOrTinyText::Text(Text::from_slice_unchecked(&bytes))),
                 }
             }
 
@@ -340,12 +337,9 @@ impl<'de: 'a, 'a> Deserialize<'de> for TextOrTinyText {
             where
                 E: serde::de::Error,
             {
-                // SAFETY: this is only safe because we assume we always serialize ourselves
-                match unsafe { TinyText::from_slice_unchecked(v) } {
+                match TinyText::from_slice(v) {
                     Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                    _ => Ok(TextOrTinyText::Text(unsafe {
-                        Text::from_slice_unchecked(v)
-                    })),
+                    _ => Ok(TextOrTinyText::Text(Text::from_slice_unchecked(v))),
                 }
             }
         }
