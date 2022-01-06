@@ -154,4 +154,6 @@ module "buildkite_benchmark_queue" {
   )
   secrets_bucket   = aws_s3_bucket.ops-secrets.bucket
   artifacts_bucket = aws_s3_bucket.ops-artifacts.bucket
+  # Needed to change file permissions during builds
+  agent_additional_sudo_permissions = ["NOPASSWD:ALL"]
 }

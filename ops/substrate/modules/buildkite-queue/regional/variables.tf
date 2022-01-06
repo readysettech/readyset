@@ -64,13 +64,19 @@ variable "extra_iam_policy_arns" {
 }
 
 variable "ssh_key_pair_name" {
-  type = string
+  type        = string
   description = "Name of the EC2 key pair to be applied to the Buildkite agents."
-  default = ""
+  default     = ""
 }
 
 variable "use_private_subnets" {
-  type = bool
+  type        = bool
   description = "Toggles the usage of private subnets within the target VPC, vs public."
-  default = false
+  default     = false
+}
+
+variable "agent_additional_sudo_permissions" {
+  type        = list(string)
+  description = "List of extra sudo permissions to have granted to the Buildkite agents."
+  default     = []
 }
