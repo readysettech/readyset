@@ -3,12 +3,11 @@
 
 Noria servers are the process that implement the core dataflow engine. Each server can be separated into the `Controller`, which handles control plane logic [^1], the `Worker` which handles data plane logic [^2], and the `NoriaServerHttpRouter` which handles and routes http requests to the `Controller` and `Worker`.
 
+![Noria Server Overview](./images/noria-server-overview.png)
+
 <p align="center">
-  <img src="./images/noria-server-overview.png" />
+<b>Figure: Overview of the noria-server components</b>
 </p>
-<center>
-  <b>Figure: Overview of the noria-server components</b>
-</center>
 
 The noria-server is comprised of tasks executing on a multi-threaded [tokio](https://docs.rs/tokio/1.12.0/tokio/) runtime. Each component, the `Worker`, `Controller`, and `NoriaServerHttpRouter` is spawned as a task which in turn may spawn tasks to handle their operations.
 
@@ -23,12 +22,11 @@ The controller is responsible for all control plane logic for a single noria-ser
 2. **Request Thread** Handle control messages for this noria-server such as starting new domains, replicating existing domains.
 3. **Leader:** If applicable, act as the leader in the system and process all leader-related controller requests: query planning, worker failures, worker registration.
 
+![Controller Overview](./images/controller-overview.png)
+
 <p align="center">
-  <img src="./images/controller-overview.png" />
+<b>Figure: Overview of the noria-server components</b>
 </p>
-<center>
-  <b>Figure: Overview of the noria-server components</b>
-</center>
 
 ### Authority Thread
 The authority thread is responsible for participating in the leader election protocol, communicating liveness of the server with the authority cluster, and observing

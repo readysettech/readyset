@@ -2,4 +2,5 @@
 
 The following diagram depicts a client's read query as it flows through various ReadySet components.
 
-<img src="./images/life-of-a-read-query.svg" />
+![Life of a Read Query](./images/life-of-a-read-query.png)
+
