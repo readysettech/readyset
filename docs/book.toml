@@ -4,3 +4,7 @@ language = "en"
 multilingual = false
 src = "src"
 title = "ReadySet Guide"
+
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]

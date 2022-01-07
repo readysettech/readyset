@@ -2,7 +2,7 @@
 <sub>Updated 1-3-2022</sub>
 
 Welcome to ReadySet! This guide is meant to give you the tools needed to work in our code base.
-
+<!-- toc -->
 ## Getting access to internal resources via tailscale
 We use [Tailscale](https://tailscale.com/) as a [virtual private network](https://en.wikipedia.org/wiki/Virtual_private_network) (VPN)
 for accessing internal resources such as code review and EC2 instances.
@@ -52,7 +52,7 @@ All ReadySet code lives in the [ReadySet monorepo](https://gerrit.readyset.name/
     > Gerrit requires a commit hook that adds a globally unique `Change-Id` to each commit message.
     > The `Change-Id` is used by gerrit to track commits across cherry-picks and rebases.
 
-### Rust and dependencies
+### Getting rust and dependencies
 
 1. **Install ReadySet dependencies.**
 

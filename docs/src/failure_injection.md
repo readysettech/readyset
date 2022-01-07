@@ -24,7 +24,7 @@ feature.
   * The `#[failpoint("failpoint-name")]` attribute macro, which creates a
     failpoint at the start of the annotated function.
   * The `set_failpoint!("failpoint-name")` macro. This is a wrapper
-    around [`set_failpoint`] that includes checking for the
+    around `set_failpoint` that includes checking for the
     `failure_injection` feature.
 
 ```rust
