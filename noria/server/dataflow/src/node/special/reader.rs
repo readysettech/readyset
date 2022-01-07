@@ -371,6 +371,7 @@ impl Reader {
             // duplicated replay.
             if !m.is_regular() && state.is_partial() {
                 m.map_data(|data| {
+                    trace!(?data, "reader received replay");
                     data.retain(|row| {
                         match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
                             Err(e) if e.is_miss() => {
@@ -378,6 +379,7 @@ impl Reader {
                                 true
                             }
                             Ok(_) => {
+                                trace!(?row, "reader dropping row that hit already-filled hole");
                                 // a given key should only be replayed to once!
                                 false
                             }

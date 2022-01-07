@@ -10,6 +10,7 @@ use futures_util::{
     future::{FutureExt, TryFutureExt},
     stream::{StreamExt, TryStreamExt},
 };
+use launchpad::intervals;
 use metrics::increment_counter;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
@@ -246,7 +247,35 @@ fn handle_normal_read_query(
                     // need to trigger partial replay for this key
                     ret.push(SerializedReadReplyBatch::empty());
 
-                    for key in miss.into_misses().drain(..) {
+                    let misses = miss.into_misses();
+
+                    // if we did a lookup of a range, it might be the case that part of the range
+                    // *didn't* miss - we still want the results for the bits that didn't miss, so
+                    // subtract the misses from our original keys and do the lookups now
+                    // NOTE(grfn): The asymptotics here are bad, but we only ever do range queries
+                    // with one key at a time so it doesn't matter - if that changes, we may want to
+                    // improve this somewhat, but for now it's actually *faster* to do this linearly
+                    // rather than trying to make a data structure out of it
+                    if key.is_range() {
+                        let non_miss_ranges = misses.iter().fold(vec![key.clone()], |acc, miss| {
+                            acc.into_iter()
+                                .flat_map(|key| {
+                                    intervals::difference(&key, miss)
+                                        .map(|(l, u)| {
+                                            KeyComparison::Range((l.cloned(), u.cloned()))
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .collect()
+                        });
+                        ret.extend(
+                            non_miss_ranges
+                                .into_iter()
+                                .flat_map(|key| do_lookup(reader, &key, &filter)),
+                        )
+                    }
+
+                    for key in misses {
                         // We do not push a lookup miss to `missing_keys` and `missing_indices` here
                         // If there is a `consistency_miss` the key will be pushed at the end of
                         // the loop no matter if it is materialized or not.
