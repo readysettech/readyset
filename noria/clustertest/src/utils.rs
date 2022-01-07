@@ -189,7 +189,9 @@ where
                     );
                     return false;
                 }
-                last = Some(r.clone());
+                if noria_queried {
+                    last = Some(r.clone());
+                }
             }
             Ok(Err(e)) => {
                 println!("Returned an error when querying for results, {:?}", e);

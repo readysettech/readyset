@@ -430,14 +430,11 @@ async fn create_view_after_worker_failure() {
 /// Fail the non-leader worker 10 times while issuing writes.
 // This test currently fails because we drop writes to failed workers.
 #[clustertest]
-#[should_panic]
-// TODO(ENG-933): Flaky test.
-#[ignore]
 async fn update_during_failure() {
     let mut deployment = readyset_mysql("ct_update_during_failure")
         .quorum(2)
-        .add_server(ServerParams::default().with_volume("v1"))
-        .add_server(ServerParams::default().with_volume("v2"))
+        .add_server(ServerParams::default())
+        .add_server(ServerParams::default())
         .start()
         .await
         .unwrap();
@@ -468,16 +465,14 @@ async fn update_during_failure() {
     let mut results = EventuallyConsistentResults::new();
     results.write(&[(1, 2)]);
 
-    let (volume_id, addr) = {
+    let addr = {
         let controller_uri = deployment.leader_handle().controller_uri().await.unwrap();
         let server_handle = deployment
             .server_handles()
             .values_mut()
             .find(|v| v.addr != controller_uri)
             .unwrap();
-        let volume_id = server_handle.params.volume_id.clone().unwrap();
-        let addr = server_handle.addr.clone();
-        (volume_id, addr)
+        server_handle.addr.clone()
     };
     deployment.kill_server(&addr, false).await.unwrap();
 
@@ -494,9 +489,16 @@ async fn update_during_failure() {
     // Let the write propagate while the worker is dead.
     sleep(Duration::from_secs(10)).await;
 
+    // Wait until we detect that the worker has failed before trying to perform
+    // a migration. Migrations involving failed workers currently fail the leader.
+    deployment
+        .wait_for_workers(PROPAGATION_DELAY_TIMEOUT)
+        .await
+        .unwrap();
+
     // Wait for the deployment to completely recover from the failure.
     deployment
-        .start_server(ServerParams::default().with_volume(&volume_id), true)
+        .start_server(ServerParams::default(), true)
         .await
         .unwrap();
 
@@ -573,7 +575,6 @@ async fn upquery_to_failed_reader_domain() {
 // This test introduces a 5 second query timeout that fails due to the upquery hanging
 // until RPC timeout.
 #[clustertest]
-#[should_panic]
 async fn upquery_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_failure_during_query")
         .with_servers(1, ServerParams::default())
@@ -617,7 +618,9 @@ async fn upquery_through_failed_domain() {
 }
 
 #[clustertest]
-#[should_panic]
+// TODO(ENG-938): We do not correctly remove query expressions due to a NodeIndex
+// mismatch between reader nodes and query expressions.
+#[ignore]
 async fn update_propagation_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
         .with_servers(2, ServerParams::default())
@@ -684,7 +687,7 @@ async fn update_propagation_through_failed_domain() {
     results.write(&[(2, 12)]);
 
     deployment
-        .start_server(ServerParams::default(), false)
+        .start_server(ServerParams::default(), true)
         .await
         .unwrap();
 

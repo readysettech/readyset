@@ -140,6 +140,39 @@ pub(crate) type FinishedDomainFuture = Box<
         + Send,
 >;
 
+/// Domains failures typically indicate that the system has entered an unrecoverable
+/// state. When these situations occur, panic, to kill the worker and in production abort the
+/// process. The future may be cancelled or gracefully complete when torndown, in these cases
+/// do not panic.
+fn handle_domain_future_completion(
+    result: (
+        Result<Result<(), anyhow::Error>, JoinError>,
+        DomainIndex,
+        usize,
+    ),
+) {
+    let (handle, idx, shard) = result;
+    match handle {
+        Ok(Ok(())) => {
+            warn!(
+                index = idx.index(),
+                shard, "domain future completed without error"
+            )
+        }
+        Ok(Err(e)) => {
+            error!(index = idx.index(), shard, err = %e, "domain failed with an error");
+            panic!("domain failed");
+        }
+        Err(e) if e.is_cancelled() => {
+            warn!(index = idx.index(), shard, err = %e, "domain future cancelled")
+        }
+        Err(e) => {
+            error!(index = idx.index(), shard, err = %e, "domain future failed");
+            panic!("domain future failure");
+        }
+    }
+}
+
 /// A Noria worker, responsible for executing some domains.
 pub struct Worker {
     /// The current election state, if it exists (see the `WorkerElectionState` docs).
@@ -207,15 +240,8 @@ impl Worker {
                 info!("controller requested that this worker clears its existing domains");
                 self.coord.clear();
                 self.domains.clear();
-                while let Some((handle, idx, shard)) = self.domain_wait_queue.next().await {
-                    let index = idx.index();
-                    match handle {
-                        Ok(Err(e)) => error!(index, shard, err = %e, "domain failed during clear"),
-                        Err(e) if !e.is_cancelled() => {
-                            error!(index, shard, err = %e, "domain failed during clear")
-                        }
-                        _ => {}
-                    }
+                while let Some(res) = self.domain_wait_queue.next().await {
+                    handle_domain_future_completion(res);
                 }
 
                 Ok(None)
@@ -378,13 +404,8 @@ impl Worker {
                 _ = eviction => {
                     self.process_eviction();
                 }
-                Some((res, idx, shard)) = self.domain_wait_queue.next() => {
-                    match res {
-                        Err(e) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
-                        Ok(Err(e)) => error!(domain_index = idx.index(), shard, error = %e, "domain failed"),
-                        Ok(Ok(())) => error!(domain_index = idx.index(), shard, "domain exited unexpectedly"),
-                    }
-                    self.domains.remove(&(idx, shard));
+                Some(res) = self.domain_wait_queue.next() => {
+                    handle_domain_future_completion(res);
                 }
             }
         }
