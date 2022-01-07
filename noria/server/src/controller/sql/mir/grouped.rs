@@ -54,8 +54,12 @@ pub(super) fn make_predicates_above_grouped<'a>(
                     )?;
 
                     node_count += predicates_above_group_by_nodes.len();
-                    *prev_node = Some(new_mpns.last().unwrap().clone());
-                    predicates_above_group_by_nodes.extend(new_mpns);
+                    if !new_mpns.is_empty() {
+                        // TODO(ENG-939): updating prev_node here isn't quite right. But moving
+                        // this doesn't solve all our problems either. See ticket.
+                        *prev_node = Some(new_mpns.last().unwrap().clone());
+                        predicates_above_group_by_nodes.extend(new_mpns);
+                    }
                 }
             }
         }

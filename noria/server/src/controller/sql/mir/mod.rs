@@ -1291,6 +1291,8 @@ impl SqlToMirConverter {
 
         let ces = column_to_predicates.get(&over_col).unwrap();
         for ce in ces {
+            // If we have two aggregates over the same column, we will skip this step for the
+            // second aggregate
             if !created_predicates.contains(ce) {
                 let mpns = self.make_predicate_nodes(
                     &format!("{}_mp{}", name, predicates_above_group_by_nodes.len()),
