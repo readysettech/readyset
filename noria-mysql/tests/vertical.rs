@@ -778,4 +778,14 @@ vertical_tests! {
             key_columns: [0],
         )
     );
+
+    simple_range(
+        "SELECT id, name, score FROM posts WHERE score > ?";
+        "posts" => (
+            "CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))",
+            schema: [id: i32, name: String, score: i32],
+            primary_key: 0,
+            key_columns: [2],
+        )
+    );
 }
