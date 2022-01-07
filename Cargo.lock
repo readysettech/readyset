@@ -3783,6 +3783,7 @@ dependencies = [
  "bit-vec",
  "bytes 1.1.0",
  "chrono",
+ "criterion",
  "derive_more",
  "eui48",
  "itertools 0.10.3",
