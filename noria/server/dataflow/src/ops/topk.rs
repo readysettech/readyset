@@ -144,11 +144,9 @@ impl TopK {
     pub fn new(
         src: NodeIndex,
         order: Vec<(usize, OrderType)>,
-        mut group_by: Vec<usize>,
+        group_by: Vec<usize>,
         k: usize,
     ) -> Self {
-        group_by.sort_unstable();
-
         TopK {
             src: src.into(),
 
