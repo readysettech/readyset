@@ -1,0 +1,18 @@
+statement ok
+CREATE TABLE posts (id INT, name TEXT, score INT, PRIMARY KEY (id))
+
+query ITI nosort
+SELECT id, name, score FROM posts WHERE score > ?
+? = 0
+----
+
+statement ok
+INSERT INTO posts (id, name, score) VALUES (1, 'a', 1);
+
+query ITI nosort
+SELECT id, name, score FROM posts WHERE score > ?
+? = 0
+----
+1
+a
+1

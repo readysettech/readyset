@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use partial_map::PartialMap;
 use std::iter;
 use std::ops::{Bound, RangeBounds};
 use tuple::Map;
@@ -6,7 +7,6 @@ use tuple::TupleElements;
 use vec1::Vec1;
 
 use super::mk_key::MakeKey;
-use super::partial_map::{self, PartialMap};
 use super::Misses;
 use crate::prelude::*;
 use launchpad::intervals::into_bound_endpoint;

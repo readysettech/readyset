@@ -17,7 +17,6 @@ maintenance = { status = "experimental" }
 [dependencies]
 anyhow = "1.0"
 bincode = "1.0.0"
-reader_map = { path = "reader_map" }
 hashbag = "0.1.2"
 ahash = "0.3"
 futures-util = "0.3.13"
@@ -60,6 +59,8 @@ unbounded-interval-tree = { path = "../../../unbounded-interval-tree" }
 launchpad = { path = "../../../launchpad" }
 noria-errors = { path = "../../errors" }
 noria-data = { path = "../../data" }
+reader_map = { path = "reader_map" }
+partial_map = { path = "partial_map" }
 
 [dev-dependencies]
 pretty_assertions = "0.7.2"

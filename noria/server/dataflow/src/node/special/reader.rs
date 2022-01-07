@@ -9,7 +9,7 @@ use noria::metrics::recorded;
 use noria::util::like::LikePattern;
 use noria::ViewQueryFilter;
 use noria::{consistency::Timestamp, KeyComparison};
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::backlog;
 use crate::prelude::*;
@@ -338,11 +338,13 @@ impl Reader {
             // hole with incomplete (i.e., non-replay) state.
             if m.is_regular() && state.is_partial() {
                 m.map_data(|data| {
+                    trace!(?data, "reader received regular message");
                     data.retain(|row| {
                         match state.entry_from_record(&row[..]).try_find_and(|_| ()) {
                             Err(e) if e.is_miss() => {
                                 // row would miss in partial state.
                                 // leave it blank so later lookup triggers replay.
+                                trace!(?row, "dropping row that hit partial hole");
                                 false
                             }
                             Ok(_) => {

@@ -1,7 +1,6 @@
 mod keyed_state;
 mod memory_state;
 mod mk_key;
-mod partial_map;
 mod persistent_state;
 mod single_state;
 

@@ -10,9 +10,11 @@ smallvec = "1.0.0"
 hashbag = "0.1.2"
 rand = { version = "0.7", default-features = false, features = ["alloc"] }
 left-right = "0.9.1"
+itertools = "0.10.0"
+
 unbounded-interval-tree = { path = "../../../../unbounded-interval-tree" }
 noria = { path = "../../../noria" }
-itertools = "0.10.0"
+partial_map = { path = "../partial_map" }
 
 [dev-dependencies]
 quickcheck = "0.9"

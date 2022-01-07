@@ -471,8 +471,8 @@ where
                 }
             },
             Operation::Reserve(ref key, additional) => match self.data.entry(key.clone()) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().reserve(additional, hasher);
+                Entry::Occupied(entry) => {
+                    entry.into_mut().reserve(additional, hasher);
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(ValuesInner::with_capacity_and_hasher(additional, hasher));
@@ -594,8 +594,8 @@ where
                 }
             },
             Operation::Reserve(key, additional) => match inner.data.entry(key) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().reserve(additional, hasher);
+                Entry::Occupied(entry) => {
+                    entry.into_mut().reserve(additional, hasher);
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(ValuesInner::with_capacity_and_hasher(additional, hasher));

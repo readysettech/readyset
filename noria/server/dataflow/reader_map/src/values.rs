@@ -56,6 +56,15 @@ where
     }
 }
 
+impl<T, S, D> Default for ValuesInner<T, S, D>
+where
+    D: DropBehavior,
+{
+    fn default() -> Self {
+        ValuesInner::Short(Default::default())
+    }
+}
+
 impl<T, S> Values<T, S> {
     /// Returns the number of values.
     pub fn len(&self) -> usize {
