@@ -10,7 +10,7 @@
 # ReadySet
 
 - [System Components](./system_components.md)
-- [Life of a Read Query](./query_path.md)
+- [Life of a Query](./query_path.md)
 - [Noria Server](./server.md)
 - [Testing](./testing.md)
   - [Clustertest](./clustertest.md)

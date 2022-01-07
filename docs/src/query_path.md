@@ -1,7 +1,6 @@
-# Life of a Read Query
+# Life of a Query
 <sub>Updated 1-6-2022, justin@</sub>
 
-The following diagram depicts a client's read query as it flows through various ReadySet components.
+The following diagram depictes a customer's request as it propagates through our infrastructure.
 
-![Life of a Read Query](./images/life-of-a-read-query.png)
-
+![Life of a Query](./images/life-of-a-query.png)

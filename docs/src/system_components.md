@@ -1,31 +1,54 @@
 # System Components
+<sub> Updated: 1-7-16, justin@ </sub>
 
-## Noria
-Noria accepts a set of parameterized SQL queries (think [prepared
-statements](https://en.wikipedia.org/wiki/Prepared_statement)), and produces a [data-flow
-program](https://en.wikipedia.org/wiki/Stream_processing) that maintains [materialized
-views](https://en.wikipedia.org/wiki/Materialized_view) for the output of those queries. Reads
-now become fast lookups directly into these materialized views, as if the value had been
-directly read from a cache (like memcached). The views are automatically kept up-to-date by
-Noria through the data-flow.
+ReadySet's architecture is broken into two main components:
+  1. **The Noria Adapter**: A server that implements the MySQL or PostgreSQL protocol and proxies requests to the customer database and
+     noria.
 
-### Client library 
-`noria/noria` in the `readyset` repo.  Provides bindings that allow the applications to issue requests to Noria (both writes and reads). The database adapters use the Noria client library under the hood to interact with Noria, but when requests are not encoded in the MySQL or Postgres binary protocols, then users can rely on the Noria client library directly, and thus save time on this translation. The trade off here is that users have to rewrite parts of their application to use the client library. This is fairly light weight in practice, but it isn't quite as "plug-and-play" as using the database adapters. 
+     > <b>Why might we proxy a query to one of upstream or noria?</b>
+     >
+     > ReadySet does not support every SQL query (yet), some SQL queries may perform worse on ReadySet, i.e. `SELECT * FROM t1`.
+     > Writes and schema changes are handled by the customer database and propagated to our system through the Replicator, see noria server for
+     > more information.
 
-### Dataflow engine 
+  2. **The Noria Server**: The server that is comprised of three components:
+       * **Controller**: Responsible for handling Noria control plane logic, one server in the Noria cluster will be elected the **Leader** and
+         initiate all control plane logic such as migrations.
 
-`noria/server` in the `readyset` repo. Implements the core dataflow engine that receives prepared statements from the Noria client and constructs dataflow representation of these queries. The dataflow engine can be distributed (i.e. through sharding)– each node runs either a worker or both a worker (`noria/server/source/worker/`) and a controller (`noria/server/source/controller`). There is only one controller running at a time (elected through Zookeeper).
+       * **Worker**: Responsible for the Noria data plane. Read queries are issued against `Readers` in the worker, while the rest of the dataflow
+                     graph lives in worker domains.
 
-#### Controller 
-The controller ("the control plane") is responsible for planning the dataflow graph based on queries it has received (i.e. deciding which nodes go in which domain, as well as which worker is responsible for running that domain), but it doesn't perform any of the actual data processing itself. The controller is also responsible for detecting any worker failures. 
+       * **Replicator**: The server that is elected the leader will have a replicator. The replicator initially bootstraps our system with data via
+                         snapshotting the customer database. It then replicates writes and schema changes from the customer database.
 
-#### Workers 
-Workers ("the data plane") run the different components of the dataflow graph (e.g. join, aggregate, projection nodes). Dataflow subgraphs are grouped together into logical units called "domains" that are run on a single worker (for pipelining). 
+![System Components](./images/architecture.png)
+<p align="center">
+<b>Figure: ReadySet system architecture</b>
+</p>
 
-#### Persistent base table storage in RocksDB
-Base tables are stored in RocksDB by default. This feature can be turned off, and likely *should* be turned off for most clients who are connecting ReadySet to their existing database. Otherwise, ReadySet materializes intermediate views that are composed to construct the final query results entirely in memory. 
 
-## Database adapters 
-`noria-mysql` and `noria-psql` in the `readyset` repo, referring to the MySQL and Postgres database adapters, respectively. 
-- Using a database adapter is optional– in general, you can interact with Noria through a database adapter, or by using the Noria client library directly.  The database adapter makes Noria "look" like an existing MySQL or Postgres database, and allows users to continue using MySQL/Postgres ORMs or client libraries.
-- The adapter can be thought of as a "shim" that wraps the core Noria client library. Read requests (encoded in MySQL/Postgres binary protocols) are sent directly to the adapter. The adapter translates from binary protocol to a Noria query, sends this query to the noria client (`noria/noria`, see below) which resolves it and sends a response back to the adapter. The adapter then forwards the received query results back to the user.
+### Noria Adapter
+
+The noria adapter, often referred to as the **adapter**, allows us to seamlessly execute queries
+against a customer database (postgres or mysql) and against a noria cluster. It accomplishes this by creating an
+upstream connector and a noria connector per adapter connection, each being used to proxy queries to their
+respective database. The adapter binaries are in `noria-mysql` and `noria-psql`, but the majority of the code
+is in `//noria-client/src/backend.rs`.
+
+The interface between the adapter and the noria-server is the **Noria Connector**. The noria connector component performs
+operations against Noria using the noria client bindings: `//noria/noria`. It
+roughly maps SQL operations: `prepare`, `execute`, `query`, to the Noria API. It performs additional per-connection
+book-keeping to do cache connections to tables and views.
+
+### Noria Server
+Within a cluster, noria-server's primary responsibility is to implement the core dataflow engine that receives
+statements from the Noria client and constructs and operates dataflow representations of these queries. There can be
+many servers that comprise a noria cluster, each owning a subset of the dataflow graph. The server is responsbile for
+both control-plane operations via the controller (`//noria/server/src/controller`), and data-plane operations (running
+components of the dataflow graph) via the worker (`//noria/server/src/worker/`).
+
+### Authority
+Each noria server instance regularly communicates with a cluster management **authority**. The authority is essentially
+a distributed key-value store used to perform sychronization. We implement wrappers around the authority to enable
+failure detection and leader election. In production we use [Consul](https://www.consul.io/), but also have a
+[Zookeeper](https://zookeeper.apache.org/) authority wrapper as well.
