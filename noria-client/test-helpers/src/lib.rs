@@ -99,6 +99,7 @@ where
         rt.block_on(async move {
             let mut builder = Builder::for_tests();
             builder.set_allow_topk(true);
+            builder.set_allow_range_queries(true);
             if !partial {
                 builder.disable_partial();
             }
