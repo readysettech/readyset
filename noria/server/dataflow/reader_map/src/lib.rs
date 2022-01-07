@@ -195,7 +195,7 @@
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
-    broken_intra_doc_links
+    rustdoc::broken_intra_doc_links
 )]
 #![allow(clippy::type_complexity)]
 // This _should_ detect if we ever accidentally leak aliasing::NoDrop.

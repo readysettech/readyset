@@ -72,7 +72,7 @@ where
     /// # Panics
     ///
     /// Panics if the underlying map is not a [`BTreeMap`](noria::internal::IndexType::BTreeMap).
-    pub fn range<'a, R>(&'a self, range: &'a R) -> Result<RangeIter<'a, K, V, S>, Miss<&'a K>>
+    pub fn range<R>(&self, range: &R) -> Result<RangeIter<'_, K, V, S>, Miss<K>>
     where
         R: RangeBounds<K> + Clone,
     {

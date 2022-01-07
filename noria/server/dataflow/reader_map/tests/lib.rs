@@ -921,3 +921,29 @@ fn timestamp_changes_on_publish() {
     w.publish();
     assert_eq!(r.timestamp(), Some(4));
 }
+
+#[test]
+fn get_respects_ranges() {
+    let (mut w, r) = reader_map::new::<i32, i32>();
+    w.insert_range(vec![], 2..6);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        let res = m.get(&3);
+        assert!(res.is_some());
+        assert_eq!(res.unwrap().len(), 0);
+    }
+}
+
+#[test]
+fn contains_key_respects_ranges() {
+    let (mut w, r) = reader_map::new::<i32, i32>();
+    w.insert_range(vec![], 2..6);
+    w.publish();
+
+    {
+        let m = r.enter().unwrap();
+        assert!(m.contains_key(&3));
+    }
+}

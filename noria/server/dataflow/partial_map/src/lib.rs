@@ -1,4 +1,7 @@
-pub use std::collections::btree_map::{Keys, Values};
+#![feature(btree_drain_filter, bound_map)]
+
+use std::borrow::Borrow;
+pub use std::collections::btree_map::{Iter, Keys, Range, Values, ValuesMut};
 use std::collections::{btree_map, BTreeMap};
 use std::ops::{Bound, RangeBounds};
 
@@ -21,7 +24,7 @@ use unbounded_interval_tree::IntervalTree;
 /// We behave just like a [`BTreeMap`] normally:
 ///
 /// ```rust
-/// use noria_dataflow::state::PartialMap;
+/// use partial_map::PartialMap;
 ///
 /// let mut map = PartialMap::new();
 /// map.insert(1, 2);
@@ -31,7 +34,7 @@ use unbounded_interval_tree::IntervalTree;
 /// Ranges can be marked as present with [`insert_range`](PartialMap::insert_range):
 ///
 /// ```rust
-/// use noria_dataflow::state::PartialMap;
+/// use partial_map::PartialMap;
 ///
 /// let mut map: PartialMap<i32, Vec<i32>> = PartialMap::new();
 /// assert_eq!(map.get(&1), None);
@@ -39,7 +42,7 @@ use unbounded_interval_tree::IntervalTree;
 /// map.insert_range(0..=10);
 /// assert_eq!(map.get(&1), Some(&vec![]));
 /// ````
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PartialMap<K, V>
 where
     K: Ord + Clone,
@@ -81,11 +84,20 @@ where
     /// If that key is covered by a range of keys we know we have (due to calls to
     /// [`insert_range`]), the [`default`](std::Default::default) value will be inserted and a
     /// mutable reference to that will be returned.
-    pub fn get_mut<'a>(&'a mut self, key: &K) -> Option<&'a mut V> {
-        if self.interval_tree.contains_point(key) {
-            Some(self.map.entry(key.clone()).or_insert_with(|| V::default()))
-        } else {
-            self.map.get_mut(key)
+    pub fn get_mut<'a, Q>(&'a mut self, key: &Q) -> Option<&'a mut V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized + ToOwned<Owned = K>,
+    {
+        match self.map.entry(key.to_owned()) {
+            btree_map::Entry::Vacant(entry) => {
+                if self.interval_tree.contains_point(key) {
+                    Some(entry.insert(V::default()))
+                } else {
+                    None
+                }
+            }
+            btree_map::Entry::Occupied(entry) => Some(entry.into_mut()),
         }
     }
 }
@@ -106,11 +118,48 @@ where
     /// rows whose keys are in a range, then it makes sense to return an empty vec (the Default
     /// value, in the case of this method) from a lookup on a key in that range, since that means
     /// that we *know* there are no rows with that key.
-    pub fn get<'a>(&'a self, key: &K) -> Option<&'a V> {
+    pub fn get<'a, Q>(&'a self, key: &Q) -> Option<&'a V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         match self.map.get(key) {
             None if self.interval_tree.contains_point(key) => Some(&self.empty_value),
             res => res,
         }
+    }
+
+    /// Returns the key-value pair corresponding to the supplied key.
+    ///
+    /// If that key is covered by a range of keys we know we have (due to calls to
+    /// [`insert_range`]), a reference to the [`default`](std::Default::default) value will be
+    /// returned.
+    pub fn get_key_value<'a>(&'a self, key: &'a K) -> Option<(&'a K, &'a V)> {
+        match self.map.get_key_value(key) {
+            None if self.interval_tree.contains_point(key) => Some((key, &self.empty_value)),
+            res => res,
+        }
+    }
+
+    /// Returns true if the map contains an entry for the given key, or contains a range covering
+    /// the given key
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        // TODO(grfn): Is it faster to just check the interval tree?
+        self.map.contains_key(key) || self.interval_tree.contains_point(key)
+    }
+
+    /// Returns true if the map contains the entirety of the given range
+    pub fn contains_range<R, Q>(&self, range: &R) -> bool
+    where
+        R: RangeBounds<Q> + Clone,
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.interval_tree.contains_interval(range)
     }
 
     /// Insert `value` at `key`, returning the value that used to be there if any.
@@ -158,12 +207,14 @@ where
     /// in `range`, or an [`Err`](std::Result::Err) containing a list of sub-ranges of `range` that
     /// were missing.
     #[allow(clippy::type_complexity)]
-    pub fn range<'a, R>(
+    pub fn range<'a, R, Q>(
         &'a self,
         range: &R,
-    ) -> Result<btree_map::Range<'a, K, V>, Vec<(Bound<K>, Bound<K>)>>
+    ) -> Result<Range<'a, K, V>, Vec<(Bound<K>, Bound<K>)>>
     where
-        R: RangeBounds<K> + Clone,
+        R: RangeBounds<Q>,
+        K: Borrow<Q>,
+        Q: Ord + ToOwned<Owned = K> + ?Sized,
     {
         let diff = self.interval_tree.get_interval_difference(range);
         if diff.is_empty() {
@@ -171,7 +222,7 @@ where
         } else {
             Err(diff
                 .into_iter()
-                .map(|(lower, upper)| (lower.cloned(), upper.cloned()))
+                .map(|(lower, upper)| (lower.map(ToOwned::to_owned), upper.map(ToOwned::to_owned)))
                 .collect())
         }
     }
@@ -205,6 +256,22 @@ where
         self.map.values()
     }
 
+    /// Returns an iterator over mutable references to the values in this map
+    ///
+    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
+    /// types of keys (floating points, strings, etc.)
+    pub fn values_mut(&mut self) -> ValuesMut<K, V> {
+        self.map.values_mut()
+    }
+
+    /// Returns an iterator over the key-value pairs in the map
+    ///
+    /// Note that this does *not* consider ranges, since iteration is not well-defined for certain
+    /// types of keys (floating points, strings, etc.)
+    pub fn iter(&self) -> Iter<K, V> {
+        self.map.iter()
+    }
+
     /// Remove all entries and ranges in this map
     pub fn clear(&mut self) {
         self.interval_tree.clear();
@@ -212,8 +279,12 @@ where
     }
 
     /// Remove the value at the given `key` from this map, returning it if it was present
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.interval_tree.remove_point(key);
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ToOwned<Owned = K> + ?Sized,
+    {
+        self.interval_tree.remove_point(&key.to_owned());
         self.map.remove(key)
     }
 
@@ -234,6 +305,27 @@ where
         // the way Vec does. This is forcing us into an O(n) operation where we could have an
         // O(log(n)) one.
         self.map.drain_filter(move |k, _| range.contains(k))
+    }
+
+    /// Clone the interval tree from the given partial map into our interval tree/
+    ///
+    /// WARNING: misusing this function can result in keys in self that don't exist in intervals.
+    /// It's not unsafe, since it can't cause undefined behavior, but it's definitely easy to
+    /// misuse!
+    pub fn clone_intervals_from<V2>(&mut self, other: &PartialMap<K, V2>) {
+        self.interval_tree.clone_from(&other.interval_tree)
+    }
+}
+
+impl<K, V> Extend<(K, V)> for PartialMap<K, V>
+where
+    K: Ord + Clone,
+{
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        self.map.extend(
+            iter.into_iter()
+                .inspect(|(k, _)| self.interval_tree.insert_point(k.clone())),
+        )
     }
 }
 

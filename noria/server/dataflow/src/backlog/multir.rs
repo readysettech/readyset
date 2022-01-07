@@ -3,7 +3,7 @@ use common::DataType;
 use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
-use reader_map::refs::Values;
+use reader_map::refs::{Miss, Values};
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
@@ -267,7 +267,7 @@ impl Handle {
                 let range = (start_bound, end_bound);
                 let records = map
                     .range(&range)
-                    .map_err(|misses| LookupError::MissRangeSingle(misses.cloned().0, meta))?;
+                    .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
             Handle::Double(ref h) => {
@@ -284,7 +284,7 @@ impl Handle {
                 let range = (start_bound, end_bound);
                 let records = map
                     .range(&range)
-                    .map_err(|misses| LookupError::MissRangeDouble(misses.cloned().0, meta))?;
+                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
             Handle::Many(ref h) => {
@@ -293,7 +293,7 @@ impl Handle {
                 let range = (range.start_bound(), range.end_bound());
                 let records = map
                     .range(&range)
-                    .map_err(|misses| LookupError::MissRangeMany(misses.cloned().0, meta))?;
+                    .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
                 Ok((records.map(|(_, row)| then(row)).collect(), meta))
             }
         }

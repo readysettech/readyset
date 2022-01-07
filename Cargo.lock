@@ -3832,6 +3832,7 @@ dependencies = [
  "noria-common",
  "noria-data",
  "noria-errors",
+ "partial_map",
  "petgraph",
  "pretty_assertions",
  "proptest",
@@ -4364,6 +4365,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "partial_map"
+version = "0.1.0"
+dependencies = [
+ "unbounded-interval-tree",
 ]
 
 [[package]]
@@ -5079,6 +5087,7 @@ dependencies = [
  "itertools 0.10.3",
  "left-right",
  "noria",
+ "partial_map",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.7.3",

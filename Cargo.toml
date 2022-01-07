@@ -19,6 +19,8 @@ members = [
     "noria/errors",
     "noria/noria",
     "noria/server",
+    "noria/server/dataflow/partial_map",
+    "noria/server/dataflow/reader_map",
     "noria/applications",
     "noria/clustertest",
     "noria/clustertest/macros",
