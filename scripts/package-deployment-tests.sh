@@ -1,4 +1,5 @@
 #!/bin/bash
+set -eux
 # Packages the set of files and binaires required to test ReadySet on a
 # deployment. Creates deployment_test.tar.gz.
 #
@@ -12,7 +13,7 @@ if [ "$#" -eq 1 ]; then
 fi
 
 # Go to the root directory.
-cd $READYSET
+cd "$READYSET"
 
 # Set of binaries that we want to be included in the testing package.
 binaries=(benchmarks irl_minimal verify_prometheus_metrics basic_validation_test data_generator)
@@ -33,7 +34,7 @@ mkdir $TMP_DIR
 
 # Binaries!
 for binary in "${binaries[@]}"; do
-  cp ./target-ubuntu2004/release/$binary $TMP_DIR
+  cp ./target-ubuntu2004/release/"$binary" $TMP_DIR
 done
 
 # Directory structure needs to match monorepo since .yaml files use the
@@ -45,5 +46,5 @@ cp benchmarks/src/yaml/benchmarks/test/* $TMP_DIR
 cp benchmarks/src/yaml/deployments/example.yaml $TMP_DIR/deployment.example.yaml
 cp scripts/test-deployment.sh $TMP_DIR
 
-tar -cvf deployment_test.tar.gz -C $TMP_DIR .
+tar -czvf deployment_test.tar.gz -C $TMP_DIR .
 rm -r $TMP_DIR
