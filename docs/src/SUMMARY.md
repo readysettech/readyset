@@ -15,6 +15,9 @@
 - [Benchmarking your code](./benchmarking.md)
 - [Debugging your code](./debugging.md)
 
+## Ops
+- [DevOps Concerns](./ops.md)
+
 ## ReadySet Internals
 
 - [System Components](./system_components.md)

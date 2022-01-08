@@ -1,4 +1,5 @@
 steps:
+
   - label: ':bk-status-pending:'
     command: .buildkite/set_gerrit_running.sh
     agents:
@@ -359,5 +360,25 @@ steps:
       - cultureamp/aws-assume-role#v0.2.0
     env:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InternalArtifactsWrite
+    agents:
+      queue: ops
+
+  - label: ":aws: :cloud: CFN Deployment Smoke Test. :chart_with_upwards_trend:"
+    key: test-cfn-stack
+    depends_on:
+      - packer-cfn-template-copy
+    commands:
+      - .buildkite/cfn-smoke-test.sh
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/InternalCloudFormationCI
     agents:
       queue: ops

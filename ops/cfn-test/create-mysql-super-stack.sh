@@ -3,19 +3,36 @@ set -eux -o pipefail
 
 # Starts the creation of a ReadySet MySQL super stack using CloudFormation.
 
-# This takes one parameter of the AWS EC2 SSH Key Pair name and uses it for
-# access and as the name of the deployment.
-# You can also override which bucket to fetch the templates from using the
-# CFN_BUCKET environment variable.
-# NOTE: This is currently pointed at Harley's taskcat bucket but should be
-# moved elsewhere by default in the future.
+HELP_TEXT="
+Arguments:
+  -h | hash | Git Commit Hash
+  -k | key | SSH Key pair name
+
+Example usage:
+  create-mysql-super-stack.sh \
+    -h ed7db94a0b1f440bfdee98f0d0247c3ae27bf092 \
+    -k testkey
+"
+VERSION_NUM="0.0.1"
+
+while getopts h:k:v flag
+do
+    case "${flag}" in
+        h) hash=${OPTARG};;
+        k) key=${OPTARG};;
+        v) echo "create-mysql-super-stack version: $VERSION_NUM"; exit;;
+        *) echo "$HELP_TEXT"; exit;;
+    esac
+done
 
 CFN_BUCKET=${CFN_BUCKET:-readysettech-cfn-internal-us-east-2}
+CFN_BUCKET=${CFN_BUCKET:-readysettech-cfn-internal-us-east-2}
 AWS_REGION=${AWS_REGION:-us-east-2}
-commit=$1
-key_pair_name=$2
+
+commit=$hash
+key_pair_name=$key
 external_ip_address=$(curl ifconfig.me)
-stack_name=${3:-${key_pair_name}-${commit}-super}
+stack_name="${key_pair_name}-${commit}-super"
 
 parameters=(
   "ParameterKey=KeyPairName,ParameterValue=${key_pair_name}"
@@ -30,9 +47,13 @@ parameters=(
   "ParameterKey=SSMPathRDSDatabasePassword,ParameterValue=/readyset/sandbox/dbPassword"
 )
 
+# --template-body "file://$(realpath -s "./readyset-mysql-super-template.yaml")" \
 aws cloudformation create-stack \
+  --region "$AWS_REGION" \
   --stack-name "$stack_name" \
   --template-url "https://${CFN_BUCKET}.s3.${AWS_REGION}.amazonaws.com/${commit}/readyset/templates/readyset-mysql-super-template.yaml" \
   --parameters "${parameters[@]}" \
   --disable-rollback \
   --capabilities CAPABILITY_IAM
+
+echo "$stack_name"

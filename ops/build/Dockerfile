@@ -126,6 +126,7 @@ COPY --from=rain-fetcher /usr/local/bin/rain /usr/local/bin/rain
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+        curl \
         ca-certificates \
         docker.io \
         python3.8 \
@@ -150,6 +151,7 @@ COPY sh-tools/ytt_apply.sh /usr/local/bin/ytt_apply.sh
 RUN chmod +x /usr/local/bin/ytt_apply.sh
 
 RUN set -eux; \
+    curl --version; \
     packer --version; \
     terraform --version; \
     tflint --version; \

@@ -38,11 +38,13 @@ resource "aws_iam_role" "internal-artifacts-write" {
 
   name = "InternalArtifactsWrite"
   assume_role_policy = data.aws_iam_policy_document.internal-artifacts-access-assume-role-document.json
-  inline_policy {
-    name = "InternalArtifactsAccessPolicy"
-    policy = data.aws_iam_policy_document.internal-artifacts-access-policy-role-document.json
-  }
 
+}
+
+resource "aws_iam_role_policy" "internal-artifacts-write-role-policy" {
+  policy = data.aws_iam_policy_document.internal-artifacts-access-policy-role-document.json
+  role   = aws_iam_role.internal-artifacts-write.id
+  name   = "InternalArtifactsWriteRolePolicy"
 }
 
 output "internal-artifacts-write-arn" {
