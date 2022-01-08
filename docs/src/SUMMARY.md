@@ -9,6 +9,7 @@
 - [Dev Tools & Troubleshooting](./dev.md)
 - [Running and configuring ReadySet](./running-readyset.md)
 - [Testing your code](./dev-testing.md)
+- [Benchmarking your code](./benchmarking.md)
 
 # ReadySet
 
