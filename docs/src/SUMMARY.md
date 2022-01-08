@@ -7,6 +7,7 @@
 - [Getting Started](./getting_started.md)
 - [Cargo.toml and dependencies](./crate_organization.md)
 - [Dev Tools & Troubleshooting](./dev.md)
+- [Running and configuring ReadySet](./running-readyset.md)
 - [Testing your code](./dev-testing.md)
 
 # ReadySet

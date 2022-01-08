@@ -1,9 +1,9 @@
-### Troubleshooting
+## Troubleshooting
 
 1. `cargo build --release` causes an error: `error:invalid channel name 'nightly-2020-11-15-x86_64-unknown-linux-gnu' in '/home/ubuntu/noria/rust-toolchain'`
 - Noria is pinned to a version of Rust that you have not installed, here: [noria/rust-toolchain](https://github.com/readysettech/noria/blob/master/rust-toolchain). Install the listed version with:`$rustup toolchain install <insert channel name here>`
 
-### Building binaries with a specific ubuntu version
+## Building binaries with a specific ubuntu version
 
 Building binaries locally, and then trying to use them in a remote virtual
 machine may cause issues if your local glibc version is newer than the glibc

@@ -171,8 +171,8 @@ cargo test -p clustertest
 ```
 
 > This requires the ReadySet docker stack to be created with external resources. See
-> [Getting Started](./getting_started.md) for more details on how
-> to setup the ReadySet docker stacks.
+> [Getting Started](./getting_started.md) and [Running ReadySet](./running-readyset.md) 
+> for more details on how to setup the ReadySet docker stacks.
 
 ### Failure Injection
 ReadySet supports failure injection through dynamically trigger failures at code annotations.
