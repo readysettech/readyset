@@ -44,7 +44,7 @@ Each is configured to collect resources from the *default* noria-server and nori
 instance addresses.
 
 > For prometeums metrics to be collected, noria-server and noria-mysql must be run with
-> `--prometheus-metrics`.
+> `--prometheus-metrics`. To see prometheus metrics, navigate to `localhost:9090`.
 
 ## Running noria-server
 
