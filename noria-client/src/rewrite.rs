@@ -400,6 +400,28 @@ impl<'ast> Visitor<'ast> for AutoParametrizeVisitor {
 /// parameters, and return the values for those parameters alongside the index in the parameter list
 /// where they appear as a tuple of (placeholder position, value).
 fn auto_parametrize_query(query: &mut SelectStatement) -> Vec<(usize, Literal)> {
+    // Don't try to auto-parametrize equal-queries that already contain range params for now, since
+    // we don't yet allow mixing range and equal parameters in the same query
+    if query.where_clause.iter().any(|expr| {
+        iter::once(expr)
+            .chain(expr.recursive_subexpressions())
+            .any(|subexpr| {
+                matches!(
+                    subexpr,
+                    Expression::BinaryOp {
+                        op: BinaryOperator::Less
+                            | BinaryOperator::Greater
+                            | BinaryOperator::LessOrEqual
+                            | BinaryOperator::GreaterOrEqual,
+                        rhs: box Expression::Literal(Literal::Placeholder(..)),
+                        ..
+                    }
+                )
+            })
+    }) {
+        return vec![];
+    }
+
     let mut visitor = AutoParametrizeVisitor {
         has_aggregates: query.contains_aggregate_select(),
         ..Default::default()
@@ -899,6 +921,15 @@ mod tests {
                 "SELECT * FROM users WHERE id = ?",
                 vec![(0, 1.into())],
             );
+        }
+
+        #[test]
+        fn existing_range_param() {
+            test_auto_parametrize(
+                "SELECT * FROM posts WHERE id = 1 AND score > ?",
+                "SELECT * FROM posts WHERE id = 1 AND score > ?",
+                vec![],
+            )
         }
     }
 
