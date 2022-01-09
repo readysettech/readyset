@@ -297,15 +297,10 @@ steps:
           login: true
 
   - label: ':rust: Deploy docs'
-    branches: 'master'
-    command:
-    - 'echo +++ :rust: Building docs'
-    - cargo --locked doc --workspace --document-private-items
-    - 'echo +++ :ec2: Deploying docs'
-    - apt-get install -y rsync
-    - mkdir -p ~/.ssh
-    - echo '172.31.41.177 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBByYJ6scdtZbyjpIeBB1BrIcfUI/jMYo/re6/0U8ulKEdeh8gyhQ/ujaktSeTQy6yJUE7bIPlpYja2zMsHkOycg=' > ~/.ssh/known_hosts
-    - rsync -azPve ssh target/doc/ admin@172.31.41.177:/var/www/docs
+    branches: 'refs/heads/main'
+    command: .buildkite/deploy-docs.sh
+    depends_on:
+    - build-image
     plugins:
       - docker#v3.8.0:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
