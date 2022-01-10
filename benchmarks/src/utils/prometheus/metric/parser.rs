@@ -159,7 +159,7 @@ fn sample(i: &str) -> IResult<&str, BorrowedSample<'_>> {
             i,
             BorrowedSample {
                 name,
-                labels: labels.unwrap_or_else(Vec::new),
+                labels: labels.unwrap_or_default(),
                 value: val,
                 timestamp,
             },

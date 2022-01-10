@@ -253,7 +253,7 @@ impl Benchmark {
             ProgressStyle::default_bar().template("{bar:50.cyan/blue} {pos}/{len} {wide_msg}"),
         );
         pb.set_message("sampling");
-        for _ in (0..n_samples).into_iter() {
+        for _ in 0..n_samples {
             pb.inc(1);
             let this_qbr = self.benchmark_query(seed.clone()).await?;
             if qbr.is_none() {

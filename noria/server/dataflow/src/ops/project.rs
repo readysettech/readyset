@@ -147,8 +147,8 @@ impl Ingredient for Project {
                 };
 
                 new_r.extend(
-                    r.into_owned()
-                        .into_iter()
+                    r.iter()
+                        .cloned()
                         .enumerate()
                         .filter(|(i, _)| emit.iter().any(|e| e == i))
                         .map(|(_, c)| c),

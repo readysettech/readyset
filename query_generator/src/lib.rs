@@ -767,7 +767,7 @@ impl UniformGenerator {
                 iters += 1;
 
                 assert!(
-                    !(iters > 100000),
+                    iters <= 100000,
                     "Too many iterations when trying to generate a single random value"
                 );
             }
