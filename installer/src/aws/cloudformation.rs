@@ -417,9 +417,7 @@ pub(crate) async fn deploy_stack(
                 break Ok(stack);
             }
             Some(
-                status
-                @
-                (StackStatus::CreateFailed
+                status @ (StackStatus::CreateFailed
                 | StackStatus::DeleteFailed
                 | StackStatus::RollbackComplete
                 | StackStatus::RollbackFailed

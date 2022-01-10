@@ -39,9 +39,7 @@ impl regex::Replacer for LikeTokenReplacer {
             "_" => dst.push('.'),
             r"\%" => dst.push('%'),
             r"\_" => dst.push('_'),
-            s
-            @
-            ("{" | "}" | "." | "*" | "+" | "?" | "|" | "(" | ")" | "[" | "]" | "$" | "^"
+            s @ ("{" | "}" | "." | "*" | "+" | "?" | "|" | "(" | ")" | "[" | "]" | "$" | "^"
             | r"\") => {
                 dst.push('\\');
                 dst.push_str(s);
