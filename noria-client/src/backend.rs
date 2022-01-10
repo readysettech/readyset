@@ -1360,8 +1360,7 @@ where
                 let upstream_id = self
                     .prepared_statements
                     .get(&id)
-                    .map(|ps| ps.upstream)
-                    .flatten()
+                    .and_then(|ps| ps.upstream)
                     .ok_or(PreparedStatementMissing { statement_id: id })?;
                 let res = self.execute_upstream(upstream_id, params, event).await;
                 self.last_query = Some(QueryInfo {
@@ -1832,7 +1831,7 @@ where
                         res
                     }
                     nom_sql::SqlQuery::Use(stmt) => {
-                        match self.upstream.as_ref().map(|u| u.database()).flatten() {
+                        match self.upstream.as_ref().and_then(|u| u.database()) {
                             Some(db) if db == stmt.database => {
                                 Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
                             }

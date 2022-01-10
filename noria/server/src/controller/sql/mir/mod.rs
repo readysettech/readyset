@@ -1018,8 +1018,7 @@ impl SqlToMirConverter {
     ) -> ReadySetResult<MirNodeRef> {
         let fields = aggregates
             .iter()
-            .map(|node| node.borrow().columns().to_owned())
-            .flatten()
+            .flat_map(|node| node.borrow().columns().to_owned())
             .unique()
             .collect::<Vec<Column>>();
 

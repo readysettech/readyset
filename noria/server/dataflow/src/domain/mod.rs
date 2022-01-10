@@ -2447,8 +2447,7 @@ impl Domain {
 
         let records = records
             .into_iter()
-            .map(|rr| rr.into_iter().map(|r| self.seed_row(*source, r)))
-            .flatten()
+            .flat_map(|rr| rr.into_iter().map(|r| self.seed_row(*source, r)))
             .collect::<ReadySetResult<Vec<Record>>>()?;
 
         let dst = path[0].node;
