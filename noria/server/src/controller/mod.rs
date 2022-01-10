@@ -89,8 +89,7 @@ impl ControllerState {
         let new_recipe = self
             .recipes
             .iter()
-            .map(|q| Recipe::clean_queries(q))
-            .flatten()
+            .flat_map(|q| Recipe::clean_queries(q))
             .filter_map(|q| nom_sql::parse_query(nom_sql::Dialect::MySQL, &q).ok())
             .filter(|q| {
                 matches!(

@@ -121,9 +121,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 })
             }
             (&Method::GET, "/prometheus") => {
-                let render = get_global_recorder()
-                    .map(|r| r.render(RecorderType::Prometheus))
-                    .flatten();
+                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Prometheus));
                 let res = res.header(CONTENT_TYPE, "text/plain");
                 let res = match render {
                     Some(metrics) => res.body(hyper::Body::from(metrics)),
@@ -134,9 +132,7 @@ impl Service<Request<Body>> for NoriaServerHttpRouter {
                 Box::pin(async move { Ok(res.unwrap()) })
             }
             (&Method::POST, "/metrics_dump") => {
-                let render = get_global_recorder()
-                    .map(|r| r.render(RecorderType::Noria))
-                    .flatten();
+                let render = get_global_recorder().and_then(|r| r.render(RecorderType::Noria));
                 let res = match render {
                     Some(metrics) => res
                         .header(CONTENT_TYPE, "application/json")

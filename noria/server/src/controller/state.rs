@@ -230,7 +230,7 @@ impl DataflowState {
                     // expression. However, this mapping will not catch bugs that break this
                     // assumption
                     let id = self.recipe.id_from_alias(&name);
-                    let expr = id.map(|id| self.recipe.expression(id)).flatten();
+                    let expr = id.and_then(|id| self.recipe.expression(id));
                     expr.map(|e| (name, e.clone()))
                 } else {
                     None

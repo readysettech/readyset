@@ -94,10 +94,7 @@ impl NodeProcessingResult {
             sets.push(set);
         }
 
-        sets.into_iter()
-            .map(|s| s.set.into_values())
-            .flatten()
-            .collect()
+        sets.into_iter().flat_map(|s| s.set.into_values()).collect()
     }
 }
 

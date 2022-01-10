@@ -158,12 +158,11 @@ pub async fn load_table_part(
             let data = spec.generate_data_from_index(rows_to_generate, index, false);
 
             data.into_iter()
-                .map(|mut row| {
+                .flat_map(|mut row| {
                     columns
                         .iter()
                         .map(move |col| row.remove(col).unwrap().try_into().unwrap())
                 })
-                .flatten()
                 .collect::<Vec<mysql_async::Value>>()
         });
 
