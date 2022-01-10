@@ -369,7 +369,6 @@
     box_patterns,
     try_find,
     stmt_expr_attributes,
-    result_cloned,
     result_flattening,
     drain_filter
 )]

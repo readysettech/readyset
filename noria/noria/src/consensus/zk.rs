@@ -94,9 +94,7 @@ impl ZookeeperAuthority {
                         .map(|_| zk)
                         .map_err(backoff::Error::Transient),
                     Err(
-                        e
-                        @
-                        (ZkError::ConnectionLoss
+                        e @ (ZkError::ConnectionLoss
                         | ZkError::SessionExpired
                         | ZkError::OperationTimeout),
                     ) => Err(backoff::Error::Transient(e)),
