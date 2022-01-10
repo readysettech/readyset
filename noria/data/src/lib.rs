@@ -1021,12 +1021,10 @@ impl Ord for DataType {
                 a.map(|t: MysqlTime| t.cmp(other_t.as_ref()))
                     .unwrap_or(Ordering::Greater)
             }
-            (&DataType::Text(..) | &DataType::TinyText(..), _) => Ordering::Greater,
             (
                 &DataType::Time(_) | &DataType::Timestamp(_) | &DataType::TimestampTz(_),
                 &DataType::Text(..) | &DataType::TinyText(..),
             ) => other.cmp(self).reverse(),
-            (_, &DataType::Text(..) | &DataType::TinyText(..)) => Ordering::Less,
             (&DataType::BigInt(a), &DataType::BigInt(ref b)) => a.cmp(b),
             (&DataType::UnsignedBigInt(a), &DataType::UnsignedBigInt(ref b)) => a.cmp(b),
             (&DataType::Int(a), &DataType::Int(b)) => a.cmp(&b),
@@ -1052,27 +1050,38 @@ impl Ord for DataType {
                 a.cmp(&b)
             }
             (&DataType::Float(fa, _), &DataType::Float(fb, _)) => fa.total_cmp(&fb),
-            (&DataType::Float(fa, _), &DataType::Double(fb, _)) => fa.total_cmp(&(fb as f32)),
-            (&DataType::Float(fa, _), &DataType::Numeric(ref d)) => d
-                .to_f32()
-                .as_ref()
-                .map(|fb| fa.total_cmp(fb))
-                .unwrap_or(Ordering::Less),
-            (&DataType::Double(fa, _), &DataType::Float(fb, _)) => fa.total_cmp(&(fb as f64)),
             (&DataType::Double(fa, _), &DataType::Double(fb, _)) => fa.total_cmp(&fb),
-            (&DataType::Double(fa, _), &DataType::Numeric(ref d)) => d
-                .to_f64()
-                .as_ref()
-                .map(|fb| fa.total_cmp(fb))
-                .unwrap_or(Ordering::Less),
             (&DataType::Numeric(ref da), &DataType::Numeric(ref db)) => da.cmp(db),
+            (&DataType::Float(fa, _), &DataType::Double(fb, _)) => fa.total_cmp(&(fb as f32)),
+            (&DataType::Double(fa, _), &DataType::Float(fb, _)) => {
+                fb.total_cmp(&(fa as f32)).reverse()
+            }
+            (&DataType::Float(fa, _), &DataType::Numeric(ref d)) => {
+                if let Some(da) = Decimal::from_f32_retain(fa) {
+                    da.cmp(d)
+                } else {
+                    d.to_f32()
+                        .as_ref()
+                        .map(|fb| fa.total_cmp(fb))
+                        .unwrap_or(Ordering::Greater)
+                }
+            }
+            (&DataType::Double(fa, _), &DataType::Numeric(ref d)) => {
+                if let Some(da) = Decimal::from_f64_retain(fa) {
+                    da.cmp(d)
+                } else {
+                    d.to_f64()
+                        .as_ref()
+                        .map(|fb| fa.total_cmp(fb))
+                        .unwrap_or(Ordering::Greater)
+                }
+            }
             (&DataType::Numeric(_), &DataType::Float(_, _) | &DataType::Double(_, _)) => {
                 other.cmp(self).reverse()
             }
             (&DataType::Timestamp(tsa), &DataType::Timestamp(ref tsb)) => tsa.cmp(tsb),
             (&DataType::TimestampTz(ref tsa), &DataType::TimestampTz(ref tsb)) => tsa.cmp(tsb),
             (&DataType::Time(ref ta), &DataType::Time(ref tb)) => ta.cmp(tb),
-            (&DataType::None, &DataType::None) => Ordering::Equal,
 
             // Convert ints to f32 and cmp against Float.
             (&DataType::Int(..), &DataType::Float(b, ..))
@@ -1081,7 +1090,7 @@ impl Ord for DataType {
             | (&DataType::UnsignedBigInt(..), &DataType::Float(b, ..)) => {
                 // this unwrap should be safe because no error path in try_from for i128 (&i128) on Int, BigInt, UnsignedInt, and UnsignedBigInt
                 #[allow(clippy::unwrap_used)]
-                let a: i128 = <i128>::try_from(self).unwrap();
+                let a = <i128>::try_from(self).unwrap();
 
                 (a as f32).total_cmp(&b)
             }
@@ -1107,11 +1116,6 @@ impl Ord for DataType {
 
                 Decimal::from(a).cmp(b)
             }
-            // order Ints, Reals, Text, Timestamps, None
-            (&DataType::Int(..), _)
-            | (&DataType::UnsignedInt(..), _)
-            | (&DataType::BigInt(..), _)
-            | (&DataType::UnsignedBigInt(..), _) => Ordering::Greater,
             (&DataType::Float(a, ..), &DataType::Int(..))
             | (&DataType::Float(a, ..), &DataType::UnsignedInt(..))
             | (&DataType::Float(a, ..), &DataType::BigInt(..))
@@ -1136,21 +1140,140 @@ impl Ord for DataType {
             | (&DataType::Numeric(_), &DataType::UnsignedInt(..))
             | (&DataType::Numeric(_), &DataType::BigInt(..))
             | (&DataType::Numeric(_), &DataType::UnsignedBigInt(..)) => other.cmp(self).reverse(),
-            (&DataType::Double(..) | &DataType::Float(..) | &DataType::Numeric(_), _) => {
-                Ordering::Greater
-            }
-            (&DataType::Timestamp(..) | DataType::Time(_) | &DataType::TimestampTz(..), _) => {
-                Ordering::Greater
-            }
-            (&DataType::None, _) => Ordering::Greater,
             (&DataType::ByteArray(ref array_a), &DataType::ByteArray(ref array_b)) => {
                 array_a.cmp(array_b)
             }
-            (&DataType::ByteArray(_), _) => Ordering::Greater,
             (&DataType::BitVector(ref bits_a), &DataType::BitVector(ref bits_b)) => {
                 bits_a.cmp(bits_b)
             }
-            (&DataType::BitVector(_), _) => Ordering::Greater,
+
+            // urgh no Ord for std::mem::Discriminant :/
+            (DataType::None, DataType::None) => Ordering::Equal,
+            (DataType::None, _) => Ordering::Less,
+
+            (
+                DataType::Int(_)
+                | DataType::UnsignedInt(_)
+                | DataType::BigInt(_)
+                | DataType::UnsignedBigInt(_)
+                | DataType::Float(_, _)
+                | DataType::Double(_, _)
+                | DataType::Numeric(_),
+                _,
+            ) => {
+                if other == &DataType::None {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (DataType::Text(_) | DataType::TinyText(_), _) => {
+                if matches!(
+                    other,
+                    DataType::None
+                        | DataType::Int(_)
+                        | DataType::UnsignedInt(_)
+                        | DataType::BigInt(_)
+                        | DataType::UnsignedBigInt(_)
+                        | DataType::Float(_, _)
+                        | DataType::Double(_, _)
+                        | DataType::Numeric(_)
+                ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (DataType::Timestamp(_) | DataType::TimestampTz(_), _) => {
+                if matches!(
+                    other,
+                    DataType::None
+                        | DataType::Int(_)
+                        | DataType::UnsignedInt(_)
+                        | DataType::BigInt(_)
+                        | DataType::UnsignedBigInt(_)
+                        | DataType::Float(_, _)
+                        | DataType::Double(_, _)
+                        | DataType::Numeric(_)
+                        | DataType::Text(_)
+                        | DataType::TinyText(_)
+                ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (DataType::Time(_), _) => {
+                if matches!(
+                    other,
+                    DataType::None
+                        | DataType::Int(_)
+                        | DataType::UnsignedInt(_)
+                        | DataType::BigInt(_)
+                        | DataType::UnsignedBigInt(_)
+                        | DataType::Float(_, _)
+                        | DataType::Double(_, _)
+                        | DataType::Numeric(_)
+                        | DataType::Text(_)
+                        | DataType::TinyText(_)
+                        | DataType::Timestamp(_)
+                        | DataType::TimestampTz(_)
+                ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (DataType::ByteArray(_), _) => {
+                if matches!(
+                    other,
+                    DataType::None
+                        | DataType::Timestamp(_)
+                        | DataType::TimestampTz(_)
+                        | DataType::Time(_)
+                        | DataType::Int(_)
+                        | DataType::UnsignedInt(_)
+                        | DataType::BigInt(_)
+                        | DataType::UnsignedBigInt(_)
+                        | DataType::Float(_, _)
+                        | DataType::Double(_, _)
+                        | DataType::Numeric(_)
+                        | DataType::Text(_)
+                        | DataType::TinyText(_)
+                ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (DataType::BitVector(_), _) => {
+                if matches!(
+                    other,
+                    DataType::None
+                        | DataType::Timestamp(_)
+                        | DataType::TimestampTz(_)
+                        | DataType::Time(_)
+                        | DataType::Int(_)
+                        | DataType::UnsignedInt(_)
+                        | DataType::BigInt(_)
+                        | DataType::UnsignedBigInt(_)
+                        | DataType::Float(_, _)
+                        | DataType::Double(_, _)
+                        | DataType::Numeric(_)
+                        | DataType::Text(_)
+                        | DataType::TinyText(_)
+                        | DataType::ByteArray(_)
+                ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
         }
     }
 }
@@ -2442,12 +2565,27 @@ impl Arbitrary for DataType {
 mod tests {
     use super::*;
     use derive_more::{From, Into};
-    use launchpad::{eq_laws, hash_laws};
+    use launchpad::{eq_laws, hash_laws, ord_laws};
     use proptest::prelude::*;
     use test_strategy::proptest;
 
+    fn non_numeric() -> impl Strategy<Value = DataType> {
+        any::<DataType>().prop_filter("Numeric DataType", |dt| !matches!(dt, DataType::Numeric(_)))
+    }
+
     eq_laws!(DataType);
     hash_laws!(DataType);
+    ord_laws!(
+        // The comparison semantics between Numeric and the other numeric types (floats, integers)
+        // isn't well-defined, so we skip that in our ord tests.
+        //
+        // This would be a problem, except that in the main place where having a proper ordering
+        // relation actually matters (persisted base table state) we only store homogenously-typed
+        // values. If that becomes *not* the case for whatever reason, we need to figure out how to
+        // fix this.
+        #[strategy(non_numeric())]
+        DataType
+    );
 
     #[derive(Debug, From, Into)]
     struct MySqlValue(mysql_common::value::Value);
