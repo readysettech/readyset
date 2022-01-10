@@ -1323,29 +1323,8 @@ mod tests {
     #[allow(clippy::eq_op)]
     mod key_comparison {
         use super::*;
-        use launchpad::hash::hash;
-        use test_strategy::proptest;
+        use launchpad::eq_laws;
 
-        #[proptest]
-        fn hash_matches_eq(k1: KeyComparison, k2: KeyComparison) {
-            assert_eq!(hash(&k1) == hash(&k2), k1 == k2);
-        }
-
-        #[proptest]
-        fn eq_reflexive(k1: KeyComparison) {
-            assert!(k1 == k1);
-        }
-
-        #[proptest]
-        fn eq_symmetric(k1: KeyComparison, k2: KeyComparison) {
-            assert_eq!(k1 == k2, k2 == k1);
-        }
-
-        #[proptest]
-        fn eq_transitive(k1: KeyComparison, k2: KeyComparison, k3: KeyComparison) {
-            if k1 == k2 && k2 == k3 {
-                assert_eq!(k1, k3)
-            }
-        }
+        eq_laws!(KeyComparison);
     }
 }

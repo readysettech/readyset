@@ -13,6 +13,7 @@ pub mod display;
 pub mod futures;
 pub mod hash;
 pub mod intervals;
+pub mod properties;
 
 /// Error (returned by [`Indices::indices`] and [`Indices::cloned_indices`]) for an out-of-bounds
 /// index access
