@@ -1114,54 +1114,9 @@ mod tests {
 
     mod buffered_replay_key {
         use super::*;
+        use launchpad::ord_laws;
 
-        use test_strategy::proptest;
-
-        #[proptest]
-        fn ord_dual(a: BufferedReplayKey, b: BufferedReplayKey) {
-            if a < b {
-                assert!(b > a);
-            }
-            if b < a {
-                assert!(a > b);
-            }
-        }
-
-        #[proptest]
-        fn le_transitive(a: BufferedReplayKey, b: BufferedReplayKey, c: BufferedReplayKey) {
-            if a < b && b < c {
-                assert!(a < c);
-            }
-        }
-
-        #[proptest]
-        fn gt_transitive(a: BufferedReplayKey, b: BufferedReplayKey, c: BufferedReplayKey) {
-            if a > b && b > c {
-                assert!(a > c);
-            }
-        }
-
-        #[proptest]
-        fn ord_trichotomy(a: BufferedReplayKey, b: BufferedReplayKey) {
-            let less = a < b;
-            let greater = a > b;
-            let eq = a == b;
-
-            if less {
-                assert!(!greater);
-                assert!(!eq);
-            }
-
-            if greater {
-                assert!(!less);
-                assert!(!eq);
-            }
-
-            if eq {
-                assert!(!less);
-                assert!(!greater);
-            }
-        }
+        ord_laws!(BufferedReplayKey);
     }
 
     mod replay_capturing {

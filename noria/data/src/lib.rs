@@ -2442,8 +2442,12 @@ impl Arbitrary for DataType {
 mod tests {
     use super::*;
     use derive_more::{From, Into};
+    use launchpad::{eq_laws, hash_laws};
     use proptest::prelude::*;
     use test_strategy::proptest;
+
+    eq_laws!(DataType);
+    hash_laws!(DataType);
 
     #[derive(Debug, From, Into)]
     struct MySqlValue(mysql_common::value::Value);
@@ -3703,35 +3707,6 @@ mod tests {
         assert_eq!(numeric.cmp(&txt1), Ordering::Less);
         assert_eq!(numeric1.cmp(&int1), Ordering::Greater);
         assert_eq!(numeric2.cmp(&int1), Ordering::Less);
-    }
-
-    #[allow(clippy::eq_op)]
-    mod eq {
-        use super::*;
-        use launchpad::hash::hash;
-        use test_strategy::proptest;
-
-        #[proptest]
-        fn reflexive(dt: DataType) {
-            assert!(dt == dt);
-        }
-
-        #[proptest]
-        fn symmetric(dt1: DataType, dt2: DataType) {
-            assert_eq!(dt1 == dt2, dt2 == dt1);
-        }
-
-        #[proptest]
-        fn transitive(dt1: DataType, dt2: DataType, dt3: DataType) {
-            if dt1 == dt2 && dt2 == dt3 {
-                assert!(dt1 == dt3)
-            }
-        }
-
-        #[proptest]
-        fn matches_hash(dt1: DataType, dt2: DataType) {
-            assert_eq!(dt1 == dt2, hash(&dt1) == hash(&dt2));
-        }
     }
 
     mod coerce_to {
