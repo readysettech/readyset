@@ -129,7 +129,7 @@ steps:
   - label: ':clippy: Check clippy'
     key: check-clippy
     commands:
-    - cargo --locked clippy --workspace -- -W clippy::disallowed_method -D warnings
+    - cargo --locked clippy --workspace -- -W clippy::disallowed_methods -D warnings
     depends_on:
     - build-image
     plugins:

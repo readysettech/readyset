@@ -165,7 +165,7 @@ impl EvictionBenchmarkResultBatch {
 }
 
 fn get_total_for_metric(scrape: &prometheus_parse::Scrape, metric: &'static str) -> f64 {
-    let metric_name = metric.replace(".", "_") + "_sum";
+    let metric_name = metric.replace('.', "_") + "_sum";
     scrape
         .samples
         .iter()
@@ -181,7 +181,7 @@ fn get_total_for_metric(scrape: &prometheus_parse::Scrape, metric: &'static str)
 }
 
 fn get_metric(scrape: &prometheus_parse::Scrape, metric: &'static str) -> f64 {
-    let metric_name = metric.replace(".", "_");
+    let metric_name = metric.replace('.', "_");
     scrape
         .samples
         .iter()
