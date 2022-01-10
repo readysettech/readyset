@@ -523,7 +523,7 @@ fn binlog_val_to_noria_val(
         (ColumnType::MYSQL_TYPE_TIMESTAMP2, _) => {
             // When meta is anything else, `mysql_common` encodes this value as number of seconds.microseconds (since UNIX EPOCH)
             let s = String::from_utf8_lossy(buf);
-            let (secs, usecs) = s.split_once(".").unwrap(); // safe to unwrap because format is fixed
+            let (secs, usecs) = s.split_once('.').unwrap(); // safe to unwrap because format is fixed
             let secs = secs.parse::<i64>().unwrap();
             let usecs = usecs.parse::<u32>().unwrap();
             let time = chrono::naive::NaiveDateTime::from_timestamp(secs, usecs * 32);

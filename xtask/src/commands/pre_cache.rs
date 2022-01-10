@@ -33,7 +33,7 @@ fn clean_dir_keeping_prefixes<P: AsRef<Path>>(path: P, prefixes: &HashSet<String
             rm_rf(path)?;
             continue;
         }
-        if let Some((package_name, _)) = path.file_name().unwrap().rsplit_once("-") {
+        if let Some((package_name, _)) = path.file_name().unwrap().rsplit_once('-') {
             if !prefixes.contains(package_name) {
                 rm_rf(path)?;
                 continue;
@@ -77,10 +77,10 @@ pub(crate) fn run() -> Result<()> {
         .iter()
         .flat_map(|p| {
             let mut names: HashSet<String> = HashSet::new();
-            let name_for_package = p.name.replace("-", "_");
+            let name_for_package = p.name.replace('-', "_");
             names.insert(format!("lib{}", name_for_package));
             for target in p.targets.iter().filter(|t| t.kind[0] == "lib") {
-                let name_for_target = target.name.replace("-", "_");
+                let name_for_target = target.name.replace('-', "_");
                 names.insert(format!("lib{}", name_for_target));
             }
             names
