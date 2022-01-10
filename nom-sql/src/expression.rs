@@ -319,7 +319,7 @@ impl Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expression::Call(fe) => fe.fmt(f),
-            Expression::Literal(l) => write!(f, "{}", l.to_string()),
+            Expression::Literal(l) => write!(f, "{}", l),
             Expression::Column(col) => col.fmt(f),
             Expression::CaseWhen {
                 condition,

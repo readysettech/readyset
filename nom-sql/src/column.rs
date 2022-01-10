@@ -106,7 +106,7 @@ impl fmt::Display for ColumnConstraint {
             ColumnConstraint::CharacterSet(ref charset) => write!(f, "CHARACTER SET {}", charset),
             ColumnConstraint::Collation(ref collation) => write!(f, "COLLATE {}", collation),
             ColumnConstraint::DefaultValue(ref literal) => {
-                write!(f, "DEFAULT {}", literal.to_string())
+                write!(f, "DEFAULT {}", literal)
             }
             ColumnConstraint::AutoIncrement => write!(f, "AUTO_INCREMENT"),
             ColumnConstraint::PrimaryKey => write!(f, "PRIMARY KEY"),

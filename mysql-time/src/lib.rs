@@ -326,7 +326,7 @@ impl fmt::Display for MysqlTime {
 
 impl fmt::Debug for MysqlTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self)
     }
 }
 

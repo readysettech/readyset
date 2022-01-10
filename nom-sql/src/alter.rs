@@ -26,7 +26,7 @@ impl fmt::Display for AlterColumnOperation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             AlterColumnOperation::SetColumnDefault(val) => {
-                write!(f, "SET DEFAULT {}", val.to_string())
+                write!(f, "SET DEFAULT {}", val)
             }
             AlterColumnOperation::DropColumnDefault => write!(f, "DROP DEFAULT"),
         }

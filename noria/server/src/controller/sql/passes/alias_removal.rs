@@ -274,12 +274,12 @@ impl AliasRemoval for SqlQuery {
                 if let Some(g) = context.get("group") {
                     Some((
                         "GroupContext".to_string(),
-                        format!("GroupContext_{}_{}", g.to_string(), universe_id.to_string()),
+                        format!("GroupContext_{}_{}", g, universe_id),
                     ))
                 } else {
                     Some((
                         "UserContext".to_string(),
-                        format!("UserContext_{}", universe_id.to_string()),
+                        format!("UserContext_{}", universe_id),
                     ))
                 }
             } else {

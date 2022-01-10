@@ -22,7 +22,7 @@ impl fmt::Display for SetStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SET ")?;
         match self {
-            Self::Variable(set) => write!(f, "{}", set.to_string())?,
+            Self::Variable(set) => write!(f, "{}", set)?,
             Self::Names(set) => write!(f, "{}", set)?,
         };
         Ok(())
