@@ -2425,7 +2425,7 @@ impl Arbitrary for DataType {
             any::<u64>().prop_map(UnsignedBigInt),
             any::<(f32, u8)>().prop_map(|(f, p)| Float(f, p)),
             any::<(f64, u8)>().prop_map(|(f, p)| Double(f, p)),
-            any::<String>().prop_map(|s| DataType::from(s.replace("\0", ""))),
+            any::<String>().prop_map(|s| DataType::from(s.replace('\0', ""))),
             arbitrary_naive_date_time().prop_map(Timestamp),
             arbitrary_duration()
                 .prop_map(MysqlTime::new)

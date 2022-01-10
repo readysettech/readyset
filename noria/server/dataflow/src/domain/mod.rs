@@ -1863,7 +1863,7 @@ impl Domain {
                                     &self
                                         .persistence_parameters
                                         .db_filename_prefix
-                                        .replace("-", "_"),
+                                        .replace('-', "_"),
                                     node_ref.borrow().name(),
                                     self.shard.unwrap_or(0),
                                 );
