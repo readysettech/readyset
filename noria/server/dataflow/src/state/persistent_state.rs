@@ -2024,6 +2024,15 @@ mod tests {
         assert_eq!(prefix, prefix_transform(prefix));
     }
 
+    #[test]
+    fn reindex_btree_with_nulls() {
+        let mut state = setup_persistent("reindex_with_nulls", None);
+        state.add_key(Index::hash_map(vec![0]), None);
+        insert(&mut state, vec![1.into()]);
+        insert(&mut state, vec![DataType::None]);
+        state.add_key(Index::btree_map(vec![0]), None);
+    }
+
     mod lookup_range {
         use super::*;
         use pretty_assertions::assert_eq;
