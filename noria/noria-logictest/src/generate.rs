@@ -324,9 +324,7 @@ impl Seed {
             new_entries.chain(run_queries(&queries, &mut conn, hash_threshold).await?);
 
         if opts.include_deletes {
-            let rows_to_delete = opts
-                .rows_to_delete
-                .unwrap_or_else(|| opts.rows_per_table / 2);
+            let rows_to_delete = opts.rows_to_delete.unwrap_or(opts.rows_per_table / 2);
 
             let delete_statements: Vec<DeleteStatement> = data
                 .iter()

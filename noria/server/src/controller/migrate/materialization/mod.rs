@@ -1014,7 +1014,7 @@ impl Materializations {
                     Ok(idxs)
                 })
                 .transpose()?
-                .unwrap_or_else(HashSet::new);
+                .unwrap_or_default();
 
             let start = ::std::time::Instant::now();
             self.ready_one(ni, &mut index_on, graph, dmp)?;
