@@ -168,6 +168,7 @@ pub struct PreparedStatement {
 }
 
 /// Builder for a [`Backend`]
+#[must_use]
 #[derive(Clone)]
 pub struct BackendBuilder {
     slowlog: bool,

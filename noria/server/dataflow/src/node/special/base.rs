@@ -65,6 +65,7 @@ impl From<Records> for BaseWrite {
 /// These nodes perform no computation, and their job is merely to persist all received updates and
 /// forward them to interested downstream operators. A base node should only be sent updates of the
 /// type corresponding to the node's type.
+#[must_use]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Base {
     primary_key: Option<Box<[usize]>>,

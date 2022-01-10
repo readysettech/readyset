@@ -230,6 +230,7 @@ pub(crate) struct NoriaBinarySource {
 }
 
 /// Parameters for a single noria-server instance.
+#[must_use]
 #[derive(Clone)]
 pub struct ServerParams {
     /// A server's region string, passed in via --region.
@@ -260,6 +261,7 @@ impl ServerParams {
 }
 
 /// Set of parameters defining an entire cluster's topology.
+#[must_use]
 pub struct DeploymentBuilder {
     /// Name of the cluster, cluster resources will be prefixed
     /// with this name.
