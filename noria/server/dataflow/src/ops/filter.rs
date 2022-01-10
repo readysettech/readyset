@@ -75,7 +75,7 @@ impl Ingredient for Filter {
         if !detailed {
             String::from("σ")
         } else {
-            format!("σ[{}]", self.expression.to_string())
+            format!("σ[{}]", self.expression)
         }
     }
 

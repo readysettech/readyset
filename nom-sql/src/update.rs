@@ -28,7 +28,7 @@ impl fmt::Display for UpdateStatement {
             "SET {}",
             self.fields
                 .iter()
-                .map(|&(ref col, ref literal)| format!("{} = {}", col, literal.to_string()))
+                .map(|&(ref col, ref literal)| format!("{} = {}", col, literal))
                 .collect::<Vec<_>>()
                 .join(", ")
         )?;

@@ -392,7 +392,7 @@ impl Expression {
                             d.round().to_i32().ok_or_else(|| {
                                 ReadySetError::BadRequest(format!(
                                     "NUMERIC value {} exceeds 32-byte integer size",
-                                    d.to_string()
+                                    d
                                 ))
                             })?
                         }

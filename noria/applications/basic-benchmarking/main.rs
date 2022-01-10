@@ -88,11 +88,10 @@ impl BenchmarkApplication {
 
         let mysql_start = time::Instant::now();
         for i in &employee_ids_to_query {
-            let employee_string = format!("SELECT * FROM employees WHERE emp_no={}", i.to_string());
-            let dept_manager_string =
-                format!("SELECT * FROM dept_manager WHERE emp_no={}", i.to_string());
-            let dept_emp_string = format!("SELECT * FROM dept_emp WHERE emp_no={}", i.to_string());
-            let salary_string = format!("SELECT * FROM salaries WHERE emp_no={}", i.to_string());
+            let employee_string = format!("SELECT * FROM employees WHERE emp_no={}", i);
+            let dept_manager_string = format!("SELECT * FROM dept_manager WHERE emp_no={}", i);
+            let dept_emp_string = format!("SELECT * FROM dept_emp WHERE emp_no={}", i);
+            let salary_string = format!("SELECT * FROM salaries WHERE emp_no={}", i);
 
             mysql_employee_count += self
                 .mysql

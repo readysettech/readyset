@@ -137,14 +137,11 @@ impl AdapterBuilder {
     }
 
     pub fn port(self, port: u16) -> Self {
-        self.push_arg("-a", &format!("127.0.0.1:{}", port.to_string()))
+        self.push_arg("-a", &format!("127.0.0.1:{}", port))
     }
 
     pub fn metrics_port(self, port: u16) -> Self {
-        self.push_arg(
-            "--metrics-address",
-            &format!("0.0.0.0:{}", port.to_string()),
-        )
+        self.push_arg("--metrics-address", &format!("0.0.0.0:{}", port))
     }
 
     pub fn mysql(self, addr: &str) -> Self {

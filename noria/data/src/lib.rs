@@ -91,7 +91,7 @@ impl fmt::Display for DataType {
             DataType::Timestamp(ts) => write!(f, "{}", ts.format("%c")),
             DataType::TimestampTz(ref ts) => write!(f, "{}", ts.format(TIMESTAMP_TZ_FORMAT)),
             DataType::Time(ref t) => {
-                write!(f, "{}", t.to_string())
+                write!(f, "{}", t)
             }
             DataType::ByteArray(ref array) => {
                 write!(
