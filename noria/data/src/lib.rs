@@ -186,6 +186,7 @@ impl DataType {
     ///
     /// This method crucially does not cause cache-line conflicts with the underlying data-store
     /// (i.e., the owner of `self`), at the cost of requiring additional allocation and copying.
+    #[must_use]
     pub fn deep_clone(&self) -> Self {
         match *self {
             DataType::Text(ref text) => DataType::Text(text.as_str().into()),

@@ -41,6 +41,7 @@ impl DatabaseGenerationSpec {
 
     /// Sets the number of rows to generate for `table`. If the table does
     /// not exist in the spec, this is a no-op.
+    #[must_use]
     pub fn table_rows(mut self, table_name: &str, num_rows: usize) -> Self {
         if let Some(t) = self.tables.get_mut(table_name) {
             t.num_rows = num_rows;

@@ -30,6 +30,7 @@ pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 pub struct Remote;
 pub struct MaybeLocal;
 
+#[must_use]
 pub struct DomainConnectionBuilder<D, T> {
     sport: Option<u16>,
     addr: SocketAddr,

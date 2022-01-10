@@ -248,6 +248,7 @@ mod aliasing;
 ///
 /// In particular, the options dictate the hashing function, meta type, and initial capacity of the
 /// map.
+#[must_use]
 pub struct Options<M, T, S>
 where
     S: BuildHasher,

@@ -32,6 +32,7 @@ impl Sharder {
         }
     }
 
+    #[must_use]
     pub fn take(&mut self) -> Self {
         let txs = std::mem::take(&mut self.txs);
         Self {

@@ -25,6 +25,7 @@ pub use process::bench;
 // NOTE(jfrg): the migration code should probably move into the dataflow crate...
 // it is the reason why so much stuff here is pub
 
+#[must_use]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: String,

@@ -36,6 +36,7 @@ impl Column {
         self.aliases.push(alias.clone());
     }
 
+    #[must_use]
     pub fn aliased_as(mut self, alias: String) -> Self {
         let name = mem::replace(&mut self.name, alias);
         self.aliases.push(Column {

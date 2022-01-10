@@ -158,6 +158,7 @@ impl BenchmarkResults {
     /// Prefixes the set of keys in this set of results with `p`.
     /// If a key with it's prefix already exists, the key may be
     /// value may be overwritten.
+    #[must_use]
     pub fn prefix(mut self, p: &str) -> Self {
         // Make a copy of all the keys so we can mutably borrow the map as we
         // iterate.
