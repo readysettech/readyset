@@ -428,6 +428,8 @@ async fn create_view_after_worker_failure() {
 // This test currently fails because we drop writes to failed workers.
 #[clustertest]
 #[should_panic]
+// TODO(ENG-933): Flaky test.
+#[ignore]
 async fn update_during_failure() {
     let mut deployment = readyset_mysql("ct_update_during_failure")
         .quorum(2)
