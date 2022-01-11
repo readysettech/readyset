@@ -717,6 +717,7 @@ where
             // Note: an Included+Excluded at the same point still is contiguous!
             match (contiguous, overlap.start_bound()) {
                 (Included(contiguous_max), Included(overlap_min) | Excluded(overlap_min))
+                | (Excluded(contiguous_max), Included(overlap_min))
                     if contiguous_max < overlap_min =>
                 {
                     return false
