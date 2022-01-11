@@ -108,30 +108,10 @@ macro_rules! noria_await {
 }
 
 impl NoriaBackendInner {
-    async fn new(mut ch: ControllerHandle, region: Option<String>) -> ReadySetResult<Self> {
-        ch.ready().await?;
-        let inputs = ch.inputs().await?;
-        let mut i = BTreeMap::new();
-        for (n, _) in inputs {
-            ch.ready().await?;
-            let t = ch.table(&n).await?;
-            i.insert(n, t);
-        }
-        ch.ready().await?;
-        let outputs = ch.outputs().await?;
-        let mut o = BTreeMap::new();
-        for (n, _) in outputs {
-            ch.ready().await?;
-            let t = match &region {
-                None => ch.view(&n).await?,
-                Some(r) => ch.view_from_region(&n, r).await?,
-            };
-
-            o.insert(n, t);
-        }
+    async fn new(ch: ControllerHandle) -> ReadySetResult<Self> {
         Ok(NoriaBackendInner {
-            inputs: i,
-            outputs: o,
+            inputs: BTreeMap::new(),
+            outputs: BTreeMap::new(),
             noria: ch,
         })
     }
@@ -338,7 +318,7 @@ impl NoriaConnector {
         query_cache: Arc<RwLock<HashMap<SelectStatement, String>>>,
         region: Option<String>,
     ) -> Self {
-        let backend = NoriaBackendInner::new(ch, region.clone()).await;
+        let backend = NoriaBackendInner::new(ch).await;
         if let Err(e) = &backend {
             error!(%e, "Error creating a noria backend");
         }
