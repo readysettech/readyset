@@ -970,7 +970,8 @@ impl Domain {
         let me = m.dst();
 
         if !self.nodes.contains_key(me) {
-            return Err(ReadySetError::NoSuchNode(me.id()));
+            error!(%src, %me, "Packet destined for node that does not exist");
+            return Ok(());
         }
 
         match self.mode {
