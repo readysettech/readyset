@@ -10,6 +10,7 @@
 - [Running and configuring ReadySet](./running-readyset.md)
 - [Testing your code](./dev-testing.md)
 - [Benchmarking your code](./benchmarking.md)
+- [Debugging your code](./debugging.md)
 
 # ReadySet
 
