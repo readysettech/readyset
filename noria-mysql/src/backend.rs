@@ -228,14 +228,15 @@ where
                     schema,
                 },
             )) => {
-                self.schema_cache.remove(&statement_id);
+                let statement_id = *statement_id; // Just to break borrow dependency
                 let params = convert_columns!(params, info);
                 let schema = convert_columns!(schema, info);
+                self.schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
             Ok(SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. })) => {
                 let params = convert_columns!(params, info);
-                info.reply(self.prepared_count(), &params, &[]).await
+                info.reply(self.last_prepared_id(), &params, &[]).await
             }
             Ok(SinglePrepareResult::Upstream(UpstreamPrepare {
                 meta: StatementMeta { params, schema },
@@ -245,7 +246,7 @@ where
                 let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
 
                 // TODO(grfn): make statement ID part of prepareresult
-                info.reply(self.prepared_count(), &params, &schema).await
+                info.reply(self.last_prepared_id(), &params, &schema).await
             }
 
             Err(Error::MySql(mysql_async::Error::Server(mysql_async::ServerError {
@@ -294,15 +295,9 @@ where
             .into_iter()
             .flat_map(|p| p.map(|pval| mysql_value_to_datatype(pval.value).map_err(Error::from)))
             .collect::<Result<Vec<DataType>, Error>>();
+
         let datatype_params = match params_result {
             Ok(r) => r,
-            Err(Error::Io(e)) | Err(Error::MsqlSrv(MsqlSrvError::IoError(e))) => {
-                error!(err = %e, "encountered io error parsing execute params");
-                // In the case that we encountered an io error, we should bubble it up so the
-                // connection can be closed. This is usually an unrecoverable error, and the client
-                // should re-initiate a connection with us so we can start with a fresh slate.
-                return Err(e);
-            }
             Err(e) => {
                 error!(err = %e, "encountered error parsing execute params");
                 return results

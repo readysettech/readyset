@@ -142,7 +142,7 @@ impl NoriaBackendInner {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PrepareResult {
     Select {
         statement_id: u32,
@@ -162,6 +162,18 @@ pub enum PrepareResult {
         statement_id: u32,
         params: Vec<ColumnSchema>,
     },
+}
+
+impl PrepareResult {
+    /// Get the noria statement id for this statement
+    pub fn statement_id(&self) -> u32 {
+        match self {
+            PrepareResult::Select { statement_id, .. }
+            | PrepareResult::Insert { statement_id, .. }
+            | PrepareResult::Delete { statement_id, .. }
+            | PrepareResult::Update { statement_id, .. } => *statement_id,
+        }
+    }
 }
 
 /// A single row in the variable table associated with [`QueryResult::MetaVariables`].
@@ -436,7 +448,7 @@ impl NoriaConnector {
         })
     }
 
-    pub(crate) async fn verbose_outputs(&mut self) -> ReadySetResult<QueryResult<'_>> {
+    pub(crate) async fn verbose_outputs(&mut self) -> ReadySetResult<QueryResult<'static>> {
         let noria = &mut self.inner.get_mut().await?.noria;
         let outputs = noria.verbose_outputs().await?;
         //TODO(DAN): this is ridiculous, update Meta instead
@@ -835,7 +847,7 @@ impl NoriaConnector {
         Ok(QueryResult::Empty)
     }
 
-    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<QueryResult<'_>> {
+    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<QueryResult<'static>> {
         let status = noria_await!(
             self.inner.get_mut().await?,
             self.inner.get_mut().await?.noria.status()

@@ -83,7 +83,7 @@ where
         loop {
             select! {
                 _ = interval.tick() => {
-                    let to_process = self.query_status_cache.pending_migration().await;
+                    let to_process = self.query_status_cache.pending_migration();
 
                     for q in &to_process {
                         self.perform_migration(q).await
@@ -177,8 +177,7 @@ where
                 counter!(recorded::MIGRATION_HANDLER_ALLOWED, 1);
                 self.start_time.remove(stmt);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::Successful)
-                    .await;
+                    .update_query_migration_state(stmt, MigrationState::Successful);
             }
             Err(e) if e.caused_by_unsupported() => {
                 error!(error = %e,
@@ -186,8 +185,7 @@ where
                         "Select query is unsupported in ReadySet");
                 self.start_time.remove(stmt);
                 self.query_status_cache
-                    .update_query_migration_state(stmt, MigrationState::Unsupported)
-                    .await;
+                    .update_query_migration_state(stmt, MigrationState::Unsupported);
             }
             // Errors that were not caused by unsupported may be transient, do nothing
             // so we may retry the migration on this query.
@@ -198,8 +196,7 @@ where
                 if Instant::now() - *self.start_time.get(stmt).unwrap() > self.max_retry {
                     // Query failed for long enough, it is unsupported.
                     self.query_status_cache
-                        .update_query_migration_state(stmt, MigrationState::Unsupported)
-                        .await;
+                        .update_query_migration_state(stmt, MigrationState::Unsupported);
                 }
             }
         }

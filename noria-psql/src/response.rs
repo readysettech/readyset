@@ -17,55 +17,37 @@ use psql_srv::Column;
 
 /// A simple wrapper around `noria_client`'s `PrepareResult`, facilitating conversion to
 /// `psql_srv::PrepareResponse`.
-pub struct PrepareResponse(pub cl::PrepareResult<PostgreSqlUpstream>);
+pub struct PrepareResponse<'a>(pub &'a cl::PrepareResult<PostgreSqlUpstream>);
 
-impl TryFrom<PrepareResponse> for ps::PrepareResponse {
-    type Error = ps::Error;
-
-    fn try_from(r: PrepareResponse) -> Result<Self, Self::Error> {
+impl<'a> PrepareResponse<'a> {
+    pub fn try_into_ps(self, prepared_statement_id: u32) -> Result<ps::PrepareResponse, ps::Error> {
         use noria_client::backend::noria_connector::PrepareResult::*;
 
-        match r.0.upstream_biased() {
-            SinglePrepareResult::Noria(Select {
-                statement_id,
-                params,
-                schema,
-            }) => Ok(ps::PrepareResponse {
-                prepared_statement_id: statement_id,
+        match self.0.upstream_biased() {
+            SinglePrepareResult::Noria(Select { params, schema, .. }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            SinglePrepareResult::Noria(Insert {
-                statement_id,
-                params,
-                schema,
-            }) => Ok(ps::PrepareResponse {
-                prepared_statement_id: statement_id,
+            SinglePrepareResult::Noria(Insert { params, schema, .. }) => Ok(ps::PrepareResponse {
+                prepared_statement_id,
                 param_schema: NoriaSchema(params).try_into()?,
                 row_schema: NoriaSchema(schema).try_into()?,
             }),
-            SinglePrepareResult::Noria(
-                Update {
-                    statement_id,
-                    params,
-                }
-                | Delete {
-                    statement_id,
-                    params,
-                },
-            ) => Ok(ps::PrepareResponse {
-                prepared_statement_id: statement_id,
-                param_schema: NoriaSchema(params).try_into()?,
-                row_schema: vec![],
-            }),
+            SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }) => {
+                Ok(ps::PrepareResponse {
+                    prepared_statement_id,
+                    param_schema: NoriaSchema(params).try_into()?,
+                    row_schema: vec![],
+                })
+            }
             SinglePrepareResult::Upstream(UpstreamPrepare {
-                statement_id,
                 meta: StatementMeta { params, schema },
                 ..
             }) => Ok(ps::PrepareResponse {
-                prepared_statement_id: statement_id,
-                param_schema: params,
-                row_schema: schema,
+                prepared_statement_id,
+                param_schema: params.to_vec(),
+                row_schema: schema.to_vec(),
             }),
         }
     }

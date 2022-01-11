@@ -591,7 +591,7 @@ mod tests {
                 Err(Error::InternalError("error requested".to_string()))
             } else {
                 Ok(PrepareResponse {
-                    prepared_statement_id: 1,
+                    prepared_statement_id: 0,
                     param_schema: vec![Type::FLOAT8, Type::INT4],
                     row_schema: vec![
                         Column {
@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(
             *protocol.prepared_statements.get("prepared1").unwrap(),
             PreparedStatementData {
-                prepared_statement_id: 1,
+                prepared_statement_id: 0,
                 param_schema: vec![Type::FLOAT8, Type::INT4],
                 row_schema: vec![
                     Column {
@@ -1022,7 +1022,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 1,
+                prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
                 result_transfer_formats: Arc::new(vec![
@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 1,
+                prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
                 // The transfer formats are set to the default value (Text).
@@ -1112,7 +1112,7 @@ mod tests {
         assert_eq!(
             *protocol.portals.get("portal1").unwrap(),
             PortalData {
-                prepared_statement_id: 1,
+                prepared_statement_id: 0,
                 prepared_statement_name: "prepared1".to_string(),
                 params: vec![DataValue::Double(0.8887), DataValue::Int(45678)],
                 // The single transfer format is applied to both fields.
@@ -1218,7 +1218,7 @@ mod tests {
             block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
             Response::Message(CloseComplete)
         );
-        assert_eq!(backend.last_close.unwrap(), 1);
+        assert_eq!(backend.last_close.unwrap(), 0);
         assert!(protocol.prepared_statements.get("prepared1").is_none());
     }
 
@@ -1523,7 +1523,7 @@ mod tests {
                 trailer: None
             }
         );
-        assert_eq!(backend.last_execute_id.unwrap(), 1);
+        assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
             vec![DataValue::Double(0.8887), DataValue::Int(45678)]
@@ -1615,7 +1615,7 @@ mod tests {
                 tag: CommandCompleteTag::Delete(5)
             })
         );
-        assert_eq!(backend.last_execute_id.unwrap(), 1);
+        assert_eq!(backend.last_execute_id.unwrap(), 0);
         assert_eq!(
             backend.last_execute_params.unwrap(),
             vec![DataValue::Double(0.8887), DataValue::Int(45678)]

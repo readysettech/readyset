@@ -48,7 +48,7 @@ impl OutputsSynchronizer {
                             //some timestamp. Also consider using query hashes instead of SqlQuery
                             for (_, query) in outputs {
                                 if let nom_sql::SqlQuery::Select(stmt) = query {
-                                    self.query_status_cache.update_query_migration_state(&stmt, MigrationState::Successful).await;
+                                    self.query_status_cache.update_query_migration_state(&stmt, MigrationState::Successful);
                                 }
                             }
                         }

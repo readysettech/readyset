@@ -5,6 +5,8 @@
 #![feature(async_closure)]
 #![feature(never_type)]
 #![feature(is_sorted)]
+#![feature(if_let_guard)]
+#![feature(bool_to_option)]
 
 pub mod backend;
 mod convert;

@@ -41,7 +41,7 @@ pub fn wrap_boxed_error(
 
 /// An (inexhaustive, currently) enumeration of the types of Node in the graph, for use in
 /// [`ReadySetError::InvalidNodeType`]
-#[derive(Serialize, Deserialize, Debug, Display)]
+#[derive(Serialize, Deserialize, Debug, Display, Clone)]
 pub enum NodeType {
     /// Base table nodes
     Base,
@@ -54,7 +54,7 @@ pub enum NodeType {
 }
 
 /// General error type to be used across all of the ReadySet codebase.
-#[derive(Serialize, Deserialize, Error, Debug)]
+#[derive(Serialize, Deserialize, Error, Debug, Clone)]
 pub enum ReadySetError {
     /// The adapter will return this error on any set statement that is not
     /// explicitly allowed.

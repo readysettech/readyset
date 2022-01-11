@@ -47,7 +47,7 @@ pub struct MySqlUpstream {
     in_transaction: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StatementMeta {
     /// Metadata about the query parameters for this statement
     pub params: Vec<Column>,

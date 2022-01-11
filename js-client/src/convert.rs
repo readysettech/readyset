@@ -18,7 +18,7 @@ where
     cx.error(e.to_string())
 }
 
-fn convert_cols<'a, C>(cx: &mut C, cols: Vec<ColumnSchema>) -> NeonResult<Handle<'a, JsArray>>
+fn convert_cols<'a, C>(cx: &mut C, cols: &[ColumnSchema]) -> NeonResult<Handle<'a, JsArray>>
 where
     C: Context<'a>,
 {
@@ -38,7 +38,7 @@ where
 
 pub(crate) fn convert_prepare_result<'a, C>(
     cx: &mut C,
-    raw_prepare_result: PrepareResult<MySqlUpstream>,
+    raw_prepare_result: &PrepareResult<MySqlUpstream>,
 ) -> NeonResult<Handle<'a, JsObject>>
 where
     C: Context<'a>,
@@ -57,7 +57,7 @@ where
             params,
             schema,
         }) => {
-            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+            utils::set_num_field(cx, &js_prepare_result, "statementId", *statement_id as f64)?;
             let js_params = convert_cols(cx, params)?;
             utils::set_jsval_field(
                 cx,
@@ -83,7 +83,7 @@ where
                 params,
             },
         ) => {
-            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+            utils::set_num_field(cx, &js_prepare_result, "statementId", *statement_id as f64)?;
             let js_params = convert_cols(cx, params)?;
             utils::set_jsval_field(
                 cx,
@@ -93,7 +93,7 @@ where
             )?;
         }
         SinglePrepareResult::Upstream(UpstreamPrepare { statement_id, .. }) => {
-            utils::set_num_field(cx, &js_prepare_result, "statementId", statement_id as f64)?;
+            utils::set_num_field(cx, &js_prepare_result, "statementId", *statement_id as f64)?;
         }
     }
     Ok(js_prepare_result)

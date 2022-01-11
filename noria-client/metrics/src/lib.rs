@@ -1,7 +1,11 @@
+#![feature(derive_default_enum)]
+
 use metrics::SharedString;
 use nom_sql::SqlQuery;
 use noria::ReadySetError;
 use serde::Serialize;
+use std::convert::TryFrom;
+use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,7 +31,46 @@ pub struct QueryExecutionEvent {
     pub noria_duration: Option<Duration>,
 
     /// Error returned by noria, if any.
-    pub noria_error: Option<String>,
+    pub noria_error: Option<ReadySetError>,
+
+    /// Where the query ended up executing
+    pub destination: Option<QueryDestination>,
+}
+
+#[derive(Debug, PartialEq, Serialize, Clone, Copy, Default)]
+pub enum QueryDestination {
+    #[default]
+    Noria,
+    NoriaThenFallback,
+    Fallback,
+    Both,
+}
+
+impl TryFrom<&str> for QueryDestination {
+    type Error = ReadySetError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "noria" => Ok(QueryDestination::Noria),
+            "noria_then_fallback" => Ok(QueryDestination::NoriaThenFallback),
+            "fallback" => Ok(QueryDestination::Fallback),
+            "both" => Ok(QueryDestination::Both),
+            _ => Err(ReadySetError::Internal(
+                "Invalid query destination".to_string(),
+            )),
+        }
+    }
+}
+
+impl fmt::Display for QueryDestination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            QueryDestination::Noria => "noria",
+            QueryDestination::NoriaThenFallback => "noria_then_fallback",
+            QueryDestination::Fallback => "fallback",
+            QueryDestination::Both => "both",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[derive(Copy, Debug, Serialize, Clone)]
@@ -94,43 +137,45 @@ impl QueryExecutionEvent {
             upstream_duration: None,
             noria_duration: None,
             noria_error: None,
+            destination: None,
         }
     }
 
-    pub fn start_timer(&mut self) -> QueryExecutionTimerHandle {
-        QueryExecutionTimerHandle::new(self)
+    pub fn start_noria_timer(&mut self) -> QueryExecutionTimerHandle {
+        QueryExecutionTimerHandle::new(&mut self.noria_duration)
+    }
+
+    pub fn start_upstream_timer(&mut self) -> QueryExecutionTimerHandle {
+        QueryExecutionTimerHandle::new(&mut self.upstream_duration)
+    }
+
+    pub fn start_parse_timer(&mut self) -> QueryExecutionTimerHandle {
+        QueryExecutionTimerHandle::new(&mut self.parse_duration)
     }
 
     pub fn set_noria_error(&mut self, error: &ReadySetError) {
-        self.noria_error = Some(format!("{:?}", error));
+        self.noria_error = Some(error.clone());
     }
 }
 
-/// A handle to updating the durations in a `QueryExecutionEvent`. Each duration
-/// should correspond to a call to `end_X`, where X is the
-/// measuremnt we are timing.
+/// A handle to updating the durations in a `QueryExecutionEvent`. Once dropped,
+/// updates the relevant timer.
 pub struct QueryExecutionTimerHandle<'a> {
-    event: &'a mut QueryExecutionEvent,
-    timer: Instant,
+    duration: &'a mut Option<Duration>,
+    start: Instant,
 }
 
 impl<'a> QueryExecutionTimerHandle<'a> {
-    pub fn new(event: &'a mut QueryExecutionEvent) -> QueryExecutionTimerHandle<'a> {
+    pub fn new(duration: &'a mut Option<Duration>) -> QueryExecutionTimerHandle<'a> {
         QueryExecutionTimerHandle {
-            event,
-            timer: Instant::now(),
+            duration,
+            start: Instant::now(),
         }
     }
+}
 
-    pub fn set_upstream_duration(self) {
-        self.event.upstream_duration = Some(self.timer.elapsed());
-    }
-
-    pub fn set_noria_duration(self) {
-        self.event.noria_duration = Some(self.timer.elapsed());
-    }
-
-    pub fn set_parse_duration(self) {
-        self.event.parse_duration = Some(self.timer.elapsed());
+impl<'a> Drop for QueryExecutionTimerHandle<'a> {
+    fn drop(&mut self) {
+        self.duration.replace(self.start.elapsed());
     }
 }

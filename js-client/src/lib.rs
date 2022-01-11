@@ -120,13 +120,13 @@ fn async_prepare(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     let backend = jsclient.backend.clone();
 
     jsclient.runtime.spawn(async move {
-        let res = backend.lock().await.prepare(&query).await;
+        let res = backend.lock().await.prepare(&query).await.cloned();
 
         queue.send(move |mut cx| {
             let (js_err, js_res) = match res {
                 Ok(raw_prepare_result) => (
                     cx.null().upcast::<JsValue>(),
-                    convert::convert_prepare_result(&mut cx, raw_prepare_result)?
+                    convert::convert_prepare_result(&mut cx, &raw_prepare_result)?
                         .upcast::<JsValue>(),
                 ),
                 Err(e) => (

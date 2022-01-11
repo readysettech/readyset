@@ -85,7 +85,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
             (&Method::GET, "/allow-list") => {
                 let query_cache = self.query_cache.clone();
                 Box::pin(async move {
-                    let allow_list = query_cache.allow_list().await;
+                    let allow_list = query_cache.allow_list();
                     let res = match serde_json::to_string(&allow_list) {
                         Ok(json) => res
                             .header(CONTENT_TYPE, "application/json")
@@ -102,7 +102,7 @@ impl Service<Request<Body>> for NoriaAdapterHttpRouter {
             (&Method::GET, "/deny-list") => {
                 let query_cache = self.query_cache.clone();
                 Box::pin(async move {
-                    let deny_list = query_cache.deny_list().await;
+                    let deny_list = query_cache.deny_list();
                     let res = match serde_json::to_string(&deny_list) {
                         Ok(json) => res
                             .header(CONTENT_TYPE, "application/json")
