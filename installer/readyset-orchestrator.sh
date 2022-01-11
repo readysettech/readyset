@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-READYSET_ORCHESTRATOR_ROOT=${READYSET_ORCHESTRATOR_ROOT:-https://get.readyset.io}
+READYSET_ORCHESTRATOR_ROOT=${READYSET_ORCHESTRATOR_ROOT:-https://launch.readyset.io}
 
 main() {
     need_cmd uname
