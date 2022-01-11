@@ -3685,6 +3685,7 @@ dependencies = [
  "maplit",
  "metrics",
  "metrics-exporter-prometheus",
+ "mysql_common",
  "nom 5.1.2",
  "nom-sql",
  "noria",

@@ -15,6 +15,7 @@
 //! again against Noria, however, if a fallback database exists, may be executed against the
 //! fallback db.
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::sync::Arc;
@@ -388,12 +389,65 @@ pub struct QueryInfo {
     pub destination: QueryDestination,
 }
 
-#[derive(Debug)]
+impl Default for QueryInfo {
+    fn default() -> Self {
+        Self {
+            destination: QueryDestination::Noria,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum QueryDestination {
     Noria,
     NoriaThenFallback,
     Fallback,
     Both,
+}
+
+impl TryFrom<&str> for QueryDestination {
+    type Error = ReadySetError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "noria" => QueryDestination::Noria,
+            "noria_then_fallback" => QueryDestination::NoriaThenFallback,
+            "fallback" => QueryDestination::Fallback,
+            "both" => QueryDestination::Both,
+            _ => {
+                internal!("Invalid query destination");
+            }
+        })
+    }
+}
+
+/// Converts a MySQL row into a [`QueryInfo`] struct.
+///
+/// This maps the row's column name and value for the column to the
+/// expected QueryInfo fields. It assumes that each column is named
+/// the same as the variable in the [`QueryInfo`] struct and that the
+/// values can be converted from utf8 strings.
+impl TryFrom<&mysql_common::row::Row> for QueryInfo {
+    type Error = ReadySetError;
+    fn try_from(row: &mysql_common::row::Row) -> Result<Self, Self::Error> {
+        let mut res = QueryInfo::default();
+
+        // Parse each column into it's respective QueryInfo field.
+        for (i, c) in row.columns_ref().iter().enumerate() {
+            if c.name_str() == "destination" {
+                // Column is referenced in mysql row.
+                #[allow(clippy::unwrap_used)]
+                if let mysql_common::value::Value::Bytes(d) = row.as_ref(i).unwrap() {
+                    let dest = std::str::from_utf8(d)
+                        .map_err(|e| ReadySetError::Internal(e.to_string()))?;
+                    res.destination = QueryDestination::try_from(dest)?;
+                } else {
+                    internal!("Invalid type for destination");
+                }
+            }
+        }
+
+        Ok(res)
+    }
 }
 
 impl Display for QueryDestination {
@@ -1212,6 +1266,7 @@ where
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let handle = event.start_timer();
+        let is_noria = prepared_statement.noria.is_some();
         if let Some(id) = prepared_statement.noria {
             let res =
                 Self::execute_noria(&mut self.noria, id, params, prep, self.ticket.clone()).await;
@@ -1255,7 +1310,11 @@ where
             .await
             .map(QueryResult::Upstream);
         self.last_query = Some(QueryInfo {
-            destination: QueryDestination::NoriaThenFallback,
+            destination: if is_noria {
+                QueryDestination::NoriaThenFallback
+            } else {
+                QueryDestination::Fallback
+            },
         });
         handle.set_upstream_duration();
         res
