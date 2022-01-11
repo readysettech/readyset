@@ -1779,12 +1779,23 @@ impl SqlToMirConverter {
                 }
 
                 _ => {
+                    let has_aggregates = st.contains_aggregate_select();
                     let mut index_type = None;
                     for (pc, op) in qg.parameters() {
                         if !self.config.allow_range_queries && !matches!(*op, BinaryOperator::Equal)
                         {
                             unsupported!("Unsupported binary operator '{}'", *op);
                         }
+
+                        // Aggregates don't currently work with range queries (since we don't
+                        // re-aggregate at the reader), so check here and return an error if the
+                        // query has both aggregates and range params
+                        if dbg!(has_aggregates) && *op != BinaryOperator::Equal {
+                            unsupported!(
+                                "Aggregates are not currently supported with non-equal parameters"
+                            )
+                        }
+
                         match IndexType::for_operator(*op) {
                             Some(it) if index_type.is_none() => index_type = Some(it),
                             Some(it) if index_type == Some(it) => {}

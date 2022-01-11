@@ -6923,6 +6923,32 @@ async fn range_query_through_union() {
     assert_eq!(res, vec![(1, 2), (2, 2)]);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn aggregate_ranges_not_supported() {
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
+        builder.set_allow_range_queries(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe("CREATE TABLE t (a int, b int)")
+        .await
+        .unwrap();
+
+    let res = g
+        .extend_recipe("QUERY q: SELECT max(a) FROM t WHERE b > ?")
+        .await;
+    assert!(res.is_err());
+    assert!(res.err().unwrap().caused_by_unsupported());
+}
+
 // FIXME(fran): This test is ignored because the Controller
 //  is not noticing that the Worker it is trying to replicate domains to
 //  is no longer available.
