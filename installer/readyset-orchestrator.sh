@@ -50,18 +50,7 @@ main() {
     fi
 
     set +e
-    # The installer is going to want to ask for confirmation by reading stdin.
-    # This script was piped into `sh` though and doesn't have stdin to pass to
-    # its children. Instead we're going to explicitly connect /dev/tty to the
-    # installer's stdin.
-    "$file" "$@" < /dev/tty
-
-    local exit_code="$?"
-
-    rm "$file"
-    rmdir "$dir"
-
-    return "$exit_code"
+    exec "$file" "$@"
 }
 
 
