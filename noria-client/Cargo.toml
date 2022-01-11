@@ -44,6 +44,7 @@ tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
 time = { version = "0.3", features = ["local-offset"] }
 dashmap = "4.0.2"
+mysql_common = "0.28"
 
 [lib]
 path = "src/lib.rs"

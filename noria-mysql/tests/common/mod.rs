@@ -93,7 +93,9 @@ pub fn query_cache_setup(
     migration_mode: MigrationMode,
 ) -> mysql::Opts {
     noria_client_test_helpers::setup_inner::<MySQLAdapter>(
-        BackendBuilder::new().require_authentication(false),
+        BackendBuilder::new()
+            .require_authentication(false)
+            .explain_last_statement(true),
         fallback,
         true,
         true,

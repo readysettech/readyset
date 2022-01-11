@@ -1,12 +1,21 @@
-use mysql::prelude::*;
-use mysql::{Result, Row};
-use noria_client::backend::MigrationMode;
+use mysql::{prelude::*, Statement};
+use mysql::{Conn, Result, Row};
+use noria_client::backend::QueryInfo;
+use noria_client::backend::{MigrationMode, QueryDestination};
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client_test_helpers::sleep;
 use serial_test::serial;
+use std::convert::TryFrom;
 use std::sync::Arc;
 mod common;
 use common::query_cache_setup;
+
+/// Retrieves where the query executed by parsing the row returned by
+/// EXPLAIN LAST STATEMENT.
+fn last_query_destination(conn: &mut Conn) -> QueryDestination {
+    let res: Row = conn.query_first("EXPLAIN LAST STATEMENT").unwrap().unwrap();
+    QueryInfo::try_from(&res).unwrap().destination
+}
 
 // With in_request_path migration and fallback, an supported query should execute on Noria
 // and be marked allowed on completion, an unsupported query should execute on Noria
@@ -28,10 +37,25 @@ fn in_request_path_query_with_fallback() {
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Noria);
+
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()");
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::NoriaThenFallback
+    );
+
+    let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()");
+    assert!(res.is_ok()); // Executed successfully against fallback.
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
 }
 
 // With in_request_path query mode without fallback, a supported query should execute on Noria
@@ -81,10 +105,19 @@ fn out_of_band_query_with_fallback() {
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()");
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
 
     let res: Result<Vec<Row>> = conn.query("CREATE CACHED QUERY test AS SELECT * FROM t");
     assert!(res.is_ok());
@@ -93,32 +126,71 @@ fn out_of_band_query_with_fallback() {
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Noria);
 }
 
-// With in_request_path migration and fallback, an supported query should execute on Noria
+// With in_request_path migration and fallback, a supported query should execute on Noria
 // and be marked allowed on completion, an unsupported query should execute on Noria
 // and then fallback, and be marked denied.
 #[test]
 #[serial]
-fn in_request_path_prep_with_fallback() {
+fn in_request_path_prep_exec_with_fallback() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let query_status_cache = Arc::new(QueryStatusCache::new());
-    let mut conn = mysql::Conn::new(query_cache_setup(
+    let opts = query_cache_setup(
         query_status_cache.clone(),
         true, // fallback enabled
         MigrationMode::InRequestPath,
-    ))
-    .unwrap();
+    );
+
+    let mut conn = mysql::Conn::new(opts).unwrap();
+
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
     let res: Result<_> = conn.prep("SELECT * FROM t");
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
-    let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW()");
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Both);
+
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Noria);
+
+    let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW() AND b = 1");
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Both);
+
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
+    let res: Result<Statement> = conn.prep("SELECT * FROM t WHERE a = NOW() AND  b = 2");
+    assert!(res.is_ok()); // Executed successfully against fallback.
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
 }
 
 // With in_request_path query mode without fallback, a supported query should execute on Noria
@@ -137,11 +209,11 @@ fn in_request_path_prep_without_fallback() {
     .unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
-    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
+    let res: Result<_> = conn.prep("SELECT * FROM t");
     assert!(res.is_ok());
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
-    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t WHERE a = NOW()", ());
+    let res: Result<_> = conn.prep("SELECT * FROM t WHERE a = NOW()");
     assert!(res.is_err()); // Unable to handle this unsupported query.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 1);
@@ -153,7 +225,7 @@ fn in_request_path_prep_without_fallback() {
 // the allow list on next exeution.
 #[test]
 #[serial]
-fn out_of_band_prep_with_fallback() {
+fn out_of_band_prep_exec_with_fallback() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let query_status_cache = Arc::new(QueryStatusCache::new());
     let mut conn = mysql::Conn::new(query_cache_setup(
@@ -164,22 +236,56 @@ fn out_of_band_prep_with_fallback() {
     .unwrap();
     conn.query_drop("CREATE TABLE t (a INT, b INT)").unwrap();
     sleep();
-    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
+    let res: Result<Statement> = conn.prep("SELECT * FROM t");
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
-    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t WHERE a = NOW()", ());
-    assert!(res.is_ok()); // Executed successfully against fallback.
-    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
-    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
 
-    let res: Result<Vec<Row>> = conn.query("CREATE CACHED QUERY test AS SELECT * FROM t");
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
+    let res: Result<Statement> = conn.prep("SELECT * FROM t WHERE a = NOW()");
+    assert!(res.is_ok()); // Executed successfully against fallback.
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 0);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(
+        last_query_destination(&mut conn),
+        QueryDestination::Fallback
+    );
+
+    let res: Result<_> = conn.query_drop("CREATE CACHED QUERY test AS SELECT * FROM t");
     assert!(res.is_ok());
 
-    let res: Result<Vec<Row>> = conn.exec("SELECT * FROM t", ());
+    let res: Result<Statement> = conn.prep("SELECT * FROM t");
     assert!(res.is_ok()); // Executed successfully against fallback.
     assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
     assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Noria);
+
+    let res: Result<Vec<Row>> = conn.exec(res.unwrap(), ());
+    assert!(res.is_ok());
+    assert_eq!(rt.block_on(query_status_cache.allow_list()).len(), 1);
+    assert_eq!(rt.block_on(query_status_cache.deny_list()).len(), 0);
+    assert_eq!(last_query_destination(&mut conn), QueryDestination::Noria);
 }
 
 // Allow migrations within the request path. Both migrations, the CREATE QUERY
