@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: Creates an IAM user for reading CloudWatch logs
+Description: Creates an IAM user for deploying ReadySet
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -20,6 +20,23 @@ Parameters:
     ConstraintDescription: Must follow your IAM user password policy
 
 Resources:
+  ReadySetDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for allowing ReadySet to deploy
+      Path: /
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteStack
+              - cloudformation:DeleteChangeSet
+              - cloudformation:UpdateStack
+            Resource: '*'
+
   ReadySetUser:
     Type: AWS::IAM::User
     Properties:
@@ -28,4 +45,6 @@ Resources:
         PasswordResetRequired: true
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
+        - arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
         - arn:aws:iam::aws:policy/IAMUserChangePassword
+        - !Ref ReadySetDeployPolicy
