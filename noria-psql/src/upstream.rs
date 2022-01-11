@@ -45,7 +45,7 @@ pub enum QueryResult {
     Command,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StatementMeta {
     /// The types of the query parameters used for this statement
     pub params: Vec<Type>,

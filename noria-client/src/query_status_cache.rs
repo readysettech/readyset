@@ -122,7 +122,7 @@ impl QueryStatusCache {
     /// This function returns the query migration state of a query. If the query does not exist
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
-    pub async fn query_migration_state(&self, q: &Query) -> MigrationState {
+    pub fn query_migration_state(&self, q: &Query) -> MigrationState {
         let query_state = self.inner.get(q).map(|m| m.migration_state.clone());
         match query_state {
             Some(s) => s,
@@ -136,7 +136,7 @@ impl QueryStatusCache {
     /// Updates a queries migration state to `m` unless the queries migration state was
     /// `MigrationState::Unsupported`. An unsupported query cannot currently become supported once
     /// again.
-    pub async fn update_query_migration_state(&self, q: &Query, m: MigrationState) {
+    pub fn update_query_migration_state(&self, q: &Query, m: MigrationState) {
         match self.inner.get_mut(q) {
             Some(mut s) if s.migration_state != MigrationState::Unsupported => {
                 // Once a query is determined to be unsupported, there is currently no going back.
@@ -154,7 +154,7 @@ impl QueryStatusCache {
 
     /// Returns a list of queries that currently need the be processed to determine
     /// if they should be allowed (are supported by Noria).
-    pub async fn pending_migration(&self) -> Vec<Query> {
+    pub fn pending_migration(&self) -> Vec<Query> {
         self.inner
             .iter()
             .filter(|r| matches!(r.value().migration_state, MigrationState::Pending))
@@ -163,7 +163,7 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that have a state of [`QueryState::Successful`].
-    pub async fn allow_list(&self) -> QueryList {
+    pub fn allow_list(&self) -> QueryList {
         self.inner
             .iter()
             .filter(|r| matches!(r.value().migration_state, MigrationState::Successful))
@@ -173,7 +173,7 @@ impl QueryStatusCache {
     }
 
     /// Returns a list of queries that are in the deny list.
-    pub async fn deny_list(&self) -> QueryList {
+    pub fn deny_list(&self) -> QueryList {
         match self.style {
             MigrationStyle::Async | MigrationStyle::InRequestPath => self
                 .inner
@@ -221,66 +221,51 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn query_is_allowed() {
+    #[test]
+    fn query_is_allowed() {
         let cache = QueryStatusCache::new();
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        assert_eq!(
-            cache.query_migration_state(&query).await,
-            MigrationState::Pending
-        );
-        assert_eq!(cache.pending_migration().await.len(), 1);
-        assert_eq!(cache.allow_list().await.len(), 0);
-        assert_eq!(cache.deny_list().await.len(), 0);
+        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(cache.pending_migration().len(), 1);
+        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.deny_list().len(), 0);
 
-        cache
-            .update_query_migration_state(&query, MigrationState::Successful)
-            .await;
-        assert_eq!(cache.pending_migration().await.len(), 0);
-        assert_eq!(cache.allow_list().await.len(), 1);
-        assert_eq!(cache.deny_list().await.len(), 0);
+        cache.update_query_migration_state(&query, MigrationState::Successful);
+        assert_eq!(cache.pending_migration().len(), 0);
+        assert_eq!(cache.allow_list().len(), 1);
+        assert_eq!(cache.deny_list().len(), 0);
     }
 
-    #[tokio::test]
-    async fn query_is_denied() {
+    #[test]
+    fn query_is_denied() {
         let cache = QueryStatusCache::new();
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        assert_eq!(
-            cache.query_migration_state(&query).await,
-            MigrationState::Pending
-        );
-        assert_eq!(cache.pending_migration().await.len(), 1);
-        assert_eq!(cache.allow_list().await.len(), 0);
-        assert_eq!(cache.deny_list().await.len(), 0);
+        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(cache.pending_migration().len(), 1);
+        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.deny_list().len(), 0);
 
-        cache
-            .update_query_migration_state(&query, MigrationState::Unsupported)
-            .await;
-        assert_eq!(cache.pending_migration().await.len(), 0);
-        assert_eq!(cache.allow_list().await.len(), 0);
-        assert_eq!(cache.deny_list().await.len(), 1);
+        cache.update_query_migration_state(&query, MigrationState::Unsupported);
+        assert_eq!(cache.pending_migration().len(), 0);
+        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.deny_list().len(), 1);
     }
 
-    #[tokio::test]
-    async fn query_is_inferred_denied_explicit() {
+    #[test]
+    fn query_is_inferred_denied_explicit() {
         let cache = QueryStatusCache::with_style(MigrationStyle::Explicit);
         let query = select_statement("SELECT * FROM t1").unwrap();
 
-        assert_eq!(
-            cache.query_migration_state(&query).await,
-            MigrationState::Pending
-        );
-        assert_eq!(cache.pending_migration().await.len(), 1);
-        assert_eq!(cache.allow_list().await.len(), 0);
-        assert_eq!(cache.deny_list().await.len(), 1);
+        assert_eq!(cache.query_migration_state(&query), MigrationState::Pending);
+        assert_eq!(cache.pending_migration().len(), 1);
+        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.deny_list().len(), 1);
 
-        cache
-            .update_query_migration_state(&query, MigrationState::Unsupported)
-            .await;
-        assert_eq!(cache.pending_migration().await.len(), 0);
-        assert_eq!(cache.allow_list().await.len(), 0);
-        assert_eq!(cache.deny_list().await.len(), 1);
+        cache.update_query_migration_state(&query, MigrationState::Unsupported);
+        assert_eq!(cache.pending_migration().len(), 0);
+        assert_eq!(cache.allow_list().len(), 0);
+        assert_eq!(cache.deny_list().len(), 1);
     }
 }

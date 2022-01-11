@@ -422,7 +422,6 @@ where
             // bunch of stuff to move into the async block below
             let ch = ch.clone();
             let (auto_increments, query_cache) = (auto_increments.clone(), query_cache.clone());
-            let migration_mode = migration_mode.clone();
             let mut connection_handler = self.connection_handler.clone();
             let region = options.region.clone();
             let upstream_db_url = options.upstream_db_url.clone();

@@ -3,6 +3,7 @@ use noria_client::backend as cl;
 use noria_data::DataType;
 use psql_srv as ps;
 use std::convert::{TryFrom, TryInto};
+use std::ops::Deref;
 
 use crate::error::Error;
 use crate::query_handler::PostgreSqlQueryHandler;
@@ -20,12 +21,20 @@ use std::sync::Arc;
 /// using type conversion.
 pub struct Backend(pub cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>);
 
+impl Deref for Backend {
+    type Target = cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Backend {
     async fn query(&mut self, query: &str) -> Result<QueryResponse<'_>, Error> {
         Ok(QueryResponse(self.0.query(query).await?))
     }
 
-    async fn prepare(&mut self, query: &str) -> Result<PrepareResponse, Error> {
+    async fn prepare(&mut self, query: &str) -> Result<PrepareResponse<'_>, Error> {
         Ok(PrepareResponse(self.0.prepare(query).await?))
     }
 
@@ -49,7 +58,8 @@ impl ps::Backend for Backend {
     }
 
     async fn on_prepare(&mut self, query: &str) -> Result<ps::PrepareResponse, ps::Error> {
-        self.prepare(query).await?.try_into()
+        let statement_id = self.next_prepared_id(); // If prepare succeeds it will get this id
+        self.prepare(query).await?.try_into_ps(statement_id)
     }
 
     async fn on_execute(

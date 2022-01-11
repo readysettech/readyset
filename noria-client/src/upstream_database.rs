@@ -13,6 +13,15 @@ pub struct UpstreamPrepare<DB: UpstreamDatabase> {
     pub meta: DB::StatementMeta,
 }
 
+impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
+    fn clone(&self) -> Self {
+        UpstreamPrepare {
+            statement_id: self.statement_id,
+            meta: self.meta.clone(),
+        }
+    }
+}
+
 /// An implementation of this trait allows the statement metadata from a
 /// prepare result to be compared against the schema of the equivalent
 /// noria prepare result. The compare function returns an Ok result if
@@ -51,7 +60,7 @@ pub trait UpstreamDatabase: Sized + Send {
     ///
     /// This type is used as a field of [`UpstreamPrepare`], returned from
     /// [`prepare`](UpstreamDatabase::prepaare)
-    type StatementMeta: NoriaCompare + Debug + Send + 'static;
+    type StatementMeta: NoriaCompare + Debug + Send + Clone + 'static;
 
     /// Errors that can be returned from operations on this database
     ///

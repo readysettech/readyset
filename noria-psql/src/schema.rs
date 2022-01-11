@@ -27,28 +27,28 @@ impl<'a> TryFrom<SelectSchema<'a>> for Vec<ps::Column> {
     }
 }
 
-pub struct NoriaSchema(pub Vec<noria::ColumnSchema>);
+pub struct NoriaSchema<'a>(pub &'a [noria::ColumnSchema]);
 
-impl TryFrom<NoriaSchema> for Vec<pgsql::types::Type> {
+impl<'a> TryFrom<NoriaSchema<'a>> for Vec<pgsql::types::Type> {
     type Error = Error;
 
-    fn try_from(value: NoriaSchema) -> Result<Self, Self::Error> {
+    fn try_from(value: NoriaSchema<'a>) -> Result<Self, Self::Error> {
         value
             .0
-            .into_iter()
+            .iter()
             .map(|c| type_to_pgsql(&c.spec.sql_type))
             .collect()
     }
 }
 
-impl TryFrom<NoriaSchema> for Vec<ps::Column> {
+impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
     type Error = Error;
 
-    fn try_from(s: NoriaSchema) -> Result<Self, Self::Error> {
-        s.0.into_iter()
+    fn try_from(s: NoriaSchema<'a>) -> Result<Self, Self::Error> {
+        s.0.iter()
             .map(|c| {
                 Ok(ps::Column {
-                    name: c.spec.column.name,
+                    name: c.spec.column.name.clone(),
                     col_type: type_to_pgsql(&c.spec.sql_type)?,
                 })
             })

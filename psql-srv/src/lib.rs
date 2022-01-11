@@ -86,7 +86,7 @@ pub trait Backend {
 }
 
 /// A description of a column, either in the parameters to a query or in a resultset
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Column {
     /// The name of the column
     pub name: String,
