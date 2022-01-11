@@ -490,8 +490,8 @@ impl TestScript {
 
             builder.set_persistence(persistence);
 
-            match builder.start(Arc::clone(&authority)).await {
-                Ok(builder) => return builder,
+            let mut noria = match builder.start(Arc::clone(&authority)).await {
+                Ok(builder) => builder,
                 Err(err) => {
                     // This can error out if there are too many open files, but if we wait a bit
                     // they will get closed (macOS problem)
@@ -499,8 +499,11 @@ impl TestScript {
                         panic!("{:?}", err)
                     }
                     tokio::time::sleep(Duration::from_millis(1000)).await;
+                    continue;
                 }
-            }
+            };
+            noria.backend_ready().await;
+            return noria;
         }
     }
 
