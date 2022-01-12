@@ -116,7 +116,6 @@
 #![deny(unused_extern_crates)]
 #![deny(unreachable_pub)]
 #![warn(rust_2018_idioms)]
-#![warn(clippy::dbg_macro)]
 
 /// Maximum number of requests that may be in-flight _to_ the connection pool at a time.
 ///

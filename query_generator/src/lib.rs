@@ -1,5 +1,4 @@
 #![feature(never_type)]
-#![warn(clippy::dbg_macro)]
 //! A deterministic, exhaustive, parametric generator for SQL queries, and associated DDL.
 //!
 //! The intent of this library is to provide a hook for generating SQL queries both

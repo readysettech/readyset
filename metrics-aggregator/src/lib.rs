@@ -1,6 +1,5 @@
 // This design should be re-assessed when we have enough time to do so.
 // Relevant ticket: https://readysettech.atlassian.net/browse/ENG-719
-#![warn(clippy::dbg_macro)]
 #![deny(macro_use_extern_crate)]
 
 use std::net::{SocketAddr, ToSocketAddrs};

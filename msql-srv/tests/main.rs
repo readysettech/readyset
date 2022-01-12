@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![feature(async_closure)]
 
 extern crate chrono;

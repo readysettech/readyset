@@ -1,5 +1,3 @@
-#![warn(clippy::dbg_macro)]
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use async_trait::async_trait;

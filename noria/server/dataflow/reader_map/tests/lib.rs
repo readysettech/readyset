@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 extern crate reader_map;
 
 macro_rules! assert_match {

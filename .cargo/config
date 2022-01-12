@@ -1,0 +1,10 @@
+[alias]
+lint = "clippy --all-targets"
+
+[build]
+rustflags = ["-C", "link-args=-llz4"]
+
+[target.'cfg(feature = "cargo-clippy")']
+rustflags = [
+  "-Dclippy::dbg_macro"
+]

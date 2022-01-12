@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 use clap::{App, Arg};
 use hdrhistogram::Histogram;
 use itertools::Itertools;

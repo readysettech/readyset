@@ -1,5 +1,4 @@
 #![warn(
-    clippy::dbg_macro,
     clippy::unimplemented,
     clippy::unreachable,
     clippy::panic,
@@ -23,7 +22,6 @@
 #![cfg_attr(debug, feature(is_sorted))]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![allow(clippy::redundant_closure)]
-#![warn(clippy::dbg_macro)]
 
 pub(crate) mod backlog;
 pub mod node;

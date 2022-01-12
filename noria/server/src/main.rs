@@ -1,5 +1,3 @@
-#![warn(clippy::dbg_macro)]
-
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process;
