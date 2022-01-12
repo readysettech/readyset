@@ -1130,3 +1130,12 @@ fn placeholder_numbering_does_not_break_postgres_ignore() {
         .get(0);
     assert_eq!(name, String::from("Bob"));
 }
+
+/// Only tests that the query succeeds. Correctness of the query is left to the MySQL
+/// integration test.
+#[test]
+fn show_readyset_status() {
+    let opts = setup(true);
+    let mut conn = opts.connect(NoTls).unwrap();
+    assert!(conn.simple_query("SHOW READYSET STATUS;").is_ok())
+}

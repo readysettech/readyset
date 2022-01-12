@@ -1869,6 +1869,9 @@ where
                             select_schema,
                         }))
                     }
+                    nom_sql::SqlQuery::Show(ShowStatement::ReadySetStatus) => {
+                        Ok(QueryResult::Noria(self.noria.readyset_status().await?))
+                    }
                     nom_sql::SqlQuery::Set(_)
                     | nom_sql::SqlQuery::CompoundSelect(_)
                     | nom_sql::SqlQuery::Show(_) => {
@@ -1957,6 +1960,9 @@ where
                     }
                     SqlQuery::Show(ShowStatement::CachedQueries) => {
                         self.noria.verbose_outputs().await
+                    }
+                    nom_sql::SqlQuery::Show(ShowStatement::ReadySetStatus) => {
+                        self.noria.readyset_status().await
                     }
                     SqlQuery::Show(ShowStatement::ProxiedQueries) => {
                         error!("upstream database must be set for show proxied queries to produce any meaningful results");

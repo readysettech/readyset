@@ -1,6 +1,8 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql::prelude::*;
+use noria::status::ReadySetStatus;
 use noria_client_test_helpers::sleep;
+use std::convert::TryFrom;
 
 mod common;
 use common::setup;
@@ -1278,4 +1280,11 @@ fn create_query_cache_where_in() {
     sleep();
     let new_queries: Vec<(String, String)> = conn.query("SHOW CACHED QUERIES;").unwrap();
     assert_eq!(new_queries.len(), queries.len());
+}
+
+#[test]
+fn show_readyset_status() {
+    let mut conn = mysql::Conn::new(setup(true)).unwrap();
+    let ret: Vec<mysql::Row> = conn.query("SHOW READYSET STATUS;").unwrap();
+    assert!(ReadySetStatus::try_from(ret).is_ok());
 }
