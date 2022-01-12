@@ -1376,7 +1376,7 @@ mod tests {
                 None,
                 mig,
             );
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "{}", res.err().unwrap());
 
             let qid = query_id_hash(
                 &["users"],
