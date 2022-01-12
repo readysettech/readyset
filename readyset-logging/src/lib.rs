@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use clap::Parser;
 use thiserror::Error;
+use tracing::warn;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug)]
@@ -35,6 +36,12 @@ impl FromStr for LogFormat {
             "json" => Ok(Self::Json),
             _ => Err(InvalidLogFormat(s.to_owned())),
         }
+    }
+}
+
+pub fn warn_if_debug_build() {
+    if cfg!(debug) {
+        warn!("Running a debug build")
     }
 }
 
@@ -90,6 +97,9 @@ impl Options {
             LogFormat::Pretty => s.pretty().init(),
             LogFormat::Json => s.json().with_current_span(true).init(),
         }
+
+        #[cfg(debug)]
+        warn_if_debug_build();
 
         Ok(())
     }
