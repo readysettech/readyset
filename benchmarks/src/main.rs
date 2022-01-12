@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 use clap::{AppSettings, Parser, ValueHint};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
+use mysql_async::prelude::Queryable;
+use noria::status::{ReadySetStatus, SnapshotStatus};
+use std::convert::TryFrom;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
@@ -48,6 +51,11 @@ struct BenchmarkRunner {
     /// any benchmark_cmd subcommand passed in.
     #[clap(long, value_hint = ValueHint::AnyPath, required(true))]
     benchmark: Option<PathBuf>,
+
+    /// Treats the target database as a ReadySet database, and polls on snapshot completion
+    /// before beginning `benchmark`.
+    #[clap(long)]
+    wait_for_snapshot: bool,
 }
 
 impl BenchmarkRunner {
@@ -158,6 +166,26 @@ impl BenchmarkRunner {
         }
 
         let importer = self.start_metric_readers();
+
+        // Check that ReadySet has completed snapshotting via the readyset status.
+        // TODO(justin): Abstract this functionality as it is generally useful for tests.
+        if self.wait_for_snapshot {
+            println!("Waiting for snapshotting to complete...");
+            let opts =
+                mysql_async::Opts::from_url(&self.deployment_params.target_conn_str).unwrap();
+            let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+
+            loop {
+                let res: Vec<mysql_async::Row> = conn.query("SHOW READYSET STATUS").await.unwrap();
+                let status = ReadySetStatus::try_from(res)?;
+                if status.snapshot_status == SnapshotStatus::Completed {
+                    println!("Snapshotting finished!");
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
 
         let mut results = Vec::new();
         for i in 0..self.iterations {
