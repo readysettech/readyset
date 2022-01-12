@@ -279,19 +279,6 @@ impl GraphViz for MirNodeInner {
 
                 write!(f, "{}", cols)
             }
-            MirNodeInner::ParamFilter {
-                ref col,
-                ref emit_key,
-                ref operator,
-            } => {
-                write!(
-                    f,
-                    "σφ | col: {}, emit_key: {}, operator: {}",
-                    print_col(col),
-                    print_col(emit_key),
-                    operator
-                )
-            }
         }
     }
 }

@@ -75,7 +75,6 @@ fn type_for_internal_column(
             // ancestors; so keep iterating to try the other paths
             Ok(None)
         }
-        NodeOperator::ParamFilter(_) => unsupported!("ParamFilter isn't implemented"),
         NodeOperator::Latest(_)
         | NodeOperator::Union(_)
         | NodeOperator::Identity(_)

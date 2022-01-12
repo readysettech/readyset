@@ -21,7 +21,6 @@ use crate::manual::ops::grouped::aggregate::Aggregation;
 use common::DataType;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
-use dataflow::ops::param_filter::ParamFilter;
 use dataflow::ops::project::Project;
 use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression, PostLookup};
 use mir::node::node_inner::MirNodeInner;
@@ -217,24 +216,6 @@ fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadyS
                     #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
                     let right = mir_node.ancestors[1].upgrade().unwrap();
                     make_join_aggregates_node(&name, left, right, mir_node.columns.as_slice(), mig)?
-                }
-                MirNodeInner::ParamFilter {
-                    ref col,
-                    ref emit_key,
-                    ref operator,
-                } => {
-                    invariant_eq!(mir_node.ancestors.len(), 1);
-                    #[allow(clippy::unwrap_used)] // checked by above invariant
-                    let parent = mir_node.first_ancestor().unwrap();
-                    make_param_filter_node(
-                        &name,
-                        parent,
-                        mir_node.columns.as_slice(),
-                        col,
-                        emit_key,
-                        operator,
-                        mig,
-                    )?
                 }
                 MirNodeInner::Latest { ref group_by } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
@@ -832,38 +813,6 @@ fn node_columns_to_idx_map(node: MirNodeRef) -> HashMap<Column, usize> {
         .enumerate()
         .map(|(i, c)| (c.clone(), i))
         .collect()
-}
-
-fn make_param_filter_node(
-    name: &str,
-    parent: MirNodeRef,
-    columns: &[Column],
-    col: &Column,
-    emit_key: &Column,
-    operator: &BinaryOperator,
-    mig: &mut Migration,
-) -> ReadySetResult<FlowNode> {
-    use nom_sql::BinaryOperator as nom_op;
-    use ops::param_filter::Operator as pf_op;
-
-    let parent_na = parent.borrow().flow_node_addr()?;
-    let column_names = column_names(columns);
-    let col = parent.borrow().column_id_for_column(col)?;
-    let emit_key = column_names
-        .iter()
-        .rposition(|c| *c == emit_key.name)
-        .ok_or_else(|| internal_err("could not find paramfilter emit key"))?;
-    let operator = match operator {
-        nom_op::ILike => pf_op::ILike,
-        nom_op::Like => pf_op::Like,
-        _ => internal!("Only supported operators are expected in a mir ParamFilter."),
-    };
-    let node = mig.add_ingredient(
-        String::from(name),
-        column_names.as_slice(),
-        ParamFilter::new(parent_na, col, emit_key, operator),
-    );
-    Ok(FlowNode::New(node))
 }
 
 fn make_latest_node(
