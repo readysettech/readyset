@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![deny(macro_use_extern_crate)]
 #![feature(box_patterns)]
 

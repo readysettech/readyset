@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![feature(associated_type_bounds)]
 //! Bindings for emulating a PostgreSQL server.
 //!

@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![warn(clippy::panic)]
 #![deny(unused_extern_crates, macro_use_extern_crate)]
 #![feature(stmt_expr_attributes)]

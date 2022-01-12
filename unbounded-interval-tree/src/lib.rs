@@ -29,7 +29,6 @@
 //! - Every node's upper bound is less than or equal to its parent's max bound
 //! - The max bound of each node is equal to the upper bound of either that node, or one of that
 //!   node's descendants
-#![warn(clippy::dbg_macro)]
 #![feature(bound_as_ref, bound_map, stmt_expr_attributes)]
 
 use std::borrow::Borrow;

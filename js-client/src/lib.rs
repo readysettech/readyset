@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![allow(dead_code)]
 
 mod convert;

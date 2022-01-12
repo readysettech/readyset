@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 #![allow(clippy::many_single_char_names)]
 
 use clap::{App, Arg};

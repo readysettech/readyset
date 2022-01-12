@@ -1,7 +1,6 @@
 /*
  * Left commented while noria-server error handling refactor is still in progress ~eta
 #![warn(
-    clippy::dbg_macro,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,

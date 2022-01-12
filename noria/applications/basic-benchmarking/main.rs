@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 use clap::{App, Arg};
 use mysql::prelude::*;
 use mysql::*;

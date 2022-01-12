@@ -1,5 +1,3 @@
-#![warn(clippy::dbg_macro)]
-
 mod backend;
 mod error;
 mod query_handler;

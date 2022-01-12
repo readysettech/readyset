@@ -1259,7 +1259,6 @@ mod tests {
                     keys,
                     ..
                 } => {
-                    dbg!(&rows);
                     // we should emit both the captured record from the left with the updates
                     // applied, and the records from the right
                     assert!(

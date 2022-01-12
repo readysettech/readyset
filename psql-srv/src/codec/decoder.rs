@@ -1139,7 +1139,6 @@ mod tests {
         // 48 bits divided into groups of 8 (a byte) = 6 bytes, plus one u32 (4 bytes) to hold the size = 10 bytes
         buf.put_i32(10); // size
         bits.to_sql(&Type::BIT, &mut buf).unwrap(); // add value
-        dbg!(buf.len());
         assert_eq!(
             get_binary_value(&mut buf.freeze(), &Type::BIT).unwrap(),
             DataValue::Bit(bits.clone())

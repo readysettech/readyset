@@ -1,4 +1,3 @@
-#![warn(clippy::dbg_macro)]
 use noria::Builder;
 use noria_data::DataType;
 use std::convert::TryFrom;
