@@ -18,6 +18,7 @@ use dataflow::prelude::*;
 use failpoint_macros::failpoint;
 use hyper::Method;
 use noria::consensus::Authority;
+use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
@@ -334,6 +335,19 @@ impl Leader {
                 (&Method::POST, "/leader_ready") => {
                     return_serialized!(leader_ready);
                 }
+                (&Method::POST, "/status") => {
+                    let status = ReadySetStatus {
+                        // Use whether the leader is ready or not as a proxy for if we have
+                        // completed snapshotting.
+                        snapshot_status: if leader_ready {
+                            SnapshotStatus::Completed
+                        } else {
+                            SnapshotStatus::InProgress
+                        },
+                    };
+                    return_serialized!(status);
+                }
+
                 _ => {}
             }
         }
