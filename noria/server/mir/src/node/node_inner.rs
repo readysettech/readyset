@@ -5,7 +5,7 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use itertools::Itertools;
-use nom_sql::{BinaryOperator, ColumnSpecification, Expression, OrderType};
+use nom_sql::{ColumnSpecification, Expression, OrderType};
 use noria::PlaceholderIdx;
 use noria_errors::{internal, ReadySetResult};
 use std::fmt::{self, Debug, Formatter};
@@ -108,12 +108,6 @@ pub enum MirNodeInner {
         returned_cols: Option<Vec<Column>>,
         /// Row of default values to send back, for example if we're aggregating and no rows are found
         default_row: Option<Vec<DataType>>,
-    },
-    /// Param Filter node
-    ParamFilter {
-        col: Column,
-        emit_key: Column,
-        operator: BinaryOperator,
     },
 }
 
@@ -380,18 +374,6 @@ impl MirNodeInner {
                 } => emit == our_emit && our_duplicate_mode == duplicate_mode,
                 _ => false,
             },
-            MirNodeInner::ParamFilter {
-                col: ref our_col,
-                emit_key: ref our_emit_key,
-                operator: ref our_operator,
-            } => match *other {
-                MirNodeInner::ParamFilter {
-                    ref col,
-                    ref emit_key,
-                    ref operator,
-                } => (col == our_col && emit_key == our_emit_key && operator == our_operator),
-                _ => false,
-            },
             _ => unimplemented!(),
         }
     }
@@ -583,11 +565,6 @@ impl Debug for MirNodeInner {
 
                 write!(f, "{}", cols)
             }
-            MirNodeInner::ParamFilter {
-                ref col,
-                ref emit_key,
-                ref operator,
-            } => write!(f, "σφ [{:?}, {:?}, {:?}]", col, emit_key, operator),
         }
     }
 }

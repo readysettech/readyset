@@ -1109,37 +1109,6 @@ impl SqlToMirConverter {
         )
     }
 
-    #[cfg(feature = "param_filter")]
-    fn make_param_filter_node(
-        &self,
-        name: &str,
-        parent_node: MirNodeRef,
-        col: &Column,
-        emit_key: &Column,
-        operator: &BinaryOperator,
-    ) -> MirNodeRef {
-        let fields = parent_node
-            .borrow()
-            .columns()
-            .iter()
-            .cloned()
-            .chain(std::iter::once(emit_key.clone()))
-            .collect();
-
-        MirNode::new(
-            name,
-            self.schema_version,
-            fields,
-            MirNodeInner::ParamFilter {
-                col: col.clone(),
-                emit_key: emit_key.clone(),
-                operator: *operator,
-            },
-            vec![MirNodeRef::downgrade(&parent_node)],
-            vec![],
-        )
-    }
-
     fn make_distinct_node(
         &self,
         name: &str,
@@ -1764,27 +1733,6 @@ impl SqlToMirConverter {
                         IndexType::HashMap,
                     ))
                 }
-
-                #[cfg(feature = "param_filter")]
-                [(column, operator @ (BinaryOperator::ILike | BinaryOperator::Like))] => {
-                    // If parameters have non equality operators, insert a ParamFilter node to
-                    // support key lookups over the query, and use the ParamFilter's emitted
-                    // key column as the lookup key. Only a subset of non equality operators are
-                    // supported.
-                    let filter_key_column = Column::new(None, "__filter_key");
-                    final_node = self.make_param_filter_node(
-                        &format!("q_{:x}_n{}{}", qg.signature().hash, new_node_count, uformat),
-                        final_node,
-                        &Column::from(column),
-                        &filter_key_column,
-                        operator,
-                    );
-                    nodes_added.push(final_node.clone());
-                    projected_columns.push(filter_key_column.clone());
-                    new_node_count += 1;
-                    Some((vec![filter_key_column], IndexType::HashMap))
-                }
-
                 _ => {
                     let has_aggregates = st.contains_aggregate_select();
                     let mut index_type = None;

@@ -12,7 +12,6 @@ pub trait StripPostFilters {
 impl StripPostFilters for Option<Expression> {
     fn strip_post_filters(self) -> Self {
         self.and_then(|conds| match conds {
-            #[cfg(not(feature = "param_filter"))]
             Expression::BinaryOp {
                 op: BinaryOperator::ILike | BinaryOperator::Like,
                 lhs: box Expression::Column(_),

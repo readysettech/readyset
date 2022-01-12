@@ -21,7 +21,6 @@ maintenance = { status = "experimental" }
 [features]
 default = []
 generate_mysql_tests = ["default"]
-param_filter = []
 profiling = ["timekeeper/default"]
 bench = ["dataflow/bench"]
 failure_injection = ["fail/failpoints"]
