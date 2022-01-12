@@ -140,3 +140,17 @@ steps:
       queue: t3a-small
 STEPS
 }
+
+resource "buildkite_pipeline" "readyset-benchmarks" {
+  name           = "readyset-benchmarks"
+  default_branch = "refs/heads/main"
+  repository     = local.repository_url
+
+  steps = <<STEPS
+steps:
+  - command: "buildkite-agent pipeline upload .buildkite/pipeline.benchmarks.yml"
+    label: ":pipeline:"
+    agents:
+      queue: t3a-small
+STEPS
+}

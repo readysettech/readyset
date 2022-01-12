@@ -140,7 +140,7 @@ module "buildkite_benchmark_queue" {
   source          = "../../../../../modules/buildkite-queue/regional"
   environment     = "build"
   buildkite_queue = "benchmarks"
-  instance_type   = "c5.2xlarge"
+  instance_type   = "c5.4xlarge"
 
   min_size = 0
   max_size = 5

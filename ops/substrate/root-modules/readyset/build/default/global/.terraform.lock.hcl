@@ -5,6 +5,7 @@ provider "registry.terraform.io/buildkite/buildkite" {
   version     = "0.5.0"
   constraints = "0.5.0"
   hashes = [
+    "h1:0+KcHcoBr7zPr3QWMB2WhHFeFgWEZ5A0gYHut7Yi3es=",
     "h1:I3U6Smix6A1iMp/r3zv9veQA9+kM7tTp4P1PFZeoGUg=",
     "zh:12bcddfec2f92afb67f515f21434b3d548580ba16c3e0b5170e17be20fd2ef2b",
     "zh:238a2848ea81f356352ba89df2d4311df6468180ca8c3a5020dae730c05c19b9",
@@ -46,6 +47,7 @@ provider "registry.terraform.io/hashicorp/aws" {
   version     = "3.60.0"
   constraints = ">= 3.45.0, >= 3.49.0"
   hashes = [
+    "h1:ngyTMQ2Zd+4GGkD3Ekrdnu97F1JzkK3SalbcazAVtlQ=",
     "h1:vwRjnpZOFwDlbFb2WX10JM2zNEEVyRLc8cBwkxCXlAE=",
     "zh:01323eedb8f006c8f9fffdfc23b449625b1446c1e43b8454e4a40a7461193661",
     "zh:03513ffdae205832be480b30d332b47a573e48623390e8f9f833141c8ceccb6a",
