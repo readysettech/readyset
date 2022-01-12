@@ -387,7 +387,7 @@ impl Installer {
             )
             .with_non_modifiable_parameter(
                 "ReadySetAdapterSecurityGroupID",
-                &supplemental_stack_outputs["ReadySetServerSecurityGroupID"],
+                &supplemental_stack_outputs["ReadySetAdapterSecurityGroupID"],
             )
             .with_non_modifiable_parameter(
                 "ReadySetMonitoringSecurityGroupID",
