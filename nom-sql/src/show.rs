@@ -16,6 +16,7 @@ pub enum ShowStatement {
     Tables(Tables),
     CachedQueries,
     ProxiedQueries,
+    ReadySetStatus,
 }
 
 impl fmt::Display for ShowStatement {
@@ -26,6 +27,7 @@ impl fmt::Display for ShowStatement {
             Self::Tables(tables) => write!(f, "{}", tables),
             Self::CachedQueries => write!(f, "CACHED QUERIES"),
             Self::ProxiedQueries => write!(f, "PROXIED QUERIES"),
+            Self::ReadySetStatus => write!(f, "READYSET STATUS"),
         }
     }
 }
@@ -43,6 +45,10 @@ pub fn show(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], ShowStatement>
             map(
                 tuple((tag_no_case("proxied"), multispace1, tag_no_case("queries"))),
                 |_| ShowStatement::ProxiedQueries,
+            ),
+            map(
+                tuple((tag_no_case("readyset"), multispace1, tag_no_case("status"))),
+                |_| ShowStatement::ReadySetStatus,
             ),
             map(show_tables(dialect), ShowStatement::Tables),
             map(tag_no_case("events"), |_| ShowStatement::Events),
@@ -224,5 +230,15 @@ mod tests {
         let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
         assert_eq!(res1, ShowStatement::ProxiedQueries);
         assert_eq!(res2, ShowStatement::ProxiedQueries);
+    }
+
+    #[test]
+    fn show_replication_status() {
+        let qstring1 = "SHOW READYSET STATUS";
+        let res1 = show(Dialect::MySQL)(qstring1.as_bytes()).unwrap().1;
+        let qstring2 = "SHOW\tREADYSET\tSTATUS";
+        let res2 = show(Dialect::MySQL)(qstring2.as_bytes()).unwrap().1;
+        assert_eq!(res1, ShowStatement::ReadySetStatus);
+        assert_eq!(res2, ShowStatement::ReadySetStatus);
     }
 }
