@@ -1790,7 +1790,7 @@ impl SqlToMirConverter {
                         // Aggregates don't currently work with range queries (since we don't
                         // re-aggregate at the reader), so check here and return an error if the
                         // query has both aggregates and range params
-                        if dbg!(has_aggregates) && *op != BinaryOperator::Equal {
+                        if has_aggregates && *op != BinaryOperator::Equal {
                             unsupported!(
                                 "Aggregates are not currently supported with non-equal parameters"
                             )
