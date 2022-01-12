@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use async_trait::async_trait;
+use noria_client::backend::noria_connector::MetaVariable;
 use std::ops::{Deref, DerefMut};
 use tokio::io::{self, AsyncWrite};
 use tracing::{error, trace};
@@ -113,6 +114,35 @@ async fn write_query_results<W: AsyncWrite + Unpin>(
                 .await
         }
     }
+}
+
+async fn write_meta_variables<W: AsyncWrite + Unpin>(
+    vars: Vec<MetaVariable>,
+    results: QueryResultWriter<'_, W>,
+) -> io::Result<()> {
+    // Assign column schema to match MySQL
+    // [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html)
+    let cols = vec![
+        Column {
+            table: "".to_owned(),
+            column: "Variable_name".to_string(),
+            coltype: ColumnType::MYSQL_TYPE_STRING,
+            colflags: ColumnFlags::empty(),
+        },
+        Column {
+            table: "".to_owned(),
+            column: "Value".to_string(),
+            coltype: ColumnType::MYSQL_TYPE_STRING,
+            colflags: ColumnFlags::empty(),
+        },
+    ];
+    let mut writer = results.start(&cols).await?;
+    for v in vars {
+        writer.write_col(v.name)?;
+        writer.write_col(v.value)?;
+        writer.end_row()?;
+    }
+    writer.finish().await
 }
 
 pub struct Backend {
@@ -366,6 +396,9 @@ where
                 writer.end_row()?;
                 Ok(writer.finish().await?)
             }
+            Ok(QueryResult::Noria(noria_connector::QueryResult::MetaVariables(vars))) => {
+                write_meta_variables(vars, results).await
+            }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
@@ -545,6 +578,9 @@ where
                 writer.write_col(value)?;
                 writer.end_row()?;
                 Ok(writer.finish().await?)
+            }
+            Ok(QueryResult::Noria(noria_connector::QueryResult::MetaVariables(vars))) => {
+                write_meta_variables(vars, results).await
             }
             Ok(QueryResult::Upstream(upstream::QueryResult::WriteResult {
                 num_rows_affected,

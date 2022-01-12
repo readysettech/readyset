@@ -128,6 +128,52 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     resultset,
                 })
             }
+            Noria(NoriaResult::MetaVariables(vars)) => {
+                let select_schema = SelectSchema(noria_client::backend::SelectSchema {
+                    use_bogo: false,
+                    schema: Cow::Owned(vec![
+                        ColumnSchema {
+                            spec: ColumnSpecification::new(
+                                nom_sql::Column {
+                                    name: "name".to_string(),
+                                    table: None,
+                                    function: None,
+                                },
+                                SqlType::Text,
+                            ),
+                            base: None,
+                        },
+                        ColumnSchema {
+                            spec: ColumnSpecification::new(
+                                nom_sql::Column {
+                                    name: "value".to_string(),
+                                    table: None,
+                                    function: None,
+                                },
+                                SqlType::Text,
+                            ),
+                            base: None,
+                        },
+                    ]),
+                    columns: Cow::Owned(vec!["name".to_owned(), "value".to_owned()]),
+                });
+                let mut rows: Vec<Vec<noria_data::DataType>> = Vec::new();
+                for v in vars {
+                    rows.push(vec![v.name.into(), v.value.into()]);
+                }
+
+                let resultset = Resultset::try_new(
+                    vec![Results::new(
+                        rows,
+                        Arc::new(["name".to_owned(), "value".to_owned()]),
+                    )],
+                    &select_schema,
+                )?;
+                Ok(Select {
+                    schema: select_schema.try_into()?,
+                    resultset,
+                })
+            }
             Upstream(upstream::QueryResult::Read { data: rows }) => {
                 let schema = match rows.first() {
                     None => vec![],
