@@ -3,6 +3,7 @@ use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
 use crate::replication::ReplicationOffsets;
+use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
 use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
@@ -656,6 +657,11 @@ impl ControllerHandle {
     /// Return whether the leader is ready or not.
     pub fn leader_ready(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
         self.rpc("leader_ready", ())
+    }
+
+    /// Returns the ReadySetStatus struct returned by the leader.
+    pub fn status(&mut self) -> impl Future<Output = ReadySetResult<ReadySetStatus>> + '_ {
+        self.rpc("status", ())
     }
 
     #[cfg(feature = "failure_injection")]

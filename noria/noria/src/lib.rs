@@ -211,6 +211,7 @@ use tokio_tower::multiplex;
 pub mod consistency;
 mod controller;
 pub mod metrics;
+pub mod status;
 mod table;
 pub mod util;
 mod view;
