@@ -241,13 +241,90 @@ impl<'a> QueryResult<'a> {
     }
 }
 
+#[derive(Clone)]
+pub struct ViewCache {
+    /// Global cache of view endpoints and prepared statements.
+    global: Arc<RwLock<HashMap<SelectStatement, String>>>,
+    /// Thread-local version of global cache (consulted first).
+    local: HashMap<SelectStatement, String>,
+}
+
+impl ViewCache {
+    /// Construct a new ViewCache with a passed in global view cache.
+    pub fn new(global_cache: Arc<RwLock<HashMap<SelectStatement, String>>>) -> ViewCache {
+        ViewCache {
+            global: global_cache,
+            local: HashMap::new(),
+        }
+    }
+
+    /// Registers a statement with the provided name into both the local and global view caches.
+    pub fn register_statement(&mut self, name: &str, statement: &nom_sql::SelectStatement) {
+        self.local
+            .entry(statement.clone())
+            .or_insert_with(|| name.to_string());
+        tokio::task::block_in_place(|| {
+            self.global
+                .write()
+                .unwrap()
+                .entry(statement.clone())
+                .or_insert_with(|| name.to_string());
+        });
+    }
+
+    /// Retrieves the name for the provided statement if it's in the cache. We first check local
+    /// cache, and if it's not there we check global cache. If it's in global but not local, we
+    /// backfill local cache before returning the result.
+    pub fn statement_name(&mut self, statement: &nom_sql::SelectStatement) -> Option<String> {
+        let maybe_name = if let Some(name) = self.local.get(statement) {
+            return Some(name.to_string());
+        } else {
+            // Didn't find it in local, so let's check global.
+            let gc = tokio::task::block_in_place(|| self.global.read().unwrap());
+            gc.get(statement).cloned()
+        };
+
+        maybe_name.map(|n| {
+            // Backfill into local before we return.
+            self.local.insert(statement.clone(), n.clone());
+            n
+        })
+    }
+
+    /// Removes the statement with the given name from both the global and local caches.
+    pub fn remove_statement(&mut self, name: &str) {
+        self.local.retain(|_, v| v != name);
+        tokio::task::block_in_place(|| {
+            self.global.write().unwrap().retain(|_, v| v != name);
+        });
+    }
+
+    /// Returns the select statement based on a provided name if it exists in either the local or
+    /// global caches.
+    pub fn select_statement_from_name(&self, name: &str) -> Option<SelectStatement> {
+        self.local
+            .iter()
+            .find(|(_, n)| &n[..] == name)
+            .map(|(v, _)| v.clone())
+            .or_else(|| {
+                tokio::task::block_in_place(|| {
+                    self.global
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .find(|(_, n)| &n[..] == name)
+                        .map(|(v, _)| v.clone())
+                })
+            })
+    }
+}
+
 pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
-    /// global cache of view endpoints and prepared statements
-    cached: Arc<RwLock<HashMap<SelectStatement, String>>>,
-    /// thread-local version of `cached` (consulted first)
-    tl_cached: HashMap<SelectStatement, String>,
+    /// Global and thread-local cache of view endpoints and prepared statements.
+    view_cache: ViewCache,
+
     prepared_statement_cache: HashMap<StatementID, PreparedStatement>,
     /// The region to pass to noria for replica selection.
     region: Option<String>,
@@ -314,8 +391,7 @@ impl Clone for NoriaConnector {
         Self {
             inner: self.inner.clone(),
             auto_increments: self.auto_increments.clone(),
-            cached: self.cached.clone(),
-            tl_cached: self.tl_cached.clone(),
+            view_cache: self.view_cache.clone(),
             prepared_statement_cache: self.prepared_statement_cache.clone(),
             region: self.region.clone(),
             failed_views: self.failed_views.clone(),
@@ -340,8 +416,7 @@ impl NoriaConnector {
                 inner: backend.ok(),
             },
             auto_increments,
-            cached: query_cache,
-            tl_cached: HashMap::new(),
+            view_cache: ViewCache::new(query_cache),
             prepared_statement_cache: HashMap::new(),
             region,
             failed_views: HashSet::new(),
@@ -806,16 +881,7 @@ impl NoriaConnector {
         // If the query is already in there with a different name, we don't need to make a new name
         // for it, as *lookups* only need one of the names for the query, and when we drop it we'll
         // be hitting noria anyway
-        self.tl_cached
-            .entry(statement.clone())
-            .or_insert_with(|| name.clone().into_owned());
-        tokio::task::block_in_place(|| {
-            self.cached
-                .write()
-                .unwrap()
-                .entry(statement.clone())
-                .or_insert_with(|| name.clone().into_owned());
-        });
+        self.view_cache.register_statement(name.as_ref(), statement);
 
         Ok(())
     }
@@ -826,58 +892,42 @@ impl NoriaConnector {
         prepared: bool,
         create_if_not_exist: bool,
     ) -> ReadySetResult<String> {
-        let qname = match self.tl_cached.get(q) {
+        match self.view_cache.statement_name(q) {
             None => {
-                // check global cache
-                let qname_opt = {
-                    let gc = tokio::task::block_in_place(|| self.cached.read().unwrap());
-                    gc.get(q).cloned()
-                };
-                let qname = match qname_opt {
-                    Some(qname) => qname,
-                    None => {
-                        let qname = generate_query_name(q);
+                let qname = generate_query_name(q);
 
-                        // add the query to Noria
-                        if create_if_not_exist {
-                            if prepared {
-                                info!(query = %q, name = %qname, "adding parameterized query");
-                            } else {
-                                info!(query = %q, name = %qname, "adding ad-hoc query");
-                            }
-
-                            if let Err(e) = noria_await!(
-                                self.inner.get_mut().await?,
-                                self.inner
-                                    .get_mut()
-                                    .await?
-                                    .noria
-                                    .extend_recipe(&format!("QUERY {}: {};", qname, q))
-                            ) {
-                                error!(error = %e, "add query failed");
-                                return Err(e);
-                            }
-                        } else if let Err(e) = noria_await!(
-                            self.inner.get_mut().await?,
-                            self.inner.get_mut().await?.noria.view(&qname)
-                        ) {
-                            error!(error = %e, "getting view from noria failed");
-                            return Err(e);
-                        }
-
-                        let mut gc = tokio::task::block_in_place(|| self.cached.write().unwrap());
-                        gc.insert(q.clone(), qname.clone());
-                        qname
+                // add the query to Noria
+                if create_if_not_exist {
+                    if prepared {
+                        info!(query = %q, name = %qname, "adding parameterized query");
+                    } else {
+                        info!(query = %q, name = %qname, "adding ad-hoc query");
                     }
-                };
 
-                self.tl_cached.insert(q.clone(), qname.clone());
+                    if let Err(e) = noria_await!(
+                        self.inner.get_mut().await?,
+                        self.inner
+                            .get_mut()
+                            .await?
+                            .noria
+                            .extend_recipe(&format!("QUERY {}: {};", qname, q))
+                    ) {
+                        error!(error = %e, "add query failed");
+                        return Err(e);
+                    }
+                } else if let Err(e) = noria_await!(
+                    self.inner.get_mut().await?,
+                    self.inner.get_mut().await?.noria.view(&qname)
+                ) {
+                    error!(error = %e, "getting view from noria failed");
+                    return Err(e);
+                }
+                self.view_cache.register_statement(&qname, q);
 
-                qname
+                Ok(qname)
             }
-            Some(qname) => qname.to_owned(),
-        };
-        Ok(qname)
+            Some(name) => Ok(name),
+        }
     }
 
     /// Make a request to Noria to drop the query with the given name, and remove it from all
@@ -887,30 +937,12 @@ impl NoriaConnector {
             self.inner.get_mut().await?,
             self.inner.get_mut().await?.noria.remove_query(name)
         )?;
-        // dropping queries is rare and we don't have a huge number of queries usually, so fine to
-        // just linear scan
-        self.tl_cached.retain(|_, v| v != name);
-        tokio::task::block_in_place(|| {
-            self.cached.write().unwrap().retain(|_, v| v != name);
-        });
+        self.view_cache.remove_statement(name);
         Ok(())
     }
 
     pub fn select_statement_from_name(&self, name: &str) -> Option<SelectStatement> {
-        self.tl_cached
-            .iter()
-            .find(|(_, n)| &n[..] == name)
-            .map(|(v, _)| v.clone())
-            .or_else(|| {
-                tokio::task::block_in_place(|| {
-                    self.cached
-                        .read()
-                        .unwrap()
-                        .iter()
-                        .find(|(_, n)| &n[..] == name)
-                        .map(|(v, _)| v.clone())
-                })
-            })
+        self.view_cache.select_statement_from_name(name)
     }
 
     async fn do_insert(
@@ -1481,4 +1513,33 @@ async fn do_read<'a>(
             columns: Cow::Borrowed(getter.columns()),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_view_cache() {
+        let global = Arc::new(RwLock::new(HashMap::new()));
+        let mut view_cache = ViewCache::new(global);
+
+        let name = "test_statement_name";
+        let statement_str = "SELECT a_col FROM t1";
+        let statement = if let SqlQuery::Select(s) =
+            nom_sql::parse_query(nom_sql::Dialect::MySQL, statement_str).unwrap()
+        {
+            s
+        } else {
+            unreachable!();
+        };
+
+        view_cache.register_statement(name, &statement);
+        let retrieved_statement = view_cache.select_statement_from_name(name);
+        assert_eq!(Some(statement), retrieved_statement);
+
+        view_cache.remove_statement(name);
+        let retrieved_statement = view_cache.select_statement_from_name(name);
+        assert_eq!(None, retrieved_statement);
+    }
 }
