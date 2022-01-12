@@ -2,6 +2,8 @@ steps:
   - label: ':docker: Build build image'
     key: build-image
     command: .buildkite/build-image.sh build/Dockerfile readyset-build .
+    env:
+      SKIP_IF_UNCHANGED: rust-toolchain
     plugins:
       ecr#v2.5.0:
         login: true
@@ -10,6 +12,8 @@ steps:
   - label: ':docker: Build builder base image'
     key: build-builder-base-image
     command: .buildkite/build-image.sh build/Dockerfile.readyset-rust-ubuntu2004-builder-base readyset-rust-ubuntu2004-builder-base .
+    env:
+      SKIP_IF_UNCHANGED: rust-toolchain
     plugins:
       ecr#v2.5.0:
         login: true
@@ -17,9 +21,9 @@ steps:
 
   - label: ':docker: Build readyset-installer build image'
     key: installer-image
-    depends_on:
-      - build-builder-base-image
     command: .buildkite/build-image-with-builder.sh build/Dockerfile.readyset-installer readyset-installer .
+    env:
+      SKIP_IF_UNCHANGED: rust-toolchain
     plugins:
       ecr#v2.5.0:
         login: true
@@ -344,6 +348,8 @@ steps:
     commands:
       - cd ops/build
       - ../../.buildkite/build-image.sh ./Dockerfile readyset-ops .
+    env:
+      SKIP_IF_UNCHANGED: 'ops/build/Dockerfile'
     plugins:
       ecr#v2.5.0:
         login: true
