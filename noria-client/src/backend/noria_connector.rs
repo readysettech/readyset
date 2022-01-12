@@ -764,6 +764,21 @@ impl NoriaConnector {
         trace!("table::created");
         Ok(QueryResult::Empty)
     }
+
+    pub(crate) async fn readyset_status(&mut self) -> ReadySetResult<QueryResult<'_>> {
+        let status = noria_await!(
+            self.inner.get_mut().await?,
+            self.inner.get_mut().await?.noria.status()
+        )?;
+
+        // Converts from ReadySetStatus -> Vec<(String, String)> -> QueryResult
+        Ok(QueryResult::MetaVariables(
+            <Vec<(String, String)>>::from(status)
+                .into_iter()
+                .map(|(name, value)| MetaVariable { name, value })
+                .collect::<Vec<MetaVariable>>(),
+        ))
+    }
 }
 
 fn generate_query_name(statement: &nom_sql::SelectStatement) -> String {
