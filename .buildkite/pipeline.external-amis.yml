@@ -121,11 +121,9 @@ steps:
     key: packer-cfn-template-copy
     depends_on: packer-cfn-template-lint
     commands:
-      - cd ops/cfn
-      - mkdir ./rendered_templates
-      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt ./rendered_templates
-      - cd ./rendered_templates
-      - aws s3 cp . s3://readysettech-cfn-internal-us-east-2/prod-${BUILDKITE_COMMIT}/readyset/templates/--exclude "*" --include "*.yaml" --recursive
+      - export S3_BUCKET=readysettech-cfn-public-us-east-2
+      - export S3_PREFIX="$(buildkite-agent meta-data get release-name)"
+      - .buildkite/upload-cfn-templates-artifacts-to-s3.sh
     plugins:
       - docker#v3.9.0:
           image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
@@ -136,6 +134,6 @@ steps:
           retries: 3
       - cultureamp/aws-assume-role#v0.2.0
     env:
-      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/InternalArtifactsWrite
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/DeployCustomerArtifactsWrite
     agents:
       queue: ops

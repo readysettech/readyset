@@ -1,5 +1,5 @@
 // This defines a role that is the only role allowed to update artifacts for the
-// custoemrs in an automated way. This role should be used only by automation
+// customers in an automated way. This role should be used only by automation
 // which has logging on who started the automation.
 data "aws_iam_policy_document" "deploy_customer_artifacts_write_assume_role" {
   statement {
@@ -7,7 +7,7 @@ data "aws_iam_policy_document" "deploy_customer_artifacts_write_assume_role" {
 
     principals {
       type        = "AWS"
-      identifiers = ["arn:aws:iam::305232526136:role/buildkite-Role"]
+      identifiers = ["arn:aws:iam::305232526136:role/buildkite-ops-Role"]
     }
   }
 }
@@ -22,7 +22,9 @@ data "aws_iam_policy_document" "deploy_customer_artifacts_write_s3" {
     ]
     resources = [
       "arn:aws:s3:::readysettech-customer-artifacts-us-east-2",
-      "arn:aws:s3:::readysettech-customer-artifacts-us-east-2/*"
+      "arn:aws:s3:::readysettech-customer-artifacts-us-east-2/*",
+      "arn:aws:s3:::readysettech-cfn-public-us-east-2",
+      "arn:aws:s3:::readysettech-cfn-public-us-east-2/*"
     ]
   }
 }

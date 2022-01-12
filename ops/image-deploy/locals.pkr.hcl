@@ -20,6 +20,9 @@ locals {
   customer_account_ids = [
     "724964194832", # IRL
     "135195219264", # Kevin Kwok Demo
+    "121756176268", # Alex Graham Demo
+    "615242630409", # Richard Crowley Demo
+    "286292902993", # Joshua Skrypek Demo
   ]
 
   ami_users = concat(local.internal_account_ids, local.customer_account_ids)
