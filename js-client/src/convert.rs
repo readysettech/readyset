@@ -213,6 +213,22 @@ where
         QueryResult::Noria(NoriaResult::Meta { label, value }) => {
             utils::set_str_field(cx, &js_query_result, &label, &value)?;
         }
+        QueryResult::Noria(NoriaResult::MetaVariables(vars)) => {
+            let js_data = cx.empty_array();
+            for (row_num, row) in vars.into_iter().enumerate() {
+                let js_current_row = cx.empty_object();
+                let datum = convert_datum(cx, &row.name.into())?;
+                utils::set_jsval_field(cx, &js_current_row, "name", datum)?;
+                js_data.set(cx, row_num as u32, js_current_row)?;
+
+                let js_current_row = cx.empty_object();
+                let datum = convert_datum(cx, &row.value.into())?;
+                utils::set_jsval_field(cx, &js_current_row, "value", datum)?;
+                js_data.set(cx, row_num as u32, js_current_row)?;
+            }
+
+            utils::set_jsval_field(cx, &js_query_result, "data", js_data.upcast::<JsValue>())?;
+        }
         QueryResult::Noria(NoriaResult::Update {
             num_rows_updated,
             last_inserted_id,

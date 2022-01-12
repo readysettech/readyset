@@ -168,6 +168,15 @@ pub enum PrepareResult {
     },
 }
 
+/// A single row in the variable table associated with [`QueryResult::MetaVariables`].
+#[derive(Debug)]
+pub struct MetaVariable {
+    /// The variable name.
+    pub name: String,
+    /// The value associated with the variable.
+    pub value: String,
+}
+
 #[derive(Debug)]
 pub enum QueryResult<'a> {
     Empty,
@@ -193,6 +202,8 @@ pub enum QueryResult<'a> {
         /// The actual value
         value: String,
     },
+    /// A table of variables returned as a response to a SHOW READYSET STATUS query.
+    MetaVariables(Vec<MetaVariable>),
 }
 
 impl<'a> QueryResult<'a> {
@@ -225,6 +236,7 @@ impl<'a> QueryResult<'a> {
             },
             QueryResult::Delete { num_rows_deleted } => QueryResult::Delete { num_rows_deleted },
             QueryResult::Meta { label, value } => QueryResult::Meta { label, value },
+            QueryResult::MetaVariables(vec) => QueryResult::MetaVariables(vec),
         }
     }
 }
