@@ -183,11 +183,16 @@ impl DataflowState {
     pub(super) fn inputs(&self) -> BTreeMap<String, NodeIndex> {
         self.ingredients
             .neighbors_directed(self.source, petgraph::EdgeDirection::Outgoing)
-            .map(|n| {
+            .filter_map(|n| {
                 #[allow(clippy::indexing_slicing)] // just came from self.ingredients
                 let base = &self.ingredients[n];
-                assert!(base.is_base());
-                (base.name().to_owned(), n)
+
+                if base.is_dropped() {
+                    None
+                } else {
+                    assert!(base.is_base());
+                    Some((base.name().to_owned(), n))
+                }
             })
             .collect()
     }
