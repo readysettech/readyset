@@ -1,4 +1,5 @@
 use crate::controller::sql::query_utils::LogicalOp;
+use common::IndexType;
 use nom_sql::analysis::ReferredColumns;
 use nom_sql::{
     BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
@@ -16,6 +17,7 @@ use std::mem;
 use std::string::String;
 use std::vec::Vec;
 
+use super::mir;
 use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -194,6 +196,17 @@ pub struct Pagination {
     pub offset: Option<Expression>,
 }
 
+/// Description of the lookup key for a view
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViewKey {
+    /// The list of key columns for the view, and for each column a description of how that column
+    /// maps back to a placeholder in the original query, if at all
+    pub columns: Vec<(mir::Column, Option<PlaceholderIdx>)>,
+
+    /// The selected index type for the view
+    pub index_type: IndexType,
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct QueryGraph {
     /// Relations mentioned in the query.
@@ -219,13 +232,11 @@ impl QueryGraph {
 
     /// Returns the set of columns on which this query is parameterized. They can come from
     /// multiple tables involved in the query.
-    pub fn parameters<'a>(&'a self) -> Vec<&'a Parameter> {
+    pub fn parameters(&self) -> Vec<&Parameter> {
         self.relations
             .values()
-            .fold(Vec::new(), |mut acc: Vec<&'a Parameter>, qgn| {
-                acc.extend(qgn.parameters.iter());
-                acc
-            })
+            .flat_map(|qgn| qgn.parameters.iter())
+            .collect()
     }
 
     pub fn exact_hash(&self) -> u64 {
@@ -234,6 +245,59 @@ impl QueryGraph {
         let mut s = DefaultHasher::new();
         self.hash(&mut s);
         s.finish()
+    }
+
+    /// Returns true if the query that this query graph represents has any aggregates
+    pub fn has_aggregates(&self) -> bool {
+        self.relations
+            .get("computed_columns")
+            .iter()
+            .any(|rel| !rel.columns.is_empty())
+    }
+
+    /// Construct a representation of the lookup key of a view for this query graph, based on the
+    /// parameters in this query.
+    ///
+    /// The passed config struct is used to conditionally forbid certain experimental query
+    /// operations, such as range queries, and can be removed once those are unconditionally allowed
+    pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
+        if self.parameters().is_empty() {
+            Ok(ViewKey {
+                columns: vec![(mir::Column::new(None, "bogokey"), None)],
+                index_type: IndexType::HashMap,
+            })
+        } else {
+            let has_aggregates = self.has_aggregates();
+            let mut index_type = None;
+            for param in self.parameters() {
+                if !config.allow_range_queries && !matches!(param.op, BinaryOperator::Equal) {
+                    unsupported!("Unsupported binary operator '{}'", param.op);
+                }
+
+                // Aggregates don't currently work with range queries (since we don't
+                // re-aggregate at the reader), so check here and return an error if the
+                // query has both aggregates and range params
+                if has_aggregates && param.op != BinaryOperator::Equal {
+                    unsupported!("Aggregates are not currently supported with non-equal parameters")
+                }
+
+                match IndexType::for_operator(param.op) {
+                    Some(it) if index_type.is_none() => index_type = Some(it),
+                    Some(it) if index_type == Some(it) => {}
+                    Some(_) => unsupported!("Conflicting binary operators in query"),
+                    None => unsupported!("Unsupported binary operator `{}`", param.op),
+                }
+            }
+
+            Ok(ViewKey {
+                columns: self
+                    .parameters()
+                    .into_iter()
+                    .map(|param| (mir::Column::from(param.col.clone()), param.placeholder_idx))
+                    .collect(),
+                index_type: index_type.expect("Checked self.parameters() isn't empty above"),
+            })
+        }
     }
 }
 

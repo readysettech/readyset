@@ -4,7 +4,8 @@ use dataflow::ops::union;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
 use mir::query::MirQuery;
-use mir::{Column, MirNodeRef};
+pub use mir::Column;
+use mir::MirNodeRef;
 use nom_sql::analysis::ReferredColumns;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -1716,62 +1717,24 @@ impl SqlToMirConverter {
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
-            let index = match qg.parameters()[..] {
-                _ if !has_leaf => {
-                    // If no leaf node is to be attached, the key_columns are unnecessary.
-                    None
-                }
+            let view_key = if has_leaf {
+                let view_key = qg.view_key(&self.config)?;
 
-                [] => {
-                    // If there are no parameters, use a dummy "bogokey" for the lookup key.
-                    // Ensure the "bogokey" is projected if that has not been done already.
-                    if !projected_columns.contains(&Column::new(None, "bogokey")) {
-                        projected_literals.push(("bogokey".into(), DataType::from(0i32)));
-                    }
-                    Some((
-                        vec![(Column::new(None, "bogokey"), None)],
-                        IndexType::HashMap,
-                    ))
-                }
-                _ => {
-                    let has_aggregates = st.contains_aggregate_select();
-                    let mut index_type = None;
-                    for param in qg.parameters() {
-                        if !self.config.allow_range_queries
-                            && !matches!(param.op, BinaryOperator::Equal)
-                        {
-                            unsupported!("Unsupported binary operator '{}'", param.op);
-                        }
-
-                        // Aggregates don't currently work with range queries (since we don't
-                        // re-aggregate at the reader), so check here and return an error if the
-                        // query has both aggregates and range params
-                        if has_aggregates && param.op != BinaryOperator::Equal {
-                            unsupported!(
-                                "Aggregates are not currently supported with non-equal parameters"
-                            )
-                        }
-
-                        match IndexType::for_operator(param.op) {
-                            Some(it) if index_type.is_none() => index_type = Some(it),
-                            Some(it) if index_type == Some(it) => {}
-                            Some(_) => unsupported!("Conflicting binary operators in query"),
-                            None => unsupported!("Unsupported binary operator `{}`", param.op),
-                        }
-
-                        let pc = Column::from(param.col.clone());
-                        if !projected_columns.contains(&pc) {
-                            projected_columns.push(pc);
+                if qg.parameters().is_empty()
+                    && !projected_columns.contains(&Column::new(None, "bogokey"))
+                {
+                    projected_literals.push(("bogokey".into(), DataType::from(0i32)));
+                } else {
+                    for (column, _) in &view_key.columns {
+                        if !projected_columns.contains(column) {
+                            projected_columns.push(column.clone())
                         }
                     }
-                    Some((
-                        qg.parameters()
-                            .into_iter()
-                            .map(|param| (Column::from(param.col.clone()), param.placeholder_idx))
-                            .collect(),
-                        index_type.expect("Checked qg.parameters() isn't empty above"),
-                    ))
                 }
+
+                Some(view_key)
+            } else {
+                None
             };
 
             if st.distinct {
@@ -1807,7 +1770,7 @@ impl SqlToMirConverter {
 
             nodes_added.push(leaf_project_node.clone());
 
-            if let Some((keys, index_type)) = index {
+            if let Some(view_key) = view_key {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
                 let columns = leaf_project_node
@@ -1827,8 +1790,8 @@ impl SqlToMirConverter {
                     columns,
                     MirNodeInner::Leaf {
                         node: leaf_project_node.clone(),
-                        keys,
-                        index_type,
+                        keys: view_key.columns,
+                        index_type: view_key.index_type,
                         order_by: st.order.as_ref().map(|order| {
                             order
                                 .columns
