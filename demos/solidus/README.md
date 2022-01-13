@@ -8,7 +8,7 @@ This directory contains a demo [solidus][] application, along with a
 ## Running the App
 
 After authenticating with ECR (TODO: link to how to do this), run the following
-command:
+command (in this directory):
 
 ``` shellsession
 $ docker-compose up -d solidus
