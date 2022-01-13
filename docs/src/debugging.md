@@ -39,6 +39,28 @@ source:
 - Call the [`graphviz`][graphviz-function] function directly inside of
   noria-server, and print the resulting string to stderr
 
+- Run `EXPLAIN GRAPHVIZ` via an adapter, either manually in a mysql or
+  postgresql shell or via a connection in an integration test, eg:
+
+  ```rust
+  # MySQL
+  eprintln!(
+      "{}",
+      conn.query_first::<(String,), _>("EXPLAIN GRAPHVIZ")
+          .unwrap()
+          .unwrap()
+          .0
+  );
+
+  # PostgreSQL
+  eprintln!(
+      "{}",
+      conn.query_one("EXPLAIN GRAPHVIZ", &[])
+          .unwrap()
+          .get::<_, String>(0)
+  );
+  ```
+
 All of these methods emit output in the [graphviz `dot` format][dot], and look
 like this (this is the source of the above graph):
 
