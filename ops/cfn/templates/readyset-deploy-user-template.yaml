@@ -66,20 +66,7 @@ Resources:
               - ec2:DeleteVpc
               - ec2:DeleteVpcEndpointServiceConfigurations
               - ec2:DeleteVpcEndpoints
-              - ec2:DescribeAccountAttributes
-              - ec2:DescribeAddresses
-              - ec2:DescribeAvailabilityZones
-              - ec2:DescribeDhcpOptions
-              - ec2:DescribeInstances
-              - ec2:DescribeInternetGateways
-              - ec2:DescribeKeyPairs
-              - ec2:DescribeNatGateways
-              - ec2:DescribeRouteTables
-              - ec2:DescribeSecurityGroups
-              - ec2:DescribeSubnets
-              - ec2:DescribeVpcEndpointServiceConfigurations
-              - ec2:DescribeVpcEndpoints
-              - ec2:DescribeVpcs
+              - ec2:Describe*
               - ec2:DetachInternetGateway
               - ec2:DisassociateRouteTable
               - ec2:ModifySubnetAttribute
@@ -106,6 +93,7 @@ Resources:
               - iam:CreateLoginProfile
               - iam:CreatePolicy
               - iam:CreateRole
+              - iam:CreateServiceLinkedRole
               - iam:CreateUser
               - iam:DeleteInstanceProfile
               - iam:DeleteLoginProfile
@@ -117,8 +105,10 @@ Resources:
               - iam:DetachUserPolicy
               - iam:GetPolicy
               - iam:GetRole
+              - iam:GetRolePolicy
               - iam:ListAccessKeys
               - iam:ListPolicyVersions
+              - iam:PassRole
               - iam:PutRolePolicy
               - iam:RemoveRoleFromInstanceProfile
               - logs:CreateLogGroup
@@ -187,5 +177,15 @@ Resources:
         - arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
         - arn:aws:iam::aws:policy/AutoScalingConsoleReadOnlyAccess
         - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+        - arn:aws:iam::aws:policy/IAMReadOnlyAccess
         - arn:aws:iam::aws:policy/IAMUserChangePassword
         - !Ref ReadySetDeployPolicy
+      Policies:
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ReadySetCloudFormationExecutionRole.Arn
+          PolicyName: ReadySetCloudFormationPassRole
