@@ -11,6 +11,7 @@ use nom_sql::CreateTableStatement;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 use std::str;
 use std::vec::Vec;
@@ -715,7 +716,7 @@ impl Recipe {
     }
 
     /// Gets the alias of the for the expression associated with each node in `nodes`.
-    pub(super) fn queries_for_nodes(&self, nodes: Vec<NodeIndex>) -> Vec<String> {
+    pub(super) fn queries_for_nodes(&self, nodes: HashSet<NodeIndex>) -> Vec<String> {
         nodes
             .iter()
             .flat_map(|ni| {

@@ -22,6 +22,7 @@ use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
 use reqwest::Url;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
@@ -551,7 +552,7 @@ impl Leader {
         let ds = writer.as_mut();
 
         // first, translate from the affected workers to affected data-flow nodes
-        let mut affected_nodes = Vec::new();
+        let mut affected_nodes = HashSet::new();
         for wi in failed {
             warn!(worker = ?wi, "handling failure of worker");
             affected_nodes.extend(ds.get_failed_nodes(&wi));
