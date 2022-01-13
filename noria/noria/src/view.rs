@@ -157,15 +157,14 @@ impl ViewSchema {
     }
 
     /// Return a vector specifiying the types of the columns for the requested indices
-    pub fn col_types(
-        &self,
-        indices: &[usize],
-        schema_type: SchemaType,
-    ) -> ReadySetResult<Vec<&SqlType>> {
+    pub fn col_types<I>(&self, indices: I, schema_type: SchemaType) -> ReadySetResult<Vec<&SqlType>>
+    where
+        I: IntoIterator<Item = usize>,
+    {
         let schema = self.schema(schema_type);
         indices
-            .iter()
-            .map(|i| schema.get(*i).map(|c| &c.spec.sql_type))
+            .into_iter()
+            .map(|i| schema.get(i).map(|c| &c.spec.sql_type))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err("Schema expects valid column indices"))
     }

@@ -27,7 +27,7 @@ pub(crate) struct ProcessedQueryParams {
 pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
-    number_placeholders(query);
+    number_placeholders(query)?;
     Ok(ProcessedQueryParams {
         rewritten_in_conditions,
         auto_parameters,
@@ -116,12 +116,6 @@ fn where_in_to_placeholders(
     *expr = Expression::BinaryOp {
         lhs: mem::replace(lhs, Box::new(Expression::Literal(Literal::Null))),
         op,
-        // NOTE: Replacing the right side with ItemPlaceholder::QuestionMark may result in the
-        // modified query containing placeholders of mixed types (i.e. with some placeholders
-        // of type QuestionMark while others are of type DollarNumber). This will work ok for
-        // now because all placeholder types are treated as equivalent by noria and
-        // noria-client. In addition, standardizing the placeholder type here may help reduce
-        // the impact of certain query reuse bugs.
         rhs: Box::new(Expression::Literal(Literal::Placeholder(
             ItemPlaceholder::QuestionMark,
         ))),
@@ -260,24 +254,48 @@ where
     ))
 }
 
-struct NumberPlaceholdersVisitor(u32);
+struct NumberPlaceholdersVisitor {
+    next_param_number: u32,
+    offset: u32,
+}
+
 impl<'ast> Visitor<'ast> for NumberPlaceholdersVisitor {
-    type Error = !;
+    type Error = ReadySetError;
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(item) = literal {
-            if matches!(item, ItemPlaceholder::QuestionMark) {
-                *item = ItemPlaceholder::DollarNumber(self.0);
-                self.0 += 1;
+            // client-provided queries aren't allowed to mix question-mark and dollar-number
+            // placeholders, but both autoparametrization and collapse-where-in create question mark
+            // placeholders, which in the intermediate state does end up with a query that has both
+            // placeholder styles - we need to make sure we number those question mark placeholders
+            // appropriately to not overlap with existing dollar-number placeholders.
+            match item {
+                ItemPlaceholder::QuestionMark => {
+                    // If we find a dollar-number placeholder, update our index to start numbering
+                    // parameters after that placeholder
+                    *item = ItemPlaceholder::DollarNumber(self.next_param_number);
+                    self.next_param_number += 1;
+                    self.offset += 1;
+                }
+                ItemPlaceholder::DollarNumber(n) => {
+                    *n += self.offset;
+                    self.next_param_number = *n + 1
+                }
+                ItemPlaceholder::ColonNumber(_) => {
+                    unsupported!("colon-number placeholders aren't supported")
+                }
             }
         }
         Ok(())
     }
 }
 
-pub fn number_placeholders(query: &mut SelectStatement) {
-    let mut visitor = NumberPlaceholdersVisitor(1);
-    #[allow(clippy::unwrap_used)] // error is !, which can never be returned
-    visitor.visit_select_statement(query).unwrap();
+pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
+    let mut visitor = NumberPlaceholdersVisitor {
+        next_param_number: 1,
+        offset: 0,
+    };
+    visitor.visit_select_statement(query)?;
+    Ok(())
 }
 
 struct AnonymizeLiteralsVisitor;
@@ -1048,6 +1066,21 @@ mod tests {
         }
 
         #[test]
+        fn number_autoparam_number() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT x, y FROM test WHERE x = $1 AND y = 2 AND z = $2",
+                vec![1.into(), 3.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT x, y FROM test WHERE x = $1 AND y = $2 AND z = $3")
+            );
+
+            assert_eq!(keys, vec![vec![1.into(), 2.into(), 3.into()]]);
+        }
+
+        #[test]
         fn numbered_where_in_with_auto_params() {
             let (keys, query) = process_and_make_keys(
                 "SELECT * FROM users WHERE x = ? AND y in (?, ?, ?) AND z = 4 AND w = 5 AND q = ?",
@@ -1090,6 +1123,26 @@ mod tests {
                     vec![1.into(), 2.into(), 1.into()],
                     vec![1.into(), 3.into(), 1.into()],
                 ]
+            );
+        }
+
+        #[test]
+        fn numbered_where_in_with_equal() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id IN ($2, $3)",
+                vec!["Bob".into(), 1.into(), 2.into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement(
+                    "SELECT Cats.name FROM Cats WHERE Cats.name = $1 AND Cats.id = $2"
+                )
+            );
+
+            assert_eq!(
+                keys,
+                vec![vec!["Bob".into(), 1.into()], vec!["Bob".into(), 2.into()]]
             );
         }
     }
