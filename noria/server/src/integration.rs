@@ -23,11 +23,11 @@ use futures::StreamExt;
 use itertools::Itertools;
 use nom_sql::OrderType;
 use noria::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
-use noria::Modification;
 use noria::{
     consistency::Timestamp, internal::LocalNodeIndex, KeyComparison, SchemaType, ViewQuery,
     ViewQueryFilter, ViewQueryOperator, ViewRequest,
 };
+use noria::{Modification, ViewPlaceholder};
 use noria_data::DataType;
 
 use chrono::NaiveDate;
@@ -3691,23 +3691,17 @@ async fn between() {
     assert_eq!(rows, expected);
 }
 
-// TODO(grfn): This doesn't work because of some weird stuff we don't understand
-// with multi-param queries - should look into thihs further in the future
-#[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn between_parametrized() {
-    let mut g = start_simple("between_query").await;
+    let mut g = start_simple("between_parametrized").await;
+
     g.install_recipe("CREATE TABLE things (bigness INT);")
         .await
         .unwrap();
 
-    g.extend_recipe(
-        "
-      QUERY one_param: SELECT bigness FROM things WHERE bigness BETWEEN 3 and ?;
-      QUERY two_param: SELECT bigness FROM things WHERE bigness BETWEEN ? and ?; ",
-    )
-    .await
-    .unwrap();
+    g.extend_recipe("QUERY q: SELECT bigness FROM things WHERE bigness BETWEEN $1 and $2;")
+        .await
+        .unwrap();
 
     let mut things = g.table("things").await.unwrap();
 
@@ -3715,26 +3709,17 @@ async fn between_parametrized() {
         things.insert(vec![i.into()]).await.unwrap();
     }
 
-    let mut one_param_query = g.view("one_param").await.unwrap();
-    let mut two_param_query = g.view("two_param").await.unwrap();
+    eprintln!("{}", g.graphviz().await.unwrap());
 
-    sleep().await;
+    let mut q = g.view("q").await.unwrap();
+    assert_eq!(q.key_map(), &[(ViewPlaceholder::Between(1, 2), 0)]);
 
-    let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
-    let res = one_param_query
-        .multi_lookup(vec![vec1![DataType::from(5)].into()], true)
-        .await
-        .unwrap();
-    let rows: Vec<Vec<Vec<DataType>>> = res.into_iter().map(|v| v.into()).collect();
-    assert_eq!(rows, expected);
-
-    let expected: Vec<Vec<Vec<DataType>>> = (3..6).map(|i| vec![vec![DataType::from(i)]]).collect();
-    let res = two_param_query
+    let expected: Vec<Vec<Vec<DataType>>> = vec![(3..6).map(|i| vec![DataType::from(i)]).collect()];
+    let res = q
         .multi_lookup(
-            vec![KeyComparison::Equal(vec1![
-                DataType::from(3),
-                DataType::from(5),
-            ])],
+            vec![KeyComparison::from_range(
+                &(vec1![DataType::from(3)]..=vec1![DataType::from(5)]),
+            )],
             true,
         )
         .await

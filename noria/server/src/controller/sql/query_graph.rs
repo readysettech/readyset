@@ -1,15 +1,3 @@
-use crate::controller::sql::query_utils::LogicalOp;
-use common::IndexType;
-use nom_sql::analysis::ReferredColumns;
-use nom_sql::{
-    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
-    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
-};
-use nom_sql::{OrderType, SelectStatement};
-use noria::PlaceholderIdx;
-use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
-
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -18,8 +6,20 @@ use std::mem;
 use std::string::String;
 use std::vec::Vec;
 
+use common::IndexType;
+use nom_sql::analysis::ReferredColumns;
+use nom_sql::{
+    BinaryOperator, Column, Expression, FieldDefinitionExpression, InValue, ItemPlaceholder,
+    JoinConstraint, JoinOperator, JoinRightSide, Literal, Table, UnaryOperator,
+};
+use nom_sql::{OrderType, SelectStatement};
+use noria::{PlaceholderIdx, ViewPlaceholder};
+use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
+use serde::{Deserialize, Serialize};
+
 use super::mir;
 use super::query_utils::{is_aggregate, is_predicate, map_aggregates};
+use crate::controller::sql::query_utils::LogicalOp;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct LiteralColumn {
@@ -202,7 +202,7 @@ pub struct Pagination {
 pub struct ViewKey {
     /// The list of key columns for the view, and for each column a description of how that column
     /// maps back to a placeholder in the original query, if at all
-    pub columns: Vec<(mir::Column, Option<PlaceholderIdx>)>,
+    pub columns: Vec<(mir::Column, ViewPlaceholder)>,
 
     /// The selected index type for the view
     pub index_type: IndexType,
@@ -262,13 +262,21 @@ impl QueryGraph {
     pub(crate) fn view_key(&self) -> ReadySetResult<ViewKey> {
         if self.parameters().is_empty() {
             Ok(ViewKey {
-                columns: vec![(mir::Column::new(None, "bogokey"), None)],
+                columns: vec![(
+                    mir::Column::new(None, "bogokey"),
+                    ViewPlaceholder::Generated,
+                )],
                 index_type: IndexType::HashMap,
             })
         } else {
             let has_aggregates = self.has_aggregates();
+            let mut parameters = self.parameters();
+            parameters.sort_by_key(|param| &param.col);
+
             let mut index_type = None;
-            for param in self.parameters() {
+            let mut columns: Vec<(mir::Column, ViewPlaceholder)> = vec![];
+            let mut last_op = None;
+            for param in parameters {
                 // Aggregates don't currently work with range queries (since we don't
                 // re-aggregate at the reader), so check here and return an error if the
                 // query has both aggregates and range params
@@ -282,14 +290,47 @@ impl QueryGraph {
                     Some(_) => unsupported!("Conflicting binary operators in query"),
                     None => unsupported!("Unsupported binary operator `{}`", param.op),
                 }
+
+                if let (Some((last_col, placeholder)), Some(last_op)) =
+                    (columns.last_mut(), last_op)
+                {
+                    if *last_col == param.col {
+                        match (last_op, param.op) {
+                            (BinaryOperator::GreaterOrEqual, BinaryOperator::LessOrEqual) => {
+                                match (*placeholder, param.placeholder_idx) {
+                                    (ViewPlaceholder::OneToOne(lower_idx), Some(upper_idx)) => {
+                                        *placeholder =
+                                            ViewPlaceholder::Between(lower_idx, upper_idx);
+                                        continue;
+                                    }
+                                    _ => unsupported!("Conflicting binary operators in query"),
+                                }
+                            }
+                            (BinaryOperator::LessOrEqual, BinaryOperator::GreaterOrEqual) => {
+                                match (param.placeholder_idx, *placeholder) {
+                                    (Some(lower_idx), ViewPlaceholder::OneToOne(upper_idx)) => {
+                                        *placeholder =
+                                            ViewPlaceholder::Between(lower_idx, upper_idx);
+                                        continue;
+                                    }
+                                    _ => unsupported!("Conflicting binary operators in query"),
+                                }
+                            }
+                            _ => unsupported!("Conflicting binary operators in query"),
+                        }
+                    }
+                }
+
+                columns.push((
+                    mir::Column::from(param.col.clone()),
+                    param.placeholder_idx.into(),
+                ));
+
+                last_op = Some(param.op);
             }
 
             Ok(ViewKey {
-                columns: self
-                    .parameters()
-                    .into_iter()
-                    .map(|param| (mir::Column::from(param.col.clone()), param.placeholder_idx))
-                    .collect(),
+                columns,
                 index_type: index_type.expect("Checked self.parameters() isn't empty above"),
             })
         }
@@ -1062,4 +1103,119 @@ pub fn to_query_graph(st: &SelectStatement) -> ReadySetResult<QueryGraph> {
     }
 
     Ok(qg)
+}
+
+#[cfg(test)]
+mod tests {
+    use nom_sql::{parse_query, Dialect, SqlQuery};
+
+    use super::*;
+
+    fn make_query_graph(sql: &str) -> QueryGraph {
+        let query = match parse_query(Dialect::MySQL, sql).unwrap() {
+            SqlQuery::Select(stmt) => stmt,
+            q => panic!(
+                "Unexpected query type; expected SelectStatement but got {:?}",
+                q
+            ),
+        };
+
+        to_query_graph(&query).unwrap()
+    }
+
+    #[test]
+    fn bogokey_key() {
+        let qg = make_query_graph("SELECT t.x FROM t");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::HashMap);
+        assert_eq!(
+            key.columns,
+            vec![(
+                mir::Column::new(None, "bogokey"),
+                ViewPlaceholder::Generated
+            )]
+        );
+    }
+
+    #[test]
+    fn one_to_one_equal_key() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::HashMap);
+        assert_eq!(
+            key.columns,
+            vec![(
+                mir::Column::new(Some("t"), "x"),
+                ViewPlaceholder::OneToOne(1)
+            )]
+        )
+    }
+
+    #[test]
+    fn compound_keys() {
+        let qg = make_query_graph("SELECT Cats.id FROM Cats WHERE Cats.name = $1 AND Cats.id = $2");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::HashMap);
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("Cats"), "id"),
+                    ViewPlaceholder::OneToOne(2)
+                ),
+                (
+                    mir::Column::new(Some("Cats"), "name"),
+                    ViewPlaceholder::OneToOne(1)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_to_one_range_key() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![(
+                mir::Column::new(Some("t"), "x"),
+                ViewPlaceholder::OneToOne(1)
+            )]
+        )
+    }
+
+    #[test]
+    fn between_keys() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![(
+                mir::Column::new(Some("t"), "x"),
+                ViewPlaceholder::Between(1, 2)
+            )]
+        );
+    }
+
+    #[test]
+    fn between_keys_reversed() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x <= $1 AND t.x >= $2");
+        let key = qg.view_key().unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![(
+                mir::Column::new(Some("t"), "x"),
+                ViewPlaceholder::Between(2, 1)
+            )]
+        );
+    }
 }

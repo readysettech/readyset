@@ -6,11 +6,10 @@ use std::time::SystemTime;
 
 use failpoint_macros::failpoint;
 use nom_sql::OrderType;
+use noria::consistency::Timestamp;
 use noria::metrics::recorded;
 use noria::util::like::LikePattern;
-use noria::ViewQueryFilter;
-use noria::{consistency::Timestamp, KeyComparison};
-use noria::{KeyColumnIdx, PlaceholderIdx};
+use noria::{KeyColumnIdx, KeyComparison, ViewPlaceholder, ViewQueryFilter};
 use tracing::{trace, warn};
 
 use crate::backlog;
@@ -221,7 +220,7 @@ pub struct Reader {
     /// key column index in the reader state.
     ///
     /// The data is stored in this manner instead of in a Hashmap to support ordered iteration.
-    placeholder_map: Vec<(PlaceholderIdx, KeyColumnIdx)>,
+    placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
 }
 
 impl Clone for Reader {
@@ -312,7 +311,7 @@ impl Reader {
     /// This method will need to be implemented before using the same reader for functionally
     /// identical queries with different parameter orderings (e.g., 'SELECT * FROM t WHERE a = ?
     /// AND b = ?' and 'SELECT * FROM t WHERE b = ? AND a = ?')
-    pub fn set_mapping(&mut self, mapping: Vec<(PlaceholderIdx, KeyColumnIdx)>) {
+    pub fn set_mapping(&mut self, mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>) {
         if !self.placeholder_map.is_empty() {
             debug_assert_eq!(self.placeholder_map, mapping);
         } else {
@@ -322,7 +321,7 @@ impl Reader {
 
     /// Returns the mapping from placeholder to reader key column. There is exactly one value for
     /// each reader key column in the map
-    pub fn mapping(&self) -> &[(PlaceholderIdx, KeyColumnIdx)] {
+    pub fn mapping(&self) -> &[(ViewPlaceholder, KeyColumnIdx)] {
         self.placeholder_map.as_ref()
     }
 

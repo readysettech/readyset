@@ -29,7 +29,7 @@ use std::ops::Deref;
 use std::vec::Vec;
 
 use crate::ReadySetResult;
-use noria::PlaceholderIdx;
+use noria::ViewPlaceholder;
 use noria_data::DataType;
 use noria_errors::{internal, internal_err, invariant, invariant_eq, unsupported, ReadySetError};
 
@@ -206,8 +206,16 @@ impl SqlToMirConverter {
         };
 
         // TODO(DAN): placeholder to key mappings are not fully supported for reuse
-        let params: Vec<(_, Option<PlaceholderIdx>)> =
-            params.iter().map(|c| (c.clone(), None)).collect();
+        let params: Vec<(_, ViewPlaceholder)> = params
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                (
+                    c.clone(),
+                    ViewPlaceholder::OneToOne(i + 1 /* placeholders are 1-based */),
+                )
+            })
+            .collect();
         let new_leaf = MirNode::new(
             name,
             self.schema_version,
@@ -1398,6 +1406,10 @@ impl SqlToMirConverter {
         {
             let mut node_for_rel: HashMap<&str, MirNodeRef> = HashMap::default();
 
+            // Convert the query parameters to an ordered list of columns that will comprise the
+            // lookup key if a leaf node is attached.
+            let view_key = qg.view_key()?;
+
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
             let mut sorted_rels: Vec<&str> = qg.relations.keys().map(String::as_str).collect();
@@ -1640,9 +1652,10 @@ impl SqlToMirConverter {
                     added_bogokey = true;
                     vec![Column::new(None, "bogokey")]
                 } else {
-                    qg.parameters()
-                        .into_iter()
-                        .map(|param| Column::from(param.col.clone()))
+                    view_key
+                        .columns
+                        .iter()
+                        .map(|(col, _)| col.clone())
                         .collect()
                 };
 
@@ -1723,11 +1736,7 @@ impl SqlToMirConverter {
                 projected_columns.push(Column::new(None, "bogokey"));
             }
 
-            // Convert the query parameters to an ordered list of columns that will comprise the
-            // lookup key if a leaf node is attached.
-            let view_key = if has_leaf {
-                let view_key = qg.view_key()?;
-
+            if has_leaf {
                 if qg.parameters().is_empty()
                     && !projected_columns.contains(&Column::new(None, "bogokey"))
                 {
@@ -1739,11 +1748,7 @@ impl SqlToMirConverter {
                         }
                     }
                 }
-
-                Some(view_key)
-            } else {
-                None
-            };
+            }
 
             if st.distinct {
                 let name = if has_leaf {
@@ -1778,7 +1783,7 @@ impl SqlToMirConverter {
 
             nodes_added.push(leaf_project_node.clone());
 
-            if let Some(view_key) = view_key {
+            if has_leaf {
                 // We are supposed to add a `MaterializedLeaf` node keyed on the query
                 // parameters. For purely internal views (e.g., subqueries), this is not set.
                 let columns = leaf_project_node
