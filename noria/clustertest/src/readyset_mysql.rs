@@ -618,9 +618,6 @@ async fn upquery_through_failed_domain() {
 }
 
 #[clustertest]
-// TODO(ENG-938): We do not correctly remove query expressions due to a NodeIndex
-// mismatch between reader nodes and query expressions.
-#[ignore]
 async fn update_propagation_through_failed_domain() {
     let mut deployment = readyset_mysql("ct_update_propagation_through_failed_domain")
         .with_servers(2, ServerParams::default())

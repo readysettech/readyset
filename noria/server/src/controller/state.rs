@@ -561,14 +561,21 @@ impl DataflowState {
         graphviz(&self.ingredients, detailed, &self.materializations)
     }
 
-    pub(super) fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> Vec<NodeIndex> {
+    pub(super) fn get_failed_nodes(&self, lost_worker: &WorkerIdentifier) -> HashSet<NodeIndex> {
         // Find nodes directly impacted by worker failure.
         let mut nodes: Vec<NodeIndex> = self.nodes_on_worker(Some(lost_worker));
 
         // Add any other downstream nodes.
-        let mut failed_nodes = Vec::new();
+        let mut failed_nodes = HashSet::new();
         while let Some(node) = nodes.pop() {
-            failed_nodes.push(node);
+            failed_nodes.insert(node);
+
+            // If any of the nodes are reader nodes, also add the NodeIndex of the parent MIR node.
+            // The query expression related to the reader is assigned the parent MIR node index.
+            if let Some(r) = self.ingredients[node].as_reader() {
+                failed_nodes.insert(r.is_for());
+            }
+
             for child in self
                 .ingredients
                 .neighbors_directed(node, petgraph::EdgeDirection::Outgoing)
@@ -578,6 +585,7 @@ impl DataflowState {
                 }
             }
         }
+
         failed_nodes
     }
 
