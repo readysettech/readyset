@@ -36,7 +36,7 @@ use dataflow::{prelude::*, PostLookup};
 use metrics::counter;
 use metrics::histogram;
 use noria::metrics::recorded;
-use noria::{KeyColumnIdx, PlaceholderIdx, ReadySetError};
+use noria::{KeyColumnIdx, ReadySetError, ViewPlaceholder};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
@@ -625,21 +625,14 @@ impl Migration {
         n: NodeIndex,
         index: &Index,
         post_lookup: PostLookup,
-        placeholder_map: Vec<(PlaceholderIdx, KeyColumnIdx)>,
+        placeholder_map: Vec<(ViewPlaceholder, KeyColumnIdx)>,
     ) {
         let ri = self.ensure_reader_for(n, Some(name), post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.ingredients[ri]
-            .as_mut_reader()
-            .unwrap()
-            .set_index(index);
-
-        #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.ingredients[ri]
-            .as_mut_reader()
-            .unwrap()
-            .set_mapping(placeholder_map);
+        let reader = self.ingredients[ri].as_mut_reader().unwrap();
+        reader.set_index(index);
+        reader.set_mapping(placeholder_map);
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.

@@ -6,7 +6,7 @@ use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
 use itertools::Itertools;
 use nom_sql::{ColumnSpecification, Expression, OrderType};
-use noria::PlaceholderIdx;
+use noria::ViewPlaceholder;
 use noria_errors::{internal, ReadySetResult};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -99,7 +99,7 @@ pub enum MirNodeInner {
         node: MirNodeRef,
         /// Keys is a tuple of the key column, and if the column was derived from a SQL
         /// placeholder, the index of the placeholder in the SQL query.
-        keys: Vec<(Column, Option<PlaceholderIdx>)>,
+        keys: Vec<(Column, ViewPlaceholder)>,
         index_type: IndexType,
 
         /// Optional set of columns and direction to order the results of lookups to this leaf
@@ -118,7 +118,7 @@ impl MirNodeInner {
     /// type, without any post-lookup operations
     pub fn leaf(
         node: MirNodeRef,
-        keys: Vec<(Column, Option<PlaceholderIdx>)>,
+        keys: Vec<(Column, ViewPlaceholder)>,
         index_type: IndexType,
     ) -> Self {
         Self::Leaf {

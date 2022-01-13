@@ -1479,37 +1479,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_orders_parameter_columns() {
-        // set up graph
-        let mut g = integration_utils::start_simple("it_orders_parameter_columns").await;
-        g.migrate(|mig| {
-            let mut inc = SqlIncorporator::default();
-            assert!(inc
-                .add_query(
-                    "CREATE TABLE users (id int, name varchar(40), age int);",
-                    None,
-                    mig
-                )
-                .is_ok());
-
-            // Add a new query with two parameters
-            let res = inc.add_query(
-                "SELECT id, name FROM users WHERE users.name = ? AND id = ?;",
-                None,
-                mig,
-            );
-            assert!(res.is_ok());
-            let qfp = res.unwrap();
-            // fields should be projected in query order
-            assert_eq!(get_node(&inc, mig, &qfp.name).fields(), &["id", "name"]);
-            // key columns should be in opposite order (i.e., the order of parameters in the query)
-            let n = get_reader(&inc, mig, &qfp.name);
-            assert_eq!(n.as_reader().unwrap().key().unwrap(), &[1, 0]);
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn it_reuses_identical_query() {
         // set up graph
         let mut g = integration_utils::start_simple("it_reuses_identical_query").await;

@@ -23,7 +23,7 @@ use crate::utils;
 
 use crate::backend::SelectSchema;
 use itertools::Itertools;
-use noria::ColumnSchema;
+use noria::{ColumnSchema, ViewPlaceholder};
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use std::fmt;
@@ -1465,16 +1465,21 @@ async fn do_read<'a>(
         raw_keys
             .into_iter()
             .map(|key| {
-                let k = getter
-                    .key_map()
-                    .iter()
-                    .map(|(placeholder_idx, key_column_idx)| {
-                        let key_type = key_types[key_column_idx];
-                        // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                        let value = key[*placeholder_idx - 1].coerce_to(key_type)?.into_owned();
-                        Ok(value)
-                    })
-                    .collect::<ReadySetResult<Vec<_>>>()?;
+                let mut k = vec![];
+                for (view_placeholder, key_column_idx) in getter.key_map() {
+                    let placeholder_idx = match view_placeholder {
+                        ViewPlaceholder::Generated => continue,
+                        ViewPlaceholder::OneToOne(idx) => idx,
+                        ViewPlaceholder::Between(_, _) => {
+                            unsupported!("BETWEEN isn't supported yet")
+                        }
+                    };
+
+                    let key_type = key_types[key_column_idx];
+                    // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+                    let value = key[*placeholder_idx - 1].coerce_to(key_type)?.into_owned();
+                    k.push(value)
+                }
 
                 (k, binop_to_use)
                     .try_into()

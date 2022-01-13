@@ -12,7 +12,7 @@ use nom_sql::{
     OrderType, UnaryOperator,
 };
 use noria::internal::{Index, IndexType};
-use noria::PlaceholderIdx;
+use noria::ViewPlaceholder;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -1143,7 +1143,7 @@ fn make_post_lookup(
 fn materialize_leaf_node(
     parent: &MirNodeRef,
     name: String,
-    key_cols: &[(Column, Option<PlaceholderIdx>)],
+    key_cols: &[(Column, ViewPlaceholder)],
     index_type: IndexType,
     post_lookup: PostLookup,
     mig: &mut Migration,
@@ -1163,17 +1163,11 @@ fn materialize_leaf_node(
             .map(|(c, _)| parent.borrow().column_id_for_column(c))
             .collect::<ReadySetResult<Vec<_>>>()?;
 
-        // Only retain entries that correspond to a SQL placeholder
-        let mut placeholder_map = key_cols
+        let placeholder_map = key_cols
             .iter()
             .zip(columns.iter())
-            .filter_map(|((_, placeholder_index), col_index)| {
-                placeholder_index.map(|v| (v, *col_index))
-            })
+            .map(|((_, placeholder), col_index)| (*placeholder, *col_index))
             .collect::<Vec<_>>();
-
-        // Sort the placeholder map for in order iteration
-        placeholder_map.sort_by(|a, b| a.0.cmp(&b.0));
 
         mig.maintain(
             name,
