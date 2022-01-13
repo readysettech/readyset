@@ -7,8 +7,8 @@ use noria::{
 use noria_data::DataType;
 
 use nom_sql::{
-    self, BinaryOperator, ColumnConstraint, DeleteStatement, InsertStatement, SelectStatement,
-    SqlQuery, UpdateStatement,
+    self, BinaryOperator, ColumnConstraint, DeleteStatement, Expression, InsertStatement, Literal,
+    SelectStatement, SqlQuery, UpdateStatement,
 };
 use vec1::vec1;
 
@@ -43,12 +43,7 @@ pub(crate) enum PreparedStatement {
 pub(crate) struct PreparedSelectStatement {
     name: String,
     statement: Box<nom_sql::SelectStatement>,
-    key_column_indices: Vec<usize>,
     processed_query_params: ProcessedQueryParams,
-    /// Parameter columns ignored by noria server
-    /// The adapter assumes that all LIMIT/OFFSET parameters are ignored by the
-    /// server. (If the server cannot ignore them, it will fail to install the query).
-    ignored_columns: Vec<ColumnSchema>,
 }
 
 impl fmt::Debug for PreparedStatement {
@@ -319,6 +314,40 @@ impl ViewCache {
     }
 }
 
+/// If the query has parametrized OFFSET or LIMIT, get the values for those params from the given
+/// slice of parameters, returning a tuple of `limit, offset`
+fn limit_offset_params<'param>(
+    params: &'param [DataType],
+    query: &SelectStatement,
+) -> (Option<&'param DataType>, Option<&'param DataType>) {
+    let limit = if let Some(limit) = &query.limit {
+        limit
+    } else {
+        return (None, None);
+    };
+
+    let offset = if matches!(
+        limit.offset,
+        Some(Expression::Literal(Literal::Placeholder(_)))
+    ) {
+        params.last()
+    } else {
+        None
+    };
+
+    let limit = if matches!(limit.limit, Expression::Literal(Literal::Placeholder(_))) {
+        if offset.is_some() {
+            params.get(params.len() - 2)
+        } else {
+            params.last()
+        }
+    } else {
+        None
+    };
+
+    (limit, offset)
+}
+
 pub struct NoriaConnector {
     inner: NoriaBackend,
     auto_increments: Arc<RwLock<HashMap<String, atomic::AtomicUsize>>>,
@@ -333,41 +362,6 @@ pub struct NoriaConnector {
     /// to allow returning references to schemas from views all the way to msql-srv,
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<String>,
-}
-
-/// Removes limit and offset params passed in with an execute function. These are not sent to the
-/// server.
-fn pop_limit_offset_params<'param>(
-    mut params: &'param [DataType],
-    ignored_columns: &[ColumnSchema],
-) -> (
-    Option<&'param DataType>,
-    Option<&'param DataType>,
-    &'param [DataType],
-) {
-    let mut offset = None;
-    let mut row_count = None;
-
-    if ignored_columns
-        .iter()
-        .any(|col| matches!(col.spec.column.name.as_str(), "__offset"))
-    {
-        offset = params.split_last().map(|(last, rest)| {
-            params = rest;
-            last
-        });
-    }
-    if ignored_columns
-        .iter()
-        .any(|col| matches!(col.spec.column.name.as_str(), "__row_count"))
-    {
-        row_count = params.split_last().map(|(last, rest)| {
-            params = rest;
-            last
-        });
-    }
-
-    (offset, row_count, params)
 }
 
 /// Used when we can determine that the params for 'OFFSET ?' or 'LIMIT ?' passed in
@@ -1208,18 +1202,10 @@ impl NoriaConnector {
             .get_noria_view(&qname, self.region.as_deref(), view_failed)
             .await?;
 
-        // Currently there is exactly one key map entry per user parameter (ignoring limit/offset).
-        // TODO: update to ignore elements based on missing entries
-        let key_column_indices = getter
-            .key_map()
-            .iter()
-            .map(|(_, key_index)| *key_index)
-            .collect::<Vec<_>>();
-
         let keys = processed.make_keys(&[])?;
 
         trace!(%qname, "query::select::do");
-        let res = do_read(getter, &query, keys, &key_column_indices, ticket).await;
+        let res = do_read(getter, &query, keys, ticket).await;
         if res.is_err() {
             self.failed_views.insert(qname.to_owned());
         }
@@ -1286,21 +1272,11 @@ impl NoriaConnector {
             })
             .collect();
 
-        // Currently there is exactly one key map entry per user parameter (ignoring limit/offset).
-        // TODO: update to ignore elements based on missing entries
-        let key_column_indices = getter
-            .key_map()
-            .iter()
-            .map(|(_, key_index)| *key_index)
-            .collect::<Vec<_>>();
-
         trace!(id = statement_id, "select::registered");
         let ps = PreparedSelectStatement {
             name: qname,
             statement: Box::new(statement),
-            key_column_indices,
             processed_query_params,
-            ignored_columns: limit_columns.clone(),
         };
         self.prepared_statement_cache
             .insert(statement_id, PreparedStatement::Select(ps));
@@ -1329,9 +1305,7 @@ impl NoriaConnector {
         let PreparedSelectStatement {
             name,
             statement,
-            key_column_indices,
             processed_query_params,
-            ignored_columns,
         } = {
             match prepared_statement_cache.get(&q_id) {
                 Some(PreparedStatement::Select(ps)) => ps,
@@ -1340,9 +1314,7 @@ impl NoriaConnector {
             }
         };
 
-        trace!("apply where-in rewrites");
-        // ignore LIMIT and OFFSET params (and return empty resultset according to value)
-        let (offset, limit, params) = pop_limit_offset_params(params, ignored_columns);
+        let (limit, offset) = limit_offset_params(params, statement);
 
         let res = {
             let view_failed = failed_views.take(name).is_some();
@@ -1353,7 +1325,6 @@ impl NoriaConnector {
                 .get_noria_view(name, region.as_deref(), view_failed)
                 .await?;
 
-            // TODO(DAN): These should have been passed as UnsignedBigInt
             if (offset.is_some() && !matches!(offset, Some(DataType::BigInt(0))))
                 || matches!(limit, Some(DataType::BigInt(0)))
             {
@@ -1363,7 +1334,6 @@ impl NoriaConnector {
                     getter,
                     statement,
                     processed_query_params.make_keys(params)?,
-                    key_column_indices,
                     ticket,
                 )
                 .await
@@ -1404,8 +1374,7 @@ impl NoriaConnector {
 async fn do_read<'a>(
     getter: &'a mut View,
     q: &nom_sql::SelectStatement,
-    mut keys: Vec<Cow<'_, [DataType]>>,
-    key_column_indices: &[usize],
+    mut raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
 ) -> ReadySetResult<QueryResult<'a>> {
     trace!("select::access view");
@@ -1413,7 +1382,15 @@ async fn do_read<'a>(
         .schema()
         .ok_or_else(|| internal_err("No schema for view"))?;
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
-    let mut key_types = getter_schema.col_types(key_column_indices, SchemaType::ProjectedSchema)?;
+
+    let mut key_types = getter_schema.col_types(
+        getter
+            .key_map()
+            .iter()
+            .map(|(_, key_column_idx)| *key_column_idx),
+        SchemaType::ProjectedSchema,
+    )?;
+
     trace!("select::lookup");
     let bogo = vec![vec1![DataType::from(0i32)].into()];
     let mut binops = utils::get_select_statement_binops(q);
@@ -1427,8 +1404,8 @@ async fn do_read<'a>(
                 .map(|op| (i, col, op))
         })
         .map(|(idx, col, operator)| -> ReadySetResult<_> {
-            let key = keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
-            if !keys.is_empty() {
+            let key = raw_keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
+            if !raw_keys.is_empty() {
                 unsupported!(
                     "LIKE/ILIKE not currently supported for more than one lookup key at a time"
                 );
@@ -1445,7 +1422,7 @@ async fn do_read<'a>(
             )?;
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
-                keys.push(key);
+                raw_keys.push(key);
             }
 
             filter_op_idx = Some(idx);
@@ -1464,7 +1441,7 @@ async fn do_read<'a>(
         binops.remove(filter_op_idx);
     }
 
-    let use_bogo = keys.is_empty();
+    let use_bogo = raw_keys.is_empty();
     let keys = if use_bogo {
         bogo
     } else {
@@ -1478,13 +1455,26 @@ async fn do_read<'a>(
             );
         }
 
-        keys.drain(..)
+        let key_types = getter
+            .key_map()
+            .iter()
+            .zip(key_types)
+            .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
+            .collect::<HashMap<_, _>>();
+
+        raw_keys
+            .into_iter()
             .map(|key| {
-                let k = key
+                let k = getter
+                    .key_map()
                     .iter()
-                    .zip(&key_types)
-                    .map(|(val, col_type)| val.coerce_to(col_type).map(Cow::into_owned))
-                    .collect::<ReadySetResult<Vec<DataType>>>()?;
+                    .map(|(placeholder_idx, key_column_idx)| {
+                        let key_type = key_types[key_column_idx];
+                        // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+                        let value = key[*placeholder_idx - 1].coerce_to(key_type)?.into_owned();
+                        Ok(value)
+                    })
+                    .collect::<ReadySetResult<Vec<_>>>()?;
 
                 (k, binop_to_use)
                     .try_into()
