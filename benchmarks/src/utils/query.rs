@@ -104,6 +104,9 @@ impl ArbitraryQueryParameters {
     }
 
     pub async fn migrate(&self, conn: &mut mysql_async::Conn) -> anyhow::Result<()> {
+        // Remove any query q if it is exists before migration.
+        let _ = self.unmigrate(conn);
+
         // TODO(justin): Cache this so we don't have to read from file each time.
         let query = fs::read_to_string(&self.query).unwrap();
         let stmt = "CREATE CACHED QUERY q AS ".to_string() + &query;
