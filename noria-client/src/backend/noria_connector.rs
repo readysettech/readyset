@@ -15,6 +15,7 @@ use vec1::vec1;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
+use std::ops::Bound;
 use std::sync::atomic;
 use std::sync::{Arc, RwLock};
 
@@ -23,7 +24,7 @@ use crate::utils;
 
 use crate::backend::SelectSchema;
 use itertools::Itertools;
-use noria::{ColumnSchema, ViewPlaceholder};
+use noria::{ColumnSchema, KeyComparison, ViewPlaceholder};
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use std::fmt;
@@ -1447,13 +1448,6 @@ async fn do_read<'a>(
     } else {
         let mut binops = binops.into_iter().map(|(_, b)| b).unique();
         let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
-        if let Some(other) = binops.next() {
-            unsupported!(
-                "attempted to execute statement with conflicting binary operators {:?} and {:?}",
-                binop_to_use,
-                other
-            );
-        }
 
         let key_types = getter
             .key_map()
@@ -1466,24 +1460,43 @@ async fn do_read<'a>(
             .into_iter()
             .map(|key| {
                 let mut k = vec![];
+                let mut between: Option<(Vec<DataType>, Vec<DataType>)> = None;
                 for (view_placeholder, key_column_idx) in getter.key_map() {
-                    let placeholder_idx = match view_placeholder {
+                    match view_placeholder {
                         ViewPlaceholder::Generated => continue,
-                        ViewPlaceholder::OneToOne(idx) => idx,
-                        ViewPlaceholder::Between(_, _) => {
-                            unsupported!("BETWEEN isn't supported yet")
+                        ViewPlaceholder::OneToOne(idx) => {
+                            let key_type = key_types[key_column_idx];
+                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+                            let value = key[*idx - 1].coerce_to(key_type)?.into_owned();
+                            k.push(value);
+                        }
+                        ViewPlaceholder::Between(lower_idx, upper_idx) => {
+                            let key_type = key_types[key_column_idx];
+                            // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
+                            let lower_value = key[*lower_idx - 1].coerce_to(key_type)?.into_owned();
+                            let upper_value = key[*upper_idx - 1].coerce_to(key_type)?.into_owned();
+                            let (lower_key, upper_key) =
+                                between.get_or_insert_with(Default::default);
+                            lower_key.push(lower_value);
+                            upper_key.push(upper_value);
                         }
                     };
-
-                    let key_type = key_types[key_column_idx];
-                    // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
-                    let value = key[*placeholder_idx - 1].coerce_to(key_type)?.into_owned();
-                    k.push(value)
                 }
 
-                (k, binop_to_use)
-                    .try_into()
-                    .map_err(|_| ReadySetError::EmptyKey)
+                if let Some((lower, upper)) = between {
+                    if !k.is_empty() {
+                        unsupported!("Can't currently mix BETWEEN and regular parameters");
+                    }
+
+                    Ok(KeyComparison::Range((
+                        Bound::Included(lower.try_into()?),
+                        Bound::Included(upper.try_into()?),
+                    )))
+                } else {
+                    (k, binop_to_use)
+                        .try_into()
+                        .map_err(|_| ReadySetError::EmptyKey)
+                }
             })
             .collect::<ReadySetResult<Vec<_>>>()?
     };

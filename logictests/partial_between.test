@@ -1,0 +1,76 @@
+statement ok
+create table t1 (x int);
+
+statement ok
+insert into t1 (x) values
+(1),
+(2),
+(3),
+(4),
+(5),
+(6),
+(7),
+(8),
+(9),
+(10)
+
+# with BETWEEN itself
+query I rowsort
+select x from t1 where x between ? and ?
+? = 3
+? = 6
+----
+3
+4
+5
+6
+
+
+# with manually-desugared BETWEEN
+query I rowsort
+select x from t1 where x >= ? and x <= ?
+? = 3
+? = 6
+----
+3
+4
+5
+6
+
+# with manually-desugared BETWEEN, reversed
+query I rowsort
+select x from t1 where x <= ? and x >= ?
+? = 6
+? = 3
+----
+3
+4
+5
+6
+
+statement ok
+create table t2 (x int, y int);
+
+statement ok
+insert into t2 (x, y) values
+(1, 2),
+(2, 3),
+(3, 4),
+(4, 5),
+(5, 6),
+(6, 7),
+(7, 8),
+(8, 9),
+(9, 10),
+(10, 11)
+
+# multiple betweens
+query I rowsort
+select x from t2 where x between ? and ? and y between ? and ?
+? = 3
+? = 6
+? = 5
+? = 6
+----
+4
+5
