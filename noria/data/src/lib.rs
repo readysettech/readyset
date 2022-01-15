@@ -2,6 +2,7 @@
 
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone};
+use enum_kinds::EnumKind;
 use itertools::Itertools;
 use nom_sql::{Double, Float, Literal, SqlType};
 use noria_errors::{internal, ReadySetError, ReadySetResult};
@@ -33,8 +34,9 @@ const MAX_SECONDS_DATETIME_OFFSET: i32 = 85_940;
 /// Note that cloning a `DataType` using the `Clone` trait is possible, but may result in cache
 /// contention on the reference counts for de-duplicated strings. Use `DataType::deep_clone` to
 /// clone the *value* of a `DataType` without danger of contention.
-#[derive(Clone, Debug)]
 #[warn(variant_size_differences)]
+#[derive(Clone, Debug, EnumKind)]
+#[enum_kind(DataTypeKind, derive(Ord, PartialOrd))]
 pub enum DataType {
     /// An empty value.
     None,
@@ -1147,133 +1149,8 @@ impl Ord for DataType {
                 bits_a.cmp(bits_b)
             }
 
-            // urgh no Ord for std::mem::Discriminant :/
-            (DataType::None, DataType::None) => Ordering::Equal,
-            (DataType::None, _) => Ordering::Less,
-
-            (
-                DataType::Int(_)
-                | DataType::UnsignedInt(_)
-                | DataType::BigInt(_)
-                | DataType::UnsignedBigInt(_)
-                | DataType::Float(_, _)
-                | DataType::Double(_, _)
-                | DataType::Numeric(_),
-                _,
-            ) => {
-                if other == &DataType::None {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-
-            (DataType::Text(_) | DataType::TinyText(_), _) => {
-                if matches!(
-                    other,
-                    DataType::None
-                        | DataType::Int(_)
-                        | DataType::UnsignedInt(_)
-                        | DataType::BigInt(_)
-                        | DataType::UnsignedBigInt(_)
-                        | DataType::Float(_, _)
-                        | DataType::Double(_, _)
-                        | DataType::Numeric(_)
-                ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-
-            (DataType::Timestamp(_) | DataType::TimestampTz(_), _) => {
-                if matches!(
-                    other,
-                    DataType::None
-                        | DataType::Int(_)
-                        | DataType::UnsignedInt(_)
-                        | DataType::BigInt(_)
-                        | DataType::UnsignedBigInt(_)
-                        | DataType::Float(_, _)
-                        | DataType::Double(_, _)
-                        | DataType::Numeric(_)
-                        | DataType::Text(_)
-                        | DataType::TinyText(_)
-                ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-
-            (DataType::Time(_), _) => {
-                if matches!(
-                    other,
-                    DataType::None
-                        | DataType::Int(_)
-                        | DataType::UnsignedInt(_)
-                        | DataType::BigInt(_)
-                        | DataType::UnsignedBigInt(_)
-                        | DataType::Float(_, _)
-                        | DataType::Double(_, _)
-                        | DataType::Numeric(_)
-                        | DataType::Text(_)
-                        | DataType::TinyText(_)
-                        | DataType::Timestamp(_)
-                        | DataType::TimestampTz(_)
-                ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-
-            (DataType::ByteArray(_), _) => {
-                if matches!(
-                    other,
-                    DataType::None
-                        | DataType::Timestamp(_)
-                        | DataType::TimestampTz(_)
-                        | DataType::Time(_)
-                        | DataType::Int(_)
-                        | DataType::UnsignedInt(_)
-                        | DataType::BigInt(_)
-                        | DataType::UnsignedBigInt(_)
-                        | DataType::Float(_, _)
-                        | DataType::Double(_, _)
-                        | DataType::Numeric(_)
-                        | DataType::Text(_)
-                        | DataType::TinyText(_)
-                ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
-
-            (DataType::BitVector(_), _) => {
-                if matches!(
-                    other,
-                    DataType::None
-                        | DataType::Timestamp(_)
-                        | DataType::TimestampTz(_)
-                        | DataType::Time(_)
-                        | DataType::Int(_)
-                        | DataType::UnsignedInt(_)
-                        | DataType::BigInt(_)
-                        | DataType::UnsignedBigInt(_)
-                        | DataType::Float(_, _)
-                        | DataType::Double(_, _)
-                        | DataType::Numeric(_)
-                        | DataType::Text(_)
-                        | DataType::TinyText(_)
-                        | DataType::ByteArray(_)
-                ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
-            }
+            // for all other kinds of data types, just compare the variants in order
+            (_, _) => DataTypeKind::from(self).cmp(&DataTypeKind::from(other)),
         }
     }
 }
@@ -3842,7 +3719,7 @@ mod tests {
         assert_eq!(double1.cmp(&txt1), Ordering::Less);
         assert_eq!(double1.cmp(&int1), Ordering::Greater);
         assert_eq!(double2.cmp(&int1), Ordering::Less);
-        assert_eq!(numeric.cmp(&txt1), Ordering::Less);
+        assert_eq!(numeric.cmp(&txt1), Ordering::Greater);
         assert_eq!(numeric1.cmp(&int1), Ordering::Greater);
         assert_eq!(numeric2.cmp(&int1), Ordering::Less);
     }

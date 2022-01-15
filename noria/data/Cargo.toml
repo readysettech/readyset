@@ -25,6 +25,7 @@ time = { version = "0.3", features = ["local-offset"] }
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 triomphe = "0.1"
 uuid = { version = "0.8", features = ["v4"] }
+enum-kinds = "0.5.1"
 
 # Local dependencies
 nom-sql = { path = "../../nom-sql" }
