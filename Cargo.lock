@@ -1882,6 +1882,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-kinds"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e40a16955681d469ab3da85aaa6b42ff656b3c67b52e1d8d3dd36afe97fd462"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "enum_dispatch"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3788,6 +3799,7 @@ dependencies = [
  "chrono",
  "criterion",
  "derive_more",
+ "enum-kinds",
  "eui48",
  "itertools 0.10.3",
  "launchpad",
