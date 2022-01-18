@@ -20,15 +20,18 @@ use std::{
 /// pass to noria.
 #[derive(Debug, Clone)]
 pub(crate) struct ProcessedQueryParams {
+    reordered_placeholders: Option<Vec<usize>>,
     rewritten_in_conditions: Vec<RewrittenIn>,
     auto_parameters: Vec<(usize, Literal)>,
 }
 
 pub(crate) fn process_query(query: &mut SelectStatement) -> ReadySetResult<ProcessedQueryParams> {
+    let reordered_placeholders = reorder_numbered_placeholders(query);
     let auto_parameters = auto_parametrize_query(query);
     let rewritten_in_conditions = collapse_where_in(query)?;
     number_placeholders(query)?;
     Ok(ProcessedQueryParams {
+        reordered_placeholders,
         rewritten_in_conditions,
         auto_parameters,
     })
@@ -40,11 +43,17 @@ impl ProcessedQueryParams {
         params: &'param [T],
     ) -> ReadySetResult<Vec<Cow<'param, [T]>>>
     where
-        T: Clone + TryFrom<Literal, Error = ReadySetError> + std::fmt::Debug,
+        T: Clone + TryFrom<Literal, Error = ReadySetError> + std::fmt::Debug + Default,
     {
         if params.is_empty() && self.auto_parameters.is_empty() {
             return Ok(vec![]);
         }
+
+        let params = if let Some(order_map) = &self.reordered_placeholders {
+            Cow::Owned(reorder_params(params, order_map)?)
+        } else {
+            Cow::Borrowed(params)
+        };
 
         let auto_parameters = self
             .auto_parameters
@@ -53,10 +62,10 @@ impl ProcessedQueryParams {
             .map(|(i, lit)| -> ReadySetResult<_> { Ok((i, lit.try_into()?)) })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let params = splice_auto_parameters(params, &auto_parameters);
+        let params = splice_auto_parameters(&params, &auto_parameters);
 
         if self.rewritten_in_conditions.is_empty() {
-            return Ok(vec![params]);
+            return Ok(vec![Cow::Owned(params.into_owned())]);
         }
 
         Ok(
@@ -252,6 +261,75 @@ where
                 Cow::Owned(res)
             }),
     ))
+}
+
+struct ReorderNumberedPlaceholdersVisitor {
+    current: u32,
+    out: Vec<usize>,
+}
+
+impl<'ast> Visitor<'ast> for ReorderNumberedPlaceholdersVisitor {
+    type Error = !;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if let Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) = literal {
+            self.out.push(*n as usize - 1);
+            *n = self.current;
+            self.current += 1
+        }
+
+        Ok(())
+    }
+}
+
+fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usize>> {
+    let mut visitor = ReorderNumberedPlaceholdersVisitor {
+        current: 1,
+        out: vec![],
+    };
+
+    #[allow(clippy::unwrap_used)] // Error is !, so can't be returned
+    visitor.visit_select_statement(query).unwrap();
+
+    // As an optimization, check if the placeholders were *already* ordered and contiguous, and
+    // return None if so. This allows us to save some clones on the actual read-path.
+    let mut contiguous = true;
+    let mut prev = *visitor.out.first()?;
+    for n in &visitor.out {
+        if prev + 1 != *n {
+            contiguous = false;
+            break;
+        }
+        prev = *n;
+    }
+
+    if contiguous {
+        None
+    } else {
+        Some(visitor.out)
+    }
+}
+
+/// Reorder the values in `params` according to `order_map`, which should be a slice of indices
+/// where the position corresponds to the position in `params`, and the value at that position is
+/// the index in the result.
+///
+/// If there are any gaps in `order_map` (eg the indices are not contiguous) the [`Default`] value
+/// for T will be used.
+fn reorder_params<T>(params: &[T], order_map: &[usize]) -> ReadySetResult<Vec<T>>
+where
+    T: Clone + Default,
+{
+    let mut res = vec![T::default(); params.len()];
+    for (param, idx) in params.iter().zip(order_map) {
+        if *idx > res.len() {
+            unsupported!("Wrong number of parameters supplied");
+        }
+
+        res[*idx] = param.clone();
+    }
+
+    Ok(res)
 }
 
 struct NumberPlaceholdersVisitor {
@@ -1144,6 +1222,40 @@ mod tests {
                 keys,
                 vec![vec!["Bob".into(), 1.into()], vec!["Bob".into(), 2.into()]]
             );
+        }
+
+        #[test]
+        fn numbered_not_in_order() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $2 AND y = $1 AND z = 'z'",
+                vec!["y".into(), "x".into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                "{}",
+                query
+            );
+
+            assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
+        }
+
+        #[test]
+        fn numbered_not_in_order_starts_in_order() {
+            let (keys, query) = process_and_make_keys(
+                "SELECT * FROM t WHERE x = $1 AND y = $3 AND z = $2",
+                vec!["x".into(), "z".into(), "y".into()],
+            );
+
+            assert_eq!(
+                query,
+                parse_select_statement("SELECT * FROM t WHERE x = $1 AND y = $2 AND z = $3"),
+                "{}",
+                query
+            );
+
+            assert_eq!(keys, vec![vec!["x".into(), "y".into(), "z".into()]]);
         }
     }
 }

@@ -966,6 +966,12 @@ impl PartialEq for DataType {
     }
 }
 
+impl Default for DataType {
+    fn default() -> Self {
+        DataType::None
+    }
+}
+
 use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use launchpad::arbitrary::arbitrary_decimal;
