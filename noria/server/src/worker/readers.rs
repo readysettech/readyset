@@ -21,6 +21,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
 use std::time;
+use std::time::Duration;
 use std::{future::Future, task::Poll};
 use stream_cancel::Valve;
 use tokio::task_local;
@@ -31,7 +32,7 @@ use tracing::error;
 use tracing::warn;
 
 /// Retry reads every this often.
-const RETRY_TIMEOUT: time::Duration = time::Duration::from_micros(100);
+const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
 
 /// If a blocking reader finds itself waiting this long for a backfill to complete, it will
 /// re-issue the replay request. To avoid the system falling over if replays are slow for a little
@@ -77,18 +78,21 @@ struct ReadRequestHandler {
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     miss_ctr: metrics::Counter,
     hit_ctr: metrics::Counter,
+    upquery_timeout: Duration,
 }
 
 impl ReadRequestHandler {
     fn new(
         readers: Readers,
         wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
+        upquery_timeout: Duration,
     ) -> Self {
         Self {
             readers,
             wait,
             miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
             hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
+            upquery_timeout,
         }
     }
 
@@ -251,7 +255,7 @@ impl ReadRequestHandler {
                     })))
                 } else {
                     let (tx, rx) = tokio::sync::oneshot::channel();
-                    let trigger = time::Duration::from_millis(TRIGGER_TIMEOUT_MS);
+                    let trigger = Duration::from_millis(TRIGGER_TIMEOUT_MS);
                     let now = time::Instant::now();
 
                     let r = self.wait.send((
@@ -268,6 +272,7 @@ impl ReadRequestHandler {
                             warned: false,
                             filter,
                             timestamp,
+                            upquery_timeout: self.upquery_timeout,
                         },
                         tx,
                     ));
@@ -347,7 +352,12 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
     }
 }
 
-pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: Readers) {
+pub(crate) async fn listen(
+    valve: Valve,
+    on: tokio::net::TcpListener,
+    readers: Readers,
+    upquery_timeout: Duration,
+) {
     let mut stream = valve.wrap(TcpListenerStream::new(on)).into_stream();
     while let Some(stream) = stream.next().await {
         set_failpoint!("read-query");
@@ -380,7 +390,7 @@ pub(crate) async fn listen(valve: Valve, on: tokio::net::TcpListener, readers: R
         });
         tokio::spawn(retries);
 
-        let r = ReadRequestHandler::new(readers, tx);
+        let r = ReadRequestHandler::new(readers, tx, upquery_timeout);
 
         let server = READERS.scope(
             Default::default(),
@@ -486,11 +496,12 @@ struct BlockingRead {
     pending_indices: Vec<usize>,
     truth: Readers,
     filter: Option<ViewQueryFilter>,
-    trigger_timeout: time::Duration,
+    trigger_timeout: Duration,
     next_trigger: time::Instant,
     first: time::Instant,
     warned: bool,
     timestamp: Option<Timestamp>,
+    upquery_timeout: Duration,
 }
 
 impl std::fmt::Debug for BlockingRead {
@@ -569,10 +580,8 @@ impl BlockingRead {
                         return Err(());
                     }
 
-                    self.trigger_timeout = time::Duration::min(
-                        self.trigger_timeout * 2,
-                        noria::VIEW_REQUEST_TIMEOUT / 20,
-                    );
+                    self.trigger_timeout =
+                        Duration::min(self.trigger_timeout * 2, noria::VIEW_REQUEST_TIMEOUT / 20);
                     self.next_trigger = now + self.trigger_timeout;
                 }
             }
@@ -580,7 +589,7 @@ impl BlockingRead {
             // log that we are still waiting
             if !self.pending_keys.is_empty() {
                 let waited = now - self.first;
-                if waited > time::Duration::from_secs(7) && !self.warned {
+                if waited > Duration::from_secs(7) && !self.warned {
                     warn!(
                         "read has been stuck waiting on {} for {:?}",
                         if self.pending_keys.len() < 8 {
@@ -595,6 +604,10 @@ impl BlockingRead {
                         waited
                     );
                     self.warned = true;
+                }
+
+                if waited > self.upquery_timeout {
+                    return Err(());
                 }
             }
 

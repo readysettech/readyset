@@ -98,6 +98,7 @@ pub(super) async fn start_instance(
 
     let Config {
         abort_on_task_failure,
+        upquery_timeout,
         ..
     } = config;
 
@@ -134,6 +135,7 @@ pub(super) async fn start_instance(
         valve.clone(),
         readers_listener,
         readers.clone(),
+        upquery_timeout,
     )));
 
     let worker = Worker {

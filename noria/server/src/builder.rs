@@ -183,6 +183,12 @@ impl Builder {
         self.should_reset_state = r;
     }
 
+    /// Sets the value of [`Config::upquery_timeout`]. See documentation of that field for more
+    /// information.
+    pub fn set_upquery_timeout(&mut self, value: std::time::Duration) {
+        self.config.upquery_timeout = value;
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,
