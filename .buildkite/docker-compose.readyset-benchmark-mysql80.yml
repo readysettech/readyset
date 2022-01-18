@@ -4,7 +4,6 @@ version: "3.8"
 services:
   # MySQL Database Server for Benchmark Data
   mysql:
-    container_name: mysql
     image: mysql:8.0.27
     user: mysql
     ports:
@@ -29,7 +28,6 @@ services:
 
   # Consul Server
   consul:
-    container_name: consul
     image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/mirror/consul
     command: ["agent", "-dev", "-client", "0.0.0.0", "-log-level", "INFO"]
     healthcheck:
@@ -40,7 +38,6 @@ services:
       start_period: 5s
 
   readyset-server:
-    container_name: readyset-server
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-server:${DOCKER_TAG}"
     expose:
       # Ephemeral
@@ -68,7 +65,6 @@ services:
 
   # Client connections go here
   readyset-adapter:
-    container_name: readyset-adapter
     image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-mysql:${DOCKER_TAG}"
     ports:
       - 3333:3333
@@ -99,7 +95,6 @@ services:
     # Eventually, when benchmarks are more static, we can abstract
     # the build process external to docker-compose and leverage an image
     # in ECR. Building inline for now seems viable.
-    container_name: benchmarks
     image: readyset-benchmarks
     build:
       dockerfile: build/Dockerfile.readyset-benchmarks
