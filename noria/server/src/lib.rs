@@ -424,6 +424,7 @@ pub mod manual {
 
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Configuration for an running noria cluster
 // WARNING: if you change this structure or any of the structures used in its fields, make sure to
@@ -450,6 +451,8 @@ pub struct Config {
     pub(crate) replication_url: Option<String>,
     pub(crate) replication_server_id: Option<u32>,
     pub(crate) keep_prior_recipes: bool,
+    /// The duration to wait before canceling the task waiting on an upquery.
+    pub(crate) upquery_timeout: Duration,
 }
 
 impl Default for Config {
@@ -473,6 +476,7 @@ impl Default for Config {
             replication_url: None,
             replication_server_id: None,
             keep_prior_recipes: true,
+            upquery_timeout: Duration::from_millis(20000),
         }
     }
 }
