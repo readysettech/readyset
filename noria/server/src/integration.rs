@@ -4254,7 +4254,7 @@ async fn non_sql_materialized_range_query() {
 
     g.migrate(|mig| {
         let a = mig.add_base("a", &["a", "b"], Base::new().with_primary_key([0]));
-        mig.maintain_anonymous(a, &Index::hash_map(vec![0]));
+        mig.maintain_anonymous(a, &Index::btree_map(vec![0]));
     })
     .await;
 
@@ -4515,7 +4515,7 @@ async fn post_read_ilike() {
         let a = mig.add_base("a", &["a", "b"], Base::new().with_primary_key([0]));
         mig.maintain_anonymous_with_post_lookup(
             a,
-            &Index::hash_map(vec![0]),
+            &Index::btree_map(vec![0]),
             PostLookup {
                 order_by: Some(vec![(1, OrderType::OrderAscending)]),
                 ..Default::default()

@@ -57,13 +57,13 @@ pub enum InitialState {
     PartialGlobal {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: Vec<usize>,
+        index: Index,
         trigger_domain: (DomainIndex, usize),
     },
     Global {
         gid: petgraph::graph::NodeIndex,
         cols: usize,
-        key: Vec<usize>,
+        index: Index,
     },
 }
 

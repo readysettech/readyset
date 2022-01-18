@@ -1434,7 +1434,7 @@ impl Domain {
                     InitialState::PartialGlobal {
                         gid,
                         cols,
-                        key,
+                        index,
                         trigger_domain: (trigger_domain, shards),
                     } => {
                         use crate::backlog;
@@ -1452,22 +1452,21 @@ impl Domain {
                             });
                         }
 
-                        let k = key.clone(); // ugh
                         let txs = (0..shards)
                             .map(|shard| -> ReadySetResult<_> {
-                                let key = key.clone();
                                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                                 let sender = self
                                     .channel_coordinator
                                     .builder_for(&(trigger_domain, shard))?
                                     .build_async()?;
 
+                                let cols = index.columns.clone();
                                 tokio::spawn(
                                     UnboundedReceiverStream::new(rx)
                                         .map(move |misses| {
                                             Box::new(Packet::RequestReaderReplay {
                                                 keys: misses,
-                                                cols: key.clone(),
+                                                cols: cols.clone(),
                                                 node,
                                             })
                                         })
@@ -1485,7 +1484,7 @@ impl Domain {
                             .collect::<ReadySetResult<Vec<_>>>()?;
                         let (mut r_part, w_part) = backlog::new_partial(
                             cols,
-                            &k[..],
+                            index,
                             move |misses: &mut dyn Iterator<Item = &KeyComparison>| {
                                 let n = txs.len();
                                 if n == 1 {
@@ -1543,9 +1542,9 @@ impl Domain {
                         // make sure Reader is actually prepared to receive state
                         r.set_write_handle(w_part)
                     }
-                    InitialState::Global { gid, cols, key } => {
+                    InitialState::Global { gid, cols, index } => {
                         use crate::backlog;
-                        let (mut r_part, w_part) = backlog::new(cols, &key[..]);
+                        let (mut r_part, w_part) = backlog::new(cols, index);
 
                         if !self
                             .nodes

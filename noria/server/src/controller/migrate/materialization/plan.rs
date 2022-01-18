@@ -731,7 +731,10 @@ impl<'a> Plan<'a> {
         // NOTE: we cannot use the impl of DerefMut here, since it (reasonably) disallows getting
         // mutable references to taken state.
         let s = if let Some(r) = our_node.as_reader() {
-            let key = Vec::from(r.key().ok_or_else(|| internal_err("Reader has no key"))?);
+            let index = r
+                .index()
+                .ok_or_else(|| internal_err("Reader has no key"))?
+                .clone();
 
             if self.partial {
                 invariant!(r.is_materialized());
@@ -748,7 +751,7 @@ impl<'a> Plan<'a> {
                 InitialState::PartialGlobal {
                     gid: self.node,
                     cols: self.graph[self.node].fields().len(),
-                    key,
+                    index,
                     trigger_domain: (last_domain, num_shards),
                 }
             } else {
@@ -756,7 +759,7 @@ impl<'a> Plan<'a> {
                 // the node index we were created with is in graph...
                 InitialState::Global {
                     cols: self.graph[self.node].fields().len(),
-                    key,
+                    index,
                     gid: self.node,
                 }
             }
