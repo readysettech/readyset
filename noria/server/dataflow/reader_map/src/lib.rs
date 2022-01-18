@@ -337,6 +337,12 @@ where
         }
     }
 
+    /// Sets the index type of the map.
+    pub fn with_index_type(mut self, index_type: IndexType) -> Self {
+        self.index_type = index_type;
+        self
+    }
+
     /// Create the map, and construct the read and write handles used to access it.
     #[allow(clippy::type_complexity)]
     pub fn construct<K, V>(self) -> (WriteHandle<K, V, M, T, S>, ReadHandle<K, V, M, T, S>)

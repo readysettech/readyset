@@ -19,9 +19,9 @@ pub(crate) trait Trigger =
 ///
 /// # Invariants:
 ///
-/// * key must be non-empty, or we hit an unimplemented!
-pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle) {
-    new_inner(cols, key, None)
+/// * index must be non-empty, or we hit an unimplemented!
+pub(crate) fn new(cols: usize, index: Index) -> (SingleReadHandle, WriteHandle) {
+    new_inner(cols, index, None)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
@@ -31,7 +31,7 @@ pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle)
 /// # Arguments
 ///
 /// * `cols` - the number of columns in this table
-/// * `key` - the column indices for the lookup key for this table
+/// * `index` - the index for the reader
 /// * `trigger` - function to call to trigger an upquery and replay
 ///
 /// # Invariants:
@@ -39,13 +39,13 @@ pub(crate) fn new(cols: usize, key: &[usize]) -> (SingleReadHandle, WriteHandle)
 /// * key must be non-empty, or we hit an unimplemented!
 pub(crate) fn new_partial<F>(
     cols: usize,
-    key: &[usize],
+    index: Index,
     trigger: F,
 ) -> (SingleReadHandle, WriteHandle)
 where
     F: Trigger,
 {
-    new_inner(cols, key, Some(Arc::new(trigger)))
+    new_inner(cols, index, Some(Arc::new(trigger)))
 }
 
 // # Invariants:
@@ -53,13 +53,13 @@ where
 // * key must be non-empty, or we hit an unimplemented!
 fn new_inner(
     cols: usize,
-    key: &[usize],
+    index: Index,
     trigger: Option<Arc<dyn Trigger>>,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
         let mut last = None;
-        for &k in key {
+        for &k in &index.columns {
             if let Some(last) = last {
                 if k != last + 1 {
                     contiguous = false;
@@ -78,6 +78,7 @@ fn new_inner(
                 .with_meta(-1)
                 .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
+                .with_index_type(index.index_type)
                 .construct();
             // If we're fully materialized, we never miss, so we can insert a single interval to
             // cover the full range of keys
@@ -92,7 +93,7 @@ fn new_inner(
     }
 
     #[allow(clippy::unreachable)] // Documented invariant.
-    let (w, r) = match key.len() {
+    let (w, r) = match index.len() {
         0 => unreachable!(),
         1 => make!(Single),
         2 => make!(Double),
@@ -102,15 +103,16 @@ fn new_inner(
     let w = WriteHandle {
         partial: trigger.is_some(),
         handle: w,
-        key: Vec::from(key),
+        index: index.clone(),
         cols,
         contiguous,
         mem_size: 0,
     };
+
     let r = SingleReadHandle {
         handle: r,
         trigger,
-        key: Vec::from(key),
+        index,
         post_lookup: Default::default(),
     };
 
@@ -145,7 +147,7 @@ pub(crate) struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,
     cols: usize,
-    key: Vec<usize>,
+    index: Index,
     contiguous: bool,
     mem_size: usize,
 }
@@ -279,7 +281,7 @@ impl WriteHandle {
     where
         R: Into<Cow<'a, [DataType]>>,
     {
-        let key = key_from_record(&self.key[..], self.contiguous, record);
+        let key = key_from_record(&self.index.columns, self.contiguous, record);
         self.mut_with_key(key)
     }
 
@@ -287,7 +289,7 @@ impl WriteHandle {
     where
         R: Into<Cow<'a, [DataType]>>,
     {
-        let key = key_from_record(&self.key[..], self.contiguous, record);
+        let key = key_from_record(&self.index.columns, self.contiguous, record);
         self.with_key(key)
     }
 
@@ -302,7 +304,7 @@ impl WriteHandle {
     where
         I: IntoIterator<Item = Record>,
     {
-        let mem_delta = self.handle.add(&self.key[..], self.cols, rs);
+        let mem_delta = self.handle.add(&self.index.columns, self.cols, rs);
         match mem_delta.cmp(&0) {
             Ordering::Greater => {
                 self.mem_size += mem_delta as usize;
@@ -396,7 +398,7 @@ impl SizeOf for WriteHandle {
 pub struct SingleReadHandle {
     handle: multir::Handle,
     trigger: Option<Arc<dyn Trigger>>,
-    key: Vec<usize>,
+    index: Index,
     pub post_lookup: PostLookup,
 }
 
@@ -405,7 +407,7 @@ impl std::fmt::Debug for SingleReadHandle {
         f.debug_struct("SingleReadHandle")
             .field("handle", &self.handle)
             .field("has_trigger", &self.trigger.is_some())
-            .field("key", &self.key)
+            .field("index", &self.index)
             .finish()
     }
 }
@@ -503,7 +505,7 @@ mod tests {
     fn store_works() {
         let a = vec![1.into(), "a".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
 
         w.swap();
 
@@ -533,7 +535,7 @@ mod tests {
         use std::thread;
 
         let n = 1_000;
-        let (r, mut w) = new(1, &[0]);
+        let (r, mut w) = new(1, Index::hash_map(vec![0]));
         let jh = thread::spawn(move || {
             for i in 0..n {
                 w.add(vec![Record::Positive(vec![i.into()])]);
@@ -562,7 +564,7 @@ mod tests {
         let a = vec![1.into(), "a".try_into().unwrap()];
         let b = vec![1.into(), "b".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![Record::Positive(a.clone())]);
         w.swap();
         w.add(vec![Record::Positive(b)]);
@@ -583,7 +585,7 @@ mod tests {
         let b = vec![1.into(), "b".try_into().unwrap()];
         let c = vec![1.into(), "c".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.swap();
@@ -611,7 +613,7 @@ mod tests {
         let a = vec![1.into(), "a".try_into().unwrap()];
         let b = vec![1.into(), "b".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.add(vec![Record::Negative(a.clone())]);
@@ -632,7 +634,7 @@ mod tests {
         let a = vec![1.into(), "a".try_into().unwrap()];
         let b = vec![1.into(), "b".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![Record::Positive(a.clone())]);
         w.add(vec![Record::Positive(b.clone())]);
         w.swap();
@@ -655,7 +657,7 @@ mod tests {
         let b = vec![1.into(), "b".try_into().unwrap()];
         let c = vec![1.into(), "c".try_into().unwrap()];
 
-        let (r, mut w) = new(2, &[0]);
+        let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![
             Record::Positive(a.clone()),
             Record::Positive(b.clone()),
@@ -697,7 +699,11 @@ mod tests {
 
     #[test]
     fn find_missing_partial() {
-        let (r, mut w) = new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+        let (r, mut w) = new_partial(
+            1,
+            Index::hash_map(vec![0]),
+            |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+        );
         w.swap();
 
         assert_eq!(
@@ -712,8 +718,11 @@ mod tests {
 
         #[test]
         fn point() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(
+                1,
+                Index::hash_map(vec![0]),
+                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            );
             w.swap();
 
             let key = vec1![DataType::from(0)];
@@ -726,8 +735,11 @@ mod tests {
 
         #[test]
         fn range() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(
+                1,
+                Index::btree_map(vec![0]),
+                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            );
             w.swap();
 
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];
@@ -752,8 +764,11 @@ mod tests {
 
         #[test]
         fn point() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(
+                1,
+                Index::btree_map(vec![0]),
+                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            );
             w.swap();
 
             let key = vec1![DataType::from(0)];
@@ -768,8 +783,11 @@ mod tests {
 
         #[test]
         fn range() {
-            let (r, mut w) =
-                new_partial(1, &[0], |_: &mut dyn Iterator<Item = &KeyComparison>| true);
+            let (r, mut w) = new_partial(
+                1,
+                Index::btree_map(vec![0]),
+                |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            );
             w.swap();
 
             let range = vec![DataType::from(0)]..vec![DataType::from(10)];
