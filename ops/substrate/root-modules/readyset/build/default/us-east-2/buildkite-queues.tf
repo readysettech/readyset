@@ -143,7 +143,7 @@ module "buildkite_benchmark_queue" {
   instance_type   = "c5.4xlarge"
 
   min_size = 0
-  max_size = 5
+  max_size = 15
 
   ssh_key_pair_name                          = "readyset-devops"
   buildkite_agent_token_parameter_store_path = module.buildkite_queue_shared.buildkite_agent_token_parameter_store_path
