@@ -471,10 +471,7 @@ where
                     backend_builder
                         .clone()
                         .build(noria, upstream, query_status_cache.clone());
-                connection_handler
-                    .process_connection(s, backend)
-                    .instrument(connection.clone())
-                    .await;
+                connection_handler.process_connection(s, backend).await;
                 connection.in_scope(|| debug!("disconnected"));
             };
             rt.handle().spawn(fut);

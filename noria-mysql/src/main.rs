@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_trait::async_trait;
 use clap::Parser;
 use tokio::net;
-use tracing::error;
+use tracing::{error, instrument};
 
 use msql_srv::MysqlIntermediary;
 use nom_sql::Dialect;
@@ -32,6 +32,7 @@ impl ConnectionHandler for MysqlHandler {
     type UpstreamDatabase = MySqlUpstream;
     type Handler = MySqlQueryHandler;
 
+    #[instrument(level = "debug", "connection", skip_all, fields(addr = ?stream.peer_addr().unwrap()))]
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
