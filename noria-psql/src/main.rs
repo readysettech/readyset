@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use clap::Parser;
 use nom_sql::Dialect;
 use tokio::net;
+use tracing::instrument;
 
 use noria_client::backend as cl;
 use noria_client_adapter::{ConnectionHandler, DatabaseType, NoriaAdapter};
@@ -22,6 +23,7 @@ impl ConnectionHandler for PsqlHandler {
     type UpstreamDatabase = PostgreSqlUpstream;
     type Handler = PostgreSqlQueryHandler;
 
+    #[instrument(level = "debug", "connection", skip_all, fields(addr = ?stream.peer_addr().unwrap()))]
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
