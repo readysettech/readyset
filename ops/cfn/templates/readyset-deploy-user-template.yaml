@@ -188,4 +188,11 @@ Resources:
                 Action: iam:PassRole
                 Resource:
                   - !GetAtt ReadySetCloudFormationExecutionRole.Arn
+              - Effect: Allow
+                Action:
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:ListAccessKeys
+                  - iam:UpdateAccessKey
+                Resource: arn:aws:iam::*:user/${aws:username}
           PolicyName: ReadySetCloudFormationPassRole
