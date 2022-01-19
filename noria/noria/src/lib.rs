@@ -243,7 +243,6 @@ use std::pin::Pin;
 use tokio::task_local;
 pub use view::{
     ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ViewPlaceholder, ViewSchema,
-    REQUEST_TIMEOUT as VIEW_REQUEST_TIMEOUT,
 };
 
 /// The prelude contains most of the types needed in everyday operation.

@@ -391,6 +391,7 @@ impl DataflowState {
             name: name.to_owned(),
             replicas: Vec1::try_from_vec(replicas)
                 .map_err(|_| ReadySetError::ViewNotFound(view_req.name))?,
+            view_request_timeout: self.domain_config.view_request_timeout,
         }))
     }
 
@@ -528,6 +529,7 @@ impl DataflowState {
             table_name: node.name().to_owned(),
             columns,
             schema,
+            table_request_timeout: self.domain_config.table_request_timeout,
         }))
     }
 

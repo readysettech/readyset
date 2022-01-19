@@ -194,6 +194,18 @@ impl Builder {
         self.config.upquery_timeout = value;
     }
 
+    /// Sets the value of [`Config::domain_config::view_request_timeout`]. See documentation of
+    /// that field for more information.
+    pub fn set_view_request_timeout(&mut self, value: std::time::Duration) {
+        self.config.domain_config.view_request_timeout = value;
+    }
+
+    /// Sets the value of [`Config::domain_config::table_request_timeout`]. See documentation of
+    /// that field for more information.
+    pub fn set_table_request_timeout(&mut self, value: std::time::Duration) {
+        self.config.domain_config.table_request_timeout = value;
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,

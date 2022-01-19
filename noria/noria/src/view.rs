@@ -36,9 +36,6 @@ use crate::consistency::Timestamp;
 use crate::util::like::CaseSensitivityMode;
 use crate::{Tagged, Tagger};
 
-/// A fixed period of time after which a call to any View method will time out
-pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-
 type Transport = AsyncBincodeStream<
     tokio::net::TcpStream,
     Tagged<ReadReply>,
@@ -79,7 +76,10 @@ impl From<Option<PlaceholderIdx>> for ViewPlaceholder {
 }
 
 #[derive(Debug)]
-struct Endpoint(SocketAddr);
+struct Endpoint {
+    addr: SocketAddr,
+    timeout: Duration,
+}
 
 /// Identifies the source base table column for a projected column
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,9 +151,10 @@ impl Service<()> for Endpoint {
     }
 
     fn call(&mut self, _: ()) -> Self::Future {
-        let f = tokio::net::TcpStream::connect(self.0);
+        let f = tokio::net::TcpStream::connect(self.addr);
+        let timeout = self.timeout;
         async move {
-            let s = tokio::time::timeout(REQUEST_TIMEOUT, f).await??;
+            let s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
             let t = multiplex::MultiplexTransport::new(s, Tagger::default());
@@ -258,6 +259,7 @@ impl ColumnSchema {
 
 fn make_views_stream(
     addr: SocketAddr,
+    timeout: Duration,
 ) -> impl futures_util::stream::TryStream<
     Ok = tower::discover::Change<usize, InnerService>,
     Error = tokio::io::Error,
@@ -266,14 +268,14 @@ fn make_views_stream(
     // creating _all_ the connections every time.
     (0..crate::VIEW_POOL_SIZE)
         .map(|i| async move {
-            let svc = Endpoint(addr).call(()).await?;
+            let svc = Endpoint { addr, timeout }.call(()).await?;
             Ok(tower::discover::Change::Insert(i, svc))
         })
         .collect::<futures_util::stream::FuturesUnordered<_>>()
 }
 
-fn make_views_discover(addr: SocketAddr) -> Discover {
-    make_views_stream(addr)
+fn make_views_discover(addr: SocketAddr, timeout: Duration) -> Discover {
+    make_views_stream(addr, timeout)
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
@@ -694,6 +696,9 @@ pub struct ViewBuilder {
     /// Set of replicas for a view, this will only include one element
     /// if there is no reader replication.
     pub replicas: Vec1<ViewReplica>,
+
+    /// The amount of time before a view request RPC is terminated.
+    pub view_request_timeout: Duration,
 }
 
 /// A reader replica for a view.
@@ -778,10 +783,13 @@ impl ViewBuilder {
                     let (c, w) = Buffer::pair(
                         Timeout::new(
                             ConcurrencyLimit::new(
-                                Balance::new(make_views_discover(shard.addr)),
+                                Balance::new(make_views_discover(
+                                    shard.addr,
+                                    self.view_request_timeout,
+                                )),
                                 crate::PENDING_LIMIT,
                             ),
-                            REQUEST_TIMEOUT,
+                            self.view_request_timeout,
                         ),
                         crate::BUFFER_TO_POOL,
                     );
