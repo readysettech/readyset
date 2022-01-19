@@ -465,6 +465,9 @@ pub struct Config {
     pub(crate) keep_prior_recipes: bool,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
+    /// The duration to wait before canceling a task waiting on a worker request. Worker requests
+    /// are typically issued as part of migrations.
+    pub(crate) worker_request_timeout: Duration,
 }
 
 impl Default for Config {
@@ -493,6 +496,7 @@ impl Default for Config {
             replication_server_id: None,
             keep_prior_recipes: true,
             upquery_timeout: Duration::from_millis(20000),
+            worker_request_timeout: Duration::from_millis(600000),
         }
     }
 }

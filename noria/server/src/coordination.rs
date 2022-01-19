@@ -1,5 +1,4 @@
 use dataflow::prelude::*;
-pub use noria::util::do_noria_rpc;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 

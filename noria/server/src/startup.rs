@@ -41,9 +41,6 @@
 //! channel to the `Controller` or `Worker`; the response is sent back via a
 //! `tokio::sync::oneshot` channel, serialized, and returned to the client.
 //!
-//! The `do_noria_rpc` function in `noria::util` shows how clients can make RPC requests (as well
-//! as the `ControllerHandle` in `noria::controller`).
-//!
 //! ## Data plane communications overview
 //!
 //! Data plane communications occur over TCP sockets, and use custom protocols optimized for speed.
