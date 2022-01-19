@@ -259,10 +259,7 @@ impl QueryGraph {
 
     /// Construct a representation of the lookup key of a view for this query graph, based on the
     /// parameters in this query.
-    ///
-    /// The passed config struct is used to conditionally forbid certain experimental query
-    /// operations, such as range queries, and can be removed once those are unconditionally allowed
-    pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
+    pub(crate) fn view_key(&self) -> ReadySetResult<ViewKey> {
         if self.parameters().is_empty() {
             Ok(ViewKey {
                 columns: vec![(mir::Column::new(None, "bogokey"), None)],
@@ -272,10 +269,6 @@ impl QueryGraph {
             let has_aggregates = self.has_aggregates();
             let mut index_type = None;
             for param in self.parameters() {
-                if !config.allow_range_queries && !matches!(param.op, BinaryOperator::Equal) {
-                    unsupported!("Unsupported binary operator '{}'", param.op);
-                }
-
                 // Aggregates don't currently work with range queries (since we don't
                 // re-aggregate at the reader), so check here and return an error if the
                 // query has both aggregates and range params

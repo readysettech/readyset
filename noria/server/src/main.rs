@@ -173,10 +173,6 @@ struct Opts {
     #[clap(long, hide = true)]
     enable_experimental_topk_support: bool,
 
-    /// Enable (experimental) support for range queries in dataflow
-    #[clap(long, hide = true)]
-    enable_experimental_range_query_support: bool,
-
     #[clap(flatten)]
     logging: readyset_logging::Options,
 
@@ -254,7 +250,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     builder.set_allow_topk(opts.enable_experimental_topk_support);
-    builder.set_allow_range_queries(opts.enable_experimental_range_query_support);
 
     if let Some(r) = opts.region {
         builder.set_region(r);

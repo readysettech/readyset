@@ -2914,10 +2914,7 @@ mod tests {
         let mut g = integration_utils::start_simple("it_adds_topk").await;
         g.migrate(|mig| {
             let mut inc = SqlIncorporator::default();
-            inc.set_mir_config(super::mir::Config {
-                allow_topk: true,
-                ..Default::default()
-            });
+            inc.set_mir_config(super::mir::Config { allow_topk: true });
             "CREATE TABLE things (id int primary key);"
                 .to_flow_parts(&mut inc, None, mig)
                 .unwrap();

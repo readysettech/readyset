@@ -127,11 +127,6 @@ impl Builder {
         self.config.mir_config.allow_topk = allow_topk;
     }
 
-    /// Set the value of [`controller::sql::Config::allow_range_queries`]
-    pub fn set_allow_range_queries(&mut self, allow_range_queries: bool) {
-        self.config.mir_config.allow_range_queries = allow_range_queries;
-    }
-
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation
     /// of that field for more information
     ///
