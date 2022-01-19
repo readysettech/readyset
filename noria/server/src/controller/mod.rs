@@ -2,7 +2,6 @@ use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
 use crate::controller::state::DataflowState;
-use crate::coordination::do_noria_rpc;
 use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
@@ -100,6 +99,7 @@ pub struct Worker {
     reader_only: bool,
     /// Volume associated with this worker's server.
     volume_id: Option<VolumeId>,
+    request_timeout: Duration,
 }
 
 impl Worker {
@@ -108,6 +108,7 @@ impl Worker {
         region: Option<String>,
         reader_only: bool,
         volume_id: Option<VolumeId>,
+        request_timeout: Duration,
     ) -> Self {
         Worker {
             healthy: true,
@@ -116,11 +117,35 @@ impl Worker {
             region,
             reader_only,
             volume_id,
+            request_timeout,
         }
     }
     pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
         let body = hyper::Body::from(bincode::serialize(&req)?);
-        Ok(do_noria_rpc(self.http.post(self.uri.join("worker_request")?).body(body)).await?)
+        let req = self.http.post(self.uri.join("worker_request")?).body(body);
+        let resp = req
+            .timeout(self.request_timeout)
+            .send()
+            .await
+            .map_err(|e| ReadySetError::HttpRequestFailed(e.to_string()))?;
+        let status = resp.status();
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| ReadySetError::HttpRequestFailed(e.to_string()))?;
+        if !status.is_success() {
+            if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+                return Err(ReadySetError::ServiceUnavailable);
+            } else if status == reqwest::StatusCode::BAD_REQUEST {
+                return Err(ReadySetError::SerializationFailed(
+                    "remote server returned 400".into(),
+                ));
+            } else {
+                let err: ReadySetError = bincode::deserialize(&body)?;
+                return Err(err);
+            }
+        }
+        Ok(bincode::deserialize::<T>(&body)?)
     }
 }
 
@@ -374,6 +399,7 @@ impl Controller {
                     self.authority.clone(),
                     self.config.replication_url.clone(),
                     self.config.replication_server_id,
+                    self.config.worker_request_timeout,
                 );
                 self.leader_ready.store(false, Ordering::Release);
 

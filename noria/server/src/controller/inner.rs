@@ -44,6 +44,9 @@ pub struct Leader {
     quorum: usize,
     controller_uri: Url,
 
+    /// The amount of time to wait for a worker request to complete.
+    worker_request_timeout: Duration,
+
     pub(super) replicator_url: Option<String>,
     /// A handle to the replicator task
     pub(super) replicator_task: Option<tokio::task::JoinHandle<()>>,
@@ -458,7 +461,13 @@ impl Leader {
         let mut writer = self.dataflow_state_handle.write().await;
         let ds = writer.as_mut();
 
-        let ws = Worker::new(worker_uri.clone(), region, reader_only, volume_id);
+        let ws = Worker::new(
+            worker_uri.clone(),
+            region,
+            reader_only,
+            volume_id,
+            self.worker_request_timeout,
+        );
 
         let mut domain_addresses = Vec::new();
         for (index, handle) in &ds.domains {
@@ -558,6 +567,7 @@ impl Leader {
         authority: Arc<Authority>,
         replicator_url: Option<String>,
         server_id: Option<u32>,
+        worker_request_timeout: Duration,
     ) -> Self {
         assert_ne!(state.config.quorum, 0);
 
@@ -582,6 +592,7 @@ impl Leader {
             replicator_task: None,
             authority,
             server_id,
+            worker_request_timeout,
         }
     }
 }
