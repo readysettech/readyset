@@ -3217,10 +3217,7 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }
-        r.set_mir_config(mir::Config {
-            allow_topk: true,
-            ..Default::default()
-        });
+        r.set_mir_config(mir::Config { allow_topk: true });
 
         let mut f = File::open(&file).unwrap();
         let mut s = String::new();
@@ -6639,18 +6636,7 @@ async fn join_straddled_columns() {
 #[tokio::test(flavor = "multi_thread")]
 async fn straddled_join_range_query() {
     readyset_logging::init_test_logging();
-    let mut g = {
-        let mut builder = Builder::for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
-        builder.set_allow_range_queries(true);
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
+    let mut g = start_simple("straddled_join_range_query").await;
 
     g.install_recipe(
         "CREATE TABLE a (a1 int, a2 int);
@@ -6710,18 +6696,7 @@ async fn straddled_join_range_query() {
 #[ignore]
 async fn overlapping_range_queries() {
     readyset_logging::init_test_logging();
-    let mut g = {
-        let mut builder = Builder::for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
-        builder.set_allow_range_queries(true);
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
+    let mut g = start_simple("straddled_join_range_query").await;
 
     g.install_recipe(
         "CREATE TABLE t (x int);
@@ -6787,18 +6762,7 @@ async fn overlapping_range_queries() {
 #[ignore]
 async fn overlapping_remapped_range_queries() {
     readyset_logging::init_test_logging();
-    let mut g = {
-        let mut builder = Builder::for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("overlapping_remapped_range_queries"));
-        builder.set_allow_range_queries(true);
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
+    let mut g = start_simple("overlapping_remapped_range_queries").await;
 
     g.install_recipe(
         "CREATE TABLE a (a1 int, a2 int);
@@ -6872,18 +6836,7 @@ async fn overlapping_remapped_range_queries() {
 #[tokio::test(flavor = "multi_thread")]
 async fn range_query_through_union() {
     readyset_logging::init_test_logging();
-    let mut g = {
-        let mut builder = Builder::for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
-        builder.set_allow_range_queries(true);
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
+    let mut g = start_simple("range_query_through_union").await;
 
     g.install_recipe(
         "CREATE TABLE t (a int, b int);
@@ -6928,18 +6881,7 @@ async fn range_query_through_union() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn aggregate_ranges_not_supported() {
-    let mut g = {
-        let mut builder = Builder::for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
-        builder.set_persistence(get_persistence_params("straddled_join_range_query"));
-        builder.set_allow_range_queries(true);
-        builder
-            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
-                Arc::new(LocalAuthorityStore::new()),
-            ))))
-            .await
-            .unwrap()
-    };
+    let mut g = start_simple("straddled_join_range_query").await;
 
     g.install_recipe("CREATE TABLE t (a int, b int)")
         .await

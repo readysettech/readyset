@@ -118,12 +118,9 @@ pub(crate) struct Config {
     /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node. If set to
     /// `false`, the SQL conversion process to return a [`ReadySetError::Unsupported`] (causing the
     /// adapter to send the query to fallback).  Defaults to `false`.
+    ///
+    /// [`TopK`]: MirNodeInner::TopK
     pub(crate) allow_topk: bool,
-
-    /// If set to `true`, allow creating partially materialized range queries (queries that do `>`,
-    /// `>=`, `<`, or `<=` comparisons on columns). If set to `false`, attempting to install these
-    /// queries will return a [`ReadySetError::Unsupported`]. Defaults to `false`.
-    pub(crate) allow_range_queries: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1729,7 +1726,7 @@ impl SqlToMirConverter {
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
             let view_key = if has_leaf {
-                let view_key = qg.view_key(&self.config)?;
+                let view_key = qg.view_key()?;
 
                 if qg.parameters().is_empty()
                     && !projected_columns.contains(&Column::new(None, "bogokey"))
