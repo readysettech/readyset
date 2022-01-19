@@ -120,7 +120,7 @@ impl DeploymentParameters {
 
 /// Key-value pair of benchmark results that can be used to calculate
 /// distributions across multiple benchmark iterations.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BenchmarkResults {
     results: HashMap<String, f64>,
 }
@@ -237,6 +237,29 @@ impl fmt::Display for BenchmarkResults {
             writeln!(f, "{}: {}", key, self.results[key])?;
         }
         Ok(())
+    }
+}
+
+/// The formatted benchmark parameters and results for serialization
+/// to a file.
+#[derive(Serialize, Deserialize)]
+pub struct BenchmarkOutput {
+    benchmark: Benchmark,
+    deployment: DeploymentParameters,
+    results: BenchmarkResults,
+}
+
+impl BenchmarkOutput {
+    pub fn new(
+        benchmark: Benchmark,
+        deployment: DeploymentParameters,
+        results: BenchmarkResults,
+    ) -> Self {
+        Self {
+            benchmark,
+            deployment,
+            results,
+        }
     }
 }
 

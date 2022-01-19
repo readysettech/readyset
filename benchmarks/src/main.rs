@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,7 +13,9 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use benchmarks::benchmark::{Benchmark, BenchmarkControl, BenchmarkResults, DeploymentParameters};
+use benchmarks::benchmark::{
+    Benchmark, BenchmarkControl, BenchmarkOutput, BenchmarkResults, DeploymentParameters,
+};
 use benchmarks::benchmark_histogram;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
@@ -56,6 +59,10 @@ struct BenchmarkRunner {
     /// before beginning `benchmark`.
     #[clap(long)]
     wait_for_snapshot: bool,
+
+    /// A file to write the set of benchmark results to.
+    #[clap(long, value_hint = ValueHint::FilePath)]
+    results_file: Option<PathBuf>,
 }
 
 impl BenchmarkRunner {
@@ -142,13 +149,10 @@ impl BenchmarkRunner {
         }
 
         // After this point deployment_params and benchmark_cmd are guaranteed to be Some.
-
-        println!(
-            "{}",
-            serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?
-        );
-
-        println!("{}", serde_yaml::to_string(&self.deployment_params)?);
+        let cmd_as_yaml = serde_yaml::to_string(&self.benchmark_cmd.as_ref().unwrap())?;
+        let deployment_as_yaml = serde_yaml::to_string(&self.deployment_params)?;
+        let identifier = format!("{}\n{}\n", cmd_as_yaml, deployment_as_yaml);
+        println!("{}", identifier);
 
         if let Some(f) = &self.only_to_spec {
             let f = std::fs::File::create(f)?;
@@ -206,7 +210,17 @@ impl BenchmarkRunner {
         }
 
         println!("Benchmark Results -----------------------");
-        println!("{}", BenchmarkResults::aggregate(&results));
+        let results = BenchmarkResults::aggregate(&results);
+        println!("{}", results);
+
+        let output = BenchmarkOutput::new(
+            self.benchmark_cmd.unwrap(),
+            self.deployment_params.clone(),
+            results,
+        );
+        if let Some(f) = self.results_file {
+            fs::write(f, serde_yaml::to_string(&output)?)?;
+        }
 
         if let Some((handle, tx)) = importer {
             drop(tx);
