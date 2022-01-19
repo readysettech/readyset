@@ -1,4 +1,4 @@
-use crate::consensus::{Authority, AuthorityControl, ZookeeperAuthority};
+use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::GraphInfo;
 use crate::debug::stats;
 use crate::metrics::MetricsDump;
@@ -153,8 +153,7 @@ impl Service<ControllerRequest> for Controller {
 /// to perform meta-operations such as fetching the dataflow's GraphViz visualization.
 ///
 /// To establish a new connection to Noria, use `ControllerHandle::new`, and pass in the
-/// appropriate `Authority`. In the likely case that you are using Zookeeper, use
-/// `ControllerHandle::from_zk`.
+/// appropriate `Authority`.
 ///
 /// Note that whatever Tokio Runtime you use to execute the `Future` that resolves into the
 /// `ControllerHandle` will also be the one that executes all your reads and writes through `View`
@@ -179,15 +178,6 @@ impl Clone for ControllerHandle {
             views: self.views.clone(),
             tracer: self.tracer.clone(),
         }
-    }
-}
-
-impl ControllerHandle {
-    /// Fetch information about the current Soup controller from Zookeeper running at the given
-    /// address, and create a `ControllerHandle` from that.
-    pub async fn from_zk(zookeeper_address: &str) -> ReadySetResult<Self> {
-        let auth = Authority::ZookeeperAuthority(ZookeeperAuthority::new(zookeeper_address).await?);
-        Ok(ControllerHandle::new(auth).await)
     }
 }
 
@@ -249,8 +239,6 @@ impl ControllerHandle {
 
     /// Create a `ControllerHandle` that bootstraps a connection to Noria via the configuration
     /// stored in the given `authority`.
-    ///
-    /// You *probably* want to use `ControllerHandle::from_zk` instead.
     pub async fn new<I: Into<Arc<Authority>>>(authority: I) -> Self {
         Self::make(authority.into())
     }

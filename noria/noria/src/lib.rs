@@ -26,13 +26,18 @@
 //!
 //! ```no_run
 //! # use noria::*;
+//! # use noria::consensus::Authority;
 //! # use noria_data::DataType;
 //! # use std::convert::TryInto;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let zookeeper_addr = "127.0.0.1:2181";
-//!     let mut db = ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//!     let zk_auth = Authority::from(
+//!         ZookeeperAuthority::new("127.0.0.1:2181/quickstart")
+//!             .await
+//!             .unwrap(),
+//!     );
+//!     let mut db = ControllerHandle::new(zk_auth).await;
 //!
 //!     // if this is the first time we interact with Noria, we must give it the schema
 //!     db.install_recipe("
