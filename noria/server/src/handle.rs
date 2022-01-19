@@ -44,7 +44,7 @@ impl Handle {
         kill: Trigger,
         descriptor: ControllerDescriptor,
     ) -> Self {
-        let c = ControllerHandle::make(authority);
+        let c = ControllerHandle::make(authority, None, None);
         Handle {
             c: Some(c),
             event_tx: Some(event_tx),
@@ -113,7 +113,7 @@ impl Handle {
 
     /// Install a new set of policies on the controller.
     pub async fn set_security_config(&mut self, p: String) -> Result<(), anyhow::Error> {
-        self.rpc("set_security_config", p).await?;
+        self.rpc("set_security_config", p, None).await?;
         Ok(())
     }
 
@@ -128,7 +128,7 @@ impl Handle {
             .get("id")
             .ok_or_else(|| bad_request_err("Universe context must have id"))?
             .clone();
-        let _ = self.rpc::<_, ()>("create_universe", &context).await?;
+        let _ = self.rpc::<_, ()>("create_universe", &context, None).await?;
 
         // Write to Context table
         let bname = match context.get("group") {

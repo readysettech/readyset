@@ -5,7 +5,6 @@ use crate::metrics::MetricsDump;
 use crate::replication::ReplicationOffsets;
 use crate::status::ReadySetStatus;
 use crate::table::{Table, TableBuilder, TableRpc};
-use crate::util::RPC_REQUEST_TIMEOUT_SECS;
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
     ActivationResult, ReaderReplicationResult, ReaderReplicationSpec, RecipeSpec,
@@ -52,13 +51,19 @@ struct Controller {
 struct ControllerRequest {
     path: &'static str,
     request: Vec<u8>,
+    timeout: Option<Duration>,
 }
 
 impl ControllerRequest {
-    fn new<Q: Serialize>(path: &'static str, r: Q) -> ReadySetResult<Self> {
+    fn new<Q: Serialize>(
+        path: &'static str,
+        r: Q,
+        timeout: Option<Duration>,
+    ) -> ReadySetResult<Self> {
         Ok(ControllerRequest {
             path,
             request: bincode::serialize(&r)?,
+            timeout,
         })
     }
 }
@@ -76,6 +81,7 @@ impl Service<ControllerRequest> for Controller {
     fn call(&mut self, req: ControllerRequest) -> Self::Future {
         let client = self.client.clone();
         let auth = self.authority.clone();
+        let request_timeout = req.timeout.unwrap_or(Duration::MAX);
         let path = req.path;
         let body = req.request;
         let start = Instant::now();
@@ -85,7 +91,8 @@ impl Service<ControllerRequest> for Controller {
             let mut url = None;
 
             loop {
-                if Instant::now().duration_since(start).as_secs() >= RPC_REQUEST_TIMEOUT_SECS {
+                let elapsed = Instant::now().duration_since(start);
+                if elapsed >= request_timeout {
                     internal!(
                         "request timeout reached; last error: {}",
                         last_error_desc.unwrap_or_else(|| "(none)".into())
@@ -109,15 +116,21 @@ impl Service<ControllerRequest> for Controller {
                     .body(hyper::Body::from(body.clone()))
                     .map_err(|e| internal_err(format!("http request failed: {}", e)))?;
 
-                // TODO(eta): custom error types here?
-
-                let res = match client.request(r).await {
-                    Ok(v) => v,
-                    Err(e) => {
+                let res = match tokio::time::timeout(request_timeout - elapsed, client.request(r))
+                    .await
+                {
+                    Ok(Ok(v)) => v,
+                    Ok(Err(e)) => {
                         last_error_desc = Some(e.to_string());
                         url = None;
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
+                    }
+                    Err(_) => {
+                        internal!(
+                            "request timeout reached; last error: {}",
+                            last_error_desc.unwrap_or_else(|| "(none)".into())
+                        );
                     }
                 };
 
@@ -168,6 +181,8 @@ pub struct ControllerHandle {
     domains: Arc<Mutex<HashMap<(SocketAddr, usize), TableRpc>>>,
     views: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     tracer: tracing::Dispatch,
+    request_timeout: Option<Duration>,
+    migration_timeout: Option<Duration>,
 }
 
 impl Clone for ControllerHandle {
@@ -177,6 +192,8 @@ impl Clone for ControllerHandle {
             domains: self.domains.clone(),
             views: self.views.clone(),
             tracer: self.tracer.clone(),
+            request_timeout: self.request_timeout,
+            migration_timeout: self.migration_timeout,
         }
     }
 }
@@ -194,11 +211,15 @@ const CONTROLLER_BUFFER_SIZE: usize = 8;
 
 impl ControllerHandle {
     #[doc(hidden)]
-    pub fn make(authority: Arc<Authority>) -> Self {
+    pub fn make(
+        authority: Arc<Authority>,
+        request_timeout: Option<Duration>,
+        migration_timeout: Option<Duration>,
+    ) -> Self {
         // need to use lazy otherwise current executor won't be known
         let tracer = tracing::dispatcher::get_default(|d| d.clone());
         let mut http_connector = HttpConnector::new();
-        http_connector.set_connect_timeout(Some(Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS)));
+        http_connector.set_connect_timeout(request_timeout);
         ControllerHandle {
             views: Default::default(),
             domains: Default::default(),
@@ -208,14 +229,19 @@ impl ControllerHandle {
                         authority,
                         client: hyper::Client::builder()
                             .http2_only(true)
-                            .http2_keep_alive_timeout(Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS))
+                            // Sets to the keep alive default if request_timeout is not specified.
+                            .http2_keep_alive_timeout(
+                                request_timeout.unwrap_or(Duration::from_secs(20)),
+                            )
                             .build(http_connector),
                     },
-                    Duration::from_secs(RPC_REQUEST_TIMEOUT_SECS),
+                    request_timeout.unwrap_or(Duration::MAX),
                 ),
                 CONTROLLER_BUFFER_SIZE,
             ),
             tracer,
+            request_timeout,
+            migration_timeout,
         }
     }
 
@@ -237,10 +263,21 @@ impl ControllerHandle {
         future::poll_fn(move |cx| self.poll_ready(cx)).await
     }
 
-    /// Create a `ControllerHandle` that bootstraps a connection to Noria via the configuration
-    /// stored in the given `authority`.
+    /// Create a [`ControllerHandle`] that bootstraps a connection to Noria via the configuration
+    /// stored in the given `authority`. Assigns the authority no timeouts for requests and
+    /// migrations.
     pub async fn new<I: Into<Arc<Authority>>>(authority: I) -> Self {
-        Self::make(authority.into())
+        Self::make(authority.into(), None, None)
+    }
+
+    /// Create a [`ControllerHandle`] that bootstraps a connection to Noria via the configuration
+    /// stored in the given `authority`. Assigns a timeout to requests to Noria, `timeout`.
+    pub async fn with_timeouts<I: Into<Arc<Authority>>>(
+        authority: I,
+        request_timeout: Option<Duration>,
+        migration_timeout: Option<Duration>,
+    ) -> Self {
+        Self::make(authority.into(), request_timeout, migration_timeout)
     }
 
     /// Enumerate all known base tables.
@@ -252,7 +289,7 @@ impl ControllerHandle {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::inputs"))?
-            .call(ControllerRequest::new("inputs", &())?)
+            .call(ControllerRequest::new("inputs", &(), None)?)
             .await
             .map_err(rpc_err!("ControllerHandle::inputs"))?;
 
@@ -270,7 +307,11 @@ impl ControllerHandle {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::outputs"))?
-            .call(ControllerRequest::new("outputs", &())?)
+            .call(ControllerRequest::new(
+                "outputs",
+                &(),
+                self.request_timeout,
+            )?)
             .await
             .map_err(rpc_err!("ControllerHandle::outputs"))?;
 
@@ -286,7 +327,11 @@ impl ControllerHandle {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?
-            .call(ControllerRequest::new("verbose_outputs", &())?)
+            .call(ControllerRequest::new(
+                "verbose_outputs",
+                &(),
+                self.request_timeout,
+            )?)
             .await
             .map_err(rpc_err!("ControllerHandle::verbose_outputs"))?;
 
@@ -347,7 +392,11 @@ impl ControllerHandle {
             .ready()
             .await
             .map_err(rpc_err!("ControllerHandle::view_builder"))?
-            .call(ControllerRequest::new("view_builder", &view_request)?)
+            .call(ControllerRequest::new(
+                "view_builder",
+                &view_request,
+                self.request_timeout,
+            )?)
             .await
             .map_err(rpc_err!("ControllerHandle::view_builder"))?;
 
@@ -398,7 +447,11 @@ impl ControllerHandle {
                 .ready()
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?
-                .call(ControllerRequest::new("table_builder", &name)?)
+                .call(ControllerRequest::new(
+                    "table_builder",
+                    &name,
+                    self.request_timeout,
+                )?)
                 .await
                 .map_err(rpc_err!("ControllerHandle::table"))?;
 
@@ -413,7 +466,12 @@ impl ControllerHandle {
 
     /// Perform a raw RPC request to the HTTP `path` provided, providing a request body `r`.
     #[doc(hidden)]
-    pub fn rpc<'a, Q, R>(&'a mut self, path: &'static str, r: Q) -> RpcFuture<'a, R>
+    pub fn rpc<'a, Q, R>(
+        &'a mut self,
+        path: &'static str,
+        r: Q,
+        timeout: Option<Duration>,
+    ) -> RpcFuture<'a, R>
     where
         for<'de> R: Deserialize<'de>,
         R: Send + 'static,
@@ -442,7 +500,7 @@ impl ControllerHandle {
                 .map_err(|e| rpc_err_no_downcast(path, e))
         }
 
-        match ControllerRequest::new(path, r) {
+        match ControllerRequest::new(path, r, timeout) {
             Ok(req) => Either::Left(rpc_inner(self, req, path)),
             Err(e) => Either::Right(std::future::ready(Err(e))),
         }
@@ -452,14 +510,14 @@ impl ControllerHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn statistics(&mut self) -> impl Future<Output = ReadySetResult<stats::GraphStats>> + '_ {
-        self.rpc("get_statistics", ())
+        self.rpc("get_statistics", (), self.request_timeout)
     }
 
     /// Flush all partial state, evicting all rows present.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn flush_partial(&mut self) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("flush_partial", ())
+        self.rpc("flush_partial", (), self.request_timeout)
     }
 
     /// Extend the existing recipe with the given set of queries.
@@ -474,7 +532,7 @@ impl ControllerHandle {
             ..Default::default()
         };
 
-        self.rpc("extend_recipe", request)
+        self.rpc("extend_recipe", request, self.migration_timeout)
     }
 
     /// Extend the existing recipe with the given set of queries and don't require leader ready.
@@ -490,7 +548,7 @@ impl ControllerHandle {
             ..Default::default()
         };
 
-        self.rpc("extend_recipe", request)
+        self.rpc("extend_recipe", request, self.migration_timeout)
     }
 
     /// Extend the existing recipe with the given set of queries and an optional replication offset
@@ -508,7 +566,7 @@ impl ControllerHandle {
             require_leader_ready: Some(require_leader_ready),
         };
 
-        self.rpc("extend_recipe", request)
+        self.rpc("extend_recipe", request, self.migration_timeout)
     }
 
     /// Replace the existing recipe with this one.
@@ -523,14 +581,14 @@ impl ControllerHandle {
             ..Default::default()
         };
 
-        self.rpc("install_recipe", request)
+        self.rpc("install_recipe", request, self.migration_timeout)
     }
 
     /// Remove all nodes related to the query with the given name
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn remove_query(&mut self, name: &str) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("remove_query", name)
+        self.rpc("remove_query", name, self.migration_timeout)
     }
 
     /// Set the replication offset for the schema, which is stored with the recipe.
@@ -540,28 +598,32 @@ impl ControllerHandle {
         &mut self,
         replication_offset: Option<&ReplicationOffset>,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("set_schema_replication_offset", replication_offset)
+        self.rpc(
+            "set_schema_replication_offset",
+            replication_offset,
+            self.request_timeout,
+        )
     }
 
     /// Fetch a graphviz description of the dataflow graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
-        self.rpc("graphviz", ())
+        self.rpc("graphviz", (), self.request_timeout)
     }
 
     /// Fetch a simplified graphviz description of the dataflow graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn simple_graphviz(&mut self) -> impl Future<Output = ReadySetResult<String>> + '_ {
-        self.rpc("simple_graphviz", ())
+        self.rpc("simple_graphviz", (), self.request_timeout)
     }
 
     /// Replicate the readers associated with the list of queries to the given worker.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn get_instances(&mut self) -> impl Future<Output = ReadySetResult<Vec<(Url, bool)>>> + '_ {
-        self.rpc("instances", ())
+        self.rpc("instances", (), self.request_timeout)
     }
 
     /// Replicate the readers associated with the list of queries to the given worker.
@@ -576,14 +638,14 @@ impl ControllerHandle {
             queries,
             worker_uri,
         };
-        self.rpc("replicate_readers", request)
+        self.rpc("replicate_readers", request, self.migration_timeout)
     }
 
     /// Query the controller for information about the graph.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn get_info(&mut self) -> impl Future<Output = ReadySetResult<GraphInfo>> + '_ {
-        self.rpc("get_info", ())
+        self.rpc("get_info", (), self.request_timeout)
     }
 
     /// Remove the given external view from the graph.
@@ -594,35 +656,35 @@ impl ControllerHandle {
         view: NodeIndex,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
         // TODO: this should likely take a view name, and we should verify that it's a Reader.
-        self.rpc("remove_node", view)
+        self.rpc("remove_node", view, self.migration_timeout)
     }
 
     /// Fetch a dump of metrics values from the running noria instance
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn metrics_dump(&mut self) -> impl Future<Output = ReadySetResult<MetricsDump>> + '_ {
-        self.rpc("metrics_dump", ())
+        self.rpc("metrics_dump", (), self.request_timeout)
     }
 
     /// Get a list of all registered worker URIs.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
-        self.rpc("workers", ())
+        self.rpc("workers", (), self.request_timeout)
     }
 
     /// Get a list of all registered worker URIs that are currently healthy.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn healthy_workers(&mut self) -> impl Future<Output = ReadySetResult<Vec<Url>>> + '_ {
-        self.rpc("healthy_workers", ())
+        self.rpc("healthy_workers", (), self.request_timeout)
     }
 
     /// Get the url of the current noria controller.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub fn controller_uri(&mut self) -> impl Future<Output = ReadySetResult<Url>> + '_ {
-        self.rpc("controller_uri", ())
+        self.rpc("controller_uri", (), self.request_timeout)
     }
 
     /// Get a set of all replication offsets for the entire system.
@@ -632,24 +694,24 @@ impl ControllerHandle {
     pub fn replication_offsets(
         &mut self,
     ) -> impl Future<Output = ReadySetResult<ReplicationOffsets>> + '_ {
-        self.rpc("replication_offsets", ())
+        self.rpc("replication_offsets", (), self.request_timeout)
     }
 
     /// Get a list of all current tables node indexes that are involved in snapshotting.
     pub fn snapshotting_tables(
         &mut self,
     ) -> impl Future<Output = ReadySetResult<Vec<String>>> + '_ {
-        self.rpc("snapshotting_tables", ())
+        self.rpc("snapshotting_tables", (), self.request_timeout)
     }
 
     /// Return whether the leader is ready or not.
     pub fn leader_ready(&mut self) -> impl Future<Output = ReadySetResult<bool>> + '_ {
-        self.rpc("leader_ready", ())
+        self.rpc("leader_ready", (), self.request_timeout)
     }
 
     /// Returns the ReadySetStatus struct returned by the leader.
     pub fn status(&mut self) -> impl Future<Output = ReadySetResult<ReadySetStatus>> + '_ {
-        self.rpc("status", ())
+        self.rpc("status", (), self.request_timeout)
     }
 
     #[cfg(feature = "failure_injection")]
@@ -658,6 +720,6 @@ impl ControllerHandle {
         name: String,
         action: String,
     ) -> impl Future<Output = ReadySetResult<()>> + '_ {
-        self.rpc("failpoint", (name, action))
+        self.rpc("failpoint", (name, action), self.request_timeout)
     }
 }
