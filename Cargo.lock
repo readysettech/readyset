@@ -3789,6 +3789,8 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_with",
+ "strum 0.23.0",
+ "strum_macros 0.23.1",
  "tempfile",
  "test-strategy",
  "thiserror",

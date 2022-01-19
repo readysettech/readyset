@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
 
 use crate::prelude::*;
@@ -197,7 +198,8 @@ pub enum DomainRequest {
 /// dataflow code that only know how to handle one kind of packet don't have to panic if they
 /// receive the wrong kind of packet. See
 /// [ENG-455](https://readysettech.atlassian.net/browse/ENG-455)
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, EnumDiscriminants)]
+#[strum_discriminants(derive(EnumIter, EnumCount, IntoStaticStr))]
 #[allow(clippy::large_enum_variant)]
 pub enum Packet {
     // Data messages

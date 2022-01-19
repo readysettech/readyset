@@ -46,6 +46,8 @@ test-strategy = "0.1.1"
 thiserror = "1.0.26"
 proptest = "1.0.0"
 fail = "0.5.0"
+strum = "0.23"
+strum_macros = "0.23"
 
 # need features
 petgraph = { version = "0.5", features = ["serde-1"] }

@@ -116,6 +116,7 @@ impl<'de> Deserialize<'de> for IndexPair {
 #[derive(
     Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Serialize, Deserialize, Arbitrary,
 )]
+#[repr(transparent)]
 pub struct Tag(u32);
 
 impl Tag {

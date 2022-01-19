@@ -219,6 +219,7 @@ pub mod recorded {
     /// | --- | ----------- |
     ///
     /// | domain | The domain that the eviction is performed in. |
+    /// | shard | The shard that the eviction is performed in. |
     pub const DOMAIN_EVICTION_TIME: &str = "domain.eviction_time_us";
 
     /// Histogram: The time in microseconds that the controller spent committing
@@ -362,6 +363,7 @@ pub mod recorded {
     ///
     /// | Tag | Description |
     /// | domain | The index of the domain. |
+    /// | shard | The shard of the base table the lookup is requested in. |
     /// | packet_type | The type of packet |
     pub const DOMAIN_PACKET_SENT: &str = "domain.packet_sent";
 

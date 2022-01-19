@@ -50,7 +50,7 @@ pub type DomainConfig = domain::Config;
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex};
 pub use crate::node::special::PostLookup;
 pub use crate::node_map::NodeMap;
-pub use crate::payload::{DomainRequest, Packet};
+pub use crate::payload::{DomainRequest, Packet, PacketDiscriminants};
 pub use crate::processing::SuggestedIndex;
 
 pub use dataflow_expression::{BuiltinFunction, Expression};
