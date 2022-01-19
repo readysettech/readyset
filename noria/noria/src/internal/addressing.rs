@@ -31,6 +31,7 @@ impl fmt::Display for DomainIndex {
 
 /// A domain-local node identifier.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
+#[repr(transparent)]
 pub struct LocalNodeIndex {
     id: u32, // not a tuple struct so this field can be made private
 }

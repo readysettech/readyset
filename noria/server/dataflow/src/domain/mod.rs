@@ -1,9 +1,10 @@
+mod domain_metrics;
+
 use std::borrow::Cow;
 use std::cell;
 use std::cmp;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::convert::TryFrom;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::ops::Bound;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,7 +15,6 @@ use ahash::RandomState;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
 use launchpad::Indices;
-use metrics::{counter, gauge, histogram};
 use noria::internal::Index;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,6 @@ use vec1::Vec1;
 use failpoint_macros::failpoint;
 pub use internal::DomainIndex;
 use noria::channel;
-use noria::metrics::recorded;
 use noria::replication::ReplicationOffset;
 use noria::{internal, KeyComparison, ReadySetError};
 use noria_errors::{internal, internal_err, ReadySetResult};
@@ -382,6 +381,8 @@ impl DomainBuilder {
             generated_columns: Default::default(),
             raw_replay_paths: Default::default(),
             active_remaps: Default::default(),
+
+            metrics: domain_metrics::DomainMetrics::new(self.index, self.shard.unwrap_or(0)),
         }
     }
 }
@@ -497,6 +498,8 @@ pub struct Domain {
     pub aggressively_update_state_sizes: bool,
 
     replay_completed: bool,
+
+    metrics: domain_metrics::DomainMetrics,
 }
 
 impl Domain {
@@ -706,16 +709,8 @@ impl Domain {
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
 
-        counter!(
-            recorded::DOMAIN_REPLAY_MISSES,
-            misses.len() as u64,
-            // HACK(eta): having to call `to_string()` here makes me sad,
-            // but seems to be a limitation of the `metrics` crate
-            "domain" => self.index.index().to_string(),
-            "shard" => self.shard.unwrap_or(0).to_string(),
-            "miss_in" => miss_in.id().to_string(),
-            "needed_for" => needed_for.to_string()
-        );
+        self.metrics
+            .inc_replay_misses(miss_in, needed_for, misses.len());
 
         for (replay_key, miss_key) in misses {
             let redo = Redo {
@@ -1273,13 +1268,7 @@ impl Domain {
                         .borrow_mut()
                         .remove();
                     self.state.remove(node);
-                    gauge!(
-                        "domain.node_state_size_bytes",
-                        0.0,
-                        "domain" => self.index.index().to_string(),
-                        "shard" => self.shard.unwrap_or(0).to_string(),
-                        "node" => node.id().to_string()
-                    );
+                    self.metrics.set_node_state_size(node, 0);
                     trace!(local = node.id(), "node removed");
                 }
 
@@ -1748,8 +1737,9 @@ impl Domain {
                         .channel_coordinator
                         .builder_for(&(self.index, self.shard.unwrap_or(0)))?;
 
-                    let domain_str = self.index.index().to_string();
-                    let shard_str = self.shard.unwrap_or(0).to_string();
+                    // Have to get metrics here so we can move them to the thread
+                    let (replay_time_counter, replay_time_histogram) =
+                        self.metrics.recorders_for_chunked_replay(link.dst);
 
                     thread::Builder::new()
                         .name(format!(
@@ -1809,43 +1799,15 @@ impl Domain {
                                "state chunker finished"
                             );
 
-                            histogram!(
-                                recorded::DOMAIN_CHUNKED_REPLAY_TIME,
-                                // HACK(eta): scary cast
-                                start.elapsed().as_micros() as f64,
-                                "domain" => domain_str.clone(),
-                                "shard" => shard_str.clone(),
-                                "from_node" => link.dst.id().to_string()
-                            );
-
-                            counter!(
-                                recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME,
-                                // HACK(eta): scary cast
-                                start.elapsed().as_micros() as u64,
-                                "domain" => domain_str,
-                                "shard" => shard_str,
-                                "from_node" => link.dst.id().to_string()
-                            );
+                            replay_time_counter.increment(start.elapsed().as_micros() as u64);
+                            replay_time_histogram.record(start.elapsed().as_micros() as f64);
                         })?;
                 }
                 self.handle_replay(*p, executor)?;
 
                 self.total_replay_time.stop();
-                histogram!(
-                    recorded::DOMAIN_CHUNKED_REPLAY_START_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
-
-                counter!(
-                    recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_START_TIME,
-                    start.elapsed().as_micros() as u64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
+                self.metrics
+                    .rec_chunked_replay_start_time(tag, start.elapsed());
                 Ok(None)
             }
             DomainRequest::Ready { node, purge, index } => {
@@ -2031,65 +1993,25 @@ impl Domain {
         // In particular one dodgy packet can kill the whole domain, which is probably not what we
         // want.
 
-        // Count of each packet sent from a domain.
-        counter!(
-            recorded::DOMAIN_PACKET_SENT,
-            1,
-            "domain" => self.index.index().to_string(),
-            "packet_type" => m.to_string()
-        );
+        self.metrics.inc_packets_sent(&m);
 
         match *m {
             Packet::Message { .. } | Packet::Input { .. } => {
                 // WO for https://github.com/rust-lang/rfcs/issues/1403
                 let start = time::Instant::now();
-                let src = m.src().id();
-                let dst = m.dst().id();
+                let src = m.src();
+                let dst = m.dst();
                 self.total_forward_time.start();
                 self.dispatch(m, executor)?;
                 self.total_forward_time.stop();
-                counter!(
-                    recorded::DOMAIN_TOTAL_FORWARD_TIME,
-                    start.elapsed().as_micros() as u64,
-                    // HACK(eta): having to call `to_string()` here makes me sad,
-                    // but seems to be a limitation of the `metrics` crate
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "from_node" => src.to_string(),
-                    "to_node" => dst.to_string(),
-                );
-
-                histogram!(
-                    recorded::DOMAIN_FORWARD_TIME,
-                    start.elapsed().as_micros() as f64,
-                    // HACK(eta): having to call `to_string()` here makes me sad,
-                    // but seems to be a limitation of the `metrics` crate
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "from_node" => src.to_string(),
-                    "to_node" => dst.to_string(),
-                );
+                self.metrics.rec_forward_time(src, dst, start.elapsed());
             }
             Packet::ReplayPiece { tag, .. } => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.handle_replay(*m, executor)?;
                 self.total_replay_time.stop();
-                counter!(
-                    recorded::DOMAIN_TOTAL_REPLAY_TIME,
-                    start.elapsed().as_micros() as u64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
-
-                histogram!(
-                    recorded::DOMAIN_REPLAY_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
+                self.metrics.rec_replay_time(tag, start.elapsed());
             }
             Packet::Evict { .. } | Packet::EvictKeys { .. } => {
                 self.handle_eviction(*m, executor)?;
@@ -2158,21 +2080,7 @@ impl Domain {
                 }
 
                 self.total_replay_time.stop();
-                histogram!(
-                    recorded::DOMAIN_READER_REPLAY_REQUEST_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "node" => node.id().to_string()
-                );
-
-                counter!(
-                    recorded::DOMAIN_READER_TOTAL_REPLAY_REQUEST_TIME,
-                    start.elapsed().as_micros() as u64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "node" => node.id().to_string()
-                );
+                self.metrics.rec_reader_replay_time(node, start.elapsed());
             }
             Packet::RequestPartialReplay {
                 tag,
@@ -2191,43 +2099,14 @@ impl Domain {
                     executor,
                 )?;
                 self.total_replay_time.stop();
-                histogram!(
-                    recorded::DOMAIN_SEED_REPLAY_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
-
-                counter!(
-                    recorded::DOMAIN_TOTAL_SEED_REPLAY_TIME,
-                    start.elapsed().as_micros() as u64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-
-                );
+                self.metrics.rec_seed_replay_time(tag, start.elapsed());
             }
             Packet::Finish(tag, ni) => {
                 let start = time::Instant::now();
                 self.total_replay_time.start();
                 self.finish_replay(tag, ni, executor)?;
                 self.total_replay_time.stop();
-                histogram!(
-                    recorded::DOMAIN_FINISH_REPLAY_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
-
-                counter!(
-                    recorded::DOMAIN_TOTAL_FINISH_REPLAY_TIME,
-                    start.elapsed().as_micros() as u64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string(),
-                    "tag" => tag.to_string()
-                );
+                self.metrics.rec_finish_replay_time(tag, start.elapsed());
             }
             Packet::Spin => {
                 // spinning as instructed
@@ -2299,20 +2178,6 @@ impl Domain {
         }
 
         Ok(row.into_owned().into())
-    }
-
-    // Records state lookup metrics for specific dataflow nodes.
-    fn record_dataflow_lookup_metrics(&self, node_idx: LocalNodeIndex) {
-        if let Some(node) = self.nodes.get(node_idx) {
-            if node.borrow().is_base() {
-                counter!(
-                    recorded::BASE_TABLE_LOOKUP_REQUESTS,
-                    1,
-                    "domain" => self.index.index().to_string(),
-                    "node" => node_idx.to_string(),
-                );
-            }
-        }
     }
 
     /// Lookup the provided keys, returns a vector of results
@@ -2445,7 +2310,11 @@ impl Domain {
             ))
         })?;
 
-        self.record_dataflow_lookup_metrics(*source);
+        if let Some(node) = self.nodes.get(*source) {
+            if node.borrow().is_base() {
+                self.metrics.inc_base_table_lookups(*source);
+            }
+        }
 
         let StateLookupResult {
             records,
@@ -3699,12 +3568,7 @@ impl Domain {
                 mut num_bytes,
             } => {
                 let start = std::time::Instant::now();
-                counter!(
-                    recorded::DOMAIN_EVICTION_REQUESTS,
-                    1,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string()
-                );
+                self.metrics.inc_eviction_requests();
 
                 let mut total_freed = 0;
                 let nodes = if let Some(node) = node {
@@ -3819,18 +3683,7 @@ impl Domain {
                     total_freed += freed;
                 }
 
-                histogram!(
-                    recorded::DOMAIN_EVICTION_FREED_MEMORY,
-                    total_freed as f64,
-                    "domain" => self.index.index().to_string(),
-                    "shard" => self.shard.unwrap_or(0).to_string()
-                );
-
-                histogram!(
-                    recorded::DOMAIN_EVICTION_TIME,
-                    start.elapsed().as_micros() as f64,
-                    "domain" => self.index.index().to_string(),
-                );
+                self.metrics.rec_eviction_time(start.elapsed(), total_freed);
             }
             Packet::EvictKeys {
                 link: Link { dst, .. },
@@ -3928,49 +3781,23 @@ impl Domain {
             })
             .sum();
 
-        let domain = self.index.index().to_string();
-        let shard = self.shard.unwrap_or(0).to_string();
-
-        let total_node_state: u64 = self
-            .state
+        let Domain { state, metrics, .. } = self; // Help borrowchk
+        let total_node_state: u64 = state
             .iter()
             .map(|(ni, state)| {
                 let ret = state.deep_size_of();
-                gauge!(
-                    recorded::DOMAIN_NODE_STATE_SIZE_BYTES,
-                    ret as f64,
-                    "domain" => domain.clone(),
-                    "shard" => shard.clone(),
-                    "node" => ni.id().to_string()
-                );
+                metrics.set_node_state_size(ni, ret);
                 ret
             })
             .sum();
 
-        gauge!(
-            recorded::DOMAIN_PARTIAL_STATE_SIZE_BYTES,
-            total as f64,
-            "domain" => domain.clone(),
-            "shard" => shard.clone(),
+        self.metrics.set_state_sizes(
+            total,
+            reader_size,
+            self.estimated_base_tables_size(),
+            total_node_state + reader_size,
         );
-        gauge!(
-            recorded::DOMAIN_READER_STATE_SIZE_BYTES,
-            reader_size as f64,
-            "domain" => domain.clone(),
-            "shard" => shard.clone(),
-        );
-        gauge!(
-            recorded::DOMAIN_ESTIMATED_BASE_TABLE_SIZE_BYTES,
-            self.estimated_base_tables_size() as f64,
-            "domain" => domain.clone(),
-            "shard" => shard.clone(),
-        );
-        gauge!(
-            recorded::DOMAIN_TOTAL_NODE_STATE_SIZE_BYTES,
-            (total_node_state + reader_size) as f64,
-            "domain" => domain,
-            "shard" => shard,
-        );
+
         self.state_size.store(total as usize, Ordering::Release);
         // no response sent, as worker will read the atomic
     }

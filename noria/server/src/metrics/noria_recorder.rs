@@ -33,6 +33,11 @@ impl NoriaHistogram {
         let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();
         NoriaHistogram(Mutex::new(metrics_util::Histogram::new(&bounds).unwrap()))
     }
+
+    fn clear(&self) {
+        let bounds: Vec<f64> = (1..20).map(|v| 2u32.pow(v) as f64).collect();
+        *self.0.lock() = metrics_util::Histogram::new(&bounds).unwrap();
+    }
 }
 
 impl metrics::HistogramFn for NoriaHistogram {
@@ -113,9 +118,17 @@ impl Render for NoriaMetricsRecorder {
 
 impl Clear for NoriaMetricsRecorder {
     fn clear(&self) -> bool {
-        self.counters.lock().clear();
-        self.gauges.lock().clear();
-        self.histograms.lock().clear();
+        self.counters
+            .lock()
+            .iter()
+            .for_each(|(_, v)| v.store(0, Relaxed));
+
+        self.gauges
+            .lock()
+            .iter()
+            .for_each(|(_, v)| v.store(0, Relaxed));
+
+        self.histograms.lock().iter().for_each(|(_, v)| v.clear());
         true
     }
 }

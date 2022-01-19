@@ -30,6 +30,7 @@ use std::time::Duration;
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn it_works_basic() {
+    register_metric_recorder();
     let mut g = {
         let mut builder = Builder::for_tests();
         builder.set_sharding(None);
@@ -192,6 +193,7 @@ async fn test_metrics_client() {
     // Start a local instance of noria and connect the metrics client to it.
     // We assign it a different port than the rest of the tests to prevent
     // other tests impacting the metrics collected.
+    register_metric_recorder();
     let builder = Builder::for_tests();
     let mut g = builder.start_local().await.unwrap();
     let mut client = initialize_metrics(&mut g).await;
@@ -217,6 +219,7 @@ async fn test_metrics_client() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn reader_replication() {
+    register_metric_recorder();
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let w1_authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
         authority_store.clone(),

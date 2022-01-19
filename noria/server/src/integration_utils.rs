@@ -129,11 +129,10 @@ pub async fn sleep() {
     tokio::time::sleep(get_settle_time()).await;
 }
 
-/// Creates the metrics client for a given local deployment and initializes
-/// the metrics recorder if it has not been initialized yet. Initializing the
-/// metrics clears all previously recorded metrics. As such if tests are run
-/// in parallel that depends on metrics, this may cause flaky metrics results.
-pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
+/// Initializes the metrics recorder if it has not been initialized yet. This
+/// must be called before the server is started, otherwise it will fail to
+/// register its metrics with the correct recorder, and none will be recorded
+pub fn register_metric_recorder() {
     unsafe {
         if get_global_recorder().is_none() {
             let rec = CompositeMetricsRecorder::with_recorders(vec![MetricsRecorder::Noria(
@@ -142,7 +141,10 @@ pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
             install_global_recorder(rec).unwrap();
         }
     }
+}
 
+/// Creates the metrics client for a given local deployment.
+pub async fn initialize_metrics(handle: &mut Handle) -> MetricsClient {
     let mut metrics_client = MetricsClient::new(handle.c.clone().unwrap()).unwrap();
     let res = metrics_client.reset_metrics().await;
     assert!(!res.is_err());
