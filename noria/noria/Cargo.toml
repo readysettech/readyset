@@ -67,7 +67,7 @@ triomphe = "0.1"
 zookeeper-async = "4.0.1"
 enum_dispatch = "0.3.7"
 async-trait = "0.1"
-consul = { git = "https://github.com/readysettech/consul-rust" }
+consul = { git = "https://github.com/readysettech/consul-rust", branch = "support-bytes" }
 base64 = "0.13"
 
 # channel/

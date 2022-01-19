@@ -262,18 +262,18 @@ impl AuthorityControl for ConsulAuthority {
         let key = self.prefix_with_deployment(CONTROLLER_KEY);
         let pair = KVPair {
             Key: key.clone(),
-            Value: serde_json::to_string(&payload)?,
-            Session: Some(session),
+            Value: serde_json::to_vec(&payload)?,
+            Session: Some(session.clone()),
             ..Default::default()
         };
 
         // Acquire will only write a new Value for the KVPair if no other leader
         // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(&pair, None).await {
+        match self.consul.acquire(pair, None).await {
             Ok((true, _)) => {
                 // Perform a get to update this authorities internal index.
                 if let Ok((Some(kv), _)) = self.consul.get(&key, None).await {
-                    if kv.Session == pair.Session {
+                    if kv.Session == Some(session) {
                         self.update_controller_index_from_pair(&kv)?;
                     }
                 }
@@ -295,7 +295,7 @@ impl AuthorityControl for ConsulAuthority {
         };
 
         // If we currently hold the lock on CONTROLLER_KEY, we will relinquish it.
-        match self.consul.release(&pair, None).await {
+        match self.consul.release(pair, None).await {
             Ok(_) => Ok(()),
             Err(e) => bail!(e.to_string()),
         }
@@ -311,8 +311,7 @@ impl AuthorityControl for ConsulAuthority {
             {
                 Ok((Some(kv), _)) if kv.Session.is_some() => {
                     let bytes = base64::decode(kv.Value)?;
-                    let as_str = serde_json::from_slice::<String>(&bytes)?;
-                    return Ok(serde_json::from_str(&as_str)?);
+                    return Ok(serde_json::from_slice(&bytes)?);
                 }
                 _ => tokio::time::sleep(Duration::from_millis(100)).await,
             };
@@ -344,8 +343,7 @@ impl AuthorityControl for ConsulAuthority {
                     // Consul encodes all responses as base64. Using ?raw to get the
                     // raw value back breaks the client we are using.
                     let bytes = base64::decode(kv.Value)?;
-                    let as_str = serde_json::from_slice::<String>(&bytes)?;
-                    GetLeaderResult::NewLeader(serde_json::from_str(&as_str)?)
+                    GetLeaderResult::NewLeader(serde_json::from_slice(&bytes)?)
                 }
                 Ok((Some(_), _)) => GetLeaderResult::Unchanged,
                 _ => GetLeaderResult::NoLeader,
@@ -376,8 +374,7 @@ impl AuthorityControl for ConsulAuthority {
                     // Consul encodes all responses as base64. Using ?raw to get the
                     // raw value back breaks the client we are using.
                     let bytes = base64::decode(kv.Value)?;
-                    let as_str = serde_json::from_slice::<String>(&bytes)?;
-                    Some(serde_json::from_str(&as_str)?)
+                    Some(serde_json::from_slice(&bytes)?)
                 }
                 Ok((None, _)) => None,
                 // The API currently throws an error that it cannot parse the json
@@ -403,7 +400,7 @@ impl AuthorityControl for ConsulAuthority {
             let modified = f(current_val);
 
             if let Ok(r) = modified {
-                let new_val = serde_json::to_string(&r)?;
+                let new_val = serde_json::to_vec(&r)?;
                 // TODO(justin): Write wrapper.
                 let pair = KVPair {
                     Key: self.prefix_with_deployment(path),
@@ -411,7 +408,7 @@ impl AuthorityControl for ConsulAuthority {
                     ..Default::default()
                 };
 
-                match self.consul.put(&pair, None).await {
+                match self.consul.put(pair, None).await {
                     Ok((true, _)) => return Ok(Ok(r)),
                     Ok((false, _)) => continue,
                     Err(e) => bail!(e.to_string()),
@@ -447,7 +444,7 @@ impl AuthorityControl for ConsulAuthority {
             let modified = f(current_val);
 
             if let Ok(r) = modified {
-                let new_val = serde_json::to_string(&r)?;
+                let new_val = serde_json::to_vec(&r)?;
                 let pair = KVPair {
                     Key: self.prefix_with_deployment(STATE_KEY),
                     Value: new_val,
@@ -455,7 +452,7 @@ impl AuthorityControl for ConsulAuthority {
                     ..Default::default()
                 };
 
-                match self.consul.acquire(&pair, None).await {
+                match self.consul.acquire(pair, None).await {
                     Ok((true, _)) => return Ok(Ok(r)),
                     Ok((false, _)) => continue,
                     Err(e) => bail!(e.to_string()),
@@ -474,8 +471,7 @@ impl AuthorityControl for ConsulAuthority {
                 Ok((Some(kv), _)) => {
                     // Consul encodes all responses as base64.
                     let bytes = base64::decode(kv.Value)?;
-                    let as_str = serde_json::from_slice::<String>(&bytes)?;
-                    Some(as_str.as_bytes().to_vec())
+                    Some(serde_json::from_slice::<Vec<u8>>(&bytes)?)
                 }
                 Ok((None, _)) => None,
                 Err(e) => bail!(e.to_string()),
@@ -494,14 +490,14 @@ impl AuthorityControl for ConsulAuthority {
 
         let pair = KVPair {
             Key: self.prefix_with_deployment(&key),
-            Value: serde_json::to_string(&payload)?,
+            Value: serde_json::to_vec(&payload)?,
             Session: Some(session.clone()),
             ..Default::default()
         };
 
         // Acquire will only write a new Value for the KVPair if no other leader
         // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(&pair, None).await {
+        match self.consul.acquire(pair, None).await {
             Ok(_) => Ok(Some(session)),
             Err(e) => bail!(e.to_string()),
         }
@@ -565,8 +561,7 @@ impl AuthorityControl for ConsulAuthority {
                 // Consul encodes all responses as base64. Using ?raw to get the
                 // raw value back breaks the client we are using.
                 let bytes = base64::decode(kv.Value)?;
-                let as_str = serde_json::from_slice::<String>(&bytes)?;
-                worker_descriptors.insert(w, serde_json::from_str(&as_str)?);
+                worker_descriptors.insert(w, serde_json::from_slice(&bytes)?);
             }
         }
 
@@ -581,14 +576,14 @@ impl AuthorityControl for ConsulAuthority {
 
         let pair = KVPair {
             Key: self.prefix_with_deployment(&key),
-            Value: endpoint.to_string(),
+            Value: serde_json::to_vec(&endpoint)?,
             Session: Some(session.clone()),
             ..Default::default()
         };
 
         // Acquire will only write a new Value for the KVPair if no other leader
         // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(&pair, None).await {
+        match self.consul.acquire(pair, None).await {
             Ok(_) => Ok(Some(session)),
             Err(e) => bail!(e.to_string()),
         }
@@ -639,11 +634,9 @@ impl AuthorityControl for ConsulAuthority {
 }
 
 /// Helper method to convert a consul value into a SocketAddr.
-fn value_to_socket_addr(value: String) -> Result<SocketAddr, Error> {
+fn value_to_socket_addr(value: Vec<u8>) -> Result<SocketAddr, Error> {
     let bytes = base64::decode(value)?;
-    let as_str = serde_json::from_slice::<String>(&bytes)?;
-    let endpoint = as_str.parse::<SocketAddr>()?;
-    Ok(endpoint)
+    Ok(serde_json::from_slice::<SocketAddr>(&bytes)?)
 }
 
 #[cfg(test)]

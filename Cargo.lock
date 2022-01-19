@@ -1311,13 +1311,15 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "consul"
 version = "0.4.2"
-source = "git+https://github.com/readysettech/consul-rust#b5f7c34aa3e8c42ee740a3773bb7b5423d934360"
+source = "git+https://github.com/readysettech/consul-rust?branch=support-bytes#cd5d5648990c0ebc424e0d221efd860cbb05818a"
 dependencies = [
  "async-trait",
+ "bytes 1.1.0",
  "error-chain",
  "futures 0.3.19",
  "reqwest",
  "serde",
+ "serde_bytes",
  "serde_derive",
  "serde_json",
  "tokio",
