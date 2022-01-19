@@ -581,7 +581,7 @@ impl BlockingRead {
                     }
 
                     self.trigger_timeout =
-                        Duration::min(self.trigger_timeout * 2, noria::VIEW_REQUEST_TIMEOUT / 20);
+                        Duration::min(self.trigger_timeout * 2, self.upquery_timeout / 20);
                     self.next_trigger = now + self.trigger_timeout;
                 }
             }

@@ -26,6 +26,7 @@ use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
+use tower::timeout::Timeout;
 use tower_service::Service;
 use vec_map::VecMap;
 
@@ -160,7 +161,10 @@ type Transport = AsyncBincodeStream<
 >;
 
 #[derive(Debug)]
-struct Endpoint(SocketAddr);
+struct Endpoint {
+    addr: SocketAddr,
+    timeout: Duration,
+}
 
 type InnerService = multiplex::Client<
     multiplex::MultiplexTransport<Transport, Tagger>,
@@ -182,9 +186,10 @@ impl Service<()> for Endpoint {
     }
 
     fn call(&mut self, _: ()) -> Self::Future {
-        let f = tokio::net::TcpStream::connect(self.0);
+        let f = tokio::net::TcpStream::connect(self.addr);
+        let timeout = self.timeout;
         async move {
-            let mut s = f.await?;
+            let mut s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
             s.write_all(&[CONNECTION_FROM_BASE]).await?;
             s.flush().await?;
@@ -200,6 +205,7 @@ impl Service<()> for Endpoint {
 
 fn make_table_stream(
     addr: SocketAddr,
+    timeout: Duration,
 ) -> impl futures_util::stream::TryStream<
     Ok = tower::discover::Change<usize, InnerService>,
     Error = tokio::io::Error,
@@ -208,14 +214,14 @@ fn make_table_stream(
     // creating _all_ the connections every time.
     (0..crate::TABLE_POOL_SIZE)
         .map(|i| async move {
-            let svc = Endpoint(addr).call(()).await?;
+            let svc = Endpoint { addr, timeout }.call(()).await?;
             Ok(tower::discover::Change::Insert(i, svc))
         })
         .collect::<futures_util::stream::FuturesUnordered<_>>()
 }
 
-fn make_table_discover(addr: SocketAddr) -> Discover {
-    make_table_stream(addr)
+fn make_table_discover(addr: SocketAddr, timeout: Duration) -> Discover {
+    make_table_stream(addr, timeout)
 }
 
 // Unpin + Send bounds are needed due to https://github.com/rust-lang/rust/issues/55997
@@ -224,7 +230,7 @@ type Discover = impl tower::discover::Discover<Key = usize, Service = InnerServi
     + Send;
 
 pub(crate) type TableRpc = Buffer<
-    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>,
+    ConcurrencyLimit<Timeout<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>>,
     Tagged<LocalOrNot<PacketData>>,
 >;
 
@@ -281,6 +287,9 @@ pub struct TableBuilder {
     pub table_name: String,
     pub columns: Vec<String>,
     pub schema: Option<CreateTableStatement>,
+
+    /// The amount of time before a table request RPC is terminated.
+    pub table_request_timeout: Duration,
 }
 
 impl TableBuilder {
@@ -304,7 +313,10 @@ impl TableBuilder {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
                         ConcurrencyLimit::new(
-                            Balance::new(make_table_discover(addr)),
+                            Timeout::new(
+                                Balance::new(make_table_discover(addr, self.table_request_timeout)),
+                                self.table_request_timeout,
+                            ),
                             crate::PENDING_LIMIT,
                         ),
                         crate::BUFFER_TO_POOL,

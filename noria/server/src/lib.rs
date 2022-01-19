@@ -466,6 +466,10 @@ impl Default for Config {
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 aggressively_update_state_sizes: false,
+                view_request_timeout: Duration::from_millis(20000),
+                // This RPC timeout must be long enough to handle compaction RPCs and extremely
+                // high concurrency during snapshotting.
+                table_request_timeout: Duration::from_millis(600000),
             },
             persistence: Default::default(),
             quorum: 1,

@@ -47,6 +47,12 @@ pub struct Config {
     /// worker. This causes a (minor) runtime cost, with the upside being that the materialization
     /// state sizes will never be out-of-date.
     pub aggressively_update_state_sizes: bool,
+
+    /// The amount of time to wait before timing out a view request to the domain.
+    pub view_request_timeout: time::Duration,
+
+    /// The amount of time to wait before timing out a table request to the domain.
+    pub table_request_timeout: time::Duration,
 }
 
 const BATCH_SIZE: usize = 256;
