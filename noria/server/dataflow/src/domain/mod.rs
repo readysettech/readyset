@@ -20,7 +20,6 @@ use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::info_span;
 use tracing::{debug, error, info, trace, warn};
 use unbounded_interval_tree::IntervalTree;
 use vec1::Vec1;
@@ -1250,9 +1249,6 @@ impl Domain {
         req: DomainRequest,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<Option<Vec<u8>>> {
-        let span = info_span!("domain", index = %self.index);
-        let _guard = span.enter();
-
         let ret = match req {
             DomainRequest::AddNode { node, parents } => {
                 let addr = node.local_addr();
@@ -4016,9 +4012,6 @@ impl Domain {
         packet: Box<Packet>,
         executor: &mut dyn Executor,
     ) -> ReadySetResult<()> {
-        let span = info_span!("domain", index = %self.index);
-        let _g = span.enter();
-
         if self.wait_time.is_running() {
             self.wait_time.stop();
         }
