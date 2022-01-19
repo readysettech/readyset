@@ -220,7 +220,7 @@ fn main() -> anyhow::Result<()> {
             recs.push(MetricsRecorder::Prometheus(
                 PrometheusBuilder::new()
                     .add_global_label("deployment", &opts.deployment)
-                    .build(),
+                    .build_recorder(),
             ));
         }
         install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();

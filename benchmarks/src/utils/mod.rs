@@ -63,8 +63,9 @@ macro_rules! benchmark_gauge {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            recorder.register_gauge(&key, Some(::metrics::Unit::$unit), Some($description));
-            recorder.update_gauge(&key, ::metrics::GaugeValue::Absolute($value));
+            let g = recorder.register_gauge(&key);
+            recorder.describe_gauge(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
+            g.set($value);
         }
     };
 }
@@ -74,8 +75,9 @@ macro_rules! benchmark_counter {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            recorder.register_counter(&key, Some(::metrics::Unit::$unit), Some($description));
-            recorder.increment_counter(&key, $value);
+            let c = recorder.register_counter(&key);
+            recorder.describe_counter(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
+            c.increment($value);
         }
     };
     ($name: expr, $unit: ident, $description: expr) => {
@@ -88,7 +90,8 @@ macro_rules! benchmark_increment_counter {
     ($name: expr, $unit: ident, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            recorder.increment_counter(&key, $value);
+            let c = recorder.register_counter(&key);
+            c.increment($value);
         }
     };
     ($name: expr, $unit: ident) => {
@@ -101,8 +104,9 @@ macro_rules! benchmark_histogram {
     ($name: expr, $unit: ident, $description: expr, $value: expr $(, $label_key: expr => $label_value: expr)*) => {
         if let Some(recorder) = metrics::try_recorder() {
             let key = $crate::make_key!($name, $unit $(, $label_key => $label_value)*);
-            recorder.register_histogram(&key, Some(::metrics::Unit::$unit), Some($description));
-            recorder.record_histogram(&key, $value);
+            let h = recorder.register_histogram(&key);
+            recorder.describe_histogram(key.into_parts().0, Some(::metrics::Unit::$unit), $description);
+            h.record($value);
         }
     };
 }
@@ -114,11 +118,9 @@ mod tests {
 
     fn setup() -> PrometheusHandle {
         let recorder = Box::leak(Box::new({
-            let builder = PrometheusBuilder::new()
-                .disable_http_listener()
-                .idle_timeout(metrics_util::MetricKindMask::ALL, None)
-                .push_gateway_config("", std::time::Duration::from_secs(10));
-            builder.build()
+            let builder =
+                PrometheusBuilder::new().idle_timeout(metrics_util::MetricKindMask::ALL, None);
+            builder.build_recorder()
         }));
         let handle = recorder.handle();
         metrics::set_recorder(recorder).unwrap();

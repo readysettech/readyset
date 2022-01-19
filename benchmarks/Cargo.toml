@@ -28,9 +28,9 @@ atomic-counter = "1.0.1"
 serde_json = "1.0"
 serde_yaml = "0.8.21"
 serde = "1.0.130"
-metrics = "0.17.0"
-metrics-util = "0.10.0"
-metrics-exporter-prometheus = {version = "0.6.0", features = ["push-gateway", "tokio-exporter"]}
+metrics = "0.18"
+metrics-util = "0.11"
+metrics-exporter-prometheus = {version = "0.8", features = ["push-gateway", "tokio"]}
 itertools = "0.10.1"
 num-integer = "0.1.44"
 lazy_static = "1.4.0"

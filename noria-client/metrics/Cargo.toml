@@ -6,7 +6,7 @@ authors = ["ReadySet"]
 edition = "2018"
 
 [dependencies]
-metrics = "0.17.0"
+metrics = "0.18"
 serde = "1.0.130"
 serde_json = "1.0.67"
 

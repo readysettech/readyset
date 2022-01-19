@@ -77,13 +77,12 @@ impl BenchmarkRunner {
 
         let handle = if let Some(prometheus) = &self.deployment_params.prometheus_push_gateway {
             let mut builder = PrometheusBuilder::new()
-                .disable_http_listener()
                 .idle_timeout(MetricKindMask::ALL, None)
-                .push_gateway_config(prometheus, PUSH_GATEWAY_PUSH_INTERVAL);
+                .with_push_gateway(prometheus, PUSH_GATEWAY_PUSH_INTERVAL)?;
             for (key, value) in &self.benchmark_cmd.as_ref().unwrap().labels() {
                 builder = builder.add_global_label(key, value);
             }
-            let (recorder, exporter) = builder.build_with_exporter()?;
+            let (recorder, exporter) = builder.build()?;
             let handle = recorder.handle();
             metrics::set_boxed_recorder(Box::new(recorder))?;
             tokio::spawn(exporter);
