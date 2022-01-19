@@ -395,6 +395,13 @@ pub mod recorded {
     /// | status | SnapshotStatusTag |
     pub const REPLICATOR_SNAPSHOT_STATUS: &str = "replicator.snapshot_status";
 
+    /// Counter: Number of failures encountered when following the replication
+    /// log.
+    pub const REPLICATOR_FAILURE: &str = "replicator.update_failure";
+
+    /// Counter: Number of replication actions performed successfully.
+    pub const REPLICATOR_SUCCESS: &str = "replicator.update_success";
+
     /// Counter: The total amount of time spent servicing controller RPCs.
     ///
     /// | Tag | Description |

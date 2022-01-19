@@ -374,6 +374,7 @@ impl NoriaAdapter {
             Err(e @ ReadySetError::RecipeInvariantViolated(_)) => return Err(e),
             Err(e) => {
                 error!(error = %e, "Error extending recipe, DDL statement will not be used");
+                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
             }
             Ok(_) => {}
         }
@@ -516,8 +517,10 @@ impl NoriaAdapter {
 
             if let Err(err) = self.handle_action(action, pos).await {
                 error!(error = %err, "Aborting replication task on error");
+                counter!(recorded::REPLICATOR_FAILURE, 1u64,);
                 return Err(err);
             };
+            counter!(recorded::REPLICATOR_SUCCESS, 1u64);
         }
     }
 

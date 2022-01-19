@@ -1,6 +1,8 @@
 use crate::utils::*;
 use crate::*;
 use mysql_async::prelude::Queryable;
+use noria::get_metric;
+use noria::metrics::{recorded, DumpedMetricValue};
 use serial_test::serial;
 use std::time::Duration;
 use test_utils::skip_slow_tests;
@@ -948,6 +950,82 @@ async fn writes_survive_restarts() {
 
         counter = counter + 1;
     }
+
+    deployment.teardown().await.unwrap();
+}
+
+// Perform an operation on the upstream MySQL DB that Noria can't yet handle
+// replication for, and validate that the relevant metric records the failure
+#[clustertest]
+async fn replication_failure_metrics() {
+    // TODO(ENG-92): Replace DROP table with a different schema failure when
+    // supported.
+    replication_test_inner(
+        "ct_replication_failure_metrics",
+        "CREATE TABLE t1 (id int); DROP TABLE t1",
+        recorded::REPLICATOR_FAILURE,
+    )
+    .await;
+}
+
+// Perform an operation on the upstream MySQL DB that Noria should be able to
+// successfully handle the replication for, and validate that the relevant
+// metric records the success
+#[clustertest]
+async fn replication_success_metrics() {
+    replication_test_inner(
+        "ct_replication_success_metrics",
+        "CREATE TABLE t1 (id int);",
+        recorded::REPLICATOR_SUCCESS,
+    )
+    .await;
+}
+
+async fn replication_test_inner(test: &str, query: &str, metric_label: &str) {
+    let mut deployment = readyset_mysql(test)
+        .with_servers(1, ServerParams::default())
+        .start()
+        .await
+        .unwrap();
+    let addr = deployment.server_addrs()[0].clone();
+
+    // Validate that the given `metric_label` should be unset
+    let metrics = deployment
+        .metrics()
+        .get_metrics_for_server(addr.clone())
+        .await
+        .unwrap()
+        .metrics;
+    assert_eq!(get_metric!(metrics, metric_label), None);
+
+    deployment.upstream().await.query_drop(query).await.unwrap();
+
+    // Allow time for the replication binlog to propagate
+    let start = Instant::now();
+    let timeout = PROPAGATION_DELAY_TIMEOUT;
+    let mut found_metric = None;
+    loop {
+        if start.elapsed() > timeout {
+            break;
+        }
+
+        let metrics = deployment
+            .metrics()
+            .get_metrics_for_server(addr.clone())
+            .await
+            .unwrap()
+            .metrics;
+
+        found_metric = get_metric!(metrics, metric_label);
+        if found_metric.is_some() {
+            // We were able to retrieve metrics, don't need to wait for binlog
+            // propagation anymore
+            break;
+        }
+
+        sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(found_metric, Some(DumpedMetricValue::Counter(1f64)));
 
     deployment.teardown().await.unwrap();
 }
