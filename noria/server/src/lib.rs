@@ -369,7 +369,8 @@
     try_find,
     stmt_expr_attributes,
     result_flattening,
-    drain_filter
+    drain_filter,
+    hash_raw_entry
 )]
 #![deny(missing_docs)]
 #![deny(unused_extern_crates)]

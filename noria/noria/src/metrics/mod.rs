@@ -457,7 +457,7 @@ pub struct MetricsDump {
 
 fn convert_key(k: Key) -> (String, HashMap<String, String>) {
     let (name_parts, labels) = k.into_parts();
-    let name = name_parts.into_owned();
+    let name = name_parts.as_str().to_string();
     let labels = labels
         .into_iter()
         .map(|l| {
@@ -473,9 +473,9 @@ impl MetricsDump {
     /// containing values for gauges
     #[allow(clippy::mutable_key_type)] // for Key in the hashmap keys
     pub fn from_metrics(
-        counters: HashMap<Key, u64>,
-        gauges: HashMap<Key, f64>,
-        histograms: HashMap<Key, Histogram>,
+        counters: Vec<(Key, u64)>,
+        gauges: Vec<(Key, f64)>,
+        histograms: Vec<(Key, Histogram)>,
     ) -> Self {
         let mut ret = HashMap::new();
         for (key, val) in counters.into_iter() {

@@ -1,6 +1,5 @@
 //! Support for recording and exporting in-memory metrics using the [`metrics`] crate
 
-use noria::metrics::Key;
 use thiserror::Error;
 
 pub use crate::metrics::composite_recorder::CompositeMetricsRecorder;

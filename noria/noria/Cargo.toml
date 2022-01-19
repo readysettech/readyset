@@ -53,8 +53,8 @@ mysql_async = "0.29"
 rand = "0.8.4"
 
 tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
-metrics = "0.17.0"
-metrics-util = "0.10.0"
+metrics = "0.18"
+metrics-util = "0.11"
 itertools = "0.10.0"
 bytes = "1.0.1"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"] }

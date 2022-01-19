@@ -282,7 +282,7 @@ where
             let recorder = PrometheusBuilder::new()
                 .add_global_label("upstream_db_type", database_label)
                 .add_global_label("deployment", &options.deployment)
-                .build();
+                .build_recorder();
 
             let handle = recorder.handle();
             metrics::set_boxed_recorder(Box::new(recorder))?;
