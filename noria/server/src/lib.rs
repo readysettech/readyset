@@ -481,10 +481,11 @@ impl Default for Config {
             domain_config: DomainConfig {
                 concurrent_replays: 512,
                 aggressively_update_state_sizes: false,
-                view_request_timeout: Duration::from_millis(20000),
+                view_request_timeout: Duration::from_millis(5000),
                 // This RPC timeout must be long enough to handle compaction RPCs and extremely
-                // high concurrency during snapshotting.
-                table_request_timeout: Duration::from_millis(600000),
+                // high concurrency during snapshotting. We set this to the migration timeout for
+                // now.
+                table_request_timeout: Duration::from_millis(1800000),
             },
             persistence: Default::default(),
             quorum: 1,
@@ -495,8 +496,8 @@ impl Default for Config {
             replication_url: None,
             replication_server_id: None,
             keep_prior_recipes: true,
-            upquery_timeout: Duration::from_millis(20000),
-            worker_request_timeout: Duration::from_millis(600000),
+            upquery_timeout: Duration::from_millis(5000),
+            worker_request_timeout: Duration::from_millis(1800000),
         }
     }
 }

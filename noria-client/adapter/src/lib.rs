@@ -195,17 +195,17 @@ pub struct Options {
     #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
     explain_last_statement: bool,
 
-    /// The time to wait before canceling a migration request.
+    /// The time to wait before canceling a migration request. Defaults to 30 minutes.
     #[clap(
         long,
         hide = true,
         env = "MIGRATION_REQUEST_TIMEOUT",
-        default_value = "600000"
+        default_value = "1800000"
     )]
     migration_request_timeout_ms: u64,
 
-    /// The time to wait before canceling a controller request.
-    #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "20000")]
+    /// The time to wait before canceling a controller request. Defaults to 5 seconds.
+    #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
     controller_request_timeout_ms: u64,
 }
 
