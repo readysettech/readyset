@@ -7901,7 +7901,9 @@ async fn overwrite_with_changed_recipe() {
 
 /// Tests that whenever we have at least two workers (including the leader), and the leader dies,
 /// then the recovery is successful and all the nodes are correctly materialized.
+// TODO(ENG-947): flaky test, Handle::backend_ready panic.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn it_recovers_fully_materialized() {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
