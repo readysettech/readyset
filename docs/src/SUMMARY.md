@@ -5,6 +5,7 @@
 # Dev Guide
 
 - [Getting Started](./getting_started.md)
+- [Docker Configuration](./docker.md)
 - [Cargo.toml and dependencies](./crate_organization.md)
 - [Dev Tools & Troubleshooting](./dev.md)
 - [Running and configuring ReadySet](./running-readyset.md)
