@@ -194,6 +194,19 @@ pub struct Options {
     /// last statement issued along the current connection.
     #[clap(long, hide = true, env = "EXPLAIN_LAST_STATEMENT")]
     explain_last_statement: bool,
+
+    /// The time to wait before canceling a migration request.
+    #[clap(
+        long,
+        hide = true,
+        env = "MIGRATION_REQUEST_TIMEOUT",
+        default_value = "600000"
+    )]
+    migration_request_timeout_ms: u64,
+
+    /// The time to wait before canceling a controller request.
+    #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "20000")]
+    controller_request_timeout_ms: u64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -236,15 +249,21 @@ where
         let authority = options.authority.clone();
         let authority_address = options.authority_address.clone();
         let deployment = options.deployment.clone();
+        let migration_request_timeout = options.migration_request_timeout_ms;
+        let controller_request_timeout = options.controller_request_timeout_ms;
         let ch = rt.block_on(async {
             let authority = authority
                 .to_authority(&authority_address, &deployment)
                 .await;
 
             Ok::<ControllerHandle, ReadySetError>(
-                ControllerHandle::new(authority)
-                    .instrument(rs_connect.clone())
-                    .await,
+                ControllerHandle::with_timeouts(
+                    authority,
+                    Some(Duration::from_millis(migration_request_timeout)),
+                    Some(Duration::from_millis(controller_request_timeout)),
+                )
+                .instrument(rs_connect.clone())
+                .await,
             )
         })?;
         rs_connect.in_scope(|| info!("Connected"));
