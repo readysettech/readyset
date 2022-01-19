@@ -1,4 +1,5 @@
-use noria::ControllerHandle;
+use noria::consensus::Authority;
+use noria::{ControllerHandle, ZookeeperAuthority};
 use std::convert::TryInto;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -19,10 +20,13 @@ async fn main() {
                             FROM Article, VoteCount \
                             WHERE Article.aid = VoteCount.aid AND Article.aid = ?;";
     let aid = 1;
+    let zk_auth = Authority::from(
+        ZookeeperAuthority::new("127.0.0.1:2181/quickstart")
+            .await
+            .unwrap(),
+    );
 
-    let mut srv = ControllerHandle::from_zk("127.0.0.1:2181/quickstart")
-        .await
-        .unwrap();
+    let mut srv = ControllerHandle::new(zk_auth).await;
     srv.install_recipe(sql).await.unwrap();
     let g = srv.graphviz().await.unwrap();
     println!("{}", g);

@@ -232,8 +232,14 @@
 //! # #[tokio::main]
 //! # async fn main() {
 //! # use std::convert::TryInto;
-//! let zookeeper_addr = "";
-//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! # use noria::ZookeeperAuthority;
+//! # use noria::consensus::Authority;
+//! let zk_auth = Authority::from(
+//!     ZookeeperAuthority::new("127.0.0.1:2181/quickstart")
+//!         .await
+//!         .unwrap(),
+//! );
+//! let mut db = noria::ControllerHandle::new(zk_auth).await;
 //! let mut article = db.table("article").await.unwrap();
 //! article.insert(vec![noria_data::DataType::from(1), "Hello world".try_into().unwrap()]).await.unwrap();
 //! # }
@@ -289,8 +295,14 @@
 //! # extern crate noria;
 //! # #[tokio::main]
 //! # async fn main() {
-//! # let zookeeper_addr = "";
-//! let mut db = noria::ControllerHandle::from_zk(zookeeper_addr).await.unwrap();
+//! # use noria::ZookeeperAuthority;
+//! # use noria::consensus::Authority;
+//! let zk_auth = Authority::from(
+//!     ZookeeperAuthority::new("127.0.0.1:2181/quickstart")
+//!         .await
+//!         .unwrap(),
+//! );
+//! let mut db = noria::ControllerHandle::new(zk_auth).await;
 //! let mut vote = db.table("vote").await.unwrap();
 //! vote.insert(vec![noria_data::DataType::from(1000), 1.into()]).await.unwrap();
 //! # }
