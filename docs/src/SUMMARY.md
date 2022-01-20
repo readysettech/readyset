@@ -1,8 +1,10 @@
-# Summary
+# ReadySet
+
+## Summary
 
 - [Introduction](./intro.md)
 
-# Dev Guide
+## Dev Guide
 
 - [Getting Started](./getting_started.md)
 - [Docker Configuration](./docker.md)
@@ -13,7 +15,7 @@
 - [Benchmarking your code](./benchmarking.md)
 - [Debugging your code](./debugging.md)
 
-# ReadySet
+## ReadySet Internals
 
 - [System Components](./system_components.md)
 - [Life of a Query](./query_path.md)
@@ -24,3 +26,7 @@
   - [Buildkite](./buildkite.md)
   - [Proptest](./proptest.md)
   - [Failure Injection](./failure_injection.md)
+
+## AWS Resources
+
+- [EC2 Dev Machine](./ec2-dev-machine.md)
