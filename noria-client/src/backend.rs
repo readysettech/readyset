@@ -53,12 +53,26 @@
 //! with an Unsupported ReadySetError. These queries should not be tried again against Noria,
 //! however, if a fallback database exists, may be executed against the fallback.
 //!
+//! ## Handling component outage
+//!
+//! In a distributed deployment, a component (such as a noria-server instance) may go down, causing
+//! some queries that rely on that server instance to fail. To help direct all affected queries
+//! immediately to fallback when this happens, you can configure the --query-max-failure-seconds
+//! flag to provide a maximum time in seconds that any given query may continuously fail for before
+//! entering into a fallback only recovery period. You can configure the
+//! --fallback-recovery-seconds flag to configure how long you would like this recovery period to
+//! be enabled for, before allowing affected queries to be retried against noria.
+//!
+//! The metadata for this feature is tracked in the QueryStatusCache for each query. We currently
+//! only trigger on networking related errors specifically to try to prevent this feature from
+//! being too heavy handed.
 use std::borrow::Cow;
 use std::collections::{hash_map::Entry, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Debug};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures::future::{self, OptionFuture};
 use nom_sql::{
@@ -80,7 +94,9 @@ use timestamp_service::client::{TimestampClient, WriteId, WriteKey};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, instrument, trace, warn};
 
-use crate::query_status_cache::{MigrationState, QueryStatusCache};
+use crate::query_status_cache::{
+    ExecutionInfo, ExecutionState, MigrationState, QueryStatus, QueryStatusCache,
+};
 use crate::rewrite;
 use crate::upstream_database::NoriaCompare;
 pub use crate::upstream_database::UpstreamPrepare;
@@ -186,6 +202,8 @@ pub struct BackendBuilder {
     allow_unsupported_set: bool,
     migration_mode: MigrationMode,
     explain_last_statement: bool,
+    query_max_failure_seconds: u64,
+    fallback_recovery_seconds: u64,
 }
 
 impl Default for BackendBuilder {
@@ -205,6 +223,8 @@ impl Default for BackendBuilder {
             allow_unsupported_set: false,
             migration_mode: MigrationMode::InRequestPath,
             explain_last_statement: false,
+            query_max_failure_seconds: (i64::MAX / 1000) as u64,
+            fallback_recovery_seconds: 0,
         }
     }
 }
@@ -241,6 +261,8 @@ impl BackendBuilder {
             migration_mode: self.migration_mode,
             last_query: None,
             explain_last_statement: self.explain_last_statement,
+            query_max_failure_duration: Duration::new(self.query_max_failure_seconds, 0),
+            fallback_recovery_duration: Duration::new(self.fallback_recovery_seconds, 0),
             _query_handler: PhantomData,
         }
     }
@@ -315,6 +337,16 @@ impl BackendBuilder {
         self.explain_last_statement = enable;
         self
     }
+
+    pub fn query_max_failure_seconds(mut self, secs: u64) -> Self {
+        self.query_max_failure_seconds = secs;
+        self
+    }
+
+    pub fn fallback_recovery_seconds(mut self, secs: u64) -> Self {
+        self.fallback_recovery_seconds = secs;
+        self
+    }
 }
 
 /// A [`CachedPreparedStatement`] stores the data needed for an immediate
@@ -328,10 +360,35 @@ where
     prep: PrepareResult<DB>,
     /// The current Noria migration state
     migration_state: MigrationState,
+    /// Holds information about if executes have been succeeding, or failing, along with a state
+    /// transition timestamp. None if prepared statement has never been executed.
+    execution_info: Option<ExecutionInfo>,
     /// If query was succesfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
     /// If statement was succesfully rewritten, will store the rewritten statement
     rewritten: Option<SelectStatement>,
+}
+
+impl<DB> CachedPreparedStatement<DB>
+where
+    DB: UpstreamDatabase,
+{
+    /// Returns whether we are currently in fallback recovery mode for the given prepared statement
+    /// we are attempting to execute.
+    /// WARNING: This will also mutate execution info timestamp if we have exceeded the supplied
+    /// recovery period.
+    pub fn in_fallback_recovery(
+        &mut self,
+        query_max_failure_duration: Duration,
+        fallback_recovery_duration: Duration,
+    ) -> bool {
+        if let Some(info) = self.execution_info.as_mut() {
+            info.reset_if_exceeded_recovery(query_max_failure_duration, fallback_recovery_duration);
+            info.execute_network_failure_exceeded(query_max_failure_duration)
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Backend<DB, Handler>
@@ -389,6 +446,13 @@ where
 
     /// Whether the EXPLAIN LAST STATEMENT feature is enabled or not.
     explain_last_statement: bool,
+
+    /// The maximum duration that a query can continuously fail for before we enter into a recovery
+    /// period.
+    query_max_failure_duration: Duration,
+    /// The recovery period that we enter into for a given query, when that query has
+    /// repeatedly failed for query_max_failure_duration.
+    fallback_recovery_duration: Duration,
 
     _query_handler: PhantomData<Handler>,
 }
@@ -909,6 +973,7 @@ where
         let cache_entry = CachedPreparedStatement {
             prep: res,
             migration_state,
+            execution_info: None,
             parsed_query,
             rewritten,
         };
@@ -975,20 +1040,32 @@ where
     }
 
     /// Execute on Noria, and if fails execute on upstream
+    #[allow(clippy::too_many_arguments)] // meh.
     async fn execute_cascade<'a>(
         noria: &'a mut NoriaConnector,
         upstream: &'a mut Option<DB>,
         noria_prep: &noria_connector::PrepareResult,
         upstream_prep: &UpstreamPrepare<DB>,
         params: &[DataType],
+        ex_info: Option<&mut ExecutionInfo>,
         ticket: Option<Timestamp>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let noria_res = Self::execute_noria(noria, noria_prep, params, ticket, event).await;
 
         match noria_res {
-            Ok(noria_ok) => Ok(noria_ok),
+            Ok(noria_ok) => {
+                if let Some(info) = ex_info {
+                    info.execute_succeeded();
+                }
+                Ok(noria_ok)
+            }
             Err(noria_err) => {
+                if noria_err.is_networking_related() {
+                    if let Some(info) = ex_info {
+                        info.execute_network_failure();
+                    }
+                }
                 event.set_noria_error(&noria_err);
                 Self::execute_upstream(upstream, upstream_prep, params, event, true).await
             }
@@ -1109,6 +1186,11 @@ where
             }
         }
 
+        let in_fallback_recovery = cached_statement.in_fallback_recovery(
+            self.query_max_failure_duration,
+            self.fallback_recovery_duration,
+        );
+
         let result = match &cached_statement.prep {
             PrepareResult::Noria(prep) => {
                 Self::execute_noria(noria, prep, params, ticket, &mut event)
@@ -1118,9 +1200,27 @@ where
             PrepareResult::Upstream(prep) => {
                 Self::execute_upstream(upstream, prep, params, &mut event, false).await
             }
+            PrepareResult::Both(.., uprep) if in_fallback_recovery => {
+                Self::execute_upstream(upstream, uprep, params, &mut event, false).await
+            }
             PrepareResult::Both(nprep, uprep) => {
-                Self::execute_cascade(noria, upstream, nprep, uprep, params, ticket, &mut event)
-                    .await
+                if cached_statement.execution_info.is_none() {
+                    cached_statement.execution_info = Some(ExecutionInfo {
+                        state: ExecutionState::Failed,
+                        last_transition_time: Instant::now(),
+                    });
+                }
+                Self::execute_cascade(
+                    noria,
+                    upstream,
+                    nprep,
+                    uprep,
+                    params,
+                    cached_statement.execution_info.as_mut(),
+                    ticket,
+                    &mut event,
+                )
+                .await
             }
         };
 
@@ -1290,17 +1390,42 @@ where
 
         // TODO(vlad): don't rewrite multiple times, it is wasteful
         let mut rewritten = stmt.clone();
-        let current_status = if rewrite::process_query(&mut rewritten).is_ok() {
-            self.query_status_cache.query_migration_state(&rewritten)
+        let mut status = if rewrite::process_query(&mut rewritten).is_ok() {
+            self.query_status_cache.query_status(&rewritten)
         } else {
-            MigrationState::Unsupported
+            QueryStatus {
+                migration_state: MigrationState::Unsupported,
+                execution_info: None,
+            }
+        };
+        let original_status = status.clone();
+        let did_work = if let Some(ref mut i) = status.execution_info {
+            i.reset_if_exceeded_recovery(
+                self.query_max_failure_duration,
+                self.fallback_recovery_duration,
+            )
+        } else {
+            false
         };
 
         if self.has_fallback()
             && (self.migration_mode != MigrationMode::InRequestPath
-                && current_status != MigrationState::Successful)
-            || (current_status == MigrationState::Unsupported)
+                && status.migration_state != MigrationState::Successful)
+            || (status.migration_state == MigrationState::Unsupported)
+            || (self.has_fallback()
+                && status
+                    .execution_info
+                    .as_mut()
+                    .map(|i| i.execute_network_failure_exceeded(self.query_max_failure_duration))
+                    .unwrap_or(false))
         {
+            if did_work {
+                #[allow(clippy::unwrap_used)] // Validated by did_work.
+                self.query_status_cache.update_transition_time(
+                    &rewritten,
+                    &status.execution_info.unwrap().last_transition_time,
+                );
+            }
             return self.query_fallback(&stmt.to_string(), event).await;
         }
 
@@ -1316,21 +1441,43 @@ where
                 .await
         };
 
+        if status.execution_info.is_none() {
+            status.execution_info = Some(ExecutionInfo {
+                state: ExecutionState::Failed,
+                last_transition_time: Instant::now(),
+            });
+        }
         match noria_res {
             Ok(noria_ok) => {
                 // We managed to select on Noria, good for us
-                self.query_status_cache
-                    .update_query_migration_state(&rewritten, MigrationState::Successful);
+                status.migration_state = MigrationState::Successful;
+                if let Some(i) = status.execution_info.as_mut() {
+                    i.execute_succeeded()
+                }
+                if status != original_status {
+                    self.query_status_cache
+                        .update_query_status(&rewritten, status);
+                }
                 Ok(noria_ok.into())
             }
             Err(noria_err) => {
-                if noria_err.caused_by_view_not_found() {
-                    self.query_status_cache
-                        .update_query_migration_state(&rewritten, MigrationState::Pending);
-                } else if noria_err.caused_by_unsupported() {
-                    self.query_status_cache
-                        .update_query_migration_state(&rewritten, MigrationState::Unsupported);
+                if let Some(i) = status.execution_info.as_mut() {
+                    if noria_err.is_networking_related() {
+                        i.execute_network_failure();
+                    }
                 }
+
+                if noria_err.caused_by_view_not_found() {
+                    status.migration_state = MigrationState::Pending;
+                } else if noria_err.caused_by_unsupported() {
+                    status.migration_state = MigrationState::Unsupported;
+                };
+
+                if status != original_status {
+                    self.query_status_cache
+                        .update_query_status(&rewritten, status);
+                }
+
                 // Try to execute on fallback if present
                 if let Some(fallback) = self.upstream.as_mut() {
                     event.set_noria_error(&noria_err);

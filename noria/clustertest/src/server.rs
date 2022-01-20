@@ -159,4 +159,17 @@ impl AdapterBuilder {
             &migration_task_interval.to_string(),
         )
     }
+
+    pub fn query_max_failure_seconds(self, secs: u64) -> Self {
+        self.push_arg("--query-max-failure-seconds", &secs.to_string())
+    }
+
+    pub fn fallback_recovery_seconds(self, secs: u64) -> Self {
+        self.push_arg("--fallback-recovery-seconds", &secs.to_string())
+    }
+
+    pub fn explain_last_statement(mut self) -> Self {
+        self.args.push("--explain-last-statement".to_string());
+        self
+    }
 }
