@@ -3217,7 +3217,10 @@ async fn test_queries(test: &str, file: &'static str, shard: bool, reuse: bool) 
         if reuse {
             r.enable_reuse(ReuseConfigType::Finkelstein);
         }
-        r.set_mir_config(mir::Config { allow_topk: true });
+        r.set_mir_config(mir::Config {
+            allow_topk: true,
+            ..Default::default()
+        });
 
         let mut f = File::open(&file).unwrap();
         let mut s = String::new();

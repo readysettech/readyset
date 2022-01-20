@@ -127,6 +127,11 @@ impl Builder {
         self.config.mir_config.allow_topk = allow_topk;
     }
 
+    /// Set the value of [`controller::sql::Config::allow_mixed_comparisons`]
+    pub fn set_allow_mixed_comparisons(&mut self, allow_mixed_comparisons: bool) {
+        self.config.mir_config.allow_mixed_comparisons = allow_mixed_comparisons;
+    }
+
     /// Set the value of [`DomainConfig::aggressively_update_state_sizes`][0]. See the documentation
     /// of that field for more information
     ///

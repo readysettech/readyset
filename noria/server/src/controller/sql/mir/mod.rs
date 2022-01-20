@@ -121,6 +121,11 @@ pub(crate) struct Config {
     ///
     /// [`TopK`]: MirNodeInner::TopK
     pub(crate) allow_topk: bool,
+
+    /// Enable support for mixing equality and range comparisons in a query. Support for mixed
+    /// comparisons is currently unfinished, so these queries may return incorrect results.
+    #[allow(dead_code)] // TODO(grfn): Remove when actually read
+    pub(crate) allow_mixed_comparisons: bool,
 }
 
 #[derive(Clone, Debug, Default)]
