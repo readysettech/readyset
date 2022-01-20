@@ -124,7 +124,6 @@ pub(crate) struct Config {
 
     /// Enable support for mixing equality and range comparisons in a query. Support for mixed
     /// comparisons is currently unfinished, so these queries may return incorrect results.
-    #[allow(dead_code)] // TODO(grfn): Remove when actually read
     pub(crate) allow_mixed_comparisons: bool,
 }
 
@@ -1413,7 +1412,7 @@ impl SqlToMirConverter {
 
             // Convert the query parameters to an ordered list of columns that will comprise the
             // lookup key if a leaf node is attached.
-            let view_key = qg.view_key()?;
+            let view_key = qg.view_key(self.config())?;
 
             // 0. Base nodes (always reused)
             let mut base_nodes: Vec<MirNodeRef> = Vec::new();
