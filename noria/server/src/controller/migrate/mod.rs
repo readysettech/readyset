@@ -41,7 +41,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, info_span, instrument, trace};
 
-use crate::controller::migrate::materialization::InvalidEdge;
+use crate::controller::migrate::materialization::{InvalidEdge, Materializations};
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::state::DataflowState;
 use crate::controller::WorkerIdentifier;
@@ -49,8 +49,8 @@ use crate::controller::WorkerIdentifier;
 pub(crate) mod assignment;
 mod augmentation;
 pub(crate) mod materialization;
-pub(in crate::controller) mod routing;
-pub(in crate::controller) mod scheduling;
+mod routing;
+mod scheduling;
 mod sharding;
 
 /// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
@@ -141,21 +141,31 @@ pub struct DomainMigrationPlan {
 }
 
 /// A set of stored data sufficient to apply a migration.
-pub struct MigrationPlan<'dataflow> {
-    dataflow_state: &'dataflow mut DataflowState,
+pub struct MigrationPlan {
+    // Basically all of these fields are just cloned from `Leader`.
+    ingredients: Graph,
+    domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
+    ndomains: usize,
+    remap: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
+    materializations: Materializations,
+    // ...apart from this one
     dmp: DomainMigrationPlan,
 }
 
-impl<'dataflow> MigrationPlan<'dataflow> {
+impl MigrationPlan {
     /// Apply the migration plan to the provided `Leader`.
     ///
     /// If the plan fails, the `Leader`'s state is left unchanged; however, no attempt
     /// is made to roll back any destructive changes that may have occurred before the plan failed
     /// to apply.
-    #[instrument(level = "info", name = "apply", skip(self))]
-    pub async fn apply(self) -> ReadySetResult<()> {
+    #[instrument(level = "info", name = "apply", skip(self, mainline))]
+    pub async fn apply(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         let MigrationPlan {
-            dataflow_state,
+            ingredients,
+            domain_nodes,
+            ndomains,
+            remap,
+            materializations,
             mut dmp,
         } = self;
 
@@ -167,18 +177,35 @@ impl<'dataflow> MigrationPlan<'dataflow> {
 
         let start = Instant::now();
 
-        match dmp.apply(dataflow_state).await {
-            Ok(_) => {
-                info!(ms = %start.elapsed().as_millis(), "migration plan applied");
-                Ok(())
-            }
-            Err(e) => {
-                error!(error = %e, "migration plan apply failed");
-                Err(ReadySetError::MigrationApplyFailed {
-                    source: Box::new(e),
-                })
-            }
+        // We do *not* roll this back on failure, to try and reduce the risk of duplicating domain
+        // indices.
+        //
+        // FIXME(eta): what about node indices?
+        mainline.ndomains = ndomains;
+
+        // Update the controller with the new state, but keep a copy of the old state for rollback.
+        // If we don't do this, things like `place_domain` won't work.
+        let ingredients = std::mem::replace(&mut mainline.ingredients, ingredients);
+        let domain_nodes = std::mem::replace(&mut mainline.domain_nodes, domain_nodes);
+        let remap = std::mem::replace(&mut mainline.remap, remap);
+        let materializations = std::mem::replace(&mut mainline.materializations, materializations);
+
+        let mut ret = Ok(());
+
+        if let Err(e) = dmp.apply(mainline).await {
+            error!(error = %e, "migration plan apply failed");
+            mainline.ingredients = ingredients;
+            mainline.domain_nodes = domain_nodes;
+            mainline.remap = remap;
+            mainline.materializations = materializations;
+            ret = Err(ReadySetError::MigrationApplyFailed {
+                source: Box::new(e),
+            });
+        } else {
+            info!(ms = %start.elapsed().as_millis(), "migration plan applied");
         }
+
+        ret
     }
 }
 
@@ -212,11 +239,6 @@ impl DomainMigrationPlan {
             shard_workers,
             nodes,
         });
-    }
-
-    /// Adds a domain and its shards to the list of valid domains.
-    pub(in crate::controller) fn add_valid_domain(&mut self, idx: DomainIndex, shards: usize) {
-        self.valid_domains.insert(idx, shards);
     }
 
     /// Return the number of shards a given domain has.
@@ -295,14 +317,14 @@ impl DomainMigrationPlan {
     }
 }
 
-fn topo_order(dataflow_state: &DataflowState, new: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
+fn topo_order(ingredients: &Graph, source: NodeIndex, new: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
     let mut topo_list = Vec::with_capacity(new.len());
-    let mut topo = petgraph::visit::Topo::new(&dataflow_state.ingredients);
-    while let Some(node) = topo.next(&dataflow_state.ingredients) {
-        if node == dataflow_state.source {
+    let mut topo = petgraph::visit::Topo::new(&ingredients);
+    while let Some(node) = topo.next(&ingredients) {
+        if node == source {
             continue;
         }
-        if dataflow_state.ingredients[node].is_dropped() {
+        if ingredients[node].is_dropped() {
             continue;
         }
         if !new.contains(&node) {
@@ -365,12 +387,13 @@ fn inform_col_changes(
     Ok(())
 }
 
-/// A `Migration` encapsulates a number of changes to the dataflow graph.
+/// A `Migration` encapsulates a number of changes to the Soup data flow graph.
 ///
 /// Only one `Migration` can be in effect at any point in time. No changes are made to the running
 /// graph until the `Migration` is committed (using `Migration::commit`).
-pub struct Migration<'dataflow> {
-    pub(super) dataflow_state: &'dataflow mut DataflowState,
+pub struct Migration {
+    pub(super) source: NodeIndex,
+    pub(super) ingredients: Graph,
     pub(super) added: HashSet<NodeIndex>,
     pub(super) columns: Vec<(NodeIndex, ColumnChange)>,
     pub(super) readers: HashMap<NodeIndex, NodeIndex>,
@@ -382,7 +405,7 @@ pub struct Migration<'dataflow> {
     pub(super) context: HashMap<String, DataType>,
 }
 
-impl<'dataflow> Migration<'dataflow> {
+impl Migration {
     /// Add the given `Ingredient` to the dataflow graph.
     ///
     /// The returned identifier can later be used to refer to the added ingredient.
@@ -396,17 +419,17 @@ impl<'dataflow> Migration<'dataflow> {
         I: Into<NodeOperator>,
     {
         let mut i = node::Node::new(name.to_string(), fields, i.into());
-        i.on_connected(&self.dataflow_state.ingredients);
+        i.on_connected(&self.ingredients);
         // TODO(peter): Should we change this function signature to return a ReadySetResult?
         #[allow(clippy::unwrap_used)]
         let parents = i.ancestors().unwrap();
         assert!(!parents.is_empty());
 
         // add to the graph
-        let ni = self.dataflow_state.ingredients.add_node(i);
+        let ni = self.ingredients.add_node(i);
         debug!(
             node = ni.index(),
-            node_type = ?self.dataflow_state.ingredients[ni],
+            node_type = ?self.ingredients[ni],
             "adding new node"
         );
 
@@ -414,7 +437,7 @@ impl<'dataflow> Migration<'dataflow> {
         self.added.insert(ni);
         // insert it into the graph
         for parent in parents {
-            self.dataflow_state.ingredients.add_edge(parent, ni, ());
+            self.ingredients.add_edge(parent, ni, ());
         }
         // and tell the caller its id
         ni
@@ -435,18 +458,15 @@ impl<'dataflow> Migration<'dataflow> {
         FS: IntoIterator<Item = S2>,
     {
         // add to the graph
-        let ni =
-            self.dataflow_state
-                .ingredients
-                .add_node(node::Node::new(name.to_string(), fields, b));
+        let ni = self
+            .ingredients
+            .add_node(node::Node::new(name.to_string(), fields, b));
         debug!(node = ni.index(), "adding new base");
 
         // keep track of the fact that it's new
         self.added.insert(ni);
         // insert it into the graph
-        self.dataflow_state
-            .ingredients
-            .add_edge(self.dataflow_state.source, ni, ());
+        self.ingredients.add_edge(self.source, ni, ());
         // and tell the caller its id
         ni
     }
@@ -466,11 +486,7 @@ impl<'dataflow> Migration<'dataflow> {
             node = ni.index(),
             "marking node as beyond materialization frontier"
         );
-        self.dataflow_state
-            .ingredients
-            .node_weight_mut(ni)
-            .unwrap()
-            .purge = true;
+        self.ingredients.node_weight_mut(ni).unwrap().purge = true;
 
         if !self.added.contains(&ni) {
             unimplemented!("marking existing node as beyond materialization frontier");
@@ -493,7 +509,7 @@ impl<'dataflow> Migration<'dataflow> {
         invariant!(!self.added.contains(&node));
 
         let field = field.to_string();
-        let base = &mut self.dataflow_state.ingredients[node];
+        let base = &mut self.ingredients[node];
         invariant!(base.is_base());
 
         // we need to tell the base about its new column and its default, so that old writes that
@@ -516,7 +532,7 @@ impl<'dataflow> Migration<'dataflow> {
         // not allowed to drop columns from new nodes
         invariant!(!self.added.contains(&node));
 
-        let base = &mut self.dataflow_state.ingredients[node];
+        let base = &mut self.ingredients[node];
         invariant!(base.is_base());
 
         // we need to tell the base about the dropped column, so that old writes that contain that
@@ -531,7 +547,7 @@ impl<'dataflow> Migration<'dataflow> {
 
     #[cfg(test)]
     pub(crate) fn graph(&self) -> &Graph {
-        &self.dataflow_state.ingredients
+        &self.ingredients
     }
 
     /// Ensure that a reader node exists as a child of `n`, optionally with the given name and set
@@ -549,15 +565,15 @@ impl<'dataflow> Migration<'dataflow> {
                 // make a reader
                 let r = node::special::Reader::new(n, post_lookup);
                 let mut r = if let Some(name) = name {
-                    self.dataflow_state.ingredients[n].named_mirror(r, name)
+                    self.ingredients[n].named_mirror(r, name)
                 } else {
-                    self.dataflow_state.ingredients[n].mirror(r)
+                    self.ingredients[n].mirror(r)
                 };
                 if r.name().starts_with("SHALLOW_") {
                     r.purge = true;
                 }
-                let r = self.dataflow_state.ingredients.add_node(r);
-                self.dataflow_state.ingredients.add_edge(n, r, ());
+                let r = self.ingredients.add_node(r);
+                self.ingredients.add_edge(n, r, ());
                 self.added.insert(r);
                 *e.insert(r)
             }
@@ -571,7 +587,7 @@ impl<'dataflow> Migration<'dataflow> {
         let ri = self.ensure_reader_for(n, None, Default::default());
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.dataflow_state.ingredients[ri]
+        self.ingredients[ri]
             .as_mut_reader()
             .unwrap()
             .set_index(index);
@@ -592,7 +608,7 @@ impl<'dataflow> Migration<'dataflow> {
         let ri = self.ensure_reader_for(n, None, post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.dataflow_state.ingredients[ri]
+        self.ingredients[ri]
             .as_mut_reader()
             .unwrap()
             .set_index(index);
@@ -614,28 +630,28 @@ impl<'dataflow> Migration<'dataflow> {
         let ri = self.ensure_reader_for(n, Some(name), post_lookup);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.dataflow_state.ingredients[ri]
+        self.ingredients[ri]
             .as_mut_reader()
             .unwrap()
             .set_index(index);
 
         #[allow(clippy::unwrap_used)] // we know it's a reader - we just made it!
-        self.dataflow_state.ingredients[ri]
+        self.ingredients[ri]
             .as_mut_reader()
             .unwrap()
             .set_mapping(placeholder_map);
     }
 
     /// Build a `MigrationPlan` for this migration, and apply it if the planning stage succeeds.
-    pub(super) async fn commit(self) -> ReadySetResult<()> {
+    pub(super) async fn commit(self, mainline: &mut DataflowState) -> ReadySetResult<()> {
         let start = self.start;
 
         let plan = self
-            .plan()
+            .plan(mainline)
             .map_err(|e| ReadySetError::MigrationPlanFailed {
                 source: Box::new(e),
             })?;
-        plan.apply().await?;
+        plan.apply(mainline).await?;
 
         histogram!(
             recorded::CONTROLLER_MIGRATION_TIME,
@@ -650,23 +666,25 @@ impl<'dataflow> Migration<'dataflow> {
     ///
     /// See the module-level docs for more information on what a migration entails.
     #[allow(clippy::cognitive_complexity)]
-    pub(super) fn plan(self) -> ReadySetResult<MigrationPlan<'dataflow>> {
+    pub(super) fn plan(self, mainline: &mut DataflowState) -> ReadySetResult<MigrationPlan> {
         let span = info_span!("plan");
         let _g = span.enter();
         debug!(num_nodes = self.added.len(), "finalizing migration");
 
         let start = self.start;
+        let mut ingredients = self.ingredients;
+        let source = self.source;
         let mut new = self.added;
-        let dataflow_state = self.dataflow_state;
-        let mut topo = topo_order(dataflow_state, &new);
+        let mut ndomains = mainline.ndomains;
+        let mut remap = mainline.remap.clone();
+        let mut topo = topo_order(&ingredients, source, &new);
         // Tracks partially materialized nodes that were duplicated as fully materialized in this
         // planning stage.
         let mut local_redundant_partial: HashMap<NodeIndex, NodeIndex> = Default::default();
 
         // Shard the graph as desired
-        let mut swapped0 = if let Some(shards) = dataflow_state.sharding {
-            let (t, swapped) =
-                sharding::shard(&mut dataflow_state.ingredients, &mut new, &topo, shards)?;
+        let mut swapped0 = if let Some(shards) = mainline.sharding {
+            let (t, swapped) = sharding::shard(&mut ingredients, &mut new, &topo, shards)?;
             topo = t;
 
             swapped
@@ -675,10 +693,15 @@ impl<'dataflow> Migration<'dataflow> {
         };
 
         // Assign domains
-        assignment::assign(dataflow_state, &topo)?;
+        assignment::assign(
+            &mut ingredients,
+            &topo,
+            &mut ndomains,
+            &mainline.node_restrictions,
+        )?;
 
         // Set up ingress and egress nodes
-        let swapped1 = routing::add(dataflow_state, &mut new, &topo)?;
+        let swapped1 = routing::add(&mut ingredients, source, &mut new, &topo)?;
 
         // Merge the swap lists
         for ((dst, src), instead) in swapped1 {
@@ -695,7 +718,7 @@ impl<'dataflow> Migration<'dataflow> {
                         // collision by looking at which translation currently has an adge from
                         // `src`, and then picking the *other*, since that must then be node
                         // below.
-                        if dataflow_state.ingredients.find_edge(src, instead).is_some() {
+                        if ingredients.find_edge(src, instead).is_some() {
                             // src -> instead -> instead0 -> [children]
                             // from [children]'s perspective, we should use instead0 for from, so
                             // we can just ignore the `instead` swap.
@@ -729,15 +752,15 @@ impl<'dataflow> Migration<'dataflow> {
             // Find all nodes for domains that have changed
             let changed_domains: HashSet<DomainIndex> = sorted_new
                 .iter()
-                .filter(|&&&ni| !dataflow_state.ingredients[ni].is_dropped())
-                .map(|&&ni| dataflow_state.ingredients[ni].domain())
+                .filter(|&&&ni| !ingredients[ni].is_dropped())
+                .map(|&&ni| ingredients[ni].domain())
                 .collect();
 
             let mut domain_new_nodes = sorted_new
                 .iter()
-                .filter(|&&&ni| ni != dataflow_state.source)
-                .filter(|&&&ni| !dataflow_state.ingredients[ni].is_dropped())
-                .map(|&&ni| (dataflow_state.ingredients[ni].domain(), ni))
+                .filter(|&&&ni| ni != source)
+                .filter(|&&&ni| !ingredients[ni].is_dropped())
+                .map(|&&ni| (ingredients[ni].domain(), ni))
                 .fold(HashMap::new(), |mut dns, (d, ni)| {
                     dns.entry(d).or_insert_with(Vec::new).push(ni);
                     dns
@@ -746,11 +769,7 @@ impl<'dataflow> Migration<'dataflow> {
             // Assign local addresses to all new nodes, and initialize them
             for (domain, nodes) in &mut domain_new_nodes {
                 // Number of pre-existing nodes
-                let mut nnodes = dataflow_state
-                    .remap
-                    .get(domain)
-                    .map(HashMap::len)
-                    .unwrap_or(0);
+                let mut nnodes = remap.get(domain).map(HashMap::len).unwrap_or(0);
 
                 if nodes.is_empty() {
                     // Nothing to do here
@@ -763,7 +782,7 @@ impl<'dataflow> Migration<'dataflow> {
                 // Give local addresses to every (new) node
                 for &ni in nodes.iter() {
                     debug!(
-                        node_type = ?dataflow_state.ingredients[ni],
+                        node_type = ?ingredients[ni],
                         node = ni.index(),
                         local = nnodes,
                         "assigning local index"
@@ -772,15 +791,14 @@ impl<'dataflow> Migration<'dataflow> {
                         recorded::DOMAIN_NODE_ADDED,
                         1,
                         "domain" => domain.index().to_string(),
-                        "ntype" => (&dataflow_state.ingredients[ni]).node_type_string(),
+                        "ntype" => (&ingredients[ni]).node_type_string(),
                         "node" => nnodes.to_string()
                     );
 
                     let mut ip: IndexPair = ni.into();
                     ip.set_local(unsafe { LocalNodeIndex::make(nnodes as u32) });
-                    dataflow_state.ingredients[ni].set_finalized_addr(ip);
-                    dataflow_state
-                        .remap
+                    ingredients[ni].set_finalized_addr(ip);
+                    remap
                         .entry(*domain)
                         .or_insert_with(HashMap::new)
                         .insert(ni, ip);
@@ -789,12 +807,12 @@ impl<'dataflow> Migration<'dataflow> {
 
                 // Initialize each new node
                 for &ni in nodes.iter() {
-                    if dataflow_state.ingredients[ni].is_internal() {
+                    if ingredients[ni].is_internal() {
                         // Figure out all the remappings that have happened
                         // NOTE: this has to be *per node*, since a shared parent may be remapped
                         // differently to different children (due to sharding for example). we just
                         // allocate it once though.
-                        let mut remap_ = dataflow_state.remap[domain].clone();
+                        let mut remap_ = remap[domain].clone();
 
                         // Parents in other domains have been swapped for ingress nodes.
                         // Those ingress nodes' indices are now local.
@@ -804,23 +822,19 @@ impl<'dataflow> Migration<'dataflow> {
                                 continue;
                             }
 
-                            remap_.insert(src, dataflow_state.remap[domain][&instead]);
+                            remap_.insert(src, remap[domain][&instead]);
                         }
 
                         trace!(node = ni.index(), "initializing new node");
-                        dataflow_state
-                            .ingredients
-                            .node_weight_mut(ni)
-                            .unwrap()
-                            .on_commit(&remap_);
+                        ingredients.node_weight_mut(ni).unwrap().on_commit(&remap_);
                     }
                 }
             }
 
-            topo = topo_order(dataflow_state, &new);
+            topo = topo_order(&ingredients, mainline.source, &new);
 
-            if let Some(shards) = dataflow_state.sharding {
-                sharding::validate(&dataflow_state.ingredients, &topo, shards)?
+            if let Some(shards) = mainline.sharding {
+                sharding::validate(&ingredients, &topo, shards)?
             };
 
             // at this point, we've hooked up the graph such that, for any given domain, the graph
@@ -841,18 +855,13 @@ impl<'dataflow> Migration<'dataflow> {
             //     :  | \         :   o
             //
             // etc.
-            // println!("{}", dataflow_state.ingredients);
+            // println!("{}", mainline);
 
-            // Since we are looping, we need to keep the dataflow_state.domain_nodes as it was before
-            // the loop.
-            // This is not ideal, as we need to clone this each time.
-            // TODO(fran): Can we remove the loop and make the modifications in-place?
-            //   Even if we don't care about performance, this loop is very hard to reason about.
-            let mut domain_nodes = dataflow_state.domain_nodes.clone();
+            let mut domain_nodes = mainline.domain_nodes.clone();
 
             for &ni in &new {
-                let n = &dataflow_state.ingredients[ni];
-                if ni != dataflow_state.source && !n.is_dropped() {
+                let n = &ingredients[ni];
+                if ni != source && !n.is_dropped() {
                     let di = n.domain();
                     domain_nodes
                         .entry(di)
@@ -875,11 +884,11 @@ impl<'dataflow> Migration<'dataflow> {
 
             // Boot up new domains (they'll ignore all updates for now)
             debug!("booting new domains");
-            let mut dmp = DomainMigrationPlan::new(dataflow_state);
-            let mut scheduler = Scheduler::new(dataflow_state, &self.worker)?;
+            let mut dmp = DomainMigrationPlan::new(mainline);
+            let mut scheduler = Scheduler::new(mainline, &self.worker, &ingredients)?;
 
             for domain in changed_domains {
-                if dataflow_state.domains.contains_key(&domain) {
+                if mainline.domains.contains_key(&domain) {
                     // this is not a new domain
                     continue;
                 }
@@ -894,13 +903,11 @@ impl<'dataflow> Migration<'dataflow> {
 
             // And now, the last piece of the puzzle -- set up materializations
             debug!("initializing new materializations");
+            let mut materializations = mainline.materializations.clone();
 
-            dataflow_state
-                .materializations
-                .extend(&mut dataflow_state.ingredients, &new)?;
-            if let Some(InvalidEdge { parent, child }) = dataflow_state
-                .materializations
-                .validate(&dataflow_state.ingredients, &new)?
+            materializations.extend(&mut ingredients, &new)?;
+            if let Some(InvalidEdge { parent, child }) =
+                materializations.validate(&ingredients, &new)?
             {
                 debug!(
                     ?child,
@@ -910,30 +917,27 @@ impl<'dataflow> Migration<'dataflow> {
 
                 // Find fully materialized equivalent of parent or create one
                 let (duplicate_index, is_new) =
-                    if let Some(idx) = dataflow_state.materializations.get_redundant(&parent) {
+                    if let Some(idx) = mainline.materializations.get_redundant(&parent) {
                         (*idx, false)
                     } else if let Some(idx) = local_redundant_partial.get(&parent) {
                         (*idx, false)
                     } else {
                         // create new node in the same domain as old
-                        let duplicate_node = dataflow_state.ingredients[parent].duplicate();
+                        let duplicate_node = ingredients[parent].duplicate();
                         // add to graph
-                        let idx = dataflow_state.ingredients.add_node(duplicate_node);
+                        let idx = ingredients.add_node(duplicate_node);
                         local_redundant_partial.insert(parent, idx);
                         (idx, true)
                     };
 
-                dataflow_state
-                    .ingredients
-                    .add_edge(duplicate_index, child, ());
+                ingredients.add_edge(duplicate_index, child, ());
                 if is_new {
                     // Recreate edges coming into parent on duplicate
-                    let incoming: Vec<_> = dataflow_state
-                        .ingredients
+                    let incoming: Vec<_> = ingredients
                         .neighbors_directed(parent, petgraph::EdgeDirection::Incoming)
                         .collect();
                     for ni in incoming {
-                        dataflow_state.ingredients.add_edge(ni, duplicate_index, ());
+                        ingredients.add_edge(ni, duplicate_index, ());
                     }
                     // Add to new nodes for processing in next loop iteration
                     new.insert(duplicate_index);
@@ -942,37 +946,34 @@ impl<'dataflow> Migration<'dataflow> {
                 // the remapping stage in the next iteration of the loop
                 swapped.insert((child, parent), duplicate_index);
                 // remove old edge
-                let old_edge = dataflow_state.ingredients.find_edge(parent, child).unwrap();
-                dataflow_state.ingredients.remove_edge(old_edge);
+                let old_edge = ingredients.find_edge(parent, child).unwrap();
+                ingredients.remove_edge(old_edge);
             } else {
-                dataflow_state.domain_nodes = domain_nodes;
                 // We have successfully made a valid graph! Now we can inform the dmp of all the
                 // changes
-                inform_col_changes(&mut dmp, &self.columns, &dataflow_state.ingredients)?;
+                inform_col_changes(&mut dmp, &self.columns, &ingredients)?;
                 // Add any new nodes to existing domains (they'll also ignore all updates for now)
                 debug!("mutating existing domains");
-                augmentation::inform(dataflow_state, &mut dmp, uninformed_domain_nodes)?;
+                augmentation::inform(source, &mut ingredients, &mut dmp, uninformed_domain_nodes)?;
 
                 // Set up inter-domain connections
                 debug!("bringing up inter-domain connections");
-                routing::connect(&dataflow_state.ingredients, &mut dmp, &new)?;
+                routing::connect(&ingredients, &mut dmp, &new)?;
 
-                dataflow_state.materializations.commit(
-                    &mut dataflow_state.ingredients,
-                    &new,
-                    &mut dmp,
-                )?;
+                materializations.commit(&mut ingredients, &new, &mut dmp)?;
 
                 info!(
                     ms = ?start.elapsed().as_millis(),
                     "migration planning completed"
                 );
 
-                dataflow_state
-                    .materializations
-                    .extend_redundant_partial(local_redundant_partial);
+                materializations.extend_redundant_partial(local_redundant_partial);
                 return Ok(MigrationPlan {
-                    dataflow_state,
+                    ingredients,
+                    domain_nodes,
+                    ndomains,
+                    remap,
+                    materializations,
                     dmp,
                 });
             }

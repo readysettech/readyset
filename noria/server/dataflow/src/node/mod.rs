@@ -506,10 +506,6 @@ impl Node {
         }
     }
 
-    pub fn has_local_addr(&self) -> bool {
-        self.index.iter().any(|idx| idx.has_local())
-    }
-
     /// Retrieves the global address for this node.
     ///
     /// Invariants:

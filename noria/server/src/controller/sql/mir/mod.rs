@@ -447,6 +447,12 @@ impl SqlToMirConverter {
         })
     }
 
+    pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
+        invariant!(new_version > self.schema_version);
+        self.schema_version = new_version;
+        Ok(())
+    }
+
     fn make_base_node(
         &mut self,
         name: &str,

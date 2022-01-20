@@ -47,17 +47,20 @@ struct WorkerStats {
 }
 
 /// A short-lived struct holding all the information necessary to assign domain shards to workers.
-pub(crate) struct Scheduler<'state> {
-    valid_workers: Vec<(&'state WorkerIdentifier, &'state Worker)>,
-    worker_stats: HashMap<&'state WorkerIdentifier, WorkerStats>,
-    dataflow_state: &'state DataflowState,
+pub(crate) struct Scheduler<'leader, 'migration> {
+    valid_workers: Vec<(&'leader WorkerIdentifier, &'leader Worker)>,
+    node_restrictions: &'leader HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
+    worker_stats: HashMap<&'leader WorkerIdentifier, WorkerStats>,
+    ingredients: &'migration Graph,
 }
 
-impl<'state> Scheduler<'state> {
-    /// Create a new [`Scheduler`], optionally restricted to the given `worker`.
+impl<'state, 'migration> Scheduler<'state, 'migration> {
+    /// Create a new scheduler, taking information from the given `leader`, optionally restricted to
+    /// the given `worker`, and assigning nodes from the given graph of `ingredients`.
     pub(crate) fn new(
         dataflow_state: &'state DataflowState,
-        worker: &Option<WorkerIdentifier>,
+        worker: &'migration Option<WorkerIdentifier>,
+        ingredients: &'migration Graph,
     ) -> ReadySetResult<Self> {
         let valid_workers = dataflow_state
             .workers
@@ -70,7 +73,7 @@ impl<'state> Scheduler<'state> {
         for (di, dh) in &dataflow_state.domains {
             let is_base_table_domain = dataflow_state.domain_nodes[di]
                 .values()
-                .any(|ni| dataflow_state.ingredients[*ni].is_base());
+                .any(|ni| ingredients[*ni].is_base());
             for wi in &dh.shards {
                 let stats = worker_stats.entry(wi).or_default();
                 stats.num_domain_shards += 1;
@@ -82,8 +85,9 @@ impl<'state> Scheduler<'state> {
 
         Ok(Self {
             valid_workers,
+            node_restrictions: &dataflow_state.node_restrictions,
             worker_stats,
-            dataflow_state,
+            ingredients,
         })
     }
 
@@ -96,23 +100,19 @@ impl<'state> Scheduler<'state> {
     /// # Invariants
     ///
     /// * `nodes` cannot be empty
-    /// * All the nodes in `nodes` must exist in `self.dataflow_state.ingredients`
+    /// * All the nodes in `nodes` must exist in `self.ingredients`
     #[allow(clippy::indexing_slicing)] // documented invariant
     pub(crate) fn schedule_domain(
         &mut self,
         domain_index: DomainIndex,
         nodes: &[(NodeIndex, bool)],
     ) -> ReadySetResult<Vec<WorkerIdentifier>> {
-        let num_shards = self.dataflow_state.ingredients[nodes[0].0]
+        let num_shards = self.ingredients[nodes[0].0]
             .sharded_by()
             .shards()
             .unwrap_or(1);
-        let is_reader_domain = nodes
-            .iter()
-            .any(|(n, _)| self.dataflow_state.ingredients[*n].is_reader());
-        let is_base_table_domain = nodes
-            .iter()
-            .any(|(n, _)| self.dataflow_state.ingredients[*n].is_base());
+        let is_reader_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_reader());
+        let is_base_table_domain = nodes.iter().any(|(n, _)| self.ingredients[*n].is_base());
 
         let workers = self
             .valid_workers
@@ -126,13 +126,11 @@ impl<'state> Scheduler<'state> {
             let dataflow_node_restrictions = nodes
                 .iter()
                 .filter_map(|(n, _)| {
-                    let node_name = self.dataflow_state.ingredients[*n].name();
-                    self.dataflow_state
-                        .node_restrictions
-                        .get(&NodeRestrictionKey {
-                            node_name: node_name.into(),
-                            shard,
-                        })
+                    let node_name = self.ingredients[*n].name();
+                    self.node_restrictions.get(&NodeRestrictionKey {
+                        node_name: node_name.into(),
+                        shard,
+                    })
                 })
                 .collect::<Vec<_>>();
 

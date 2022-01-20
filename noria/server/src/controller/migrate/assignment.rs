@@ -3,78 +3,31 @@
 use dataflow::prelude::*;
 use tracing::debug;
 
-use crate::controller::state::DataflowState;
-use crate::controller::NodeRestrictionKey;
+use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey};
+use std::collections::HashMap;
 
-/// Assigns domains to all the new nodes.
-///
-/// # Domain assigment heuristics
-/// The main idea is to have as few domains as possible.
-/// However, domains are assigned or created depending on the type of each node, heuristically.
-/// There are some nodes that have special invariants that must be held. See the Invariants section
-/// below
-///
-/// ## Shard Merger
-/// Shard Mergers (nodes that are of type [`dataflow::node::NodeType::Internal`] with a
-/// [`dataflow::ops::NodeOperator::Union`] operator, where the union has a
-/// [`dataflow::ops::union::Emit::AllFrom`]), need their own separate domain from their
-/// sharded ancestors.
-/// A Shard Merger is then assigned a new domain.
-///
-/// ## [`dataflow::node::NodeType::Reader`]
-/// Since readers always re-materialize, sharing a domain doesn't help them much. Having them in
-/// their own domain also means that they get to aggregate reader replay requests in their own
-/// thread, and not interfere as much with other internal traffic.
-/// A reader node is then assigned a new domain.
-///
-/// ## [`dataflow::node::NodeType::Base`]
-/// Base nodes are assigned domains depending on sharding.
-///
-/// ### Sharding disabled
-/// All base nodes are assigned to the same domain.
-///
-/// ### Sharding enabled
-/// In this situation, the following happens:
-/// 1. We traverse down the graph and gather all the children nodes from the base node,
-/// until we hit a sharder or shard merger.
-/// 2. From all of those children, we traverse the graph up until we encounter another base node
-/// without traversing any sharders or shard mergers.
-///
-/// The set of those base node will be grouped together in the same domain, as long as their shards
-/// are compatible with each other (based on the [`DataflowState::node_restrictions`]).
-///
-/// ## Node name starts with 'BOUNDARY_'
-/// It is assigned a new domain.
-///
-/// ## Any other case
-/// The node is assigned the same domain as its first non-source, non-sharder parent.
-/// If no such parent exists, it is assigned a new domain.
-///
-/// # Invariants
-/// ## Shard Mergers
-/// Shard Mergers are the only nodes that MUST be assigned to a different node than their sharded
-/// ancestors.
-/// The reason behind this is that it is not possible to change the shard key of the dataflow
-/// except at a domain boundary.
-pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> ReadySetResult<()> {
+pub fn assign(
+    graph: &mut Graph,
+    topo_list: &[NodeIndex],
+    ndomains: &mut usize,
+    node_restrictions: &HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
+) -> ReadySetResult<()> {
     // we need to walk the data flow graph and assign domains to all new nodes.
     // we generally want as few domains as possible, but in *some* cases we must make new ones.
     // specifically:
     //
     //  - the child of a Sharder is always in a different domain from the sharder
     //  - shard merge nodes are never in the same domain as their sharded ancestors
-    let mut ndomains = dataflow_state.ndomains;
 
     let mut next_domain = || -> ReadySetResult<usize> {
-        ndomains += 1;
-        Ok(ndomains - 1)
+        *ndomains += 1;
+        Ok(*ndomains - 1)
     };
 
-    for &node in new_nodes {
+    for &node in topo_list {
         #[allow(clippy::cognitive_complexity)]
         let assignment = (|| {
-            let graph = &dataflow_state.ingredients;
-            let node_restrictions = &dataflow_state.node_restrictions;
+            let graph = &*graph;
             let n = &graph[node];
 
             // TODO: the code below is probably _too_ good at keeping things in one domain.
@@ -111,7 +64,8 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
                 while !frontier.is_empty() {
                     for cni in frontier.split_off(0) {
                         let c = &graph[cni];
-                        if !c.is_sharder() && !c.is_shard_merger() {
+                        if c.is_sharder() || c.is_shard_merger() {
+                        } else {
                             invariant_eq!(n.sharded_by().is_none(), c.sharded_by().is_none());
                             children_same_shard.push(cni);
                             frontier.extend(
@@ -123,11 +77,6 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
 
                 let mut friendly_base = None;
                 frontier = children_same_shard;
-
-                // We search to see if there's another base with the same shard constraints.
-                // TODO(fran): Why are we looking for a single base? Couldn't we group more bases
-                //  together? Or maybe not group bases at all, since having too many bases in one
-                //  domain can hurt write performance.
                 'search: while !frontier.is_empty() {
                     for pni in frontier.split_off(0) {
                         if pni == node {
@@ -135,10 +84,13 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
                         }
 
                         let p = &graph[pni];
-                        if p.is_base() && p.has_domain() {
-                            friendly_base = Some(p);
-                            break 'search;
-                        } else if !p.is_source() && !p.is_sharder() && !p.is_shard_merger() {
+                        if p.is_source() || p.is_sharder() || p.is_shard_merger() {
+                        } else if p.is_base() {
+                            if p.has_domain() {
+                                friendly_base = Some(p);
+                                break 'search;
+                            }
+                        } else {
                             invariant_eq!(n.sharded_by().is_none(), p.sharded_by().is_none());
                             frontier.extend(
                                 graph.neighbors_directed(pni, petgraph::EdgeDirection::Incoming),
@@ -158,13 +110,6 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
                         friendly_base.sharded_by().shards().unwrap_or(1),
                     );
 
-                    // TODO(fran): Is it possible that to have a scneario in which we have two nodes N1 and N2
-                    //  with shards N1S1, N1S2 and N2S1, N2S2 and N2S3 where:
-                    //   - N1S1 is compatible with N2S2
-                    //   - N1S2 is compatible with N2S3
-                    //   - Any other combination is incompatible
-                    //  There is a valid combination there, by leaving N2S1 into it's own domain, but
-                    //  we are not contemplating that here.
                     let compatible = |new_node: &Node, existing_node: &Node| {
                         for i in 0..num_shards {
                             let new_node_key = NodeRestrictionKey {
@@ -248,15 +193,13 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
 
             let mut assignment = None;
             for &(_, p) in &parents {
-                if p.is_source() {
-                    // the source isn't a useful source of truth
-                    continue;
-                }
                 if p.is_sharder() {
                     // we're a child of a sharder (which currently has to be unsharded). we
                     // can't be in the same domain as the sharder (because we're starting a new
                     // sharding)
                     invariant!(p.sharded_by().is_none());
+                } else if p.is_source() {
+                    // the source isn't a useful source of truth
                 } else if assignment.is_none() {
                     // the key may move to a different column, so we can't actually check for
                     // ByColumn equality. this'll do for now.
@@ -314,12 +257,11 @@ pub fn assign(dataflow_state: &mut DataflowState, new_nodes: &[NodeIndex]) -> Re
 
         debug!(
             node = node.index(),
-            node_type = ?dataflow_state.ingredients[node],
+            node_type = ?graph[node],
             domain = ?assignment,
             "node added to domain"
         );
-        dataflow_state.ingredients[node].add_to(assignment.into());
+        graph[node].add_to(assignment.into());
     }
-    dataflow_state.ndomains = ndomains;
     Ok(())
 }

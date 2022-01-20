@@ -131,7 +131,9 @@ pub(in crate::controller) struct Materializations {
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
+    // Skipping this field as we will rebuild the [`Materializations`] state
+    // upon recovery.
+    #[serde(skip)]
     redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
     // Skipping this field as we will rebuild the [`Materializations`] state
@@ -141,16 +143,7 @@ pub(in crate::controller) struct Materializations {
 
     tag_generator: usize,
 
-    #[serde(skip, default = "get_pending_recovery")]
-    pending_recovery: bool,
-
     pub(crate) config: Config,
-}
-
-/// Helper function to deserialize the `pending_recovery` field
-/// as `true`.
-fn get_pending_recovery() -> bool {
-    true
 }
 
 impl Materializations {
@@ -170,8 +163,6 @@ impl Materializations {
             partial: HashSet::default(),
 
             tag_generator: 0,
-
-            pending_recovery: false,
 
             config: Default::default(),
         }
@@ -205,7 +196,7 @@ impl Materializations {
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
     #[allow(clippy::cognitive_complexity)]
-    pub(in crate::controller) fn extend(
+    pub(super) fn extend(
         &mut self,
         graph: &mut Graph,
         new: &HashSet<NodeIndex>,
@@ -932,7 +923,7 @@ impl Materializations {
     /// This includes setting up replay paths, adding new indices to existing materializations, and
     /// populating new materializations.
     #[allow(clippy::cognitive_complexity)]
-    pub(in crate::controller) fn commit(
+    pub(super) fn commit(
         &mut self,
         graph: &mut Graph,
         new: &HashSet<NodeIndex>,
@@ -1068,7 +1059,6 @@ impl Materializations {
         }
 
         self.added.clear();
-        self.pending_recovery = false;
 
         Ok(())
     }

@@ -36,7 +36,7 @@ use petgraph::graph::NodeIndex;
 
 pub(super) fn mir_query_to_flow_parts(
     mir_query: &mut MirQuery,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<QueryFlowParts> {
     use std::collections::VecDeque;
 
@@ -106,10 +106,7 @@ pub(super) fn mir_query_to_flow_parts(
     })
 }
 
-fn mir_node_to_flow_parts(
-    mir_node: &mut MirNode,
-    mig: &mut Migration<'_>,
-) -> ReadySetResult<FlowNode> {
+fn mir_node_to_flow_parts(mir_node: &mut MirNode, mig: &mut Migration) -> ReadySetResult<FlowNode> {
     let name = mir_node.name.clone();
     Ok(match mir_node.flow_node {
         None => {
@@ -372,7 +369,7 @@ fn mir_node_to_flow_parts(
 
 fn adapt_base_node(
     over_node: MirNodeRef,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     add: &[ColumnSpecification],
     remove: &[ColumnSpecification],
@@ -432,7 +429,7 @@ fn make_base_node(
     column_specs: &mut [(ColumnSpecification, Option<usize>)],
     primary_key: Option<&[Column]>,
     unique_keys: &[Box<[Column]>],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     // remember the absolute base column ID for potential later removal
     for (i, cs) in column_specs.iter_mut().enumerate() {
@@ -506,7 +503,7 @@ fn make_union_node(
     emit: &[Vec<Column>],
     ancestors: &[MirNodeRef],
     duplicate_mode: ops::union::DuplicateMode,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let column_names = column_names(columns);
     let mut emit_column_id: HashMap<NodeIndex, Vec<usize>> = HashMap::new();
@@ -539,7 +536,7 @@ fn make_filter_node(
     parent: MirNodeRef,
     columns: &[Column],
     conditions: Expression,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
@@ -560,7 +557,7 @@ fn make_grouped_node(
     on: &Column,
     group_by: &[Column],
     kind: GroupedNodeType,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     invariant!(!group_by.is_empty());
     let parent_na = parent.borrow().flow_node_addr()?;
@@ -600,7 +597,7 @@ fn make_identity_node(
     name: &str,
     parent: MirNodeRef,
     columns: &[Column],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
@@ -622,7 +619,7 @@ fn make_join_node(
     on_right: &[Column],
     proj_cols: &[Column],
     kind: JoinType,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
 
@@ -745,7 +742,7 @@ fn make_join_aggregates_node(
     left: MirNodeRef,
     right: MirNodeRef,
     columns: &[Column],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     use dataflow::ops::join::JoinSource;
 
@@ -823,7 +820,7 @@ fn make_latest_node(
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
@@ -970,7 +967,7 @@ fn make_project_node(
     emit: &[Column],
     expressions: &[(String, Expression)],
     literals: &[(String, DataType)],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(source_columns);
@@ -1012,7 +1009,7 @@ fn make_distinct_node(
     parent: MirNodeRef,
     columns: &[Column],
     group_by: &[Column],
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
@@ -1055,7 +1052,7 @@ fn make_topk_node(
     group_by: &[Column],
     k: usize,
     offset: usize,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<FlowNode> {
     let parent_na = parent.borrow().flow_node_addr()?;
     let column_names = column_names(columns);
@@ -1149,7 +1146,7 @@ fn materialize_leaf_node(
     key_cols: &[(Column, Option<PlaceholderIdx>)],
     index_type: IndexType,
     post_lookup: PostLookup,
-    mig: &mut Migration<'_>,
+    mig: &mut Migration,
 ) -> ReadySetResult<()> {
     let na = parent.borrow().flow_node_addr()?;
 
