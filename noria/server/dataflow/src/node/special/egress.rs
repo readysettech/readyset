@@ -1,6 +1,5 @@
 use crate::node::special::packet_filter::PacketFilter;
 use crate::prelude::*;
-use metrics::counter;
 use noria::metrics::recorded;
 use noria_errors::{internal_err, invariant, ReadySetResult};
 use serde::{Deserialize, Serialize};
@@ -11,6 +10,37 @@ struct EgressTx {
     node: NodeIndex,
     local: LocalNodeIndex,
     dest: ReplicaAddr,
+
+    #[serde(skip)]
+    sent_ctr: Option<metrics::Counter>,
+    #[serde(skip)]
+    dropped_ctr: Option<metrics::Counter>,
+}
+
+impl EgressTx {
+    fn inc_sent(&mut self) {
+        if let Some(ctr) = &self.sent_ctr {
+            ctr.increment(1);
+        } else {
+            let node = self.node.index().to_string();
+            let ctr =
+                metrics::register_counter!(recorded::EGRESS_NODE_SENT_PACKETS, "node" => node);
+            ctr.increment(1);
+            self.sent_ctr.replace(ctr);
+        }
+    }
+
+    fn inc_dropped(&mut self) {
+        if let Some(ctr) = &self.dropped_ctr {
+            ctr.increment(1);
+        } else {
+            let node = self.node.index().to_string();
+            let ctr =
+                metrics::register_counter!(recorded::EGRESS_NODE_DROPPED_PACKETS, "node" => node);
+            ctr.increment(1);
+            self.dropped_ctr.replace(ctr);
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -39,6 +69,8 @@ impl Egress {
             node: dst_g,
             local: dst_l,
             dest: addr,
+            sent_ctr: None,
+            dropped_ctr: None,
         });
     }
 
@@ -57,10 +89,10 @@ impl Egress {
         shard: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
-        let &mut Self {
-            ref mut txs,
-            ref tags,
-            ref mut packet_filter,
+        let Self {
+            txs,
+            tags,
+            packet_filter,
         } = self;
 
         // send any queued updates to all external children
@@ -109,18 +141,11 @@ impl Egress {
             // Take the packet through the filter. The filter will make any necessary modifications
             // to the packet to be sent, and tell us if we should send the packet or drop it.
             if !packet_filter.process(m.as_mut(), keyed_by, tx.node)? {
-                counter!(
-                    recorded::EGRESS_NODE_DROPPED_PACKETS,
-                    1,
-                    "node" => tx.node.index().to_string(),
-                );
+                tx.inc_dropped();
                 continue;
             }
-            counter!(
-                recorded::EGRESS_NODE_SENT_PACKETS,
-                1,
-                "node" => tx.node.index().to_string(),
-            );
+            tx.inc_sent();
+
             output.send(tx.dest, m);
             if take {
                 break;
