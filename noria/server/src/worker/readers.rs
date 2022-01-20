@@ -12,7 +12,6 @@ use futures_util::{
     stream::{StreamExt, TryStreamExt},
 };
 use launchpad::intervals;
-use metrics::increment_counter;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
@@ -76,6 +75,8 @@ type Ack = tokio::sync::oneshot::Sender<Result<Tagged<ReadReply<SerializedReadRe
 struct ReadRequestHandler {
     readers: Readers,
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
+    miss_ctr: metrics::Counter,
+    hit_ctr: metrics::Counter,
 }
 
 impl ReadRequestHandler {
@@ -83,7 +84,12 @@ impl ReadRequestHandler {
         readers: Readers,
         wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
     ) -> Self {
-        Self { readers, wait }
+        Self {
+            readers,
+            wait,
+            miss_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_MISS),
+            hit_ctr: metrics::register_counter!(recorded::SERVER_VIEW_QUERY_HIT),
+        }
     }
 
     fn handle_normal_read_query(
@@ -214,15 +220,13 @@ impl ReadRequestHandler {
 
             // Hit on all the keys and were RYW consistent
             if !consistency_miss && miss_keys.is_empty() {
-                increment_counter!(recorded::SERVER_VIEW_QUERY_HIT);
-
+                self.hit_ctr.increment(1);
                 return Ok(Ok(Tagged {
                     tag,
                     v: ReadReply::Normal(Ok(ret)),
                 }));
             }
-
-            increment_counter!(recorded::SERVER_VIEW_QUERY_MISS);
+            self.miss_ctr.increment(1);
 
             // Trigger backfills for all the keys we missed on, regardless of a consistency hit/miss
             if !keys_to_replay.is_empty() {
