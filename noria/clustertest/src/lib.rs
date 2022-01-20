@@ -329,6 +329,13 @@ pub struct DeploymentBuilder {
     mysql_root_password: String,
     /// Are async migrations enabled on the adapter.
     async_migration_interval: Option<u64>,
+    /// The max time in seconds that a query may continuously fail until we enter a recovery
+    /// period. None if not enabled.
+    query_max_failure_seconds: Option<u64>,
+    /// The period in seconds that we enter into a fallback recovery mode for a given query, if
+    /// that query has continously failed for query_max_failure_seconds.
+    /// None if not enabled.
+    fallback_recovery_seconds: Option<u64>,
 }
 
 impl DeploymentBuilder {
@@ -364,6 +371,8 @@ impl DeploymentBuilder {
             mysql_port: env.mysql_port,
             mysql_root_password: env.mysql_root_password,
             async_migration_interval: None,
+            query_max_failure_seconds: None,
+            fallback_recovery_seconds: None,
         }
     }
 
@@ -422,6 +431,21 @@ impl DeploymentBuilder {
     /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
     pub fn async_migrations(mut self, interval_ms: u64) -> Self {
         self.async_migration_interval = Some(interval_ms);
+        self
+    }
+
+    /// Overrides the maximum time a query may continuously fail in the adapter.
+    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    pub fn query_max_failure_seconds(mut self, secs: u64) -> Self {
+        self.query_max_failure_seconds = Some(secs);
+        self
+    }
+
+    /// Overrides the fallback recovery period in the adapter that we enter when a query has
+    /// repeatedly failed for query_max_failure_seconds.
+    /// [`Self::deploy_mysql_adapter`] to be set on this deployment.
+    pub fn fallback_recovery_seconds(mut self, secs: u64) -> Self {
+        self.fallback_recovery_seconds = Some(secs);
         self
     }
 
@@ -525,6 +549,8 @@ impl DeploymentBuilder {
                 metrics_port,
                 upstream_mysql_addr.as_ref(),
                 self.async_migration_interval,
+                self.query_max_failure_seconds,
+                self.fallback_recovery_seconds,
             )?;
             // Sleep to give the adapter time to startup.
             sleep(Duration::from_millis(2000)).await;
@@ -922,16 +948,27 @@ fn start_mysql_adapter(
     metrics_port: u16,
     mysql: Option<&String>,
     async_migration_interval: Option<u64>,
+    query_max_failure_seconds: Option<u64>,
+    fallback_recovery_seconds: Option<u64>,
 ) -> Result<ProcessHandle> {
     let mut builder = AdapterBuilder::new(noria_mysql_path)
         .deployment(deployment_name)
         .port(port)
         .metrics_port(metrics_port)
         .authority_addr(authority_addr)
-        .authority(authority);
+        .authority(authority)
+        .explain_last_statement();
 
     if let Some(interval) = async_migration_interval {
         builder = builder.async_migrations(interval);
+    }
+
+    if let Some(secs) = query_max_failure_seconds {
+        builder = builder.query_max_failure_seconds(secs);
+    }
+
+    if let Some(secs) = fallback_recovery_seconds {
+        builder = builder.fallback_recovery_seconds(secs);
     }
 
     if let Some(mysql) = mysql {

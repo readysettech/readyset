@@ -209,6 +209,25 @@ pub struct Options {
     /// The time to wait before canceling a controller request. Defaults to 5 seconds.
     #[clap(long, hide = true, env = "CONTROLLER_TIMEOUT", default_value = "5000")]
     controller_request_timeout_ms: u64,
+
+    /// Specifies the maximum continous failure time for any given query, in seconds, before entering into a fallback recovery mode.
+    #[clap(
+        long,
+        hide = true,
+        env = "QUERY_MAX_FAILURE_SECONDS",
+        default_value = "9223372036854775"
+    )]
+    query_max_failure_seconds: u64,
+
+    /// Specifies the recovery period in seconds that we enter if a given query fails for the
+    /// period of time designated by the query_max_failure_seconds flag.
+    #[clap(
+        long,
+        hide = true,
+        env = "FALLBACK_RECOVERY_SECONDS",
+        default_value = "0"
+    )]
+    fallback_recovery_seconds: u64,
 }
 
 impl<H> NoriaAdapter<H>
@@ -464,7 +483,9 @@ where
                 .validate_queries(options.validate_queries, options.fail_invalidated_queries)
                 .allow_unsupported_set(options.allow_unsupported_set)
                 .migration_mode(migration_mode)
-                .explain_last_statement(options.explain_last_statement);
+                .explain_last_statement(options.explain_last_statement)
+                .query_max_failure_seconds(options.query_max_failure_seconds)
+                .fallback_recovery_seconds(options.fallback_recovery_seconds);
 
             // can't move query_status_cache into the async move block
             let query_status_cache = query_status_cache.clone();

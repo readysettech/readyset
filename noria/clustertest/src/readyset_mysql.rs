@@ -283,6 +283,132 @@ async fn query_cached_view_after_failure() {
     deployment.teardown().await.unwrap();
 }
 
+#[clustertest]
+async fn test_fallback_recovery_period() {
+    let mut deployment = readyset_mysql("test_fallback_recovery_period")
+        .with_servers(1, ServerParams::default())
+        .quorum(1)
+        .query_max_failure_seconds(5)
+        .fallback_recovery_seconds(1200)
+        .start()
+        .await
+        .unwrap();
+
+    let mut upstream = deployment.upstream().await;
+    let _ = upstream
+        .query_drop(
+            r"CREATE TABLE t1 (
+        uid INT NOT NULL,
+        value INT NOT NULL
+    );",
+        )
+        .await
+        .unwrap();
+
+    upstream
+        .query_drop(r"INSERT INTO t1 VALUES (1, 4), (2,5);")
+        .await
+        .unwrap();
+
+    let mut adapter = deployment.adapter().await;
+
+    adapter
+        .query_drop("CREATE CACHED QUERY AS SELECT * FROM t1 WHERE uid = ?")
+        .await
+        .unwrap();
+
+    // Query until we hit noria once.
+    let query = "SELECT * FROM t1 WHERE uid = ?";
+    assert!(
+        query_until_expected_from_noria(
+            &mut adapter,
+            deployment.metrics(),
+            query.clone(),
+            (1,),
+            &EventuallyConsistentResults::empty_or(&[(1, 4)]),
+            PROPAGATION_DELAY_TIMEOUT,
+        )
+        .await
+    );
+
+    // TODO(ENG-862): This is required as propagation of the INSERT must occur
+    // before kill_server or we may panic on recovery.
+    sleep(std::time::Duration::from_secs(10)).await;
+
+    deployment
+        .kill_server(&deployment.server_addrs()[0], false)
+        .await
+        .unwrap();
+
+    // Prep/exec path
+    let res: (i32, i32) = adapter
+        .exec_first(query.clone(), (1,))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(res, (1, 4));
+
+    let res: String = adapter
+        .query_first(r"EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(&res[..], "noria_then_fallback");
+
+    // Standard query path (not prep/exec)
+    let flattened_query = "SELECT * FROM t1 WHERE uid = 1";
+    let res: (i32, i32) = adapter
+        .query_first(flattened_query.clone())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(res, (1, 4));
+
+    let res: String = adapter
+        .query_first(r"EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(&res[..], "noria_then_fallback");
+
+    // We wait out the query_max_failure_seconds period and then try again, at which point we
+    // should be in the recovery period.
+    sleep(std::time::Duration::from_secs(6)).await;
+
+    // Should hit fallback exclusively now because we should now be in the recovery period.
+    // Regular query path.
+    let res: (i32, i32) = adapter.query_first(flattened_query).await.unwrap().unwrap();
+
+    assert_eq!(res, (1, 4));
+
+    let res: String = adapter
+        .query_first(r"EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(&res[..], "fallback");
+
+    // prep/exec path.
+    let res: (i32, i32) = adapter.exec_first(query, (1,)).await.unwrap().unwrap();
+
+    assert_eq!(res, (1, 4));
+
+    let res: String = adapter
+        .query_first(r"EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(&res[..], "fallback");
+
+    deployment.teardown().await.unwrap();
+}
+
 /// Creates a two servers deployment and performs a failure and recovery on one
 /// of the servers. After the failure, we verify that we can still perform the
 /// query on Noria and we return the correct results.

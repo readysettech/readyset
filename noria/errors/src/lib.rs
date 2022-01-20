@@ -569,6 +569,19 @@ impl ReadySetError {
     pub fn caused_by_table_not_found(&self) -> bool {
         self.any_cause(|e| e.is_table_not_found())
     }
+
+    /// Returns `true` if the error could have been caused by a networking problem.
+    pub fn is_networking_related(&self) -> bool {
+        self.any_cause(|e| {
+            matches!(
+                e,
+                Self::RpcFailed { .. }
+                    | Self::IOError(..)
+                    | Self::TcpSendError(..)
+                    | Self::ServiceUnavailable
+            )
+        })
+    }
 }
 
 /// Make a new [`ReadySetError::Internal`] with the provided string-able argument.
