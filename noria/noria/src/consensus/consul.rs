@@ -235,6 +235,36 @@ impl ConsulAuthority {
             .await
             .unwrap();
     }
+
+    async fn try_read_compressed<P: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<Option<P>, Error> {
+        Ok(
+            match self
+                .consul
+                .get(&self.prefix_with_deployment(path), None)
+                .await
+            {
+                Ok((Some(kv), _)) => {
+                    // Consul encodes all responses as base64. Using ?raw to get the
+                    // raw value back breaks the client we are using.
+                    let bytes = base64::decode(kv.Value)?;
+                    // Drop the checksum because we take risks.
+                    let (data, _) = yazi::decompress(&bytes, yazi::Format::Zlib)
+                        .map_err(|_| anyhow!("Failure during decompress"))?;
+                    Some(rmp_serde::from_slice(&data)?)
+                }
+                Ok((None, _)) => None,
+                // The API currently throws an error that it cannot parse the json
+                // if the key does not exist.
+                Err(e) => {
+                    warn!("try_read consul error: {}", e.to_string());
+                    None
+                }
+            },
+        )
+    }
 }
 
 fn is_new_index(current_index: Option<u64>, kv: &KVPair) -> bool {
@@ -440,14 +470,20 @@ impl AuthorityControl for ConsulAuthority {
         loop {
             // TODO(justin): Use cas parameter to only modify if we have the same
             // ModifyIndex when we write.
-            let current_val = self.try_read(STATE_KEY).await?;
+            let current_val = self.try_read_compressed(STATE_KEY).await?;
             let modified = f(current_val);
 
             if let Ok(r) = modified {
-                let new_val = serde_json::to_vec(&r)?;
+                let new_val = rmp_serde::to_vec(&r)?;
+                let compressed = yazi::compress(
+                    &new_val,
+                    yazi::Format::Zlib,
+                    yazi::CompressionLevel::Default,
+                )
+                .unwrap();
                 let pair = KVPair {
                     Key: self.prefix_with_deployment(STATE_KEY),
-                    Value: new_val,
+                    Value: compressed,
                     Session: my_session.clone(),
                     ..Default::default()
                 };
