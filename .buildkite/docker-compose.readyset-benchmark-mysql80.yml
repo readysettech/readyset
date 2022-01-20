@@ -5,7 +5,7 @@ services:
   # MySQL Database Server for Benchmark Data
   mysql:
     container_name: mysql
-    image: mysql:8.0
+    image: mysql:8.0.27
     user: mysql
     ports:
       - 3306:3306

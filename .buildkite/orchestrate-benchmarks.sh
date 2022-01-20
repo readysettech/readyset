@@ -90,12 +90,13 @@ else
   # Necessary to allow mysql container to r/w to this directory in CI
   if [ "${ENVIRONMENT}" == "ci" ]; then
     sudo chown -R 999:999 ${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}
-    sudo chmod -R 1777 ${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}
+    sudo chmod -R 0777 ${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}
     sudo rm -f ${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}/auto.cnf
   fi
 fi
 
 echo "HOST_DATADIR_PATH=${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO}" >> ${BENCHMARK_DC_ENV_PATH}
+echo "HOST_ARTIFACT_PATH=${BENCHMARK_ARTIFACT_DIR}" >> ${BENCHMARK_DC_ENV_PATH}
 
 set +e
 echo '+++ Execute Benchmarks'
@@ -113,14 +114,14 @@ docker-compose \
   --remove-orphans
 
 benchmark_ec=$?
-echo '+++ Display Container Logs'
-show_db_container_logs
-show_benchmark_container_logs
-set -e
 
 echo '+++ Benchmark Results'
 if [ $benchmark_ec -gt 0 ]; then
     echo 'Benchmarking stack exited with a failure exit code. Whoops, we should look into that. Exiting with failure.'
+    echo '+++ Display Container Logs'
+    show_db_container_logs
+    show_benchmark_container_logs
+    set -e
     exit $benchmark_ec
 fi
 echo ":tada: Finished successfully."
