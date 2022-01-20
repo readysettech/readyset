@@ -22,4 +22,5 @@ cd ./rendered_templates
 aws s3 cp . "s3://${S3_BUCKET}/${S3_PREFIX}/readyset/templates/" \
   --exclude "*" \
   --include "*.yaml" \
+  --acl bucket-owner-full-control \
   --recursive
