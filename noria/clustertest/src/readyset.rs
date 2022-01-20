@@ -97,7 +97,7 @@ async fn query_regional_routing_test() {
     );
     assert_eq!(
         get_metric!(r2_metrics, recorded::SERVER_VIEW_QUERY_MISS),
-        None
+        Some(DumpedMetricValue::Counter(0.0))
     );
     assert_eq!(
         get_metric!(r2_metrics, recorded::SERVER_VIEW_QUERY_HIT),
