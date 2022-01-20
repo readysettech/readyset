@@ -184,13 +184,9 @@ impl<'a> Plan<'a> {
     /// eventually reported back by `finalize`.
     #[allow(clippy::cognitive_complexity)]
     pub(super) fn add(&mut self, index_on: Index) -> Result<(), ReadySetError> {
-        // if we are recovering, we must build the paths again. Otherwise
         // if we're full and we already have some paths added... (either this run, or from previous
         // runs)
-        if !self.m.pending_recovery
-            && !self.partial
-            && (!self.paths.is_empty() || !self.old_paths.is_empty())
-        {
+        if !self.partial && (!self.paths.is_empty() || !self.old_paths.is_empty()) {
             // ...don't add any more replay paths, because...
             // non-partial views should not have one replay path per index. that would cause us to
             // replay several times, even though one full replay should always be sufficient.
