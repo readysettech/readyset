@@ -14,7 +14,9 @@ use nom_sql::{
 };
 use nom_sql::{OrderType, SelectStatement};
 use noria::{PlaceholderIdx, ViewPlaceholder};
-use noria_errors::{internal, invariant, invariant_eq, unsupported, ReadySetResult};
+use noria_errors::{
+    internal, invariant, invariant_eq, unsupported, unsupported_err, ReadySetResult,
+};
 use serde::{Deserialize, Serialize};
 
 use super::mir;
@@ -259,7 +261,7 @@ impl QueryGraph {
 
     /// Construct a representation of the lookup key of a view for this query graph, based on the
     /// parameters in this query.
-    pub(crate) fn view_key(&self) -> ReadySetResult<ViewKey> {
+    pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
         if self.parameters().is_empty() {
             Ok(ViewKey {
                 columns: vec![(
@@ -271,7 +273,23 @@ impl QueryGraph {
         } else {
             let has_aggregates = self.has_aggregates();
             let mut parameters = self.parameters();
-            parameters.sort_by_key(|param| &param.col);
+
+            // Sort the parameters to put equal comparisons first, to take advantage of
+            // lexicographic key ordering for queries that mix equality and range comparisons
+            parameters.sort_by(|param1, param2| {
+                match (param1.op, param2.op) {
+                    // All equal operators go first
+                    (BinaryOperator::Equal, _) => Ordering::Less,
+                    (_, BinaryOperator::Equal) => Ordering::Greater,
+                    // sort_by is stable, so if we return Equal we just leave things
+                    // in the same order
+                    (_, _) => Ordering::Equal,
+                }
+                // then sort by column, so that later when we iterate parameters with the same
+                // column but different comparisons are adjacent, allowing us to detect
+                // BETWEEN-style comparisons
+                .then_with(|| param1.col.cmp(&param2.col))
+            });
 
             let mut index_type = None;
             let mut columns: Vec<(mir::Column, ViewPlaceholder)> = vec![];
@@ -284,11 +302,17 @@ impl QueryGraph {
                     unsupported!("Aggregates are not currently supported with non-equal parameters")
                 }
 
-                match IndexType::for_operator(param.op) {
-                    Some(it) if index_type.is_none() => index_type = Some(it),
-                    Some(it) if index_type == Some(it) => {}
-                    Some(_) => unsupported!("Conflicting binary operators in query"),
-                    None => unsupported!("Unsupported binary operator `{}`", param.op),
+                let new_index_type = Some(IndexType::for_operator(param.op).ok_or_else(|| {
+                    unsupported_err(format!("Unsupported binary operator `{}`", param.op))
+                })?);
+
+                if !config.allow_mixed_comparisons
+                    && index_type.is_some()
+                    && new_index_type != index_type
+                {
+                    unsupported!("Conflicting binary operators in query");
+                } else {
+                    index_type = new_index_type;
                 }
 
                 if let (Some((last_col, placeholder)), Some(last_op)) =
@@ -1126,7 +1150,7 @@ mod tests {
     #[test]
     fn bogokey_key() {
         let qg = make_query_graph("SELECT t.x FROM t");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::HashMap);
         assert_eq!(
@@ -1141,7 +1165,7 @@ mod tests {
     #[test]
     fn one_to_one_equal_key() {
         let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::HashMap);
         assert_eq!(
@@ -1156,7 +1180,7 @@ mod tests {
     #[test]
     fn compound_keys() {
         let qg = make_query_graph("SELECT Cats.id FROM Cats WHERE Cats.name = $1 AND Cats.id = $2");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::HashMap);
         assert_eq!(
@@ -1177,7 +1201,7 @@ mod tests {
     #[test]
     fn one_to_one_range_key() {
         let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::BTreeMap);
         assert_eq!(
@@ -1192,7 +1216,7 @@ mod tests {
     #[test]
     fn between_keys() {
         let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::BTreeMap);
         assert_eq!(
@@ -1207,7 +1231,7 @@ mod tests {
     #[test]
     fn between_keys_reversed() {
         let qg = make_query_graph("SELECT t.x FROM t WHERE t.x <= $1 AND t.x >= $2");
-        let key = qg.view_key().unwrap();
+        let key = qg.view_key(&Default::default()).unwrap();
 
         assert_eq!(key.index_type, IndexType::BTreeMap);
         assert_eq!(
@@ -1216,6 +1240,32 @@ mod tests {
                 mir::Column::new(Some("t"), "x"),
                 ViewPlaceholder::Between(2, 1)
             )]
+        );
+    }
+
+    #[test]
+    fn mixed_comparisons() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2");
+        let key = qg
+            .view_key(&mir::Config {
+                allow_mixed_comparisons: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("t"), "y"),
+                    ViewPlaceholder::OneToOne(2)
+                ),
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::OneToOne(1)
+                ),
+            ]
         );
     }
 }
