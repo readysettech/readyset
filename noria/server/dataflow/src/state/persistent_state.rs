@@ -321,15 +321,19 @@ impl State for PersistentState {
 
         match lower {
             Bound::Included(k) => iterator.seek(k),
-            Bound::Excluded(k) => {
-                iterator.seek(&k);
+            Bound::Excluded(start_key) => {
+                iterator.seek(&start_key);
                 // The key in the exclusive bound might not actually exist in the db, in which case
                 // `seek` brings us to the next key after that. We only want to skip forward if that
                 // didn't happen, so first check to see if the iterator is pointing at the exclusive
                 // bound
-                if iterator.valid() && k == iterator.key().unwrap()[..k.len()] {
-                    // If the iterator *is* pointing at the exclusive bound, skip forward one.
-                    iterator.next();
+                if iterator.valid() {
+                    let curr_key = iterator.key().unwrap();
+                    if curr_key.len() >= start_key.len() && start_key == curr_key[..start_key.len()]
+                    {
+                        // If the iterator *is* pointing at the exclusive bound, skip forward one.
+                        iterator.next();
+                    }
                 }
             }
             Bound::Unbounded => iterator.seek_to_first(),
@@ -351,10 +355,10 @@ impl State for PersistentState {
             // Stop iterating if we hit the inclusive bound (set above). For exclusive bounds, once
             // we hit them `iterator.valid()` will just stop returning `true`, since we configured
             // `iterate_upper_bound` earlier.
-            if inclusive_end
-                .iter()
-                .any(|end| end == &iterator.key().unwrap()[..end.len()])
-            {
+            if inclusive_end.iter().any(|end| {
+                let key = iterator.key().unwrap();
+                key.len() >= end.len() && end == &key[..end.len()]
+            }) {
                 break;
             }
 
