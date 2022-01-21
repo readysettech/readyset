@@ -6882,6 +6882,113 @@ async fn aggregate_ranges_not_supported() {
     assert!(res.err().unwrap().caused_by_unsupported());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn mixed_inclusive_range_and_equality() {
+    readyset_logging::init_test_logging();
+
+    let mut g = {
+        let mut builder = Builder::for_tests();
+        builder.set_sharding(Some(DEFAULT_SHARDING));
+        builder.set_persistence(get_persistence_params("mixed_inclusive_range_and_equality"));
+        builder.set_allow_mixed_comparisons(true);
+        builder
+            .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
+                Arc::new(LocalAuthorityStore::new()),
+            ))))
+            .await
+            .unwrap()
+    };
+
+    g.install_recipe(
+        "CREATE TABLE t (x INT, y INT, z INT, w INT);
+         QUERY q:
+         SELECT x, y, z, w FROM t
+         WHERE x >= $1 AND y = $2 AND z >= $3 AND w = $4;",
+    )
+    .await
+    .unwrap();
+
+    let mut t = g.table("t").await.unwrap();
+
+    t.insert_many::<_, Vec<DataType>>(vec![
+        // matches
+        vec![1.into(), 2.into(), 3.into(), 4.into()],
+        vec![2.into(), 2.into(), 3.into(), 4.into()],
+        vec![1.into(), 2.into(), 4.into(), 4.into()],
+        vec![2.into(), 2.into(), 4.into(), 4.into()],
+        // non-matches
+        vec![2.into(), 3.into(), 4.into(), 5.into()],
+        vec![2.into(), 2.into(), 4.into(), 5.into()],
+        vec![0.into(), 2.into(), 4.into(), 4.into()],
+        vec![2.into(), 1.into(), 2.into(), 4.into()],
+    ])
+    .await
+    .unwrap();
+
+    let mut q = g.view("q").await.unwrap();
+
+    // Columns should be (y, w, x, z)
+    //
+    // where x = 0
+    //       y = 1
+    //       z = 2
+    //       w = 3
+    //
+    // Then we can do a lookup of [{yᵥ, wᵥ, xᵥ, zᵥ}, {yᵥ, wᵥ, ⁺∞, ⁺∞})
+    // to get y = yᵥ AND w = wᵥ AND x >= xᵥ AND z >= zᵥ
+    assert_eq!(
+        q.key_map(),
+        &[
+            (ViewPlaceholder::OneToOne(4), 3),
+            (ViewPlaceholder::OneToOne(2), 1),
+            (ViewPlaceholder::OneToOne(1), 0),
+            (ViewPlaceholder::OneToOne(3), 2)
+        ]
+    );
+
+    let rows = q
+        .multi_lookup(
+            vec![KeyComparison::from_range(
+                &(vec1![
+                    DataType::from(4i32),
+                    DataType::from(2i32),
+                    DataType::from(1i32),
+                    DataType::from(3i32)
+                ]
+                    ..=vec1![
+                        DataType::from(4i32),
+                        DataType::from(2i32),
+                        DataType::from(i32::MAX),
+                        DataType::from(i32::MAX)
+                    ]),
+            )],
+            true,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+
+    let res = rows
+        .into_iter()
+        .map(|r| {
+            (
+                get_col!(r, "x", i32),
+                get_col!(r, "y", i32),
+                get_col!(r, "z", i32),
+                get_col!(r, "w", i32),
+            )
+        })
+        .sorted()
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        res,
+        vec![(1, 2, 3, 4), (1, 2, 4, 4), (2, 2, 3, 4), (2, 2, 4, 4)]
+    );
+}
+
 // FIXME(fran): This test is ignored because the Controller
 //  is not noticing that the Worker it is trying to replicate domains to
 //  is no longer available.
