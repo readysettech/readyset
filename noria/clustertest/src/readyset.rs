@@ -252,3 +252,54 @@ async fn balance_base_table_domains() {
 
     deployment.teardown().await.unwrap();
 }
+
+// Validate that, on promotion of a follower to leader, its
+// `CONTROLLER_IS_LEADER` metric changes from 0 (not leader) to 1 (leader)
+#[clustertest]
+async fn new_leader_metrics() {
+    let mut deployment = DeploymentBuilder::new("ct_new_leader_metrics")
+        .add_server(ServerParams::default())
+        .start()
+        .await
+        .unwrap();
+
+    let original_leader = deployment.server_addrs()[0].clone();
+    let new_server = deployment
+        .start_server(ServerParams::default(), true)
+        .await
+        .unwrap();
+
+    // `new_server` should be reporting that it's a follower (0)
+    let metrics = deployment
+        .metrics()
+        .get_metrics_for_server(new_server.clone())
+        .await
+        .unwrap()
+        .metrics;
+    assert_eq!(
+        get_metric!(metrics, recorded::CONTROLLER_IS_LEADER),
+        Some(DumpedMetricValue::Gauge(0f64))
+    );
+
+    // Killing the original leader will result in `new_server` becoming leader
+    deployment
+        .kill_server(&original_leader, true)
+        .await
+        .unwrap();
+
+    // `new_server` should have received its promotion to leader now, and be
+    // reporting that it's the leader (1)
+    let metrics = deployment
+        .metrics()
+        .get_metrics_for_server(new_server.clone())
+        .await
+        .unwrap()
+        .metrics;
+
+    assert_eq!(
+        get_metric!(metrics, recorded::CONTROLLER_IS_LEADER),
+        Some(DumpedMetricValue::Gauge(1f64))
+    );
+
+    deployment.teardown().await.unwrap();
+}

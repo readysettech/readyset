@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use itertools::Itertools;
 use launchpad::select;
-use metrics::{counter, histogram};
+use metrics::{counter, gauge, histogram};
 use nom_sql::SqlQuery;
 use noria::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
@@ -379,6 +379,7 @@ impl Controller {
     async fn handle_authority_update(&self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descr) => {
+                gauge!(recorded::CONTROLLER_IS_LEADER, 0f64);
                 self.send_worker_request(WorkerRequestKind::NewController {
                     controller_uri: descr.controller_uri,
                 })
@@ -386,6 +387,7 @@ impl Controller {
             }
             AuthorityUpdate::WonLeaderElection(state) => {
                 info!("won leader election, creating Leader");
+                gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
                 let mut leader = Leader::new(
                     state.clone(),
                     self.our_descriptor.controller_uri.clone(),
