@@ -28,7 +28,7 @@ async fn write_column<W: AsyncWrite + Unpin>(
     cs: &msql_srv::Column,
 ) -> Result<(), Error> {
     let written = match *c {
-        DataType::None => rw.write_col(None::<i32>),
+        DataType::None | DataType::Max => rw.write_col(None::<i32>),
         // NOTE(malte): the code repetition here is unfortunate, but it's hard to factor
         // this out into a helper since i has a different time depending on the DataType
         // variant.

@@ -306,7 +306,7 @@ async fn check_query(
             .map(|row| {
                 row.into_iter()
                     .map(|v| match v {
-                        DataType::None => "NULL".to_owned(),
+                        DataType::None | DataType::Max => "NULL".to_owned(),
                         DataType::Int(i) => i.to_string(),
                         DataType::UnsignedInt(i) => i.to_string(),
                         DataType::BigInt(i) => i.to_string(),

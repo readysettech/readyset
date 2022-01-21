@@ -104,7 +104,7 @@ where
     C: Context<'a>,
 {
     match d {
-        DataType::None => Ok(cx.null().upcast::<JsValue>()),
+        DataType::None | DataType::Max => Ok(cx.null().upcast::<JsValue>()),
         DataType::Int(n) => Ok(cx.number(*n).upcast::<JsValue>()),
         DataType::UnsignedInt(n) => Ok(cx.number(*n).upcast::<JsValue>()),
         DataType::BigInt(n) => Ok(cx.number(*n as f64).upcast::<JsValue>()),

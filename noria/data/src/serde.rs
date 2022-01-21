@@ -26,6 +26,7 @@ enum Field {
     Numeric,
     BitVector,
     TimestampTz,
+    Max,
 }
 
 enum TextOrTinyText {
@@ -109,6 +110,11 @@ impl serde::ser::Serialize for DataType {
             DataType::TimestampTz(ts) => {
                 serialize_variant(serializer, Field::TimestampTz, ts.as_ref())
             }
+            DataType::Max => serializer.serialize_unit_variant(
+                "DataType",
+                Field::Max as _,
+                Field::VARIANTS[Field::Max as usize],
+            ),
         }
     }
 }
@@ -284,6 +290,9 @@ impl<'de> Deserialize<'de> for DataType {
                     (Field::TimestampTz, variant) => {
                         VariantAccess::newtype_variant::<DateTime<FixedOffset>>(variant)
                             .map(DataType::from)
+                    }
+                    (Field::Max, variant) => {
+                        VariantAccess::unit_variant(variant).map(|_| DataType::Max)
                     }
                 }
             }

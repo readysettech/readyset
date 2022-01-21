@@ -429,7 +429,7 @@ pub fn shard_by(dt: &DataType, shards: usize) -> usize {
             hasher.finish() as usize % shards
         }
         // a bit hacky: send all NULL values to the first shard
-        DataType::None => 0,
+        DataType::None | DataType::Max => 0,
         DataType::Float(_, _)
         | DataType::Double(_, _)
         | DataType::Time(_)
