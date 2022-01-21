@@ -24,7 +24,9 @@ data "aws_iam_policy_document" "readysettech-customer-artifacts" {
     ]
     actions = [
       "s3:GetObject",
+      "s3:GetObjectAcl",
       "s3:PutObject",
+      "s3:PutObjectAcl",
       "s3:ListBucket"
     ]
   }
@@ -102,7 +104,9 @@ data "aws_iam_policy_document" "readysettech-cfn-public" {
     ]
     actions = [
       "s3:GetObject",
+      "s3:GetObjectAcl",
       "s3:PutObject",
+      "s3:PutObjectAcl",
       "s3:ListBucket"
     ]
   }
@@ -153,6 +157,15 @@ resource "aws_s3_bucket" "readysettech-cfn-public" {
     enabled = true
   }
 }
+
+# Prevent any account other than bucket account from owning objects
+resource "aws_s3_bucket_ownership_controls" "readysettech-cfn-public" {
+  bucket = aws_s3_bucket.readysettech-cfn-public.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
 resource "aws_s3_bucket_policy" "readysettech-cfn-public" {
   bucket = aws_s3_bucket.readysettech-cfn-public.bucket
   policy = data.aws_iam_policy_document.readysettech-cfn-public.json

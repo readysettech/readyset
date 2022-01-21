@@ -73,9 +73,6 @@ RUN set -eux; \
         ca-certificates \
         git; \
     rm -rf /var/lib/apt/lists/*; \
-    # Configure Terraform provider cache
-    mkdir -p $HOME/.terraform.d/plugin-cache; \
-    echo "plugin_cache_dir = \"$HOME/.terraform.d/plugin-cache\"" > $HOME/.terraformrc; \
     # Validate all programs are installed correctly
     terraform --version; \
     sops --version; \
