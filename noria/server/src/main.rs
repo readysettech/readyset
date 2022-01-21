@@ -170,7 +170,7 @@ struct Opts {
     volume_id: Option<VolumeId>,
 
     /// Enable (experimental, currently broken) support for TopK in dataflow
-    #[clap(long, hide = true)]
+    #[clap(long, env = "EXPERIMENTAL_TOPK_SUPPORT", hide = true)]
     enable_experimental_topk_support: bool,
 
     #[clap(flatten)]
