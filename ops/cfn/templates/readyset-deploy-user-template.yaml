@@ -195,4 +195,8 @@ Resources:
                   - iam:ListAccessKeys
                   - iam:UpdateAccessKey
                 Resource: arn:aws:iam::*:user/${aws:username}
+              - Effect: Allow
+                Action:
+                  - ec2:Get*
+                Resource: '*'
           PolicyName: ReadySetCloudFormationPassRole
