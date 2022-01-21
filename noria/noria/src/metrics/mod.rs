@@ -404,6 +404,10 @@ pub mod recorded {
     /// Counter: Number of replication actions performed successfully.
     pub const REPLICATOR_SUCCESS: &str = "replicator.update_success";
 
+    /// Gauge: Indicates whether a server is the leader. Set to 1 when the
+    /// server is leader, 0 for follower.
+    pub const CONTROLLER_IS_LEADER: &str = "controller.is_leader";
+
     /// Counter: The total amount of time spent servicing controller RPCs.
     ///
     /// | Tag | Description |
