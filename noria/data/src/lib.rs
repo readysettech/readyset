@@ -72,6 +72,16 @@ pub enum DataType {
     Numeric(Arc<Decimal>),
     /// A bit or varbit value.
     BitVector(Arc<BitVec>),
+    /// A sentinel maximal value.
+    ///
+    /// This value is always greater than all other [`DataType`]s, except itself.
+    ///
+    /// This is a special value, as it cannot ever be constructed by user supplied values, and
+    /// always returns an error when encountered during expression evaluation. Its only use is as
+    /// the upper bound in a range query
+    // NOTE: when adding new DataType variants, make sure to always keep Max last - we use the order
+    // of the variants to compare
+    Max,
 }
 
 impl Eq for DataType {}
@@ -110,6 +120,7 @@ impl fmt::Display for DataType {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
+            DataType::Max => f.write_str("MAX"),
         }
     }
 }
@@ -151,12 +162,11 @@ impl DataType {
             DataType::ByteArray(_) => DataType::ByteArray(Arc::new(Vec::new())),
             DataType::Numeric(_) => DataType::from(Decimal::MIN),
             DataType::BitVector(_) => DataType::from(BitVec::new()),
+            DataType::Max => DataType::None,
         }
     }
 
     /// Generates the maximum DataType corresponding to the type of a given DataType.
-    /// Note that there is no possible maximum for the `Text`, `ByteArray` or `BitVector` variants,
-    /// hence it is not implemented.
     pub fn max_value(other: &Self) -> Self {
         match other {
             DataType::None => DataType::None,
@@ -180,7 +190,8 @@ impl DataType {
             DataType::TinyText(_)
             | DataType::Text(_)
             | DataType::ByteArray(_)
-            | DataType::BitVector(_) => unimplemented!(),
+            | DataType::BitVector(_)
+            | DataType::Max => DataType::Max,
         }
     }
 
@@ -248,7 +259,7 @@ impl DataType {
     /// ```
     pub fn is_truthy(&self) -> bool {
         match *self {
-            DataType::None => false,
+            DataType::None | DataType::Max => false,
             DataType::Int(x) => x != 0,
             DataType::UnsignedInt(x) => x != 0,
             DataType::BigInt(x) => x != 0,
@@ -314,7 +325,7 @@ impl DataType {
     pub fn sql_type(&self) -> Option<SqlType> {
         use SqlType::*;
         match self {
-            Self::None => None,
+            Self::None | Self::Max => None,
             Self::Int(_) => Some(Int(None)),
             Self::UnsignedInt(_) => Some(UnsignedInt(None)),
             Self::BigInt(_) => Some(Bigint(None)),
@@ -961,6 +972,7 @@ impl PartialEq for DataType {
                 bits_a.as_ref() == bits_b.as_ref()
             }
             (&DataType::None, &DataType::None) => true,
+            (&DataType::Max, &DataType::Max) => true,
             _ => false,
         }
     }
@@ -1168,6 +1180,7 @@ impl Hash for DataType {
         // collisions, but the decreased overhead is worth it.
         match *self {
             DataType::None => {}
+            DataType::Max => 1i64.hash(state),
             DataType::Int(..) | DataType::BigInt(..) => {
                 // this unwrap should be safe because no error path in try_from for i64 (&i64) on Int and BigInt
                 #[allow(clippy::unwrap_used)]
@@ -1489,6 +1502,7 @@ impl TryFrom<DataType> for Literal {
             DataType::ByteArray(ref array) => Ok(Literal::ByteArray(array.as_ref().clone())),
             DataType::Numeric(ref d) => Ok(Literal::Numeric(d.mantissa(), d.scale())),
             DataType::BitVector(ref bits) => Ok(Literal::BitVector(bits.as_ref().to_bytes())),
+            DataType::Max => internal!("MAX has no representation as a literal"),
         }
     }
 }
@@ -2062,7 +2076,7 @@ impl ToSql for DataType {
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn Error + 'static + Sync + Send>> {
         match (self, ty) {
-            (Self::None, _) => None::<i8>.to_sql(ty, out),
+            (Self::None | Self::Max, _) => None::<i8>.to_sql(ty, out),
             (Self::Int(x), &Type::INT2) => (*x as i16).to_sql(ty, out),
             (Self::Int(x), _) => x.to_sql(ty, out),
             (Self::UnsignedInt(x), &Type::BOOL) => (*x != 0).to_sql(ty, out),
@@ -2230,7 +2244,7 @@ impl TryFrom<&DataType> for mysql_common::value::Value {
         use mysql_common::value::Value;
 
         match dt {
-            DataType::None => Ok(Value::NULL),
+            DataType::None | DataType::Max => Ok(Value::NULL),
             DataType::Int(val) => Ok(Value::Int(i64::from(*val))),
             DataType::UnsignedInt(val) => Ok(Value::UInt(u64::from(*val))),
             DataType::BigInt(val) => Ok(Value::Int(*val)),
@@ -2426,6 +2440,7 @@ impl Arbitrary for DataType {
 
         prop_oneof![
             Just(None),
+            Just(Max),
             any::<i32>().prop_map(Int),
             any::<u32>().prop_map(UnsignedInt),
             any::<i64>().prop_map(BigInt),
@@ -2515,6 +2530,12 @@ mod tests {
     }
 
     #[proptest]
+    fn max_greater_than_all(dt: DataType) {
+        prop_assume!(dt != DataType::Max, "MAX");
+        assert!(DataType::Max > dt);
+    }
+
+    #[proptest]
     #[allow(clippy::float_cmp)]
     fn dt_to_mysql_value_roundtrip_prop(v: MySqlValue) {
         use mysql_common::value::Value;
@@ -2537,7 +2558,10 @@ mod tests {
 
         prop_assume!(match dt {
             DataType::Timestamp(t) if t.date().year() < 1000 || t.date().year() > 9999 => false,
-            DataType::ByteArray(_) | DataType::Numeric(_) | DataType::BitVector(_) => false,
+            DataType::ByteArray(_)
+            | DataType::Numeric(_)
+            | DataType::BitVector(_)
+            | DataType::Max => false,
             _ => true,
         });
 
