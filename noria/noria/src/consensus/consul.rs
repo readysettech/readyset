@@ -1,12 +1,127 @@
+//! # State Management in Consul
+//! *TL:DR: Consul has a 512 KB limit to values and we hack around it.*
+//!
+//! The values in Consul's KV store cannot exceed 512 KB without throwing an error.
+//! Noria's controller state, however, can greatly exceed 512 KB and its size can be
+//! unbounded. We circumvent this by storing the serialized+compressed dataflow state
+//! across several chunks. We guarantee atomicity of dataflow updates through versioning.
+//!
+//! ## Dataflow state keys
+//! | Key | Description |
+//! | --- | ----------- |
+//! | /controller/state | the current version of the dataflow state. |
+//! | /state/<version> | the path prefix for the dataflow state chunks. |
+//! | /state/<version>/n | chunk n for the dataflow state <version>. |
+//!
+//! ## Guarantees during dataflow state updates.
+//! Updating the dataflow state involves: (1) reading the dataflow state, (2) applying
+//! an arbitrary function to that state, (3) writing the new dataflow state. During this
+//! process we guarantee that we are currently the leader, and *if* we successfully update
+//! the dataflow state in (3), we are still the leader.
+//!
+//! If we lose leadership at any point during (1) and (2) we are only operating on local
+//! data and never violate consistency by overwriting shared state, we then return an
+//! error.
+//!
+//! If we update the dataflow state, we must do so *atomically*. Either every update to
+//! the dataflow state proceeds, or none of them do (from the perspective of future reads
+//! of the dataflow state).
+//!
+//! # Atomic updates to dataflow state
+//! 1. Read the current version of the controller state from /controller/state.
+//!    The chunks associated with this controller state are stored at
+//!    /controller/state/<version>/<chunk number>.
+//! 2. Read all the chunks associated with this state.
+//! 3. Stitch the bytes back together, decompress, deserialize and update the dataflow state.
+//! 4. Split the compressed + serialized dataflow state into chunks of size 512 KB.
+//! 5. Write the chunks to /controller/state/<new version>/<chunk number> where chunk number is an
+//!    integer in the range of 0 to maximum chunk number - 1.
+//! 6. Update the version at /controller/state/<version>
+//!
+//! # Atomic reads from dataflow state
+//! 1. Read the current version from the controller state key /controller/state. This key includes
+//!    the version and the maximum chunk number.
+//! 2. Read from all chunks /controller/state/<version>/<chunk number> where chunk number is an
+//!    integer in the range of 0 to maximum chunk number - 1.
+//!
+//! ## Using only two states with atomicity.
+//! The easiest way to guarantee atomicity is to assign every dataflow state update a unique
+//! version, however, this would cause the storage required to hold all the unique dataflow states
+//! to grow effectively unbounded.
+//! Instead we need only use two versions to maintain atomicity. We refer to these in the following
+//! text as the "current" and "staging" versions, where "current" is the active version before a
+//! dataflow state update. See [`next_state_version`] to see the two version names we alternate
+//! between.
+//!
+//! This is possible becasue of the following:
+//! * We may only perform writes to *any* version of the dataflow state if and only if we are
+//!   the leader. This follows from  [^1].
+//! * The dataflow state referred to in `/state` is always immutable while it is in `/state,
+//!   leaders may never perform writes to that state. This follows from [^2]
+//! * If we update /state to a new version, we have successfully written all the chunks to the
+//!   `/state/<version>/` prefix. Guaranteed by Step 6 only being performed if Step 5 succeeds.
+//! * Each version is associated with the number of chunks in the version. That way we know how
+//!   many chunks to read from `/state/version`.
+//!
+//! *What if we read /state and then hang?*
+//! `/state` cannot change while we are the leader; if we lose leadership, we cannot perform writes
+//! due to [^1].
+//!
+//! [^1]: Acquiring a PUT request with `acquire` will only succeed if it has not been locked by
+//!     another authority and our session is still valid:
+//!     [Consul API Docs](https://www.consul.io/api-docs/kv#acquire.)
+//!     This allows us to perform writes if and only if we are the leader.
+//!
+//! [^2]: The current leader always writes to the version that is *not* the `/state` it read at the
+//!     start of updating the dataflow state (See [[Atomic updates to dataflow state]]). If
+//!     `/state` changes, the current leader must have lost leadership and cannot perform any
+//!     writes.
+//!
+//! ## Example
+//!
+//! *Updating the state from "v1" to "v2" with dataflow states "d1" and "d2", respectively.
+//!
+//! Suppose we have:
+//!   /state: { version: "v1", chunks: 4 }
+//!   /state/v1/{0, 1, 2, 3}
+//!   /state/v2/{0, 1, 2, 3, 4, 5}
+//!
+//! If we are updating the dataflow state to v2, we begin by writing chunks to `/state/v2/`.
+//! Suppose we update a subset and fail.
+//!   /state/v2/{*0*, *1*, 2, 3, 4, 5}
+//!
+//! A new leader is elected and begins updating the dataflow state to v2. Once again beginning
+//! at chunk 0. Suppose the new dataflow state fits in 3 chunks: {0, 1, 2}.
+//!   /state/v2/{*0*, *1*, *2*, 3, 4, 5}
+//!
+//! The new leader then writes to `/state`
+//!   /state: { version "v2", chunks: 3 }
+//!
+//! On a read to the dataflow state, the read would ignore the remaining chunks and only read the
+//! first 3 chunks from /state/v2:
+//!   /state/v2/0
+//!   /state/v2/1
+//!   /state/v2/2
+//!
+//! ## Limitations
+//! Dataflow state is all or nothing. We must read all keys to deserialize the state which
+//! can be slow.
+//!
+//! The amount of data stored in consul is bounded by 2 * the maximum dataflow state size for a
+//! deployment. If the dataflow state size decreases, we still store up the total number of chunks
+//! as we cannot safely delete old blocks.
+
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
 use consul::kv::{KVPair, KV};
 use consul::session::{Session, SessionEntry};
 use consul::Config;
 use futures::future::join_all;
+use futures::stream::FuturesOrdered;
+use futures::TryStreamExt;
 use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 use std::{
@@ -39,6 +154,13 @@ const SESSION_RELEASE_BEHAVIOR: &str = "release";
 /// session as dead.
 const SESSION_TTL: &str = "20s";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// The size of each chunk stored in Consul. Consul converts the chunk's bytes to base64
+/// encoding, the encoded base64 bytes must be less than 512KB.
+const CHUNK_SIZE: usize = 256000;
+/// The format used by yazi for compression and decompression of controller state.
+const COMPRESSION_FORMAT: yazi::Format = yazi::Format::Zlib;
+/// The compression level used for compression of controller state.
+const COMPRESSION_LEVEL: yazi::CompressionLevel = yazi::CompressionLevel::Default;
 
 struct ConsulAuthorityInner {
     session: Option<SessionEntry>,
@@ -77,6 +199,51 @@ fn worker_id_to_path(id: &str) -> String {
 
 fn adapter_id_to_path(id: &str) -> String {
     ADAPTER_PREFIX.to_owned() + id
+}
+
+/// Returns the next controller state version. Returns a version in the set { "0", "1" }
+/// since only two versions are required.
+fn next_state_version(current: &str) -> String {
+    if current == "0" { "1" } else { "0" }.to_string()
+}
+
+struct ChunkedState(Vec<Vec<u8>>);
+
+impl From<Vec<u8>> for ChunkedState {
+    fn from(v: Vec<u8>) -> ChunkedState {
+        ChunkedState(v.chunks(CHUNK_SIZE).map(|s| s.into()).collect())
+    }
+}
+
+impl From<ChunkedState> for Vec<u8> {
+    fn from(c: ChunkedState) -> Vec<u8> {
+        // Manually allocate a vector large enough to hold all chunks (this assumes the last
+        // chunk is full) to prevent behind the scenes reallocation of the Vec when performing the
+        // comparable operation with flattening the Vec<Vec<u8>> to a Vec<u8>.
+        let mut res = Vec::with_capacity(c.0.len() * CHUNK_SIZE);
+        for chunk in c.0 {
+            res.extend(chunk);
+        }
+        res
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+struct StateVersion {
+    // We must keep the number of chunks in the version as if the number of chunks
+    // decreases we have no way of atomically deleting. We instead just keep track
+    // of what chunks are actually active via `num_chunks`.
+    num_chunks: usize,
+    version: String,
+}
+
+impl Default for StateVersion {
+    fn default() -> Self {
+        Self {
+            num_chunks: 0,
+            version: "0".to_string(),
+        }
+    }
 }
 
 impl ConsulAuthority {
@@ -236,34 +403,160 @@ impl ConsulAuthority {
             .unwrap();
     }
 
-    async fn try_read_compressed<P: DeserializeOwned>(
-        &self,
-        path: &str,
-    ) -> Result<Option<P>, Error> {
+    /// Retrieves the controller state version if it exists, otherwise returns None.
+    async fn get_controller_state_version(&self) -> Result<Option<StateVersion>, Error> {
         Ok(
             match self
                 .consul
-                .get(&self.prefix_with_deployment(path), None)
+                .get(&self.prefix_with_deployment(STATE_KEY), None)
                 .await
             {
                 Ok((Some(kv), _)) => {
-                    // Consul encodes all responses as base64. Using ?raw to get the
-                    // raw value back breaks the client we are using.
+                    // Results returned by consul are base64 encoded.
                     let bytes = base64::decode(kv.Value)?;
-                    // Drop the checksum because we take risks.
-                    let (data, _) = yazi::decompress(&bytes, yazi::Format::Zlib)
-                        .map_err(|_| anyhow!("Failure during decompress"))?;
-                    Some(rmp_serde::from_slice(&data)?)
+                    Some(serde_json::from_slice(&bytes)?)
                 }
                 Ok((None, _)) => None,
                 // The API currently throws an error that it cannot parse the json
                 // if the key does not exist.
                 Err(e) => {
-                    warn!("try_read consul error: {}", e.to_string());
+                    warn!("Failure to get controller state version: {}", e.to_string());
                     None
                 }
             },
         )
+    }
+
+    /// Writes the controller state version if:
+    ///  1. We are the leader at the start of the call,
+    ///  2. Consul has not detected us as failed when we perform the update.
+    ///
+    ///  As we only relinquish leadership based on consul's failure detection, we are safe
+    ///  to update the state version.
+    async fn write_controller_state_version(&self, input: StateVersion) -> Result<(), Error> {
+        let my_session = Some(self.get_session()?);
+        if let Ok((Some(kv), _)) = self
+            .consul
+            .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
+            .await
+        {
+            if kv.Session != my_session {
+                bail!("Cannot update controller state if not the leader");
+            }
+        }
+
+        let pair = KVPair {
+            Key: self.prefix_with_deployment(STATE_KEY),
+            Value: serde_json::to_vec(&input)?,
+            Session: my_session.clone(),
+            ..Default::default()
+        };
+
+        match self.consul.acquire(pair, None).await {
+            Ok((true, _)) => Ok(()),
+            Ok((false, _)) => bail!("We are not the leader when trying to write state"),
+            Err(e) => bail!(e.to_string()),
+        }
+    }
+
+    /// Retrieves the controller state from Consul.
+    ///
+    /// The controller state is stored in the path `/state/{version}/{chunk number}` where the
+    /// version referes to the version number returned from a [`get_controller_state_version`]
+    /// call, and the chunk number is an integer from 0 to the number of chunks in the state.
+    /// The number of chunks is stored in [`StateVersion::num_chunks`].
+    async fn get_controller_state<P: DeserializeOwned>(
+        &self,
+        version: StateVersion,
+    ) -> Result<P, Error> {
+        let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &version.version;
+        let chunk_futures: FuturesOrdered<_> = (0..version.num_chunks)
+            .map(|c| {
+                let prefix = state_prefix.clone();
+                async move {
+                    let path = prefix + "/" + &c.to_string();
+                    let (kv, _) = self.consul.get(&path, None).await.map_err(|e| {
+                        anyhow!("Failed to read state from consul, {}", e.to_string())
+                    })?;
+                    let kv = kv.ok_or(anyhow!("Missing chunk in controller state"))?;
+                    Ok(base64::decode(kv.Value)?)
+                }
+            })
+            .collect();
+
+        let t: Result<Vec<Vec<u8>>, Error> = chunk_futures.try_collect().await;
+        let chunks = ChunkedState(t?);
+        let contiguous: Vec<u8> = chunks.into();
+        let (data, _) = yazi::decompress(&contiguous, COMPRESSION_FORMAT)
+            .map_err(|_| anyhow!("Failure during decompress"))?;
+        Ok(rmp_serde::from_slice(&data)?)
+    }
+
+    /// Write `controller_state` to the consul KV store.
+    ///
+    /// `controller_state` is serialized and compressed before being split into N keys.
+    async fn write_controller_state<P: Serialize>(
+        &self,
+        version: Option<StateVersion>,
+        controller_state: P,
+    ) -> Result<(StateVersion, P), Error> {
+        let my_session = Some(self.get_session()?);
+
+        // The version will not exist for the first controller write, in that case, use the default
+        // version.
+        let new_version = next_state_version(&version.unwrap_or_default().version);
+        let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &new_version;
+
+        let new_val = rmp_serde::to_vec(&controller_state)?;
+        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+        let chunked = ChunkedState::from(compressed);
+
+        // Create futures for each of the consul chunk writes.
+        let num_chunks = chunked.0.len();
+        let chunk_writes: Vec<_> = chunked
+            .0
+            .into_iter()
+            .enumerate()
+            .map(|(i, chunk)| {
+                let prefix = state_prefix.clone() + "/" + &i.to_string();
+                let session = my_session.clone();
+                async move {
+                    let pair = KVPair {
+                        Key: prefix,
+                        Value: chunk,
+                        Session: session,
+                        ..Default::default()
+                    };
+
+                    // TODO(justin): Custom error type for consul code.
+                    match self.consul.acquire(pair, None).await {
+                        Ok((true, _)) => Ok(()),
+                        Ok((false, _)) => Err(anyhow!(
+                            "Failed to write controller state chunk with acquire"
+                        )),
+                        Err(e) => Err(anyhow!(
+                            "Failed to write controller state chunk, {}",
+                            e.to_string()
+                        )),
+                    }
+                }
+            })
+            .collect();
+
+        // TODO(justin): For extremely large states this will increase high load, consider
+        // buffering.
+        join_all(chunk_writes)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        Ok((
+            StateVersion {
+                num_chunks,
+                version: new_version,
+            },
+            controller_state,
+        ))
     }
 }
 
@@ -468,31 +761,18 @@ impl AuthorityControl for ConsulAuthority {
         }
 
         loop {
-            // TODO(justin): Use cas parameter to only modify if we have the same
-            // ModifyIndex when we write.
-            let current_val = self.try_read_compressed(STATE_KEY).await?;
-            let modified = f(current_val);
+            let current_version = self.get_controller_state_version().await?;
+            let current_state = if let Some(v) = current_version.clone() {
+                self.get_controller_state(v).await?
+            } else {
+                None
+            };
 
-            if let Ok(r) = modified {
-                let new_val = rmp_serde::to_vec(&r)?;
-                let compressed = yazi::compress(
-                    &new_val,
-                    yazi::Format::Zlib,
-                    yazi::CompressionLevel::Default,
-                )
-                .unwrap();
-                let pair = KVPair {
-                    Key: self.prefix_with_deployment(STATE_KEY),
-                    Value: compressed,
-                    Session: my_session.clone(),
-                    ..Default::default()
-                };
+            if let Ok(r) = f(current_state) {
+                let (new_version, r) = self.write_controller_state(current_version, r).await?;
+                self.write_controller_state_version(new_version).await?;
 
-                match self.consul.acquire(pair, None).await {
-                    Ok((true, _)) => return Ok(Ok(r)),
-                    Ok((false, _)) => continue,
-                    Err(e) => bail!(e.to_string()),
-                }
+                return Ok(Ok(r));
             }
         }
     }
@@ -678,18 +958,28 @@ fn value_to_socket_addr(value: Vec<u8>) -> Result<SocketAddr, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
     use reqwest::Url;
     use serial_test::serial;
+    use std::iter;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::Arc;
     use std::time::Duration;
 
+    fn test_authority_address(deployment: &str) -> String {
+        format!(
+            "http://{}/{}",
+            std::env::var("AUTHORITY_ADDRESS").unwrap_or("127.0.0.1:8500".to_string()),
+            deployment
+        )
+    }
+
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn read_write_operations() {
-        let authority =
-            Arc::new(ConsulAuthority::new("http://127.0.0.1:8500/read_write_operations").unwrap());
+        let authority_address = test_authority_address("leader_election");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -711,10 +1001,9 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn leader_election_operations() {
-        let authority_address = "http://127.0.0.1:8500/leader_election";
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_address = test_authority_address("leader_election");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -734,7 +1023,7 @@ mod tests {
 
         // This authority can't become the leader because it doesn't hold the lock on the
         // leader key.
-        let authority_2 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_2 = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority_2.init().await.unwrap();
         let payload_2 = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2182").unwrap(),
@@ -757,7 +1046,7 @@ mod tests {
         // Surrender leadership willingly but keep the session alive.
         authority_2.surrender_leadership().await.unwrap();
 
-        let authority_3 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_3 = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority_3.init().await.unwrap();
         let payload_3 = LeaderPayload {
             controller_uri: url::Url::parse("http://127.0.0.1:2183").unwrap(),
@@ -769,10 +1058,9 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn retrieve_workers() {
-        let authority_address = "http://127.0.0.1:8500/retrieve_workers";
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_address = test_authority_address("retrieve_workers");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -808,7 +1096,7 @@ mod tests {
                 .unwrap()[&worker_id]
         );
 
-        let authority_2 = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_2 = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority_2.init().await.unwrap();
         let worker_id = authority_2.register_worker(worker).await.unwrap().unwrap();
         let workers = authority_2.get_workers().await.unwrap();
@@ -819,17 +1107,16 @@ mod tests {
         authority.destroy_session().await.unwrap();
         authority_2.destroy_session().await.unwrap();
 
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         let workers = authority.get_workers().await.unwrap();
         assert_eq!(workers.len(), 0);
     }
 
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn leader_indexes() {
-        let authority_address = "http://127.0.0.1:8500/leader_indexes";
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_address = test_authority_address("leader_indexes");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -855,7 +1142,7 @@ mod tests {
         );
         authority.destroy_session().await.unwrap();
 
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         assert_eq!(
             authority.try_get_leader().await.unwrap(),
             GetLeaderResult::NoLeader,
@@ -864,10 +1151,9 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn retrieve_adapter_endpoints() {
-        let authority_address = "http://127.0.0.1:8500/retrieve_adapter_endpoints";
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_address = test_authority_address("retrieve_adapter_endpoints");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -889,17 +1175,16 @@ mod tests {
         // Kill the session, this should remove the keys from the worker set.
         authority.destroy_session().await.unwrap();
 
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         let adapter_addrs = authority.get_adapters().await.unwrap();
         assert_eq!(adapter_addrs.len(), 0);
     }
 
     #[tokio::test]
     #[serial]
-    #[ignore]
     async fn only_leader_can_update_state() {
-        let authority_address = "http://127.0.0.1:8500/leader_updates_state";
-        let authority = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_address = test_authority_address("leader_updates_state");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
@@ -930,7 +1215,7 @@ mod tests {
                 .unwrap()
         );
 
-        let authority_new = Arc::new(ConsulAuthority::new(authority_address).unwrap());
+        let authority_new = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority_new.init().await.unwrap();
 
         assert!(authority_new
@@ -974,5 +1259,153 @@ mod tests {
                 .unwrap()
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn state_version_roundtrip() {
+        let authority_address = test_authority_address("state_version_roundtrip");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let returned = authority.get_controller_state_version().await.unwrap();
+        assert_eq!(None, returned);
+
+        let version = StateVersion {
+            num_chunks: 40,
+            version: "version".to_string(),
+        };
+        authority
+            .write_controller_state_version(version.clone())
+            .await
+            .unwrap();
+        let returned = authority.get_controller_state_version().await.unwrap();
+
+        assert_eq!(returned, Some(version));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn small_state_roundtrip() {
+        let authority_address = test_authority_address("small_state_roundtrip");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let returned = authority.get_controller_state_version().await.unwrap();
+        assert_eq!(None, returned);
+
+        let small_bytes = "No way we lose this data".to_string();
+        let (version, _) = authority
+            .write_controller_state(None, &small_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority
+            .get_controller_state(version.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(small_bytes, returned);
+
+        // Do it again using the existing version.
+        let small_bytes = "No way we lose this other data".to_string();
+        let (version, _) = authority
+            .write_controller_state(Some(version), &small_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority.get_controller_state(version).await.unwrap();
+
+        assert_eq!(small_bytes, returned);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multichunk_state_roundtrip() {
+        let authority_address = test_authority_address("multichunk_state_roundtrip");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let returned = authority.get_controller_state_version().await.unwrap();
+        assert_eq!(None, returned);
+
+        let mut rng = thread_rng();
+        let big_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(512000 * 10)
+            .collect();
+
+        let (version, _) = authority
+            .write_controller_state(None, &big_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority
+            .get_controller_state(version.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(big_bytes, returned);
+
+        // Do it again using the existing version.
+        let big_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(512000 * 11)
+            .collect();
+
+        let (version, _) = authority
+            .write_controller_state(Some(version), &big_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority.get_controller_state(version).await.unwrap();
+
+        assert_eq!(big_bytes, returned);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multichunk_shrinks_roundtrip() {
+        let authority_address = test_authority_address("multichunk_shrinks_roundtrip");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let returned = authority.get_controller_state_version().await.unwrap();
+        assert_eq!(None, returned);
+
+        let mut rng = thread_rng();
+        let big_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(512000 * 2)
+            .collect();
+
+        let (version, _) = authority
+            .write_controller_state(None, &big_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority
+            .get_controller_state(version.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(big_bytes, returned);
+
+        // Do it again with a single chunk.
+        let big_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(10)
+            .collect();
+
+        let (version, _) = authority
+            .write_controller_state(Some(version), &big_bytes)
+            .await
+            .unwrap();
+        let returned: String = authority.get_controller_state(version).await.unwrap();
+
+        assert_eq!(big_bytes, returned);
     }
 }
