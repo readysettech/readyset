@@ -5,6 +5,7 @@ use crate::coordination::do_noria_rpc;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
 use anyhow::{format_err, Context};
+use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
 use itertools::Itertools;
@@ -513,17 +514,10 @@ impl Controller {
                     match req {
                         Some(req) => self.handle_authority_update(req).await?,
                         None => {
-                            let res = self.inner.read().await;
-                            if res.is_some() {
-                                info!("leadership campaign terminated normally");
-                            } else {
-                                // this shouldn't ever happen: if the leadership campaign thread fails,
-                                // it should send a `CampaignError` that we handle above first before
-                                // ever hitting this bit
-                                // still, good to be doubly sure
-                                internal!("leadership sender dropped without being elected");
-                            }
-                        },
+                            // this shouldn't ever happen: if the leadership campaign thread fails,
+                            // it should send a `CampaignError` in `handle_authority_update`.
+                            internal!("leadership thread has unexpectedly failed.")
+                        }
                     }
                 }
                 req = self.replication_error_channel.receiver.recv() => {
@@ -821,12 +815,14 @@ async fn authority_inner(
 
     let mut last_leader_state = false;
     loop {
+        set_failpoint!("authority");
         leader_election_state
             .update_leader_state()
             .await
             .context("Updating leader state")?;
-        // TODO(justin): Handle detected as failed.
-        worker_state.heartbeat().await?;
+        if let AuthorityWorkerHeartbeatResponse::Failed = worker_state.heartbeat().await? {
+            anyhow::bail!("This node is considered failed by consul");
+        }
 
         let is_leader = leader_election_state.is_leader();
         let became_leader = !last_leader_state && is_leader;
@@ -888,6 +884,7 @@ pub(crate) async fn authority_runner(
     .await
     {
         let _ = event_tx.send(AuthorityUpdate::AuthorityError(e)).await;
+        anyhow::bail!("Authority runner failed");
     }
     Ok(())
 }
