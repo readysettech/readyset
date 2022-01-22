@@ -21,11 +21,11 @@ postgres-types = { git = "https://github.com/readysettech/rust-postgres.git", fe
 thiserror = "1.0.26"
 tokio = { version = "1.8.4", features = ["rt-multi-thread"] }
 tokio-util = { version = "0.6.6", features = ["codec"] }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 smallvec = "1.6"
 hex = "0.4.3"
 rust_decimal = { version = "1.16" }
-eui48 = "0.4"
+eui48 = { version = "1.1", default-features = false }
 uuid = "0.8"
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 bit-vec = { version = "0.6", features = ["serde"] }

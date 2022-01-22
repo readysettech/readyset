@@ -1897,11 +1897,10 @@ dependencies = [
 
 [[package]]
 name = "eui48"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c4cf866e4d3e5e773691f5f61615a224a7b0b72b7daf994fc56d1b82dab0b6b"
+version = "1.1.0"
+source = "git+https://github.com/readysettech/eui48.git?branch=master#fd6b62f813785d56a36215ee8e5b3504b755d691"
 dependencies = [
- "rustc-serialize",
+ "regex",
 ]
 
 [[package]]
@@ -5343,12 +5342,6 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-serialize"
-version = "0.3.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcf128d1287d2ea9d80910b5f1120d0b8eede3fbf1abe91c40d39ea7d51e6fda"
 
 [[package]]
 name = "rustc_version"

@@ -10,7 +10,7 @@ anyhow = "1.0"
 bit-vec = { version = "0.6", features = ["serde"] }
 bytes = "1.0.1"
 chrono = { version = "0.4.19", features = ["serde"] }
-eui48 = "0.4"
+eui48 = { version = "1.1", default-features = false }
 itertools = "0.10.0"
 mysql_common = { version = "0.28.0", features = ["chrono"] }
 proptest = "1.0.0"
@@ -22,7 +22,7 @@ strum = "0.23"
 strum_macros = "0.23"
 test-strategy = "0.1.1"
 time = { version = "0.3", features = ["local-offset"] }
-tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-0_4", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"] }
 triomphe = "0.1"
 uuid = { version = "0.8", features = ["v4"] }
 enum-kinds = "0.5.1"

@@ -3,6 +3,7 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 bindgen = { git = "https://github.com/rust-lang/rust-bindgen.git", branch = "master" }
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch = "lru-fix" }
 triomphe = { git = "https://github.com/readysettech/triomphe", branch = "vlad/from_slice" }
+eui48 = { git = "https://github.com/readysettech/eui48.git", branch = "master" }
 
 [workspace]
 members = [
