@@ -111,9 +111,10 @@ impl NoriaAdapter {
     pub async fn start_with_authority(
         authority: Authority,
         options: AdapterOpts,
+        server_id: Option<u32>,
     ) -> ReadySetResult<!> {
         let noria = noria::ControllerHandle::new(authority).await;
-        NoriaAdapter::start_inner(noria, options, None, None).await
+        NoriaAdapter::start_inner(noria, options, server_id, None).await
     }
 }
 

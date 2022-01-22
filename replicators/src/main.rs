@@ -22,6 +22,8 @@ struct Opts {
     authority_address: String,
     #[clap(long, env("AUTHORITY"), default_value("zookeeper"), possible_values = &["consul", "zookeeper"])]
     authority: AuthorityType,
+    #[clap(long, env("SERVER_ID"))]
+    server_id: Option<u32>,
     #[clap(subcommand)]
     subcmd: DbOpts,
 
@@ -146,5 +148,5 @@ async fn main() -> anyhow::Result<!> {
         .to_authority(&opts.authority_address, &opts.deployment)
         .await;
 
-    NoriaAdapter::start_with_authority(authority, options).await?
+    NoriaAdapter::start_with_authority(authority, options, opts.server_id).await?
 }
