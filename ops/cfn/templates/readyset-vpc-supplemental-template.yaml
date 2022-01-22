@@ -258,6 +258,13 @@ Resources:
             Condition:
               "Null":
                 aws:ResourceTag/ReadySet:ServerInstance: "false"
+          # For Consul Server
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - ec2:DescribeImages
+            Resource:
+              - '*'
       SubnetIds: !Ref VPCPrivateSubnetIds
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2'
       SecurityGroupIds:
