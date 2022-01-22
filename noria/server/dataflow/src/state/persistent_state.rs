@@ -75,7 +75,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tempfile::{tempdir, TempDir};
 use test_strategy::Arbitrary;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::node::special::base::SnapshotMode;
 use crate::prelude::*;
@@ -234,6 +234,14 @@ impl State for PersistentState {
         assert!(partial_tag.is_none(), "PersistentState can't be partial");
         if records.len() == 0 && replication_offset.is_none() {
             return;
+        }
+
+        // Don't process records if the replication offset is less than our current.
+        if let (Some(new), Some(current)) = (&replication_offset, &self.replication_offset) {
+            if new <= current {
+                warn!("Dropping writes we have already processed");
+                return;
+            }
         }
 
         let mut batch = WriteBatch::default();
