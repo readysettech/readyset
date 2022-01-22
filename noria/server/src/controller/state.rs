@@ -1350,6 +1350,17 @@ impl DataflowState {
         authority: &Arc<Authority>,
         add_txt_spec: RecipeSpec<'_>,
     ) -> Result<ActivationResult, ReadySetError> {
+        // Drop recipes from the replicator that we have already processed.
+        if let (Some(new), Some(current)) = (
+            &add_txt_spec.replication_offset,
+            &self.schema_replication_offset,
+        ) {
+            if current >= new {
+                // Return an empty ActivationResult as this is a no-op.
+                return Ok(ActivationResult::default());
+            }
+        }
+
         let old = self.recipe.clone();
         // needed because self.apply_recipe needs to mutate self.recipe, so can't have it borrowed
         let blank = Recipe::blank_with_config_from(&self.recipe);

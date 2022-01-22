@@ -334,7 +334,7 @@ pub mod builders {
 pub mod debug;
 
 /// Represents the result of a recipe activation.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct ActivationResult {
     /// Map of query names to `NodeIndex` handles for reads/writes.
     pub new_nodes: HashMap<String, NodeIndex>,
