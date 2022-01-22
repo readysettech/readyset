@@ -113,21 +113,26 @@
 
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
-use consul::kv::{KVPair, KV};
-use consul::session::{Session, SessionEntry};
-use consul::Config;
+use consulrs::api::kv::common::KVPair;
+use consulrs::api::kv::requests as kv_requests;
+use consulrs::api::session::requests as session_requests;
+use consulrs::api::ApiResponse;
+use consulrs::client::{ConsulClient, ConsulClientSettingsBuilder};
+use consulrs::error::ClientError;
+use consulrs::kv;
 use futures::future::join_all;
 use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
-use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::convert::TryInto;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
 };
+use thiserror::Error as ThisError;
 use tracing::{error, warn};
 
 use super::{AdapterId, WorkerId};
@@ -146,14 +151,13 @@ pub const STATE_KEY: &str = "state";
 /// Path to the adapter http endpoints.
 pub const ADAPTER_PREFIX: &str = "adapters/";
 /// The delay before another client can claim a lock.
-const SESSION_LOCK_DELAY: u64 = 0;
+const SESSION_LOCK_DELAY: &str = "0";
 /// When the authority releases a session, release the locks held
 /// by the session.
 const SESSION_RELEASE_BEHAVIOR: &str = "release";
 /// The amount of time to wait for a heartbeat before declaring a
 /// session as dead.
 const SESSION_TTL: &str = "20s";
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// The size of each chunk stored in Consul. Consul converts the chunk's bytes to base64
 /// encoding, the encoded base64 bytes must be less than 512KB.
 const CHUNK_SIZE: usize = 256000;
@@ -163,16 +167,50 @@ const COMPRESSION_FORMAT: yazi::Format = yazi::Format::Zlib;
 const COMPRESSION_LEVEL: yazi::CompressionLevel = yazi::CompressionLevel::Default;
 
 struct ConsulAuthorityInner {
-    session: Option<SessionEntry>,
+    session: Option<String>,
     /// The last index that the controller key was modified or
     /// created at.
     controller_index: Option<u64>,
 }
 
+/// Errors returned by the Consul Authority. These errors may wrap Consul API errors,
+/// [`ClientError`] as a string.
+#[derive(ThisError, Debug)]
+enum ConsulAuthorityError {
+    /// The read response did not include any KVPairs or the value in the pairs was unexpectedly
+    /// empty.
+    #[error("Authority returned no keys in the read request")]
+    EmptyReadResponse,
+
+    /// The authority tried to perform a write requiring leadership, but consul failed the write
+    /// due to loss of leadership.
+    #[error("An authority that has lost leadership attempted to issue a write")]
+    WriteIssuedFromLostLeader,
+
+    /// The Consul HTTP request returned an error.
+    #[error("Error issuing request {0}")]
+    RequestFailed(String),
+
+    /// The Consul API failed to perform serialization/deserialization.
+    #[error("Error during serialization {0}")]
+    SerializationFailed(String),
+}
+
+impl From<ClientError> for ConsulAuthorityError {
+    fn from(e: ClientError) -> ConsulAuthorityError {
+        match e {
+            e @ ClientError::Base64DecodeError { .. } => {
+                ConsulAuthorityError::SerializationFailed(e.to_string())
+            }
+            e => ConsulAuthorityError::RequestFailed(e.to_string()),
+        }
+    }
+}
+
 /// Coordinator that shares connection information between workers and clients using Consul.
 pub struct ConsulAuthority {
     /// The consul client.
-    consul: consul::Client,
+    consul: ConsulClient,
 
     /// Deployment associated with this authority.
     deployment: String,
@@ -205,6 +243,24 @@ fn adapter_id_to_path(id: &str) -> String {
 /// since only two versions are required.
 fn next_state_version(current: &str) -> String {
     if current == "0" { "1" } else { "0" }.to_string()
+}
+
+/// Maps an [`ApiResponse`] that is expected to only have one KVPair in it's response to that
+/// KVPair.
+fn get_kv_pair(mut r: ApiResponse<Vec<KVPair>>) -> Result<KVPair, ConsulAuthorityError> {
+    r.response
+        .pop()
+        .ok_or(ConsulAuthorityError::EmptyReadResponse)
+}
+
+/// Maps an [`ApiResponse`] that is expected to only have one KVPair to the base64 decoded
+/// value within that KVPair.
+fn get_value_as_bytes(mut r: ApiResponse<Vec<KVPair>>) -> Result<Vec<u8>, ConsulAuthorityError> {
+    Ok(r.response
+        .pop()
+        .and_then(|v| v.value)
+        .ok_or(ConsulAuthorityError::EmptyReadResponse)?
+        .try_into()?)
 }
 
 struct ChunkedState(Vec<Vec<u8>>);
@@ -262,22 +318,17 @@ impl ConsulAuthority {
         let deployment = connect_string[(split_idx + 1)..].to_owned();
         let address = connect_string[..split_idx].to_owned();
 
-        let config = ClientBuilder::new()
-            .timeout(CONNECT_TIMEOUT)
-            .build()
-            .map(|client| Config {
-                address,
-                datacenter: None,
-                http_client: client,
-                token: None,
-                wait_time: Some(CONNECT_TIMEOUT),
-            })
-            .map_err(|e| ReadySetError::Internal(e.to_string()))?;
-
-        let consul = consul::Client::new(config);
+        // TODO(justin): Introduce PR to add timeouts.
+        let client = ConsulClient::new(
+            ConsulClientSettingsBuilder::default()
+                .address(address)
+                .build()
+                .map_err(|_| internal_err("Invalid config for consul client"))?,
+        )
+        .map_err(|_| internal_err("Failed to connect to consul client"))?;
 
         let authority = Self {
-            consul,
+            consul: client,
             deployment,
             inner,
         };
@@ -301,29 +352,22 @@ impl ConsulAuthority {
         };
 
         if session.is_none() {
-            match self
-                .consul
-                .create(
-                    &SessionEntry {
-                        // All keys attached to this session are ephemeral keys.
-                        Behavior: Some(SESSION_RELEASE_BEHAVIOR.to_string()),
-                        // Disable lock delaying so a new leader can claim the lock
-                        // immediately when it is relinquished.
-                        LockDelay: Some(SESSION_LOCK_DELAY),
-                        // The amount of time to wait for a heartbeat before declaring
-                        // a ession dead.
-                        TTL: Some(SESSION_TTL.to_string()),
-                        ..Default::default()
-                    },
-                    None,
-                )
-                .await
+            match consulrs::session::create(
+                &self.consul,
+                Some(
+                    session_requests::CreateSessionRequestBuilder::default()
+                        .behavior(SESSION_RELEASE_BEHAVIOR)
+                        .lock_delay(SESSION_LOCK_DELAY)
+                        .ttl(SESSION_TTL),
+                ),
+            )
+            .await
             {
-                Ok((entry, _)) => {
+                Ok(r) => {
                     let mut inner = self.write_inner()?;
-                    inner.session = Some(entry);
+                    inner.session = Some(r.response.id);
                 }
-                Err(e) => bail!(e.to_string()),
+                Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
             }
         };
 
@@ -335,7 +379,7 @@ impl ConsulAuthority {
         // Both fields are guarenteed to be populated previously or
         // above.
         #[allow(clippy::unwrap_used)]
-        Ok(inner.session.as_ref().unwrap().ID.clone().unwrap())
+        Ok(inner.session.as_ref().unwrap().clone())
     }
 
     fn read_inner(&self) -> Result<RwLockReadGuard<'_, ConsulAuthorityInner>, Error> {
@@ -366,14 +410,7 @@ impl ConsulAuthority {
 
     fn update_controller_index_from_pair(&self, kv: &KVPair) -> Result<(), Error> {
         let mut inner = self.write_inner()?;
-
-        let new_index = match (kv.ModifyIndex, kv.CreateIndex) {
-            (Some(modify), _) => modify,
-            (_, Some(create)) => create,
-            _ => 0,
-        };
-
-        inner.controller_index = Some(new_index);
+        inner.controller_index = Some(kv.modify_index);
         Ok(())
     }
 
@@ -384,12 +421,12 @@ impl ConsulAuthority {
     #[cfg(test)]
     async fn destroy_session(&self) -> Result<(), Error> {
         let inner_session = self.read_inner()?.session.clone();
-        if let Some(session) = &inner_session {
+        if let Some(session) = inner_session {
             // This will not be populated without an id.
             #[allow(clippy::unwrap_used)]
-            let id = session.ID.clone().unwrap();
-            drop(session);
-            self.consul.destroy(&id, None).await.unwrap();
+            consulrs::session::delete(&self.consul, &session, None)
+                .await
+                .unwrap();
         }
 
         Ok(())
@@ -397,32 +434,28 @@ impl ConsulAuthority {
 
     #[cfg(test)]
     async fn delete_all_keys(&self) {
-        self.consul
-            .delete(&self.prefix_with_deployment("?recurse"), None)
-            .await
-            .unwrap();
+        kv::delete(
+            &self.consul,
+            &self.prefix_with_deployment(""),
+            Some(kv_requests::DeleteKeyRequestBuilder::default().recurse(true)),
+        )
+        .await
+        .unwrap();
     }
 
     /// Retrieves the controller state version if it exists, otherwise returns None.
     async fn get_controller_state_version(&self) -> Result<Option<StateVersion>, Error> {
         Ok(
-            match self
-                .consul
-                .get(&self.prefix_with_deployment(STATE_KEY), None)
-                .await
-            {
-                Ok((Some(kv), _)) => {
-                    // Results returned by consul are base64 encoded.
-                    let bytes = base64::decode(kv.Value)?;
+            match kv::read(&self.consul, &self.prefix_with_deployment(STATE_KEY), None).await {
+                Ok(r) => {
+                    let bytes: Vec<u8> = get_value_as_bytes(r)?;
                     Some(serde_json::from_slice(&bytes)?)
                 }
-                Ok((None, _)) => None,
-                // The API currently throws an error that it cannot parse the json
-                // if the key does not exist.
-                Err(e) => {
-                    warn!("Failure to get controller state version: {}", e.to_string());
+                Err(ClientError::APIError { code, .. }) if code == 404 => {
+                    warn!("No controller state version in Consul");
                     None
                 }
+                Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
             },
         )
     }
@@ -435,27 +468,30 @@ impl ConsulAuthority {
     ///  to update the state version.
     async fn write_controller_state_version(&self, input: StateVersion) -> Result<(), Error> {
         let my_session = Some(self.get_session()?);
-        if let Ok((Some(kv), _)) = self
-            .consul
-            .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
-            .await
+        if let Ok(r) = kv::read(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            None,
+        )
+        .await
         {
-            if kv.Session != my_session {
-                bail!("Cannot update controller state if not the leader");
+            if get_kv_pair(r)?.session != my_session {
+                bail!(ConsulAuthorityError::WriteIssuedFromLostLeader);
             }
         }
 
-        let pair = KVPair {
-            Key: self.prefix_with_deployment(STATE_KEY),
-            Value: serde_json::to_vec(&input)?,
-            Session: my_session.clone(),
-            ..Default::default()
-        };
-
-        match self.consul.acquire(pair, None).await {
-            Ok((true, _)) => Ok(()),
-            Ok((false, _)) => bail!("We are not the leader when trying to write state"),
-            Err(e) => bail!(e.to_string()),
+        let bytes = serde_json::to_vec(&input)?;
+        match kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(STATE_KEY),
+            &bytes,
+            Some(kv_requests::SetKeyRequestBuilder::default().acquire(my_session.unwrap())),
+        )
+        .await
+        {
+            Ok(r) if r.response => Ok(()),
+            Ok(_) => bail!(ConsulAuthorityError::WriteIssuedFromLostLeader),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         }
     }
 
@@ -475,11 +511,8 @@ impl ConsulAuthority {
                 let prefix = state_prefix.clone();
                 async move {
                     let path = prefix + "/" + &c.to_string();
-                    let (kv, _) = self.consul.get(&path, None).await.map_err(|e| {
-                        anyhow!("Failed to read state from consul, {}", e.to_string())
-                    })?;
-                    let kv = kv.ok_or(anyhow!("Missing chunk in controller state"))?;
-                    Ok(base64::decode(kv.Value)?)
+                    let r = kv::read(&self.consul, &path, None).await?;
+                    Ok(get_value_as_bytes(r)?)
                 }
             })
             .collect();
@@ -519,25 +552,20 @@ impl ConsulAuthority {
             .enumerate()
             .map(|(i, chunk)| {
                 let prefix = state_prefix.clone() + "/" + &i.to_string();
-                let session = my_session.clone();
+                #[allow(clippy::unwrap_used)] // Set to Some above.
+                let session = my_session.clone().unwrap();
                 async move {
-                    let pair = KVPair {
-                        Key: prefix,
-                        Value: chunk,
-                        Session: session,
-                        ..Default::default()
-                    };
-
-                    // TODO(justin): Custom error type for consul code.
-                    match self.consul.acquire(pair, None).await {
-                        Ok((true, _)) => Ok(()),
-                        Ok((false, _)) => Err(anyhow!(
-                            "Failed to write controller state chunk with acquire"
-                        )),
-                        Err(e) => Err(anyhow!(
-                            "Failed to write controller state chunk, {}",
-                            e.to_string()
-                        )),
+                    match kv::set(
+                        &self.consul,
+                        &prefix,
+                        &chunk,
+                        Some(kv_requests::SetKeyRequestBuilder::default().acquire(session)),
+                    )
+                    .await
+                    {
+                        Ok(r) if r.response => Ok(()),
+                        Ok(_) => bail!(ConsulAuthorityError::WriteIssuedFromLostLeader),
+                        Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
                     }
                 }
             })
@@ -560,13 +588,9 @@ impl ConsulAuthority {
     }
 }
 
-fn is_new_index(current_index: Option<u64>, kv: &KVPair) -> bool {
+fn is_new_index(current_index: Option<u64>, kv_pair: &KVPair) -> bool {
     if let Some(current) = current_index {
-        match (kv.ModifyIndex, kv.CreateIndex) {
-            (Some(modify), _) => modify > current,
-            (_, Some(create)) => create > current,
-            _ => true,
-        }
+        kv_pair.modify_index > current
     } else {
         true
     }
@@ -579,62 +603,70 @@ impl AuthorityControl for ConsulAuthority {
     }
 
     async fn become_leader(&self, payload: LeaderPayload) -> Result<Option<LeaderPayload>, Error> {
-        // Move session creation to the start of the authority.
         let session = self.get_session()?;
-
         let key = self.prefix_with_deployment(CONTROLLER_KEY);
-        let pair = KVPair {
-            Key: key.clone(),
-            Value: serde_json::to_vec(&payload)?,
-            Session: Some(session.clone()),
-            ..Default::default()
-        };
 
         // Acquire will only write a new Value for the KVPair if no other leader
         // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(pair, None).await {
-            Ok((true, _)) => {
-                // Perform a get to update this authorities internal index.
-                if let Ok((Some(kv), _)) = self.consul.get(&key, None).await {
-                    if kv.Session == Some(session) {
-                        self.update_controller_index_from_pair(&kv)?;
+        match kv::set(
+            &self.consul,
+            &key,
+            &serde_json::to_vec(&payload)?,
+            Some(kv_requests::SetKeyRequestBuilder::default().acquire(session.clone())),
+        )
+        .await
+        {
+            Ok(r) if r.response => {
+                if let Ok(r) = kv::read(&self.consul, &key, None).await {
+                    let kv_pair = get_kv_pair(r)?;
+                    if kv_pair.session == Some(session) {
+                        self.update_controller_index_from_pair(&kv_pair)?;
                     }
+
+                    return Ok(Some(payload));
                 }
 
-                Ok(Some(payload))
+                Ok(None)
             }
-            Ok((false, _)) => Ok(None),
-            Err(e) => Err(anyhow!("become_leader consul error: {}", e.to_string())),
+            Ok(_) => Ok(None),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         }
     }
 
     async fn surrender_leadership(&self) -> Result<(), Error> {
         let session = self.get_session()?;
 
-        let pair = KVPair {
-            Key: self.prefix_with_deployment(CONTROLLER_KEY),
-            Session: Some(session),
-            ..Default::default()
-        };
-
         // If we currently hold the lock on CONTROLLER_KEY, we will relinquish it.
-        match self.consul.release(pair, None).await {
+        match kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            &[],
+            Some(kv_requests::SetKeyRequestBuilder::default().release(session)),
+        )
+        .await
+        {
             Ok(_) => Ok(()),
-            Err(e) => bail!(e.to_string()),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         }
     }
 
     // Block until there is any leader.
     async fn get_leader(&self) -> Result<LeaderPayload, Error> {
         loop {
-            match self
-                .consul
-                .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
-                .await
+            match kv::read(
+                &self.consul,
+                &self.prefix_with_deployment(CONTROLLER_KEY),
+                None,
+            )
+            .await
             {
-                Ok((Some(kv), _)) if kv.Session.is_some() => {
-                    let bytes = base64::decode(kv.Value)?;
-                    return Ok(serde_json::from_slice(&bytes)?);
+                Ok(r) => {
+                    if let Ok(kv_pair) = get_kv_pair(r) {
+                        if kv_pair.session.is_some() && kv_pair.value.is_some() {
+                            let bytes: Vec<u8> = kv_pair.value.unwrap().try_into()?;
+                            return Ok(serde_json::from_slice(&bytes)?);
+                        }
+                    }
                 }
                 _ => tokio::time::sleep(Duration::from_millis(100)).await,
             };
@@ -649,29 +681,39 @@ impl AuthorityControl for ConsulAuthority {
             inner.controller_index
         };
 
-        Ok(
-            match self
-                .consul
-                .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
-                .await
-            {
-                Ok((Some(kv), _)) if is_new_index(current_index, &kv) => {
-                    // The leader may have changed but if no session holds the lock
-                    // then that leader is dead.
-                    if kv.Session.is_none() {
-                        return Ok(GetLeaderResult::NoLeader);
-                    }
-
-                    self.update_controller_index_from_pair(&kv)?;
-                    // Consul encodes all responses as base64. Using ?raw to get the
-                    // raw value back breaks the client we are using.
-                    let bytes = base64::decode(kv.Value)?;
-                    GetLeaderResult::NewLeader(serde_json::from_slice(&bytes)?)
-                }
-                Ok((Some(_), _)) => GetLeaderResult::Unchanged,
-                _ => GetLeaderResult::NoLeader,
-            },
+        match kv::read(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            None,
         )
+        .await
+        {
+            Ok(r) => {
+                if let Ok(kv_pair) = get_kv_pair(r) {
+                    if is_new_index(current_index, &kv_pair) {
+                        // The leader may have changed but if no session holds the lock
+                        // then that leader is dead.
+                        if kv_pair.session.is_none() {
+                            return Ok(GetLeaderResult::NoLeader);
+                        }
+
+                        self.update_controller_index_from_pair(&kv_pair)?;
+                        // Consul encodes all responses as base64. Using ?raw to get the
+                        // raw value back breaks the client we are using.
+                        let bytes: Vec<u8> = kv_pair
+                            .value
+                            .ok_or(ConsulAuthorityError::EmptyReadResponse)?
+                            .try_into()?;
+                        return Ok(GetLeaderResult::NewLeader(serde_json::from_slice(&bytes)?));
+                    } else {
+                        return Ok(GetLeaderResult::Unchanged);
+                    }
+                }
+
+                Ok(GetLeaderResult::NoLeader)
+            }
+            _ => Ok(GetLeaderResult::NoLeader),
+        }
     }
 
     fn can_watch(&self) -> bool {
@@ -688,18 +730,12 @@ impl AuthorityControl for ConsulAuthority {
 
     async fn try_read<P: DeserializeOwned>(&self, path: &str) -> Result<Option<P>, Error> {
         Ok(
-            match self
-                .consul
-                .get(&self.prefix_with_deployment(path), None)
-                .await
-            {
-                Ok((Some(kv), _)) => {
-                    // Consul encodes all responses as base64. Using ?raw to get the
-                    // raw value back breaks the client we are using.
-                    let bytes = base64::decode(kv.Value)?;
+            match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
+                Ok(r) if !r.response.is_empty() => {
+                    let bytes: Vec<u8> = get_value_as_bytes(r)?;
                     Some(serde_json::from_slice(&bytes)?)
                 }
-                Ok((None, _)) => None,
+                Ok(_) => None,
                 // The API currently throws an error that it cannot parse the json
                 // if the key does not exist.
                 Err(e) => {
@@ -720,21 +756,20 @@ impl AuthorityControl for ConsulAuthority {
             // TODO(justin): Use cas parameter to only modify if we have the same
             // ModifyIndex when we write.
             let current_val = self.try_read(path).await?;
-            let modified = f(current_val);
 
-            if let Ok(r) = modified {
-                let new_val = serde_json::to_vec(&r)?;
-                // TODO(justin): Write wrapper.
-                let pair = KVPair {
-                    Key: self.prefix_with_deployment(path),
-                    Value: new_val,
-                    ..Default::default()
-                };
-
-                match self.consul.put(pair, None).await {
-                    Ok((true, _)) => return Ok(Ok(r)),
-                    Ok((false, _)) => continue,
-                    Err(e) => bail!(e.to_string()),
+            if let Ok(modified) = f(current_val) {
+                let bytes = serde_json::to_vec(&modified)?;
+                match kv::set(
+                    &self.consul,
+                    &self.prefix_with_deployment(path),
+                    &bytes,
+                    None,
+                )
+                .await
+                {
+                    Ok(r) if r.response => return Ok(Ok(modified)),
+                    Ok(_) => continue,
+                    Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
                 }
             }
         }
@@ -750,13 +785,21 @@ impl AuthorityControl for ConsulAuthority {
         E: Send,
     {
         let my_session = Some(self.get_session()?);
-        if let Ok((Some(kv), _)) = self
-            .consul
-            .get(&self.prefix_with_deployment(CONTROLLER_KEY), None)
-            .await
+
+        match kv::read(
+            &self.consul,
+            &self.prefix_with_deployment(CONTROLLER_KEY),
+            None,
+        )
+        .await
         {
-            if kv.Session != my_session {
-                bail!("Cannot update controller state if not the leader");
+            Ok(r) => {
+                if get_kv_pair(r)?.session != my_session {
+                    bail!(ConsulAuthorityError::WriteIssuedFromLostLeader);
+                }
+            }
+            Err(e) => {
+                bail!(ConsulAuthorityError::RequestFailed(e.to_string()));
             }
         }
 
@@ -779,18 +822,17 @@ impl AuthorityControl for ConsulAuthority {
 
     async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
         Ok(
-            match self
-                .consul
-                .get(&self.prefix_with_deployment(path), None)
-                .await
-            {
-                Ok((Some(kv), _)) => {
-                    // Consul encodes all responses as base64.
-                    let bytes = base64::decode(kv.Value)?;
-                    Some(serde_json::from_slice::<Vec<u8>>(&bytes)?)
+            match kv::read(&self.consul, &self.prefix_with_deployment(path), None).await {
+                // If it has a value, deserialize it and return it, otherwise return None.
+                Ok(mut r) => {
+                    if let Some(value) = r.response.pop().and_then(|v| v.value) {
+                        let bytes: Vec<u8> = value.try_into()?;
+                        Some(serde_json::from_slice::<Vec<u8>>(&bytes)?)
+                    } else {
+                        None
+                    }
                 }
-                Ok((None, _)) => None,
-                Err(e) => bail!(e.to_string()),
+                Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
             },
         )
     }
@@ -804,18 +846,18 @@ impl AuthorityControl for ConsulAuthority {
         let session = self.get_session()?;
         let key = worker_id_to_path(&session);
 
-        let pair = KVPair {
-            Key: self.prefix_with_deployment(&key),
-            Value: serde_json::to_vec(&payload)?,
-            Session: Some(session.clone()),
-            ..Default::default()
-        };
-
         // Acquire will only write a new Value for the KVPair if no other leader
         // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(pair, None).await {
+        match kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(&key),
+            &serde_json::to_vec(&payload)?,
+            Some(kv_requests::SetKeyRequestBuilder::default().acquire(session.clone())),
+        )
+        .await
+        {
             Ok(_) => Ok(Some(session)),
-            Err(e) => bail!(e.to_string()),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         }
     }
 
@@ -823,41 +865,43 @@ impl AuthorityControl for ConsulAuthority {
         &self,
         id: WorkerId,
     ) -> Result<AuthorityWorkerHeartbeatResponse, Error> {
-        //TODO(justin): Consider changing this to heartbeat without a parameter.
-        Ok(match self.consul.renew(&id, None).await {
-            Ok(_) => AuthorityWorkerHeartbeatResponse::Alive,
-            Err(e) => {
-                error!("Authority failed to heartbeat: {}", e.to_string());
-                AuthorityWorkerHeartbeatResponse::Failed
-            }
-        })
+        Ok(
+            match consulrs::session::renew(&self.consul, &id, None).await {
+                Ok(_) => AuthorityWorkerHeartbeatResponse::Alive,
+                Err(e) => {
+                    error!("Authority failed to heartbeat: {}", e.to_string());
+                    AuthorityWorkerHeartbeatResponse::Failed
+                }
+            },
+        )
     }
 
     // TODO(justin): The set of workers includes failed workers, this set will grow
     // unbounded over a long-lived deployment with many failures. Introduce cleanup by
     // deleting keys without a session.
+    // TODO(justin): Combine this with worker data to prevent redundent calls.
     async fn get_workers(&self) -> Result<HashSet<WorkerId>, Error> {
         Ok(
-            match consul::kv::KV::list(
+            match kv::read(
                 &self.consul,
                 &self.prefix_with_deployment(WORKER_PREFIX),
-                None,
+                Some(kv_requests::ReadKeyRequestBuilder::default().recurse(true)),
             )
             .await
             {
-                Ok((children, _)) => children
+                Ok(ApiResponse { response, .. }) => response
                     .into_iter()
-                    .filter_map(|kv| {
-                        if kv.Session.is_some() {
-                            Some(path_to_worker_id(&kv.Key))
+                    .filter_map(|kv_pair| {
+                        if kv_pair.session.is_some() {
+                            Some(path_to_worker_id(&kv_pair.key))
                         } else {
                             None
                         }
                     })
                     .collect(),
-                // The API currently throws an error that it cannot parse the json
-                // if the key does not exist.
-                Err(e) => bail!(e.to_string()),
+                // Consul returns a 404 error if the key does not exist.
+                Err(ClientError::APIError { code, .. }) if code == 404 => HashSet::new(),
+                Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
             },
         )
     }
@@ -869,90 +913,95 @@ impl AuthorityControl for ConsulAuthority {
         let mut worker_descriptors: HashMap<WorkerId, WorkerDescriptor> = HashMap::new();
 
         for w in worker_ids {
-            if let Ok((Some(kv), _)) = self
-                .consul
-                .get(&self.prefix_with_deployment(&worker_id_to_path(&w)), None)
-                .await
+            match kv::read(
+                &self.consul,
+                &self.prefix_with_deployment(&worker_id_to_path(&w)),
+                None,
+            )
+            .await
             {
-                // Consul encodes all responses as base64. Using ?raw to get the
-                // raw value back breaks the client we are using.
-                let bytes = base64::decode(kv.Value)?;
-                worker_descriptors.insert(w, serde_json::from_slice(&bytes)?);
+                Ok(r) => {
+                    let bytes: Vec<u8> = get_value_as_bytes(r)?;
+                    worker_descriptors.insert(w, serde_json::from_slice(&bytes)?);
+                }
+                // The API currently throws an error that it cannot parse the json
+                // if the key does not exist.
+                Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
             }
         }
 
         Ok(worker_descriptors)
     }
 
+    // TODO(justin): Duplicate code with register_worker, abstract writing a serialized value
+    // to a key + lock.
     async fn register_adapter(&self, endpoint: SocketAddr) -> Result<Option<AdapterId>, Error> {
         // Each adapter is associated with the key:
         // `ADAPTER_PREFIX`/<session>.
         let session = self.get_session()?;
         let key = adapter_id_to_path(&session);
 
-        let pair = KVPair {
-            Key: self.prefix_with_deployment(&key),
-            Value: serde_json::to_vec(&endpoint)?,
-            Session: Some(session.clone()),
-            ..Default::default()
-        };
-
-        // Acquire will only write a new Value for the KVPair if no other leader
-        // holds the lock. The lock is released if a leader's session dies.
-        match self.consul.acquire(pair, None).await {
+        match kv::set(
+            &self.consul,
+            &self.prefix_with_deployment(&key),
+            &serde_json::to_vec(&endpoint)?,
+            Some(kv_requests::SetKeyRequestBuilder::default().acquire(session.clone())),
+        )
+        .await
+        {
             Ok(_) => Ok(Some(session)),
-            Err(e) => bail!(e.to_string()),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         }
     }
 
     async fn get_adapters(&self) -> Result<HashSet<SocketAddr>, Error> {
-        let adapter_ids: HashSet<AdapterId> = match consul::kv::KV::list(
+        let adapter_ids: HashSet<AdapterId> = match kv::read(
             &self.consul,
             &self.prefix_with_deployment(ADAPTER_PREFIX),
-            None,
+            Some(kv_requests::ReadKeyRequestBuilder::default().recurse(true)),
         )
         .await
         {
-            Ok((children, _)) => children
+            Ok(ApiResponse { response, .. }) => response
                 .into_iter()
-                .filter_map(|kv| {
-                    if kv.Session.is_some() {
-                        Some(path_to_adapter_id(&kv.Key))
+                .filter_map(|kv_pair| {
+                    if kv_pair.session.is_some() {
+                        Some(path_to_adapter_id(&kv_pair.key))
                     } else {
                         None
                     }
                 })
                 .collect(),
+            // Consul returns a 404 error if the key does not exist.
+            Err(ClientError::APIError { code, .. }) if code == 404 => HashSet::new(),
             // The API currently throws an error that it cannot parse the json
             // if the key does not exist.
-            Err(e) => bail!(e.to_string()),
+            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
         };
 
-        let consul = self.consul.clone();
-        let consul_addresses: Vec<String> = adapter_ids
-            .iter()
-            .map(|id| self.prefix_with_deployment(&adapter_id_to_path(id)))
-            .collect();
-        let adapter_futs = consul_addresses
-            .iter()
-            .map(|addr| consul::kv::KV::get(&consul, addr, None));
-        let endpoints = join_all(adapter_futs)
+        // TODO(justin): join_all is overkill for adapter / worker data as ordering of results is
+        // not needed.
+        let endpoints = join_all(adapter_ids.iter().map(|id| async move {
+            kv::read(
+                &self.consul,
+                &self.prefix_with_deployment(&adapter_id_to_path(id)),
+                None,
+            )
             .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| anyhow!(e.to_string()))?
-            .into_iter()
-            .filter_map(|data| data.0.map(|kv| value_to_socket_addr(kv.Value)))
-            .collect::<Result<HashSet<SocketAddr>, Error>>()?;
+            .map_err(|e| ConsulAuthorityError::RequestFailed(e.to_string()))
+        }))
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|r| {
+            let bytes: Vec<u8> = get_value_as_bytes(r)?;
+            Ok(serde_json::from_slice(&bytes)?)
+        })
+        .collect::<Result<HashSet<SocketAddr>, Error>>()?;
 
         Ok(endpoints)
     }
-}
-
-/// Helper method to convert a consul value into a SocketAddr.
-fn value_to_socket_addr(value: Vec<u8>) -> Result<SocketAddr, Error> {
-    let bytes = base64::decode(value)?;
-    Ok(serde_json::from_slice::<SocketAddr>(&bytes)?)
 }
 
 #[cfg(test)]
