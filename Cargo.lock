@@ -1900,7 +1900,7 @@ dependencies = [
 [[package]]
 name = "eui48"
 version = "1.1.0"
-source = "git+https://github.com/readysettech/eui48.git?branch=master#fd6b62f813785d56a36215ee8e5b3504b755d691"
+source = "git+https://github.com/readysettech/eui48.git?branch=master#d7db8acbeb3e6e59e0fafd71ff01e8c7510d8810"
 dependencies = [
  "regex",
 ]
