@@ -1,5 +1,7 @@
 # Benchmarking your code
 
+## Macrobenchmarks
+
 `//benchmarks` let you run macro-benchmarks for ReadySet performance. These include:
   * Executing any arbitrary query at a specific queries-per-second with a specific access pattern.
   * Comparing ReadySet cache hit and cache miss performance for a query.
@@ -9,7 +11,7 @@
 Benchmarks are all executed as subcommands on the `benchmarks` binary.
 The complete set of benchmarks can be seen with `cargo run --bin benchmarks -- --help`.
 
-## Running benchmarks from specs
+### Running benchmarks from specs
 ```
 # From the root of the ReadySet repo.
 cargo run --bin benchmarks -- --iterations 10 --benchmark benchmarks/src/yaml/benchmarks/read_benchmark_irl_small.yaml \
@@ -29,7 +31,7 @@ See `//benchmarks/src/yaml` for existing YAML specifications.
 > * `--iterations <N>`: Run a benchmark N times and calculate aggregates over the benchmark results.
 >                       Not supported by all benchmarks.
 
-## Specifying your own benchmark parameters.
+### Specifying your own benchmark parameters.
 
 ```
 cargo run --bin benchmarks -- <benchmark> <benchmark params>
@@ -52,13 +54,13 @@ for the set of benchmark parameters.
 >  * `DistributionAnnotation` docs for the complete annotation spec format.
 >  * `//benchmarks/src/data/irl` for examples on how to annotate schemas and query specs.
 
-## Creating a new benchmark specification.
+### Creating a new benchmark specification.
 
 Executing any benchmark outputs a benchmark specification at the start of the run that can be copied to
 a file. The argument `--only-to-spec <file>` may be used to write the benchmark spec to a file instead
 of executing it.
 
-## Data Generation
+### Data Generation
 
 To perform data generation separate from a benchmark use the `data_generator` binary.
 
@@ -67,4 +69,81 @@ Sample usage:
 cargo run --bin data_generator -- --schema benchmarks/src/data/irl/irl_db_small.sql
 ```
 
-# TODO: Microbenchmark information.
+## Flamegraph
+
+Flamegraphs visualize stack traces of profiles software. They visualize
+the output of a sampling profiler - CPU, memory, disk utilization. They
+can be used to identify areas for performance improvement in our code,
+for example, providing an answer to the question: "where is most of my
+CPU time spent"?
+
+### Interpreting a flamegraph
+Flamegraphs show all of the call stacks measured, widened to the
+proportion of the stack samples that contained them. 
+    
+  - **x-axis**: The x-axis in a flamegraph represent the proportion of
+    collected samples aggregated by span. A wider bar indicates more
+    collected samples, it does *not* show the passage of time.
+  - **y-axis**: The y-axis in a flamegraph indicates the stack depth of
+    a specific span. Spans are grouped by their originiting span.
+
+![Sample Flamegraph](./images/flamegraph-example.png)
+
+This is a subset of a flamegraph on `noria-server`, showing how a single
+read query is handled. We can see that the majority of the time is
+performed in serialization.
+
+### Collecting a CPU flamegraph with `cargo-flamegraph`.
+
+[`cargo flamegraph`](https://github.com/flamegraph-rs/flamegraph) can be
+used  to easily profile our system. It generates a flamegraph as an
+`svg`. 
+
+> It relies on `perf` on linux, and `dtrace` otherwise to profile our 
+> code. The respective performance tracing tool must be installed on
+> your machine.
+
+When using flamegraph is it useful to:
+  * Increease the user stack dump size to 64KB from 8KB.
+  * Add a minute delay before perf starts to remove start overhead from
+    the graph.
+  * Only sample for a small number of seconds when the server is under
+    load.
+  * If using `perf`, prefer version 5.16 and up.
+
+Sample usage:
+```
+cargo install flamegraph
+
+# With perf 5.16 and up.
+cargo flamegraph -c "record --call-graph dwarf,65528 -g -D 60000" --bin noria-server
+
+# Without perf 5.16 and up.
+cargo flamegraph --no-inline --bin noria-server
+```
+
+See [flamegraph docs](https://github.com/flamegraph-rs/flamegraph) for 
+more information on usage.
+
+> Perf 5.16 is only available on our EC2 image by building from source.
+> ```
+> git clone --depth 1 --branch v5.16 git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+> sudo apt-get install build-essential flex bison libelf-dev libunwind-dev libdw-dev python-dev libperl-dev binutils-dev -y
+> cd linux/tools/perf
+> make
+> export PERF=$(pwd)/perf
+> ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- TODO: Microbenchmark information. -->
