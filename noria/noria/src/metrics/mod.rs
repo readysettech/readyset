@@ -429,6 +429,12 @@ pub mod recorded {
 
     /// Histogram: The time it takes to clone the dataflow state graph.
     pub const DATAFLOW_STATE_CLONE_TIME: &str = "dataflow_state.clone_time";
+
+    /// Gauge: The size of the dataflow state, serialized and compressed, measured when it is
+    /// written to the authority. This metric may be recorded even if the state does not
+    /// get written to the authority (due to a failure). It is only recorded when the Consul
+    /// authority is in use
+    pub const DATAFLOW_STATE_SERIALIZED: &str = "dataflow_state.serialized_size";
 }
 
 /// A dumped metric's kind.
