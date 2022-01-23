@@ -123,6 +123,7 @@ use consulrs::kv;
 use futures::future::join_all;
 use futures::stream::FuturesOrdered;
 use futures::TryStreamExt;
+use metrics::gauge;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
@@ -140,6 +141,7 @@ use super::{
     AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult, LeaderPayload,
     WorkerDescriptor,
 };
+use crate::metrics::recorded;
 use crate::{ReadySetError, ReadySetResult};
 use noria_errors::internal_err;
 
@@ -542,6 +544,8 @@ impl ConsulAuthority {
 
         let new_val = rmp_serde::to_vec(&controller_state)?;
         let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+        gauge!(recorded::DATAFLOW_STATE_SERIALIZED, compressed.len() as f64);
+
         let chunked = ChunkedState::from(compressed);
 
         // Create futures for each of the consul chunk writes.
