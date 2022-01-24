@@ -1,28 +1,30 @@
 use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::recipe::Recipe;
+use crate::controller::state::DataflowState;
 use crate::coordination::do_noria_rpc;
+use crate::materialization::Materializations;
 use crate::worker::{WorkerRequest, WorkerRequestKind};
 use crate::{Config, ReadySetResult, VolumeId};
 use anyhow::{format_err, Context};
+use dataflow::node;
+use dataflow::prelude::ChannelCoordinator;
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
 use hyper::http::{Method, StatusCode};
-use itertools::Itertools;
 use launchpad::select;
 use metrics::{counter, gauge, histogram};
-use nom_sql::SqlQuery;
 use noria::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, GetLeaderResult,
     WorkerDescriptor, WorkerId,
 };
 use noria::metrics::recorded;
-use noria::replication::ReplicationOffset;
 use noria::ControllerDescriptor;
 use noria_errors::{internal, internal_err, ReadySetError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -66,46 +68,26 @@ pub struct NodeRestrictionKey {
     shard: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     pub(crate) config: Config,
-
-    recipe_version: usize,
-    recipes: Vec<String>,
-    schema_replication_offset: Option<ReplicationOffset>,
-    // Serde requires hash map's be keyed by a string, we workaround this by
-    // serializing the hashmap as a tuple list.
-    #[serde(with = "serde_with::rust::hashmap_as_tuple_list")]
-    node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
+    pub(crate) dataflow_state: DataflowState,
 }
 
-impl ControllerState {
-    /// This method interates over the recipes currently installed and only keeps
-    /// the ones for CREATE/ALTER/DROP TABLE and CREATE VIEW.
-    /// This option is pretty risky and should only be used if noria gets into an
-    /// unmanagable state. In theory this will remove all of noria specific state
-    /// preventing bad migrations, and only keep the DDL state, required to properly
-    /// keep the base tables and the binlog replication functional.
-    fn reset(&mut self) {
-        let new_recipe = self
-            .recipes
-            .iter()
-            .flat_map(|q| Recipe::clean_queries(q))
-            .filter_map(|q| nom_sql::parse_query(nom_sql::Dialect::MySQL, &q).ok())
-            .filter(|q| {
-                matches!(
-                    q,
-                    SqlQuery::CreateTable(_)
-                        | SqlQuery::DropTable(_)
-                        | SqlQuery::AlterTable(_)
-                        | SqlQuery::RenameTable(_)
-                        | SqlQuery::CreateView(_),
-                )
-            })
-            .join(";\n");
-
-        self.recipes = vec![new_recipe];
-        self.recipe_version = 1;
+// We implement [`Debug`] manually so that we can skip the [`DataflowState`] field.
+// In the future, we might want to implement [`Debug`] for [`DataflowState`] as well and just derive
+// it from [`Debug`] for [`ControllerState`].
+impl Debug for ControllerState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ControllerState")
+            .field("config", &self.config)
+            .field("recipe_version", &self.dataflow_state.recipe.version())
+            .field(
+                "schema_replication_offset",
+                &self.dataflow_state.schema_replication_offset(),
+            )
+            .field("node_restrictions", &self.dataflow_state.node_restrictions)
+            .finish()
     }
 }
 
@@ -207,7 +189,7 @@ pub enum HandleRequest {
     PerformMigration {
         /// The migration function to perform.
         func: Box<
-            dyn FnOnce(&mut crate::controller::migrate::Migration) -> ReadySetResult<()>
+            dyn FnOnce(&mut crate::controller::migrate::Migration<'_>) -> ReadySetResult<()>
                 + Send
                 + 'static,
         >,
@@ -291,10 +273,6 @@ pub struct Controller {
     /// Channel that the replication task, if it exists, can use to propagate updates back to
     /// the parent controller.
     replication_error_channel: ReplicationErrorChannel,
-
-    /// Indicates if state should be reset to only reflect DDL changes, and erase all Noria
-    /// specific recipes. Also flattens all DDL changes into a single recipe.
-    should_reset_state: bool,
 }
 
 impl Controller {
@@ -307,7 +285,6 @@ impl Controller {
         shutoff_valve: Valve,
         worker_descriptor: WorkerDescriptor,
         config: Config,
-        should_reset_state: bool,
     ) -> Self {
         Self {
             inner: Arc::new(LeaderHandle::new()),
@@ -324,7 +301,6 @@ impl Controller {
             replication_error_channel: ReplicationErrorChannel::new(),
             authority_task: None,
             write_processing_task: None,
-            should_reset_state,
         }
     }
 
@@ -365,7 +341,10 @@ impl Controller {
                     let mut writer = inner.dataflow_state_handle.write().await;
                     let ds = writer.as_mut();
                     let ret = ds.migrate(move |m| func(m)).await?;
-                    inner.dataflow_state_handle.commit(writer).await;
+                    inner
+                        .dataflow_state_handle
+                        .commit(writer, &self.authority)
+                        .await?;
                     if done_tx.send(ret).is_err() {
                         warn!("handle-based migration sender hung up!");
                     }
@@ -390,12 +369,11 @@ impl Controller {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER, 1f64);
                 let mut leader = Leader::new(
-                    state.clone(),
+                    state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
                     self.config.replication_url.clone(),
                     self.config.replication_server_id,
-                    self.config.keep_prior_recipes,
                 );
                 self.leader_ready.store(false, Ordering::Release);
 
@@ -453,7 +431,6 @@ impl Controller {
                 self.our_descriptor.clone(),
                 self.worker_descriptor.clone(),
                 self.config.clone(),
-                self.should_reset_state,
             )
             .instrument(tracing::info_span!("authority")),
         ));
@@ -561,7 +538,6 @@ struct AuthorityLeaderElectionState {
     leader_eligible: bool,
     /// True if we are the current leader.
     is_leader: bool,
-    should_reset_state: bool,
 }
 
 impl AuthorityLeaderElectionState {
@@ -571,7 +547,6 @@ impl AuthorityLeaderElectionState {
         descriptor: ControllerDescriptor,
         config: Config,
         region: Option<String>,
-        should_reset_state: bool,
     ) -> Self {
         // We are eligible to be a leader if we are in the primary region.
         let can_be_leader = if let Some(pr) = &config.primary_region {
@@ -587,7 +562,6 @@ impl AuthorityLeaderElectionState {
             config,
             leader_eligible: can_be_leader,
             is_leader: false,
-            should_reset_state,
         }
     }
 
@@ -635,26 +609,57 @@ impl AuthorityLeaderElectionState {
                 .update_controller_state(
                     |state: Option<ControllerState>| -> Result<ControllerState, ()> {
                         match state {
-                            None => Ok(ControllerState {
-                                config: self.config.clone(),
-                                recipe_version: 0,
-                                recipes: vec![],
-                                schema_replication_offset: None,
-                                node_restrictions: HashMap::new(),
-                            }),
-                            Some(mut state) => {
-                                if self.should_reset_state {
-                                    state.reset();
-                                }
+                            None => {
+                                let mut g = petgraph::Graph::new();
+                                // Create the root node in the graph.
+                                let source = g.add_node(node::Node::new::<_, &[String], _, _>(
+                                    "source",
+                                    &[],
+                                    node::special::Source,
+                                ));
 
+                                let mut materializations = Materializations::new();
+                                materializations.set_config(self.config.materialization_config.clone());
+
+                                let cc = Arc::new(ChannelCoordinator::new());
+                                assert_ne!(self.config.quorum, 0);
+
+                                let recipe = Recipe::with_config(
+                                    crate::sql::Config {
+                                        reuse_type: self.config.reuse,
+                                        ..Default::default()
+                                    },
+                                    self.config.mir_config.clone(),
+                                );
+
+                                let dataflow_state = DataflowState::new(
+                                    g,
+                                    source,
+                                    0,
+                                    self.config.sharding,
+                                    self.config.domain_config.clone(),
+                                    self.config.persistence.clone(),
+                                    materializations,
+                                    recipe,
+                                    None,
+                                    HashMap::new(),
+                                    cc,
+                                    self.config.keep_prior_recipes,
+                                );
+                                Ok(ControllerState {
+                                    config: self.config.clone(),
+                                    dataflow_state,
+                                })
+                            },
+                            Some(mut state) => {
                                 // check that running config is compatible with the new
                                 // configuration.
                                 if state.config != self.config {
                                     warn!(
-                                        authority_config = ?state.config,
-                                        our_config = ?self.config,
-                                        "Config in authority different than our config, changing to our config"
-                                    );
+                                    authority_config = ?state.config,
+                                    our_config = ?self.config,
+                                    "Config in authority different than our config, changing to our config"
+                                );
                                 }
                                 state.config = self.config.clone();
                                 Ok(state)
@@ -791,7 +796,6 @@ async fn authority_inner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    should_reset_state: bool,
 ) -> anyhow::Result<()> {
     authority.init().await?;
 
@@ -801,7 +805,6 @@ async fn authority_inner(
         descriptor,
         config,
         worker_descriptor.region.clone(),
-        should_reset_state,
     );
 
     let mut worker_state =
@@ -871,7 +874,6 @@ pub(crate) async fn authority_runner(
     descriptor: ControllerDescriptor,
     worker_descriptor: WorkerDescriptor,
     config: Config,
-    should_reset_state: bool,
 ) -> anyhow::Result<()> {
     if let Err(e) = authority_inner(
         event_tx.clone(),
@@ -879,7 +881,6 @@ pub(crate) async fn authority_runner(
         descriptor,
         worker_descriptor,
         config,
-        should_reset_state,
     )
     .await
     {
@@ -999,6 +1000,7 @@ async fn handle_controller_request(
 mod tests {
     use super::*;
     use crate::integration_utils::start_simple;
+    use noria::replication::ReplicationOffset;
     use std::error::Error;
 
     #[tokio::test(flavor = "multi_thread")]
