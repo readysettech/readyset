@@ -352,7 +352,7 @@ impl NoriaExecutor {
             let vq = ViewQuery {
                 key_comparisons: keys,
                 block: true,
-                filter: None,
+                filters: vec![],
                 timestamp: None,
             };
 

@@ -892,8 +892,8 @@ pub struct ViewQuery {
     pub key_comparisons: Vec<KeyComparison>,
     /// Whether the query should block.
     pub block: bool,
-    /// Filter to apply to values after they're returned from the underlying reader
-    pub filter: Option<ViewQueryFilter>,
+    /// Filter(s) to apply to values after they're returned from the underlying reader
+    pub filters: Vec<ViewQueryFilter>,
     /// Timestamp to compare against for reads, if a timestamp is passed into the
     /// view query, a read will only return once the timestamp is less than
     /// the timestamp associated with the data.
@@ -910,7 +910,7 @@ impl From<(Vec<KeyComparison>, bool, Option<Timestamp>)> for ViewQuery {
         Self {
             key_comparisons,
             block,
-            filter: None,
+            filters: vec![],
             timestamp: ticket,
         }
     }
@@ -921,7 +921,7 @@ impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
         Self {
             key_comparisons,
             block,
-            filter: None,
+            filters: vec![],
             timestamp: None,
         }
     }
@@ -1021,7 +1021,7 @@ impl Service<ViewQuery> for View {
                         query: ViewQuery {
                             key_comparisons: shard_queries,
                             block: query.block,
-                            filter: query.filter.clone(),
+                            filters: query.filters.clone(),
                             timestamp: query.timestamp.clone(),
                         },
                     });

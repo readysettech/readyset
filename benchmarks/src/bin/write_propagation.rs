@@ -227,7 +227,7 @@ impl Writer {
                 article as i32,
             )))],
             block: true,
-            filter: None,
+            filters: vec![],
             timestamp: None,
         };
 
