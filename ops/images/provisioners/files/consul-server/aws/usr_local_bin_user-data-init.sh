@@ -6,7 +6,7 @@ exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
 on_error() {
   local exit_code="$?"
-
+  journalctl -xe
   /usr/local/bin/cfn-signal-wrapper.sh "$exit_code"
 }
 
@@ -24,6 +24,7 @@ data_dir = "/opt/consul"
 client_addr = "0.0.0.0"
 server = true
 bootstrap_expect=${CONSUL_BOOTSTRAP_EXPECT:-1}
+disable_update_check = true
 retry_join = ["provider=aws tag_key=${CONSUL_TAG_KEY:-consul-server} tag_value=${CONSUL_TAG_VALUE}"]
 EOF
 
