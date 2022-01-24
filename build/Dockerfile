@@ -4,7 +4,7 @@ WORKDIR /tmp
 
 COPY rust-toolchain .
 
-RUN rustup toolchain install "$(cat rust-toolchain)"; rm rust-toolchain
+RUN rustup default "$(cat rust-toolchain)"; rm rust-toolchain
 
 RUN set -eux; \
     apt-get update; \
