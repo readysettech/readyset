@@ -1414,6 +1414,7 @@ impl<'a> TryFrom<&'a Literal> for DataType {
     fn try_from(l: &'a Literal) -> Result<Self, Self::Error> {
         match l {
             Literal::Null => Ok(DataType::None),
+            Literal::Boolean(b) => Ok(DataType::from(*b)),
             Literal::Integer(i) => Ok((*i as i64).into()),
             Literal::String(s) => Ok(s.as_str().into()),
             Literal::CurrentTimestamp | Literal::CurrentTime => {

@@ -15,6 +15,7 @@ impl ToDataType for Literal {
     fn into_datatype(self) -> ReadySetResult<DataType> {
         Ok(match self {
             Literal::Null => DataType::None,
+            Literal::Boolean(b) => DataType::from(b),
             Literal::String(b) => b.into(),
             Literal::Blob(b) => DataType::ByteArray(Arc::new(b)),
             Literal::Integer(i) => i.into(),
