@@ -1289,7 +1289,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_comparisons() {
+    fn mixed_inclusive_and_equal() {
         let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2");
         let key = qg
             .view_key(&mir::Config {
@@ -1310,6 +1310,94 @@ mod tests {
                     mir::Column::new(Some("t"), "x"),
                     ViewPlaceholder::OneToOne(1)
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_opposite_ranges() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x > $1 AND t.y <= $2 AND t.z = $3");
+        let key = qg
+            .view_key(&mir::Config {
+                allow_mixed_comparisons: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("t"), "z"),
+                    ViewPlaceholder::OneToOne(3)
+                ),
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::OneToOne(1)
+                ),
+                (
+                    mir::Column::new(Some("t"), "y"),
+                    ViewPlaceholder::OneToOne(2)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_equal_and_between() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y = $3");
+        let key = qg
+            .view_key(&mir::Config {
+                allow_mixed_comparisons: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("t"), "y"),
+                    ViewPlaceholder::OneToOne(3)
+                ),
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::Between(1, 2)
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_equal_range_and_between() {
+        let qg = make_query_graph(
+            "SELECT t.x FROM t WHERE t.x >= $1 AND t.x <= $2 AND t.y < $3 AND t.z = $4",
+        );
+        let key = qg
+            .view_key(&mir::Config {
+                allow_mixed_comparisons: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(key.index_type, IndexType::BTreeMap);
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("t"), "z"),
+                    ViewPlaceholder::OneToOne(4)
+                ),
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::Between(1, 2)
+                ),
+                (
+                    mir::Column::new(Some("t"), "y"),
+                    ViewPlaceholder::OneToOne(3)
+                )
             ]
         );
     }
