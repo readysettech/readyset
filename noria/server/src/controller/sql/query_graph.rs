@@ -320,6 +320,7 @@ impl QueryGraph {
                 {
                     if *last_col == param.col {
                         match (last_op, param.op) {
+                            (BinaryOperator::Equal, BinaryOperator::Equal) => {}
                             (BinaryOperator::GreaterOrEqual, BinaryOperator::LessOrEqual) => {
                                 match (*placeholder, param.placeholder_idx) {
                                     (ViewPlaceholder::OneToOne(lower_idx), Some(upper_idx)) => {
@@ -1174,6 +1175,28 @@ mod tests {
                 mir::Column::new(Some("t"), "x"),
                 ViewPlaceholder::OneToOne(1)
             )]
+        )
+    }
+
+    #[test]
+    fn double_equality_same_column() {
+        let qg = make_query_graph("SELECT t.x FROM t WHERE t.x = $1 AND t.x = $2");
+        let key = qg.view_key(&Default::default()).unwrap();
+
+        assert_eq!(key.index_type, IndexType::HashMap);
+
+        assert_eq!(
+            key.columns,
+            vec![
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::OneToOne(2)
+                ),
+                (
+                    mir::Column::new(Some("t"), "x"),
+                    ViewPlaceholder::OneToOne(1)
+                )
+            ]
         )
     }
 
