@@ -6,7 +6,6 @@ use noria::KeyComparison;
 use reader_map::refs::{Miss, Values};
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
-use std::mem;
 use std::ops::RangeBounds;
 use vec1::{vec1, Vec1};
 
@@ -25,22 +24,6 @@ pub(super) enum Handle {
     Many(
         reader_map::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>,
     ),
-}
-
-pub(super) unsafe fn slice_to_2_tuple<T>(slice: &[T]) -> (T, T) {
-    assert_eq!(slice.len(), 2);
-    // we want to transmute &[T; 2] to &(T, T), but that's not actually safe
-    // we're not guaranteed that they have the same memory layout
-    // we *could* just clone DataType, but that would mean dealing with string refcounts
-    // so instead, we play a trick where we memcopy onto the stack and then forget!
-    //
-    // h/t https://gist.github.com/mitsuhiko/f6478a0dd1ef174b33c63d905babc89a
-    use std::ptr;
-    let mut res: (mem::MaybeUninit<T>, mem::MaybeUninit<T>) =
-        (mem::MaybeUninit::uninit(), mem::MaybeUninit::uninit());
-    ptr::copy_nonoverlapping(&slice[0] as *const T, res.0.as_mut_ptr(), 1);
-    ptr::copy_nonoverlapping(&slice[1] as *const T, res.1.as_mut_ptr(), 1);
-    core::ptr::read(&res as *const (mem::MaybeUninit<T>, mem::MaybeUninit<T>) as *const (T, T))
 }
 
 /// An error that could occur during an equality or range lookup to a reader node.
@@ -190,16 +173,11 @@ impl Handle {
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
-                unsafe {
-                    let tuple_key = slice_to_2_tuple(key);
-                    let map = h.enter().ok_or(NotReady)?;
-                    let m = *map.meta();
-                    let v = map
-                        .get(&tuple_key)
-                        .ok_or_else(|| MissPointDouble(tuple_key.clone(), m))?;
-                    mem::forget(tuple_key);
-                    Ok((then(v), m))
-                }
+                let tuple_key = (key[0].clone(), key[1].clone());
+                let map = h.enter().ok_or(NotReady)?;
+                let m = *map.meta();
+                let v = map.get(&tuple_key).ok_or(MissPointDouble(tuple_key, m))?;
+                Ok((then(v), m))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
@@ -223,13 +201,10 @@ impl Handle {
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
-                unsafe {
-                    let tuple_key = slice_to_2_tuple(key);
-                    let map = h.enter()?;
-                    let res = map.contains_key(&tuple_key);
-                    mem::forget(tuple_key);
-                    Some(res)
-                }
+                let tuple_key = (key[0].clone(), key[1].clone());
+                let map = h.enter()?;
+                let res = map.contains_key(&tuple_key);
+                Some(res)
             }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
@@ -371,16 +346,6 @@ mod tests {
     }
 
     proptest! {
-        #[test]
-        fn horrible_cursed_transmute(x: i32, y: i32) {
-            unsafe {
-                let arg = [x, y];
-                let result = slice_to_2_tuple(&arg);
-                assert_eq!(result, (x, y));
-                mem::forget(result)
-            }
-        }
-
         #[test]
         fn get_double(key: (DataType, DataType), val: Vec<DataType>) {
             let (mut w, handle) = make_double();
