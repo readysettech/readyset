@@ -154,7 +154,7 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: true,
-            filter: None,
+            filters: vec![],
             timestamp: Some(t.clone()),
         })
         .await
@@ -167,7 +167,7 @@ async fn test_timestamp_propagation_simple() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![id.clone()])],
             block: false,
-            filter: None,
+            filters: vec![],
             // The timestamp at the reader node { 0: 4 }, does not
             // satisfy this timestamp.
             timestamp: Some(timestamp(vec![(1, 4)])),
@@ -237,7 +237,7 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: true,
-            filter: None,
+            filters: vec![],
             timestamp: Some(timestamp(vec![(0, 6), (1, 6)])),
         })
         .await
@@ -252,7 +252,7 @@ async fn test_timestamp_propagation_multitable() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::Equal(vec1![DataType::Int(1)])],
             block: false,
-            filter: None,
+            filters: vec![],
             timestamp: Some(timestamp(vec![(0, 6), (1, 7)])),
         })
         .await
@@ -4530,11 +4530,11 @@ async fn post_read_ilike() {
         .raw_lookup(ViewQuery {
             key_comparisons: vec![KeyComparison::from_range(&(..))],
             block: true,
-            filter: Some(ViewQueryFilter {
+            filters: vec![ViewQueryFilter {
                 column: 0,
                 operator: ViewQueryOperator::ILike,
                 value: "%a%".into(),
-            }),
+            }],
             timestamp: None,
         })
         .await
@@ -7525,7 +7525,7 @@ async fn aggressive_eviction_impl() {
         let vq = ViewQuery {
             key_comparisons: keys.clone(),
             block: true,
-            filter: None,
+            filters: vec![],
             timestamp: None,
         };
 

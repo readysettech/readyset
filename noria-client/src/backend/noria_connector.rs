@@ -1408,10 +1408,10 @@ async fn do_read<'a>(
     let bogo = vec![vec1![DataType::from(0i32)].into()];
     let mut binops = utils::get_select_statement_binops(q);
     let mut filter_op_idx = None;
-    let filter = binops
+    let filters = binops
         .iter()
         .enumerate()
-        .find_map(|(i, (col, binop))| {
+        .filter_map(|(i, (col, binop))| {
             if matches!(binop, BinaryOperator::Like | BinaryOperator::ILike) {
                 ViewQueryOperator::try_from(*binop)
                     .ok()
@@ -1445,7 +1445,7 @@ async fn do_read<'a>(
                 value,
             })
         })
-        .transpose()?;
+        .collect::<Result<Vec<_>, _>>()?;
 
     if let Some(filter_op_idx) = filter_op_idx {
         // if we're using a column for a post-lookup filter, remove it from our list of binops
@@ -1515,7 +1515,7 @@ async fn do_read<'a>(
     let vq = ViewQuery {
         key_comparisons: keys,
         block: true,
-        filter,
+        filters,
         // TODO(andrew): Add a timestamp to views when RYW consistency
         // is specified.
         timestamp: ticket,

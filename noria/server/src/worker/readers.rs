@@ -106,7 +106,7 @@ impl ReadRequestHandler {
             mut key_comparisons,
             block,
             timestamp,
-            filter,
+            filters,
         } = query;
         let immediate = READERS.with(|readers_cache| {
             let mut readers_cache = readers_cache.borrow_mut();
@@ -147,7 +147,7 @@ impl ReadRequestHandler {
                 }
 
                 use dataflow::LookupError::*;
-                match do_lookup(reader, &key, &filter) {
+                match do_lookup(reader, &key, &filters) {
                     Ok(rs) => {
                         if consistency_miss {
                             ret.push(SerializedReadReplyBatch::empty());
@@ -190,7 +190,7 @@ impl ReadRequestHandler {
                             ret.extend(
                                 non_miss_ranges
                                     .into_iter()
-                                    .flat_map(|key| do_lookup(reader, &key, &filter)),
+                                    .flat_map(|key| do_lookup(reader, &key, &filters)),
                             )
                         }
 
@@ -270,7 +270,7 @@ impl ReadRequestHandler {
                             next_trigger: now,
                             first: now,
                             warned: false,
-                            filter,
+                            filters,
                             timestamp,
                             upquery_timeout: self.upquery_timeout,
                         },
@@ -445,12 +445,12 @@ where
 fn do_lookup(
     reader: &SingleReadHandle,
     key: &KeyComparison,
-    filter: &Option<ViewQueryFilter>,
+    filters: &[ViewQueryFilter],
 ) -> Result<SerializedReadReplyBatch, dataflow::LookupError> {
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
-                let filtered = reader.post_lookup.process(rs, filter);
+                let filtered = reader.post_lookup.process(rs, filters);
                 serialize(filtered)
             })
             .map(|r| r.0)
@@ -461,7 +461,7 @@ fn do_lookup(
                 serialize(
                     reader
                         .post_lookup
-                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filter),
+                        .process(rs.into_iter().flatten().collect::<Vec<_>>().iter(), filters),
                 )
             })
     }
@@ -495,7 +495,7 @@ struct BlockingRead {
     pending_keys: Vec<KeyComparison>,
     pending_indices: Vec<usize>,
     truth: Readers,
-    filter: Option<ViewQueryFilter>,
+    filters: Vec<ViewQueryFilter>,
     trigger_timeout: Duration,
     next_trigger: time::Instant,
     first: time::Instant,
@@ -552,7 +552,7 @@ impl BlockingRead {
                         .pop()
                         .expect("pending.len() == keys.len()");
 
-                    match do_lookup(reader, &key, &self.filter) {
+                    match do_lookup(reader, &key, &self.filters) {
                         Ok(rs) => {
                             read[read_i] = rs;
                         }

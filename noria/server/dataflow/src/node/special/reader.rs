@@ -1,3 +1,4 @@
+use itertools::Either;
 use metrics::histogram;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -47,7 +48,7 @@ impl PostLookup {
     pub fn process<'a, 'b: 'a, I>(
         &'a self,
         iter: I,
-        filter: &Option<ViewQueryFilter>,
+        filters: &[ViewQueryFilter],
     ) -> Vec<Vec<&'a DataType>>
     where
         I: Iterator<Item = &'b Box<[DataType]>> + ExactSizeIterator,
@@ -56,7 +57,7 @@ impl PostLookup {
         let data = iter.map(|r| r.iter().collect::<Vec<_>>());
         if self.order_by.is_none()
             && self.limit.is_none()
-            && filter.is_none()
+            && filters.is_empty()
             && self.returned_cols.is_none()
             && self.default_row.is_none()
         {
@@ -72,60 +73,63 @@ impl PostLookup {
         }
 
         let ordered_limited = do_order_limit(data, self.order_by.as_deref(), self.limit);
-        let pattern = filter.as_ref().and_then(
-            |ViewQueryFilter {
-                 value,
-                 operator,
-                 column,
-             }| {
-                match operator {
-                    ViewQueryOperator::Like => Some((
-                        LikePattern::new(
-                            value
-                                .try_into()
-                                .expect("Unexpected type for value; expected string"),
-                            CaseSensitivityMode::CaseSensitive,
-                        ),
-                        *column,
-                    )),
-                    ViewQueryOperator::ILike => Some((
-                        LikePattern::new(
-                            value
-                                .try_into()
-                                .expect("Unexpected type for value; expected string"),
-                            CaseSensitivityMode::CaseInsensitive,
-                        ),
-                        *column,
-                    )),
-                    _ => None,
-                }
-            },
-        );
+        let compiled_filters = filters
+            .iter()
+            .map(
+                |filter @ ViewQueryFilter {
+                     value,
+                     operator,
+                     column,
+                 }| {
+                    match operator {
+                        ViewQueryOperator::Like => Either::Left((
+                            LikePattern::new(
+                                value
+                                    .try_into()
+                                    .expect("Unexpected type for value; expected string"),
+                                CaseSensitivityMode::CaseSensitive,
+                            ),
+                            *column,
+                        )),
+                        ViewQueryOperator::ILike => Either::Left((
+                            LikePattern::new(
+                                value
+                                    .try_into()
+                                    .expect("Unexpected type for value; expected string"),
+                                CaseSensitivityMode::CaseInsensitive,
+                            ),
+                            *column,
+                        )),
+                        _ => Either::Right(filter),
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
         let filtered = ordered_limited.filter(move |rec| {
-            if let Some((pattern, column)) = &pattern {
-                pattern.matches(
-                    rec[*column]
-                        .try_into()
-                        .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
-                )
-            } else if let Some(ViewQueryFilter {
-                column,
-                operator,
-                value,
-            }) = filter
-            {
-                match operator {
-                    ViewQueryOperator::NotEqual => rec[*column] != value,
-                    ViewQueryOperator::Like | ViewQueryOperator::ILike => {
-                        #[allow(clippy::unreachable)] // actually unreachable
-                        {
-                            unreachable!("Already matched on Like and ILike above")
+            compiled_filters.iter().all(|filter| {
+                match filter {
+                    Either::Left((pattern, column)) => pattern.matches(
+                        rec[*column]
+                            .try_into()
+                            .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
+                    ),
+                    Either::Right(ViewQueryFilter {
+                        column,
+                        operator,
+                        value,
+                    }) => {
+                        match operator {
+                            ViewQueryOperator::NotEqual => rec[*column] != value,
+                            ViewQueryOperator::Like | ViewQueryOperator::ILike => {
+                                #[allow(clippy::unreachable)] // actually unreachable
+                                {
+                                    unreachable!("Already matched on Like and ILike above")
+                                }
+                            }
                         }
                     }
                 }
-            } else {
-                true
-            }
+            })
         });
 
         let returned_cols = match &self.returned_cols {
@@ -508,7 +512,7 @@ mod tests {
             ];
 
             let post_lookup = PostLookup::default();
-            let result = post_lookup.process(records.iter(), &Some(filter));
+            let result = post_lookup.process(records.iter(), &[filter]);
 
             assert_eq!(result, vec![vec![&2.into(), &2.into()]]);
         }
