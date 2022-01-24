@@ -45,12 +45,6 @@ pub(crate) struct Recipe {
     #[serde(skip)]
     version: usize,
 
-    /// Preceding recipe.
-    // We are skipping this field, since in the near future when we recover using the [`DataflowState`]
-    // as source of truth, we won't need a list of [`Recipes`] anymore.
-    #[serde(skip)]
-    prior: Option<Box<Recipe>>,
-
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     ///
     /// NOTE: this is an Option so that we can call [`Option::take`] on it, but will
@@ -90,7 +84,6 @@ impl PartialEq for Recipe {
             && self.expression_order == other.expression_order
             && self.aliases == other.aliases
             && self.version == other.version
-            && self.prior == other.prior
     }
 }
 
@@ -179,13 +172,12 @@ impl Recipe {
 
     /// Creates a blank recipe. This is useful for bootstrapping, e.g., in interactive
     /// settings, and for temporary recipes.
-    fn blank() -> Recipe {
+    pub(crate) fn blank() -> Recipe {
         Recipe {
             expressions: HashMap::default(),
             expression_order: Vec::default(),
             aliases: HashMap::default(),
             version: 0,
-            prior: None,
             inc: Some(SqlIncorporator::new()),
         }
     }
@@ -381,7 +373,6 @@ impl Recipe {
             expression_order,
             aliases,
             version: 0,
-            prior: None,
             inc: Some(inc),
         })
     }
@@ -392,7 +383,8 @@ impl Recipe {
     // crate viz for tests
     pub(crate) fn activate(
         &mut self,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
+        recipe: Recipe,
     ) -> Result<ActivationResult, ReadySetError> {
         debug!(
             num_queries = self.expressions.len(),
@@ -400,13 +392,7 @@ impl Recipe {
             version = self.version,
         );
 
-        let (added, removed) = match self.prior {
-            None => self.compute_delta(&Recipe::blank()),
-            Some(ref pr) => {
-                // compute delta over prior recipe
-                self.compute_delta(pr)
-            }
-        };
+        let (added, removed) = self.compute_delta(&recipe);
 
         let mut result = ActivationResult {
             new_nodes: HashMap::default(),
@@ -414,13 +400,6 @@ impl Recipe {
             expressions_added: added.len(),
             expressions_removed: removed.len(),
         };
-
-        // upgrade schema version *before* applying changes, so that new queries are correctly
-        // tagged with the new version. If this recipe was just created, there is no need to
-        // upgrade the schema version, as the SqlIncorporator's version will still be at zero.
-        if self.version > 0 {
-            self.inc.as_mut().unwrap().upgrade_schema(self.version)?;
-        }
 
         // add new queries to the Soup graph carried by `mig`, and reflect state in the
         // incorporator in `inc`. `NodeIndex`es for new nodes are collected in `new_nodes` to be
@@ -454,7 +433,7 @@ impl Recipe {
         result.removed_leaves = removed
             .iter()
             .map(|qid| {
-                let (ref n, ref q, _) = self.prior.as_ref().unwrap().expressions[qid];
+                let (ref n, ref q, _) = recipe.expressions[qid];
                 Ok(match q {
                     SqlQuery::CreateTable(ref ctq) => {
                         // a base may have many dependent queries, including ones that also lost
@@ -528,62 +507,33 @@ impl Recipe {
     /// recipe; use `replace` if removal of unused expressions is desired.
     /// Consumes `self` and returns a replacement recipe.
     // crate viz for tests
-    pub(crate) fn extend(mut self, additions: &str) -> Result<Recipe, (Recipe, ReadySetError)> {
+    pub(crate) fn extend(&mut self, additions: &str) -> Result<(), ReadySetError> {
         // parse and compute differences to current recipe
         let add_rp = match Recipe::from_str(additions) {
             Ok(rp) => rp,
-            Err(e) => return Err((self, e)),
+            Err(e) => return Err(e),
         };
-        let (added, _) = add_rp.compute_delta(&self);
-
-        // move the incorporator state from the old recipe to the new one
-        let prior_inc = self.inc.take();
-
-        // build new recipe as clone of old one
-        let mut new = Recipe {
-            expressions: self.expressions.clone(),
-            expression_order: self.expression_order.clone(),
-            aliases: self.aliases.clone(),
-            version: self.version + 1,
-            inc: prior_inc,
-            prior: None,
-        };
+        let (added, _) = add_rp.compute_delta(self);
 
         // apply changes
         for qid in added {
             let q = add_rp.expressions[&qid].clone();
-            new.expressions.insert(qid, q);
-            new.expression_order.push(qid);
+            self.expressions.insert(qid, q);
+            self.expression_order.push(qid);
         }
 
         for (n, qid) in &add_rp.aliases {
-            if new.aliases.contains_key(n) && new.aliases[n] != *qid {
-                self.inc = new.inc.take();
-                return Err((
-                    self,
-                    ReadySetError::RecipeInvariantViolated(format!(
-                        "Query name exists but existing query is different: {}",
-                        n
-                    )),
-                ));
+            if self.aliases.contains_key(n) && self.aliases[n] != *qid {
+                return Err(ReadySetError::RecipeInvariantViolated(format!(
+                    "Query name exists but existing query is different: {}",
+                    n
+                )));
             }
         }
-        new.aliases.extend(add_rp.aliases);
-        // retain the old recipe for future reference
-        new.prior = Some(Box::new(self));
+        self.aliases.extend(add_rp.aliases);
+        self.version += 1;
 
-        // return new recipe as replacement for self
-        Ok(new)
-    }
-
-    pub fn clear_prior(&mut self) {
-        self.prior = None;
-    }
-
-    /// Helper method to reparent a recipe. This is needed for the recovery logic to build
-    /// recovery and original recipe (see `make_recovery`).
-    pub(in crate::controller) fn set_prior(&mut self, new_prior: Recipe) {
-        self.prior = Some(Box::new(new_prior));
+        Ok(())
     }
 
     /// Helper method to reparent a recipe. This is needed for some of t
@@ -633,12 +583,6 @@ impl Recipe {
             .collect::<Result<Vec<_>, _>>()
     }
 
-    /// Returns the predecessor from which this `Recipe` was migrated to.
-    // crate viz for tests
-    pub(crate) fn prior(&self) -> Option<&Recipe> {
-        self.prior.as_deref()
-    }
-
     /// Remove the expression with the given alias, `qname`, from the recipe.
     pub(super) fn remove_query(&mut self, qname: &str) -> bool {
         let qid = self.aliases.get(qname).cloned();
@@ -652,6 +596,7 @@ impl Recipe {
         if self.expressions.remove(&qid).is_some() {
             if let Some(i) = self.expression_order.iter().position(|&q| q == qid) {
                 self.expression_order.remove(i);
+                self.version += 1;
                 return true;
             }
         }
@@ -685,8 +630,6 @@ impl Recipe {
         new.version = self.version + 1;
         // retain the old incorporator but move it to the new recipe
         let prior_inc = self.inc.take();
-        // retain the old recipe for future reference
-        new.prior = Some(Box::new(self));
         // retain the previous `SqlIncorporator` state
         new.inc = prior_inc;
 
@@ -704,15 +647,6 @@ impl Recipe {
     // crate viz for tests
     pub(crate) fn version(&self) -> usize {
         self.version
-    }
-
-    /// Reverts to prior version of recipe
-    pub(super) fn revert(self) -> Recipe {
-        if let Some(prior) = self.prior {
-            *prior
-        } else {
-            Recipe::blank_with_config_from(&self)
-        }
     }
 
     /// Gets the alias of the for the expression associated with each node in `nodes`.
@@ -733,7 +667,6 @@ impl Recipe {
         affected_queries.dedup();
 
         let mut recovery = self.clone();
-        recovery.prior = Some(Box::new(self.clone()));
         recovery.next();
 
         // remove from recipe
@@ -801,25 +734,18 @@ mod tests {
         let r0 = Recipe::blank();
         assert_eq!(r0.version, 0);
         assert_eq!(r0.expressions.len(), 0);
-        assert_eq!(r0.prior, None);
-
-        let r0_copy = r0.clone();
 
         let r1_txt = "SELECT a FROM b;\nSELECT a, c FROM b WHERE x = 42;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
         let r1 = r0.replace(r1_t);
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 2);
-        assert_eq!(r1.prior, Some(Box::new(r0_copy)));
-
-        let r1_copy = r1.clone();
 
         let r2_txt = "SELECT c FROM b;\nSELECT a, c FROM b;";
         let r2_t = Recipe::from_str(r2_txt).unwrap();
         let r2 = r1.replace(r2_t);
         assert_eq!(r2.version, 2);
         assert_eq!(r2.expressions.len(), 2);
-        assert_eq!(r2.prior, Some(Box::new(r1_copy)));
     }
 
     #[test]
@@ -842,16 +768,16 @@ mod tests {
 
         let r1_txt = "q_0: SELECT a FROM b;\nq_1: SELECT a, c FROM b WHERE x = 42;";
         let r1_t = Recipe::from_str(r1_txt).unwrap();
-        let r1 = r0.replace(r1_t);
+        let mut r1 = r0.replace(r1_t);
         assert_eq!(r1.version, 1);
         assert_eq!(r1.expressions.len(), 2);
 
         let r2_txt = "q_0: SELECT a, c FROM b WHERE x = 21;\nq_1: SELECT c FROM b;";
         // we expect this to panic, since both q_0 and q_1 already exist with a different
         // definition
-        let r2 = r1.extend(r2_txt).unwrap();
-        assert_eq!(r2.version, 2);
-        assert_eq!(r2.expressions.len(), 4);
+        r1.extend(r2_txt).unwrap();
+        assert_eq!(r1.version, 2);
+        assert_eq!(r1.expressions.len(), 4);
     }
 
     #[test]

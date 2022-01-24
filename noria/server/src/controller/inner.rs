@@ -7,17 +7,15 @@
     clippy::unreachable
 )]
 
-use crate::controller::migrate::materialization::Materializations;
 use crate::controller::state::DataflowStateHandle;
-use crate::controller::{ControllerRequest, ControllerState, Recipe};
+use crate::controller::{ControllerRequest, ControllerState};
 use crate::controller::{Worker, WorkerIdentifier};
 use crate::coordination::DomainDescriptor;
 use crate::worker::WorkerRequestKind;
-use dataflow::node;
-use dataflow::prelude::*;
 use failpoint_macros::failpoint;
 use hyper::Method;
 use noria::consensus::Authority;
+use noria::replication::ReplicationOffset;
 use noria::status::{ReadySetStatus, SnapshotStatus};
 use noria::{RecipeSpec, WorkerDescriptor};
 use noria_errors::{ReadySetError, ReadySetResult};
@@ -41,7 +39,7 @@ use tracing::{error, info, warn};
 pub struct Leader {
     pub(super) dataflow_state_handle: DataflowStateHandle,
 
-    pending_recovery: Option<(Vec<String>, usize)>,
+    pending_recovery: bool,
 
     quorum: usize,
     controller_uri: Url,
@@ -163,7 +161,7 @@ impl Leader {
 
         macro_rules! check_quorum {
             ($ds:expr) => {{
-                if self.pending_recovery.is_some() || $ds.workers.len() < self.quorum {
+                if self.pending_recovery || $ds.workers.len() < self.quorum {
                     return Err(ReadySetError::NoQuorum);
                 }
             }};
@@ -360,9 +358,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().flush_partial().await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().flush_partial().await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
@@ -374,9 +372,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().extend_recipe(authority, body).await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().extend_recipe(body).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
@@ -388,9 +386,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().install_recipe(authority, body).await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().install_recipe(body).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
@@ -400,23 +398,19 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_query(authority, query_name).await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().remove_query(query_name).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
             (Method::POST, "/set_schema_replication_offset") => {
-                let body = bincode::deserialize(&body)?;
+                let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer
-                        .as_mut()
-                        .set_schema_replication_offset(authority, body)
-                        .await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    writer.as_mut().set_schema_replication_offset(body);
+                    self.dataflow_state_handle.commit(writer, authority).await
                 })?;
                 return_serialized!(ret);
             }
@@ -425,9 +419,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().replicate_readers(body).await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().replicate_readers(body).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
@@ -437,9 +431,9 @@ impl Leader {
                 let ret = futures::executor::block_on(async move {
                     let mut writer = self.dataflow_state_handle.write().await;
                     check_quorum!(writer.as_ref());
-                    let r = writer.as_mut().remove_nodes(vec![body].as_slice()).await;
-                    self.dataflow_state_handle.commit(writer).await;
-                    r
+                    let r = writer.as_mut().remove_nodes(vec![body].as_slice()).await?;
+                    self.dataflow_state_handle.commit(writer, authority).await?;
+                    Ok(r)
                 })?;
                 return_serialized!(ret);
             }
@@ -512,36 +506,15 @@ impl Leader {
             self.quorum
         );
 
-        if ds.workers.len() >= self.quorum {
-            if let Some((recipes, mut recipe_version)) = self.pending_recovery.take() {
-                assert_eq!(ds.workers.len(), self.quorum);
-                assert_eq!(ds.recipe.version(), 0);
-                if recipes.len() > recipe_version + 1 {
-                    // TODO(eta): this is a terrible stopgap hack
-                    error!(
-                        "{} recipes but recipe version is at {}",
-                        recipes.len(),
-                        recipe_version
-                    );
-                    recipe_version = recipes.len() + 1;
-                }
-
-                info!("Restoring graph configuration");
-                ds.recipe = Recipe::with_version_and_config_from(
-                    recipe_version + 1 - recipes.len(),
-                    &ds.recipe,
-                );
-                for r in recipes {
-                    let recipe = ds.recipe.clone().extend(&r).map_err(|(_, e)| e)?;
-                    ds.apply_recipe(recipe).await?;
-                }
-                info!("Finished restoring graph configuration");
-            }
+        if ds.workers.len() >= self.quorum && self.pending_recovery {
+            self.pending_recovery = false;
+            ds.recover().await?;
+            info!("Finished restoring graph configuration");
         }
 
-        self.dataflow_state_handle.commit(writer).await;
-
-        Ok(())
+        self.dataflow_state_handle
+            .commit(writer, &self.authority)
+            .await
     }
 
     pub(super) async fn handle_failed_workers(
@@ -567,19 +540,15 @@ impl Leader {
         // activate recipe
         ds.apply_recipe(recovery).await?;
 
-        // we must do this *after* the migration, since the migration itself modifies the recipe in
-        // `recovery`, and we currently need to clone it here.
-        let tmp = ds.recipe.clone();
-        original.set_prior(tmp.clone());
         // somewhat awkward, but we must replace the stale `SqlIncorporator` state in `original`
-        original.set_sql_inc(tmp.sql_inc().clone());
+        original.set_sql_inc(ds.recipe.sql_inc().clone());
 
         // back to original recipe, which should add the query again
         ds.apply_recipe(original).await?;
 
-        self.dataflow_state_handle.commit(writer).await;
-
-        Ok(())
+        self.dataflow_state_handle
+            .commit(writer, &self.authority)
+            .await
     }
 
     /// Construct `Leader` with a specified listening interface
@@ -589,56 +558,24 @@ impl Leader {
         authority: Arc<Authority>,
         replicator_url: Option<String>,
         server_id: Option<u32>,
-        keep_prior_recipes: bool,
     ) -> Self {
-        let mut g = petgraph::Graph::new();
-        // Create the root node in the graph.
-        let source = g.add_node(node::Node::new(
-            "source",
-            &["because-type-inference"],
-            node::special::Source,
-        ));
-
-        let mut materializations = Materializations::new();
-        materializations.set_config(state.config.materialization_config);
-
-        let cc = Arc::new(ChannelCoordinator::new());
         assert_ne!(state.config.quorum, 0);
 
-        let pending_recovery = if !state.recipes.is_empty() {
-            Some((state.recipes, state.recipe_version))
-        } else {
-            None
-        };
+        // TODO(fran): I feel like this is a little bit hacky. It is true that
+        //   if we have more than 1 node (we know there's always going to be _at least_ 1,
+        //   namely the `self.source` node) then that means we are recovering; but maybe
+        //   we can be more explicit and store a `recovery` flag in the persisted [`ControllerState`]
+        //   itself.
+        let pending_recovery = state.dataflow_state.ingredients.node_indices().count() > 1;
 
-        let recipe = Recipe::with_config(
-            crate::sql::Config {
-                reuse_type: state.config.reuse,
-                ..Default::default()
-            },
-            state.config.mir_config,
-        );
-
-        let dataflow_state_handle = DataflowStateHandle::new(
-            g,
-            source,
-            0,
-            state.config.sharding,
-            state.config.domain_config,
-            state.config.persistence,
-            materializations,
-            recipe,
-            state.schema_replication_offset,
-            state.node_restrictions,
-            cc,
-            keep_prior_recipes,
-        );
+        let dataflow_state_handle = DataflowStateHandle::new(state.dataflow_state);
 
         Leader {
             dataflow_state_handle,
+            pending_recovery,
+
             quorum: state.config.quorum,
 
-            pending_recovery,
             controller_uri,
 
             replicator_url,

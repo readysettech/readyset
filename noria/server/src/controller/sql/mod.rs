@@ -15,7 +15,7 @@ use nom_sql::{parser as sql_parser, Expression, InValue};
 use nom_sql::{BinaryOperator, CreateTableStatement};
 use nom_sql::{CompoundSelectOperator, CompoundSelectStatement, FieldDefinitionExpression};
 use nom_sql::{SelectStatement, SqlQuery, Table};
-use noria_errors::{internal, internal_err, invariant, unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use tracing::{debug, trace, warn};
 
 use crate::controller::Migration;
@@ -128,7 +128,7 @@ impl SqlIncorporator {
         &mut self,
         query: &str,
         name: Option<String>,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         query.to_flow_parts(self, name, mig)
     }
@@ -145,7 +145,7 @@ impl SqlIncorporator {
         query: SqlQuery,
         name: Option<String>,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         match name {
             None => self.nodes_for_query(query, is_leaf, mig),
@@ -456,7 +456,7 @@ impl SqlIncorporator {
         index_type: IndexType,
         final_query_node: MirNodeRef,
         project_columns: Option<Vec<Column>>,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> ReadySetResult<QueryFlowParts> {
         trace!("Adding a new leaf below: {:?}", final_query_node);
 
@@ -483,7 +483,7 @@ impl SqlIncorporator {
         &mut self,
         query_name: &str,
         stmt: CreateTableStatement,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> ReadySetResult<QueryFlowParts> {
         // first, compute the MIR representation of the SQL query
         let mut mir = self.mir_converter.named_base_to_mir(query_name, &stmt)?;
@@ -512,7 +512,7 @@ impl SqlIncorporator {
         is_name_required: bool,
         query: &CompoundSelectStatement,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         let subqueries: Result<Vec<_>, ReadySetError> = query
             .selects
@@ -556,7 +556,7 @@ impl SqlIncorporator {
         is_name_required: bool,
         sq: &SelectStatement,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<(QueryFlowParts, Option<MirQuery>), ReadySetError> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
             qname: query_name.into(),
@@ -610,7 +610,7 @@ impl SqlIncorporator {
         query: &SelectStatement,
         qg: QueryGraph,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<(QueryFlowParts, MirQuery), ReadySetError> {
         use ::mir::visualize::GraphViz;
         // no QG-level reuse possible, so we'll build a new query.
@@ -638,7 +638,7 @@ impl SqlIncorporator {
     pub(super) fn remove_query(
         &mut self,
         query_name: &str,
-        _mig: &Migration,
+        _mig: &Migration<'_>,
     ) -> ReadySetResult<Option<NodeIndex>> {
         let nodeid = self
             .leaf_addresses
@@ -729,7 +729,7 @@ impl SqlIncorporator {
         qg: QueryGraph,
         reuse_mirs: Vec<u64>,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         use ::mir::reuse::merge_mir_for_queries;
         use ::mir::visualize::GraphViz;
@@ -772,7 +772,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         let name = match q {
             SqlQuery::CreateTable(ref ctq) => ctq.table.name.clone(),
@@ -788,7 +788,7 @@ impl SqlIncorporator {
         &mut self,
         q: SqlQuery,
         query_name: &str,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<SqlQuery, ReadySetError> {
         // TODO: make this not take &mut self
 
@@ -980,7 +980,7 @@ impl SqlIncorporator {
         query_name: String,
         is_name_required: bool,
         is_leaf: bool,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         // short-circuit if we're dealing with a CreateView query; this avoids having to deal with
         // CreateView in all of our rewrite passes.
@@ -1036,19 +1036,6 @@ impl SqlIncorporator {
 
         Ok(qfp)
     }
-
-    /// Upgrades the schema version that any nodes created for queries will be tagged with.
-    /// `new_version` must be strictly greater than the current version in `self.schema_version`.
-    pub(super) fn upgrade_schema(&mut self, new_version: usize) -> ReadySetResult<()> {
-        invariant!(new_version > self.schema_version);
-        debug!(
-            "Schema version advanced from {} to {}",
-            self.schema_version, new_version
-        );
-        self.schema_version = new_version;
-        self.mir_converter.upgrade_schema(new_version)?;
-        Ok(())
-    }
 }
 
 /// Enables incorporation of a textual SQL query into a Soup graph.
@@ -1060,7 +1047,7 @@ trait ToFlowParts {
         &self,
         inc: &mut SqlIncorporator,
         name: Option<String>,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError>;
 }
 
@@ -1069,7 +1056,7 @@ impl<'a> ToFlowParts for &'a String {
         &self,
         inc: &mut SqlIncorporator,
         name: Option<String>,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         self.as_str().to_flow_parts(inc, name, mig)
     }
@@ -1080,7 +1067,7 @@ impl<'a> ToFlowParts for &'a str {
         &self,
         inc: &mut SqlIncorporator,
         name: Option<String>,
-        mig: &mut Migration,
+        mig: &mut Migration<'_>,
     ) -> Result<QueryFlowParts, ReadySetError> {
         // try parsing the incoming SQL
         let parsed_query = sql_parser::parse_query(CANONICAL_DIALECT, self);
@@ -1106,14 +1093,14 @@ mod tests {
     use super::{SqlIncorporator, ToFlowParts};
 
     /// Helper to grab a reference to a named view.
-    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
+    fn get_node<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
             .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
         mig.graph().node_weight(na).unwrap()
     }
 
-    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration, name: &str) -> &'a Node {
+    fn get_reader<'a>(inc: &SqlIncorporator, mig: &'a Migration<'_>, name: &str) -> &'a Node {
         let na = inc
             .get_flow_node_address(name, 0)
             .unwrap_or_else(|| panic!("No node named \"{}\" exists", name));
