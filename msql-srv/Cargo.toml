@@ -21,7 +21,7 @@ chrono = "0.4"
 time = "0.2.27"
 getrandom = "0.2.2"
 async-trait = "0.1"
-tokio = { version = "1.8.1", features = ["io-util", "net", "macros", "rt-multi-thread"] }
+tokio = { version = "1.15", features = ["io-util", "net", "macros", "rt-multi-thread"] }
 thiserror = "1.0.26"
 sha-1 = "0.9.6"
 mysql-time = { path = "../mysql-time" }
@@ -31,6 +31,6 @@ postgres = "0.19.1"
 mysql = "22.0.0"
 
 slab = "0.4.2"
-futures = "0.1.26"
+futures = "0.3"
 
 test_utils = { path = "../test_utils" }

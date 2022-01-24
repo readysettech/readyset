@@ -6,7 +6,7 @@ authors = ["justin@readyset.io"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.8.4", features = ["macros"] }
+tokio = { version = "1.15", features = ["macros"] }
 serial_test = "0.5.1"
 syn = {version="1.0.57",features=["full","fold"]}
 quote = "1.0.8"

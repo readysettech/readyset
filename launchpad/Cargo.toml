@@ -11,7 +11,7 @@ description = "Extensions to the Rust standard library"
 [dependencies]
 proptest = "1.0.0"
 chrono = { version = "0.4.0", features = ["serde"] }
-tokio = { version = "1.8.4", features = ["full"] }
+tokio = { version = "1.15", features = ["full"] }
 futures = "0.3.15"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 rust_decimal = { version = "1.16" }
