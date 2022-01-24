@@ -44,7 +44,7 @@ edition = "2018"
 If you do not intend to release the crate publicly, set `publish = false` in the
 Cargo.toml so that `cargo-deny` is aware that this is an internal crate.
 
-#TODO: Global denys to set up, etc.
+<!-- TODO: Global denys to set up, etc. -->
 
 ## Notes about crates
 
@@ -56,3 +56,51 @@ of crate dependencies you are introducing, some crates take an unfortunately lon
 time to compile, and should be added as dependencies with caution. Some examples:
   * Any crate that depends on librocksdb.
   * noria/server
+
+
+## Cargo.lock 
+The [`Cargo.lock`](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html) 
+file describes the state of the world at the time of a successful
+build: the exact dependencies and versions used at the time when it was
+generated. This allows us to deterministically build and test ReadySet
+with reproducible dependencies and versions.
+
+> We use the `--locked` when performing building, linting, and testing
+> in our CI pipeline. If the Cargo.lock file is not up to date, the CI
+> pipeline will fail the build. As such, always commit `Cargo.lock` when
+> making changes to dependencies.
+
+When performing a build, `cargo` attempts to use the latest compatible
+version of a package according to 
+[`SemVer` compatibility](https://doc.rust-lang.org/cargo/reference/resolver.html#semver-compatibility).
+
+## Updating git dependencies with `cargo update`
+
+Git dependencies in `Cargo.toml` are locked to the version pulled when
+the dependency was added. Bumping the version of the git dependency can
+be performed with `cargo update`.
+
+```
+cargo update -p [dependency]
+```
+
+## Working with dependencies treewide via [`cargo-edit`](https://crates.io/crates/cargo-edit)
+
+`cargo-edit` enables you to modify `Cargo.toml` files from the
+command-line.  It can be used to add (`cargo add`), remove (`cargo rm`),
+bump the Cargo.toml version (`cargo set-version`), and upgrade
+dependencies (`cargo update`).
+
+```
+# Upgrade the dependency in the Cargo.toml file.
+cargo upgrade [FLAGS] [OPTIONS] [dependency]...
+```
+
+> The `--workspace` flag can be used to apply an upgrade across the
+> entire workspace.
+
+See [`cargo-edit`](https://crates.io/crates/cargo-edit) for other
+commands, options, and flags.
+
+
+
