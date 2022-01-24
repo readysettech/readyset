@@ -5,7 +5,7 @@ publish = false
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.8.4", features = ["full"] }
+tokio = { version = "1.15", features = ["full"] }
 futures = "0.3.0"
 futures-util = "0.3.0"
 mysql = "22.0.0"

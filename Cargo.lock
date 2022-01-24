@@ -789,7 +789,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "enum_dispatch",
- "futures 0.3.19",
+ "futures",
  "hdrhistogram",
  "indicatif 0.16.2",
  "indoc",
@@ -1212,7 +1212,7 @@ dependencies = [
  "bincode",
  "clustertest-macros",
  "envy",
- "futures 0.3.19",
+ "futures",
  "futures-util",
  "hyper",
  "mysql_async",
@@ -1889,7 +1889,7 @@ dependencies = [
  "aws-sdk-sqs",
  "aws-types",
  "clap 3.0.4",
- "futures 0.3.19",
+ "futures",
  "lazy_static",
  "nix",
  "regex",
@@ -2171,12 +2171,6 @@ name = "funty"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1847abb9cb65d566acd5942e94aea9c8f547ad02c98e1649326fc0e8910b8b1e"
-
-[[package]]
-name = "futures"
-version = "0.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a471a38ef8ed83cd6e40aa59c1ffe17db6855c18e3604d9c4ed8c08ebc28678"
 
 [[package]]
 name = "futures"
@@ -2668,7 +2662,7 @@ name = "irl_demo"
 version = "0.1.0"
 dependencies = [
  "clap 3.0.4",
- "futures 0.3.19",
+ "futures",
  "futures-util",
  "mysql",
  "time 0.2.27",
@@ -2682,7 +2676,7 @@ name = "irl_minimal"
 version = "0.1.0"
 dependencies = [
  "clap 3.0.4",
- "futures 0.3.19",
+ "futures",
  "futures-util",
  "mysql",
  "time 0.2.27",
@@ -2807,7 +2801,7 @@ dependencies = [
  "bit-vec",
  "chrono",
  "eui48",
- "futures 0.3.19",
+ "futures",
  "proptest",
  "rust_decimal",
  "serde_json",
@@ -3116,7 +3110,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "derive_more",
- "futures 0.3.19",
+ "futures",
  "futures-executor",
  "futures-util",
  "hyper",
@@ -3304,7 +3298,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "chrono",
- "futures 0.1.31",
+ "futures",
  "getrandom 0.2.3",
  "mysql",
  "mysql-time",
@@ -3602,7 +3596,7 @@ dependencies = [
  "derive_more",
  "enum_dispatch",
  "eui48",
- "futures 0.3.19",
+ "futures",
  "futures-util",
  "hyper",
  "itertools 0.10.3",
@@ -3689,7 +3683,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "derive_more",
- "futures 0.3.19",
+ "futures",
  "futures-executor",
  "futures-util",
  "hyper",
@@ -3908,7 +3902,7 @@ dependencies = [
  "colored",
  "derive_more",
  "enum-display-derive",
- "futures 0.3.19",
+ "futures",
  "hex",
  "humantime",
  "indicatif 0.16.2",
@@ -4002,7 +3996,7 @@ dependencies = [
  "chrono",
  "clap 3.0.4",
  "eui48",
- "futures 0.3.19",
+ "futures",
  "itertools 0.10.3",
  "jemallocator",
  "launchpad",
@@ -4048,7 +4042,7 @@ dependencies = [
  "diff",
  "fail",
  "failpoint-macros",
- "futures 0.3.19",
+ "futures",
  "futures-core",
  "futures-executor",
  "futures-sink",
@@ -4617,7 +4611,7 @@ checksum = "eb76d6535496f633fa799bb872ffb4790e9cbdedda9d35564ca0252f930c0dd5"
 dependencies = [
  "bytes 1.1.0",
  "fallible-iterator",
- "futures 0.3.19",
+ "futures",
  "log",
  "tokio",
  "tokio-postgres",
@@ -4630,7 +4624,7 @@ source = "git+https://github.com/readysettech/rust-postgres.git#278f240fac961c34
 dependencies = [
  "bytes 1.1.0",
  "fallible-iterator",
- "futures 0.3.19",
+ "futures",
  "log",
  "tokio",
  "tokio-postgres",
@@ -4641,7 +4635,7 @@ name = "postgres-native-tls"
 version = "0.5.0"
 source = "git+https://github.com/readysettech/rust-postgres.git#278f240fac961c34f784b3cb9e2853b60e18bf90"
 dependencies = [
- "futures 0.3.19",
+ "futures",
  "native-tls",
  "tokio",
  "tokio-native-tls",
@@ -4821,7 +4815,7 @@ dependencies = [
  "bytes 1.1.0",
  "chrono",
  "eui48",
- "futures 0.3.19",
+ "futures",
  "hex",
  "nom-sql",
  "noria-data",
@@ -5126,7 +5120,7 @@ dependencies = [
  "derive_more",
  "dialoguer",
  "directories 4.0.1",
- "futures 0.3.19",
+ "futures",
  "indicatif 0.16.2",
  "ipnet",
  "iprange",
@@ -5256,7 +5250,7 @@ dependencies = [
  "bytes 1.1.0",
  "chrono",
  "clap 3.0.4",
- "futures 0.3.19",
+ "futures",
  "hex",
  "itertools 0.10.3",
  "launchpad",
@@ -5390,7 +5384,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs-next",
- "futures 0.3.19",
+ "futures",
  "hyper",
  "serde",
  "serde_json",
@@ -6355,11 +6349,10 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e992e41e0d2fb9f755b37446f20900f64446ef54874f40a60c78f021ac6144"
+checksum = "fbbf1c778ec206785635ce8ad57fe52b3009ae9e0c9f574a728f3049d3e55838"
 dependencies = [
- "autocfg",
  "bytes 1.1.0",
  "libc",
  "memchr",
@@ -6375,9 +6368,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9efc1aba077437943f7515666aa2b882dfabfbfdf89c819ea75a8d6e9eaba5e"
+checksum = "b557f72f448c511a979e2564e55d74e6c4432fc96ff4f6241bc6bded342643b7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6403,7 +6396,7 @@ dependencies = [
  "byteorder",
  "bytes 1.1.0",
  "fallible-iterator",
- "futures 0.3.19",
+ "futures",
  "log",
  "parking_lot",
  "percent-encoding",
@@ -6642,8 +6635,8 @@ version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f559b464de2e2bdabcac6a210d12e9b5a5973c251e102c44c585c71d51bd78e"
 dependencies = [
- "cfg-if 0.1.10",
- "rand 0.7.3",
+ "cfg-if 1.0.0",
+ "rand 0.8.4",
  "static_assertions",
 ]
 
@@ -7012,7 +7005,7 @@ dependencies = [
  "cargo_metadata",
  "clap 3.0.4",
  "directories 3.0.2",
- "futures 0.3.19",
+ "futures",
  "maplit",
  "reqwest",
  "serde_json",
@@ -7089,7 +7082,7 @@ dependencies = [
  "byteorder",
  "bytes 1.1.0",
  "derive_more",
- "futures 0.3.19",
+ "futures",
  "lazy_static",
  "num_enum",
  "snowflake",

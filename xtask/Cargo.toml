@@ -18,7 +18,7 @@ sha2 = "0.9"
 which = "4.2"
 aws-config = "0.3.0"
 aws-sdk-s3 = "0.3.0"
-tokio = {version = "1", features=["full"]}
+tokio = { version = "1.15", features = ["full"] }
 cargo_metadata = "0.14"
 camino = "1.0"
 serde_yaml = "0.8.21"

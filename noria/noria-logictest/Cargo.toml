@@ -35,7 +35,7 @@ query_generator = { path = "../../query_generator" }
 mysql-time = { path = "../../mysql-time" }
 readyset-logging = { path = "../../readyset-logging" }
 noria-data = { path = "../../noria/data" }
-tokio = { version = "1.8.1", features = ["signal", "rt-multi-thread", "time", "net"] }
+tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time", "net"] }
 itertools = "0.10.0"
 ascii_utils = "0.9.3"
 maplit = "1.0.2"

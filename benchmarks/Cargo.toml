@@ -6,7 +6,7 @@ authors = ["justin@readyset.io"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "1.8.1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.15", features = ["macros", "rt-multi-thread", "signal"] }
 anyhow = "1.0.38"
 nom = "5.1.2"
 mysql_async = "0.29.0"

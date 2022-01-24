@@ -29,7 +29,7 @@ size_format = "1.0.2"
 strum = "0.20.0"
 strum_macros = "0.20.1"
 thiserror = "1.0.26"
-tokio = "1.8.4"
+tokio = "1.15"
 launchpad = { path = "../launchpad" }
 proptest = "1.0.0"
 test-strategy = "0.1.1"
