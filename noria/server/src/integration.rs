@@ -4533,7 +4533,7 @@ async fn post_read_ilike() {
             filter: Some(ViewQueryFilter {
                 column: 0,
                 operator: ViewQueryOperator::ILike,
-                value: "%a%".to_string(),
+                value: "%a%".into(),
             }),
             timestamp: None,
         })
