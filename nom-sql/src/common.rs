@@ -250,6 +250,7 @@ impl ToString for ItemPlaceholder {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum Literal {
     Null,
+    Boolean(bool),
     Integer(i64),
     /// Represents an `f32` floating-point number.
     /// This distinction was introduced to avoid numeric error when transforming
@@ -330,6 +331,8 @@ impl Display for Literal {
         }
         match self {
             Literal::Null => write!(f, "NULL"),
+            Literal::Boolean(true) => write!(f, "TRUE"),
+            Literal::Boolean(false) => write!(f, "FALSE"),
             Literal::Integer(i) => write!(f, "{}", i),
             Literal::Float(float) => write_real!(float.value, float.precision),
             Literal::Double(double) => write_real!(double.value, double.precision),
@@ -1341,6 +1344,13 @@ pub fn float_literal(i: &[u8]) -> IResult<&[u8], Literal> {
     )(i)
 }
 
+fn boolean_literal(i: &[u8]) -> IResult<&[u8], Literal> {
+    alt((
+        map(tag_no_case("true"), |_| Literal::Boolean(true)),
+        map(tag_no_case("false"), |_| Literal::Boolean(false)),
+    ))(i)
+}
+
 // Any literal value.
 pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
     move |i| {
@@ -1380,6 +1390,7 @@ pub fn literal(dialect: Dialect) -> impl Fn(&[u8]) -> IResult<&[u8], Literal> {
                 ),
                 |num| Literal::Placeholder(ItemPlaceholder::DollarNumber(num)),
             ),
+            boolean_literal,
         ))(i)
     }
 }
@@ -1672,6 +1683,44 @@ mod tests {
             let res = type_identifier(dialect)(b"json");
             assert!(res.is_ok());
             assert_eq!(res.unwrap().1, SqlType::Json);
+        }
+    }
+
+    #[test]
+    fn boolean_literals() {
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            assert_eq!(
+                test_parse!(literal(dialect), b"true"),
+                Literal::Boolean(true)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"True"),
+                Literal::Boolean(true)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"TruE"),
+                Literal::Boolean(true)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"TRUE"),
+                Literal::Boolean(true)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"false"),
+                Literal::Boolean(false)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"False"),
+                Literal::Boolean(false)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"FalsE"),
+                Literal::Boolean(false)
+            );
+            assert_eq!(
+                test_parse!(literal(dialect), b"FALSE"),
+                Literal::Boolean(false)
+            );
         }
     }
 
