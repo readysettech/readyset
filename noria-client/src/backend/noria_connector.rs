@@ -1412,9 +1412,13 @@ async fn do_read<'a>(
         .iter()
         .enumerate()
         .find_map(|(i, (col, binop))| {
-            ViewQueryOperator::try_from(*binop)
-                .ok()
-                .map(|op| (i, col, op))
+            if matches!(binop, BinaryOperator::Like | BinaryOperator::ILike) {
+                ViewQueryOperator::try_from(*binop)
+                    .ok()
+                    .map(|op| (i, col, op))
+            } else {
+                None
+            }
         })
         .map(|(idx, col, operator)| -> ReadySetResult<_> {
             let key = raw_keys.drain(0..1).next().ok_or(ReadySetError::EmptyKey)?;
@@ -1427,12 +1431,7 @@ async fn do_read<'a>(
                 .iter()
                 .position(|x| x.spec.column.name == col.name)
                 .ok_or_else(|| ReadySetError::NoSuchColumn(col.name.clone()))?;
-            let value = String::try_from(
-                key[idx]
-                    .coerce_to(key_types.remove(idx))
-                    .unwrap()
-                    .into_owned(),
-            )?;
+            let value = key[idx].coerce_to(key_types.remove(idx))?.into_owned();
             if !key.is_empty() {
                 // the LIKE/ILIKE isn't our only key, add the rest back to `keys`
                 raw_keys.push(key);

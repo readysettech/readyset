@@ -8,8 +8,8 @@ use failpoint_macros::failpoint;
 use nom_sql::OrderType;
 use noria::consistency::Timestamp;
 use noria::metrics::recorded;
-use noria::util::like::LikePattern;
-use noria::{KeyColumnIdx, KeyComparison, ViewPlaceholder, ViewQueryFilter};
+use noria::util::like::{CaseSensitivityMode, LikePattern};
+use noria::{KeyColumnIdx, KeyComparison, ViewPlaceholder, ViewQueryFilter, ViewQueryOperator};
 use tracing::{trace, warn};
 
 use crate::backlog;
@@ -72,36 +72,71 @@ impl PostLookup {
         }
 
         let ordered_limited = do_order_limit(data, self.order_by.as_deref(), self.limit);
-        let like_pattern = filter.as_ref().map(
+        let pattern = filter.as_ref().and_then(
             |ViewQueryFilter {
                  value,
                  operator,
                  column,
-             }| { (LikePattern::new(value, (*operator).into()), *column) },
+             }| {
+                match operator {
+                    ViewQueryOperator::Like => Some((
+                        LikePattern::new(
+                            value
+                                .try_into()
+                                .expect("Unexpected type for value; expected string"),
+                            CaseSensitivityMode::CaseSensitive,
+                        ),
+                        *column,
+                    )),
+                    ViewQueryOperator::ILike => Some((
+                        LikePattern::new(
+                            value
+                                .try_into()
+                                .expect("Unexpected type for value; expected string"),
+                            CaseSensitivityMode::CaseInsensitive,
+                        ),
+                        *column,
+                    )),
+                    _ => None,
+                }
+            },
         );
-
-        let like_filtered = ordered_limited.filter(move |rec| {
-            like_pattern
-                .as_ref()
-                .map(|(pat, col)| {
-                    pat.matches(
-                        (rec[*col])
-                            .try_into()
-                            .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
-                    )
-                })
-                .unwrap_or(true)
+        let filtered = ordered_limited.filter(move |rec| {
+            if let Some((pattern, column)) = &pattern {
+                pattern.matches(
+                    rec[*column]
+                        .try_into()
+                        .expect("Type mismatch: LIKE and ILIKE can only be applied to strings"),
+                )
+            } else if let Some(ViewQueryFilter {
+                column,
+                operator,
+                value,
+            }) = filter
+            {
+                match operator {
+                    ViewQueryOperator::NotEqual => rec[*column] != value,
+                    ViewQueryOperator::Like | ViewQueryOperator::ILike => {
+                        #[allow(clippy::unreachable)] // actually unreachable
+                        {
+                            unreachable!("Already matched on Like and ILike above")
+                        }
+                    }
+                }
+            } else {
+                true
+            }
         });
 
         let returned_cols = match &self.returned_cols {
             Some(c) => c,
             None => {
-                return like_filtered.collect::<Vec<_>>();
+                return filtered.collect::<Vec<_>>();
             }
         };
 
         let col_filtered =
-            like_filtered.map(|row| returned_cols.iter().map(|i| row[*i]).collect::<Vec<_>>());
+            filtered.map(|row| returned_cols.iter().map(|i| row[*i]).collect::<Vec<_>>());
         col_filtered.collect::<Vec<_>>()
     }
 }
@@ -450,5 +485,32 @@ impl Reader {
     /// Get a reference to the reader's post lookup.
     pub fn post_lookup(&self) -> &PostLookup {
         &self.post_lookup
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod post_lookup {
+        use super::*;
+
+        #[test]
+        fn not_equal_filter() {
+            let filter = ViewQueryFilter {
+                column: 0,
+                operator: ViewQueryOperator::NotEqual,
+                value: 1.into(),
+            };
+            let records: Vec<Box<[DataType]>> = vec![
+                vec![1.into(), 2.into()].into_boxed_slice(),
+                vec![2.into(), 2.into()].into_boxed_slice(),
+            ];
+
+            let post_lookup = PostLookup::default();
+            let result = post_lookup.process(records.iter(), &Some(filter));
+
+            assert_eq!(result, vec![vec![&2.into(), &2.into()]]);
+        }
     }
 }

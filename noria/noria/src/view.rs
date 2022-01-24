@@ -33,7 +33,6 @@ use tracing::error;
 use vec1::Vec1;
 
 use crate::consistency::Timestamp;
-use crate::util::like::CaseSensitivityMode;
 use crate::{Tagged, Tagger};
 
 type Transport = AsyncBincodeStream<
@@ -858,15 +857,8 @@ pub enum ViewQueryOperator {
     Like,
     /// String matching with case-insensitive LIKE
     ILike,
-}
-
-impl From<ViewQueryOperator> for CaseSensitivityMode {
-    fn from(op: ViewQueryOperator) -> Self {
-        match op {
-            ViewQueryOperator::Like => Self::CaseSensitive,
-            ViewQueryOperator::ILike => Self::CaseInsensitive,
-        }
-    }
+    /// Not-equals
+    NotEqual,
 }
 
 impl TryFrom<nom_sql::BinaryOperator> for ViewQueryOperator {
@@ -876,6 +868,7 @@ impl TryFrom<nom_sql::BinaryOperator> for ViewQueryOperator {
         match op {
             nom_sql::BinaryOperator::Like => Ok(Self::Like),
             nom_sql::BinaryOperator::ILike => Ok(Self::ILike),
+            nom_sql::BinaryOperator::NotEqual => Ok(Self::NotEqual),
             op => Err(op),
         }
     }
@@ -888,9 +881,8 @@ pub struct ViewQueryFilter {
     pub column: usize,
     /// Operator to use when filtering
     pub operator: ViewQueryOperator,
-    /// Value to match against. This is a String right now because the only supported operations are
-    /// LIKE and ILIKE, which are string-only
-    pub value: String,
+    /// Value to match against.
+    pub value: DataType,
 }
 
 /// A read query to be run against a view.
