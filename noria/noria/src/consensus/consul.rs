@@ -110,6 +110,11 @@
 //! The amount of data stored in consul is bounded by 2 * the maximum dataflow state size for a
 //! deployment. If the dataflow state size decreases, we still store up the total number of chunks
 //! as we cannot safely delete old blocks.
+//!
+//! ## Optimization: Storing the controller state in /state if it fits in a single chunk.
+//! To prevent having to perform two key lookups for a key that would have fit in a single chunk,
+//! we introduce  [`StateValue`] which may be a version referring to a chunked dataflow state, or
+//! it holds the dataflow state directly.
 
 use anyhow::{anyhow, bail, Error};
 use async_trait::async_trait;
@@ -304,6 +309,16 @@ impl Default for StateVersion {
     }
 }
 
+/// The dataflow state value either holds a version or it holds the dataflow state bytes. When the
+/// dataflow state is small enough, less than the maximum consul key size, we store the dataflow
+/// state bytes directly, otherwise we hold the version which acts as a pointer to the prefix used
+/// for all the dataflow state chunks.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+enum StateValue {
+    Data(Vec<u8>),
+    Version(StateVersion),
+}
+
 impl ConsulAuthority {
     /// The connect string should be in the format of
     /// http(s)://<address>:<port>/<deployment>.
@@ -445,13 +460,15 @@ impl ConsulAuthority {
         .unwrap();
     }
 
-    /// Retrieves the controller state version if it exists, otherwise returns None.
-    async fn get_controller_state_version(&self) -> Result<Option<StateVersion>, Error> {
+    /// Retrieves the controller statevalue if it exists, otherwise returns None.
+    async fn get_controller_state_value(&self) -> Result<Option<StateValue>, Error> {
         Ok(
             match kv::read(&self.consul, &self.prefix_with_deployment(STATE_KEY), None).await {
                 Ok(r) => {
                     let bytes: Vec<u8> = get_value_as_bytes(r)?;
-                    Some(serde_json::from_slice(&bytes)?)
+                    let (data, _) = yazi::decompress(&bytes, COMPRESSION_FORMAT)
+                        .map_err(|_| anyhow!("Failure during decompress"))?;
+                    Some(rmp_serde::from_slice(&data)?)
                 }
                 Err(ClientError::APIError { code, .. }) if code == 404 => {
                     warn!("No controller state version in Consul");
@@ -462,13 +479,13 @@ impl ConsulAuthority {
         )
     }
 
-    /// Writes the controller state version if:
+    /// Writes the controller state key if:
     ///  1. We are the leader at the start of the call,
     ///  2. Consul has not detected us as failed when we perform the update.
     ///
     ///  As we only relinquish leadership based on consul's failure detection, we are safe
-    ///  to update the state version.
-    async fn write_controller_state_version(&self, input: StateVersion) -> Result<(), Error> {
+    ///  to update the state key.
+    async fn write_controller_state_value(&self, input: StateValue) -> Result<(), Error> {
         let my_session = Some(self.get_session()?);
         if let Ok(r) = kv::read(
             &self.consul,
@@ -482,11 +499,13 @@ impl ConsulAuthority {
             }
         }
 
-        let bytes = serde_json::to_vec(&input)?;
+        let new_val = rmp_serde::to_vec(&input)?;
+        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+
         match kv::set(
             &self.consul,
             &self.prefix_with_deployment(STATE_KEY),
-            &bytes,
+            &compressed,
             Some(kv_requests::SetKeyRequestBuilder::default().acquire(my_session.unwrap())),
         )
         .await
@@ -497,50 +516,57 @@ impl ConsulAuthority {
         }
     }
 
-    /// Retrieves the controller state from Consul.
+    /// Retrieves the value of the controller state key from Consul.
     ///
-    /// The controller state is stored in the path `/state/{version}/{chunk number}` where the
-    /// version referes to the version number returned from a [`get_controller_state_version`]
+    /// If the StateValue holds [`StateValue::Version`] this retrieves the controller state from
+    /// the chunks store in the path `/state/{version}/{chunk number}` where the
+    /// version referes to the version number returned from a [`get_controller_state_value`]
     /// call, and the chunk number is an integer from 0 to the number of chunks in the state.
     /// The number of chunks is stored in [`StateVersion::num_chunks`].
+    ///
+    /// Otherwise, if `state_value` holds [`StateValue::Data`], this instead just deserializes that
+    /// data into P. This function returns the StateValue to be used when calculating the next
+    /// state value to prevent having to clone a `StateValue::Data`.
     async fn get_controller_state<P: DeserializeOwned>(
         &self,
-        version: StateVersion,
-    ) -> Result<P, Error> {
-        let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &version.version;
-        let chunk_futures: FuturesOrdered<_> = (0..version.num_chunks)
-            .map(|c| {
-                let prefix = state_prefix.clone();
-                async move {
-                    let path = prefix + "/" + &c.to_string();
-                    let r = kv::read(&self.consul, &path, None).await?;
-                    Ok(get_value_as_bytes(r)?)
-                }
-            })
-            .collect();
+        state_value: StateValue,
+    ) -> Result<(P, Option<StateValue>), Error> {
+        let (state_bytes, value) = match state_value {
+            StateValue::Version(ref v) => {
+                let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &v.version;
+                let chunk_futures: FuturesOrdered<_> = (0..v.num_chunks)
+                    .map(|c| {
+                        let prefix = state_prefix.clone();
+                        async move {
+                            let path = prefix + "/" + &c.to_string();
+                            let r = kv::read(&self.consul, &path, None).await?;
+                            Ok(get_value_as_bytes(r)?)
+                        }
+                    })
+                    .collect();
 
-        let t: Result<Vec<Vec<u8>>, Error> = chunk_futures.try_collect().await;
-        let chunks = ChunkedState(t?);
-        let contiguous: Vec<u8> = chunks.into();
-        let (data, _) = yazi::decompress(&contiguous, COMPRESSION_FORMAT)
+                let t: Result<Vec<Vec<u8>>, Error> = chunk_futures.try_collect().await;
+                let chunks = ChunkedState(t?);
+                (chunks.into(), Some(state_value))
+            }
+            StateValue::Data(d) => (d, None),
+        };
+        let (data, _) = yazi::decompress(&state_bytes, COMPRESSION_FORMAT)
             .map_err(|_| anyhow!("Failure during decompress"))?;
-        Ok(rmp_serde::from_slice(&data)?)
+        Ok((rmp_serde::from_slice(&data)?, value))
     }
 
-    /// Write `controller_state` to the consul KV store.
+    /// Write `controller_state` to the consul KV store. If the dataflow state does not need to be
+    /// chunked, this is instead a no-op as a subsequent call to `write_controller_state_value`
+    /// will write the state into Consul under the /state key.
     ///
     /// `controller_state` is serialized and compressed before being split into N keys.
     async fn write_controller_state<P: Serialize>(
         &self,
-        version: Option<StateVersion>,
+        version: Option<StateValue>,
         controller_state: P,
-    ) -> Result<(StateVersion, P), Error> {
+    ) -> Result<(StateValue, P), Error> {
         let my_session = Some(self.get_session()?);
-
-        // The version will not exist for the first controller write, in that case, use the default
-        // version.
-        let new_version = next_state_version(&version.unwrap_or_default().version);
-        let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &new_version;
 
         let new_val = rmp_serde::to_vec(&controller_state)?;
         let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
@@ -550,45 +576,56 @@ impl ConsulAuthority {
 
         // Create futures for each of the consul chunk writes.
         let num_chunks = chunked.0.len();
-        let chunk_writes: Vec<_> = chunked
-            .0
-            .into_iter()
-            .enumerate()
-            .map(|(i, chunk)| {
-                let prefix = state_prefix.clone() + "/" + &i.to_string();
-                #[allow(clippy::unwrap_used)] // Set to Some above.
-                let session = my_session.clone().unwrap();
-                async move {
-                    match kv::set(
-                        &self.consul,
-                        &prefix,
-                        &chunk,
-                        Some(kv_requests::SetKeyRequestBuilder::default().acquire(session)),
-                    )
-                    .await
-                    {
-                        Ok(r) if r.response => Ok(()),
-                        Ok(_) => bail!(ConsulAuthorityError::WriteIssuedFromLostLeader),
-                        Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
+        let state_value = if num_chunks > 1 {
+            // The version will not exist for the first controller write, in that case, use the default
+            // version.
+            let new_version = match version {
+                Some(StateValue::Version(v)) => next_state_version(&v.version),
+                Some(StateValue::Data(_)) | None => StateVersion::default().version,
+            };
+            let state_prefix = self.prefix_with_deployment(STATE_KEY) + "/" + &new_version;
+
+            let chunk_writes: Vec<_> = chunked
+                .0
+                .into_iter()
+                .enumerate()
+                .map(|(i, chunk)| {
+                    let prefix = state_prefix.clone() + "/" + &i.to_string();
+                    #[allow(clippy::unwrap_used)] // Set to Some above.
+                    let session = my_session.clone().unwrap();
+                    async move {
+                        match kv::set(
+                            &self.consul,
+                            &prefix,
+                            &chunk,
+                            Some(kv_requests::SetKeyRequestBuilder::default().acquire(session)),
+                        )
+                        .await
+                        {
+                            Ok(r) if r.response => Ok(()),
+                            Ok(_) => bail!(ConsulAuthorityError::WriteIssuedFromLostLeader),
+                            Err(e) => bail!(ConsulAuthorityError::RequestFailed(e.to_string())),
+                        }
                     }
-                }
-            })
-            .collect();
+                })
+                .collect();
 
-        // TODO(justin): For extremely large states this will increase high load, consider
-        // buffering.
-        join_all(chunk_writes)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, Error>>()?;
+            // TODO(justin): For extremely large states this will increase high load, consider
+            // buffering.
+            join_all(chunk_writes)
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>, Error>>()?;
 
-        Ok((
-            StateVersion {
+            StateValue::Version(StateVersion {
                 num_chunks,
                 version: new_version,
-            },
-            controller_state,
-        ))
+            })
+        } else {
+            StateValue::Data(chunked.into())
+        };
+
+        Ok((state_value, controller_state))
     }
 }
 
@@ -808,16 +845,15 @@ impl AuthorityControl for ConsulAuthority {
         }
 
         loop {
-            let current_version = self.get_controller_state_version().await?;
-            let current_state = if let Some(v) = current_version.clone() {
-                self.get_controller_state(v).await?
-            } else {
-                None
+            let current_value = self.get_controller_state_value().await?;
+            let (current_state, current_value) = match current_value {
+                Some(v) => self.get_controller_state(v).await?,
+                None => (None, None),
             };
 
             if let Ok(r) = f(current_state) {
-                let (new_version, r) = self.write_controller_state(current_version, r).await?;
-                self.write_controller_state_version(new_version).await?;
+                let (new_value, r) = self.write_controller_state(current_value, r).await?;
+                self.write_controller_state_value(new_value).await?;
 
                 return Ok(Ok(r));
             }
@@ -1316,24 +1352,24 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn state_version_roundtrip() {
+    async fn state_value_roundtrip() {
         let authority_address = test_authority_address("state_version_roundtrip");
         let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
-        let returned = authority.get_controller_state_version().await.unwrap();
+        let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
-        let version = StateVersion {
+        let version = StateValue::Version(StateVersion {
             num_chunks: 40,
             version: "version".to_string(),
-        };
+        });
         authority
-            .write_controller_state_version(version.clone())
+            .write_controller_state_value(version.clone())
             .await
             .unwrap();
-        let returned = authority.get_controller_state_version().await.unwrap();
+        let returned = authority.get_controller_state_value().await.unwrap();
 
         assert_eq!(returned, Some(version));
     }
@@ -1346,7 +1382,7 @@ mod tests {
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
-        let returned = authority.get_controller_state_version().await.unwrap();
+        let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
         let small_bytes = "No way we lose this data".to_string();
@@ -1354,7 +1390,7 @@ mod tests {
             .write_controller_state(None, &small_bytes)
             .await
             .unwrap();
-        let returned: String = authority
+        let (returned, _): (String, _) = authority
             .get_controller_state(version.clone())
             .await
             .unwrap();
@@ -1367,7 +1403,7 @@ mod tests {
             .write_controller_state(Some(version), &small_bytes)
             .await
             .unwrap();
-        let returned: String = authority.get_controller_state(version).await.unwrap();
+        let (returned, _): (String, _) = authority.get_controller_state(version).await.unwrap();
 
         assert_eq!(small_bytes, returned);
     }
@@ -1380,7 +1416,7 @@ mod tests {
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
-        let returned = authority.get_controller_state_version().await.unwrap();
+        let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
         let mut rng = thread_rng();
@@ -1394,7 +1430,7 @@ mod tests {
             .write_controller_state(None, &big_bytes)
             .await
             .unwrap();
-        let returned: String = authority
+        let (returned, _): (String, _) = authority
             .get_controller_state(version.clone())
             .await
             .unwrap();
@@ -1412,7 +1448,7 @@ mod tests {
             .write_controller_state(Some(version), &big_bytes)
             .await
             .unwrap();
-        let returned: String = authority.get_controller_state(version).await.unwrap();
+        let (returned, _): (String, _) = authority.get_controller_state(version).await.unwrap();
 
         assert_eq!(big_bytes, returned);
     }
@@ -1425,7 +1461,7 @@ mod tests {
         authority.init().await.unwrap();
         authority.delete_all_keys().await;
 
-        let returned = authority.get_controller_state_version().await.unwrap();
+        let returned = authority.get_controller_state_value().await.unwrap();
         assert_eq!(None, returned);
 
         let mut rng = thread_rng();
@@ -1439,7 +1475,7 @@ mod tests {
             .write_controller_state(None, &big_bytes)
             .await
             .unwrap();
-        let returned: String = authority
+        let (returned, _): (String, _) = authority
             .get_controller_state(version.clone())
             .await
             .unwrap();
@@ -1447,18 +1483,112 @@ mod tests {
         assert_eq!(big_bytes, returned);
 
         // Do it again with a single chunk.
-        let big_bytes: String = iter::repeat(())
+        let small_bytes: String = iter::repeat(())
             .map(|()| rng.sample(Alphanumeric))
             .map(char::from)
             .take(10)
             .collect();
 
         let (version, _) = authority
+            .write_controller_state(Some(version), &small_bytes)
+            .await
+            .unwrap();
+        let (returned, _): (String, _) = authority.get_controller_state(version).await.unwrap();
+
+        assert_eq!(small_bytes, returned);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multichunk_grows_roundtrip() {
+        let authority_address = test_authority_address("multichunk_grows_roundtrip");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let returned = authority.get_controller_state_value().await.unwrap();
+        assert_eq!(None, returned);
+
+        let mut rng = thread_rng();
+        let small_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(10)
+            .collect();
+
+        let (version, _) = authority
+            .write_controller_state(None, &small_bytes)
+            .await
+            .unwrap();
+        let (returned, _): (String, _) = authority
+            .get_controller_state(version.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(small_bytes, returned);
+
+        // Do it again with a single chunk.
+        let big_bytes: String = iter::repeat(())
+            .map(|()| rng.sample(Alphanumeric))
+            .map(char::from)
+            .take(512000 * 2)
+            .collect();
+
+        let (version, _) = authority
             .write_controller_state(Some(version), &big_bytes)
             .await
             .unwrap();
-        let returned: String = authority.get_controller_state(version).await.unwrap();
+        let (returned, _): (String, _) = authority.get_controller_state(version).await.unwrap();
 
         assert_eq!(big_bytes, returned);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn update_chunked_controller_state() {
+        let authority_address = test_authority_address("update_chunked_controller_state");
+        let authority = Arc::new(ConsulAuthority::new(&authority_address).unwrap());
+        authority.init().await.unwrap();
+        authority.delete_all_keys().await;
+
+        let payload = LeaderPayload {
+            controller_uri: url::Url::parse("http://127.0.0.1:2181").unwrap(),
+            nonce: 1,
+        };
+
+        assert_eq!(
+            authority.become_leader(payload.clone()).await.unwrap(),
+            Some(payload)
+        );
+
+        let returned = authority.get_controller_state_value().await.unwrap();
+        assert_eq!(None, returned);
+
+        let mut last_bytes: Option<String> = None;
+        for _ in 0..10 {
+            authority
+                .worker_heartbeat(authority.get_session().unwrap())
+                .await
+                .unwrap();
+
+            // Varies from 1-3 chunks with MessagePack + zlib compression.
+            last_bytes = Some(
+                authority
+                    .update_controller_state(move |n: Option<String>| -> Result<String, ()> {
+                        assert_eq!(n, last_bytes);
+
+                        let mut rng = thread_rng();
+                        let length = rng.gen_range(0..CHUNK_SIZE * 3);
+                        Ok(iter::repeat(())
+                            .map(|()| rng.sample(Alphanumeric))
+                            .map(char::from)
+                            .take(length)
+                            .collect())
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+        }
     }
 }
