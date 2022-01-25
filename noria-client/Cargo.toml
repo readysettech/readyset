@@ -23,7 +23,7 @@ tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
 chrono = "0.4"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 vec1 = "1.6.0"
-itertools = "0.9"
+itertools = "0.10"
 derive_more = "0.99.11"
 async-trait = "0.1.49"
 thiserror = "1.0.26"
@@ -31,7 +31,7 @@ launchpad = { path = "../launchpad" }
 metrics = "0.18"
 noria-client-metrics = { path = "metrics" }
 metrics-exporter-prometheus = "0.8"
-futures = "0.3.16"
+futures = "0.3"
 maplit = "1.0.2"
 serde = "1.0.130"
 serde_json = "1.0.67"

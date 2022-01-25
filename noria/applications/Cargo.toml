@@ -11,9 +11,9 @@ clap = { version = "3.0", features = ["derive", "env"] }
 anyhow = "1.0"
 futures-core = "0.3.0"
 futures-util = "0.3.0"
-hdrhistogram = "=7.1" # When updated to 7.2 it causes conflicts between bitvec and funty:
+hdrhistogram = "7.4"
                       # https://github.com/nucypher/rust-umbral/issues/34
-itertools = "0.9"
+itertools = "0.10"
 mysql_async = "0.29"
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../server", package = "noria-server" }
@@ -25,7 +25,7 @@ regex = "1.0.0"
 tokio = { version = "1.15", features = ["full"] }
 tower-service = "0.3.0"
 vec_map = { version = "0.8.0" }
-zookeeper = "0.5.3"
+zookeeper = "0.6"
 mysql = "22.0.0"
 vec1 = "1.6.0"
 tracing = "0.1.26"

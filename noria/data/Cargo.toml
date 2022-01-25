@@ -11,7 +11,7 @@ bit-vec = { version = "0.6", features = ["serde"] }
 bytes = "1.0.1"
 chrono = { version = "0.4.19", features = ["serde"] }
 eui48 = { version = "1.1", default-features = false }
-itertools = "0.10.0"
+itertools = "0.10"
 mysql_common = { version = "0.28.0", features = ["chrono"] }
 proptest = "1.0.0"
 rust_decimal = { version = "1.16", features = ["db-tokio-postgres", "serde-str"] }

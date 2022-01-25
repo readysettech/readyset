@@ -13,7 +13,7 @@ authors = ["Readyset"]
 async-trait = "0.1"
 bytes = "1.0.1"
 chrono = "0.4.19"
-futures = "0.3.14"
+futures = "0.3"
 nom-sql = { path = "../nom-sql" }
 noria-data = { path = "../noria/data" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git" }

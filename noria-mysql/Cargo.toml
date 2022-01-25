@@ -28,7 +28,7 @@ anyhow = "1.0.42"
 derive_more = "0.99.16"
 thiserror = "1.0.26"
 mysql_common = "0.28.0"
-itertools = "0.10.1"
+itertools = "0.10"
 
 [dev-dependencies]
 noria-client-test-helpers = { path = "../noria-client/test-helpers" }

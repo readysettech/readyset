@@ -20,12 +20,12 @@ regex = "1.0.0"
 chrono = "0.4"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 vec1 = "1.6.0"
-itertools = "0.10.1"
+itertools = "0.10"
 derive_more = "0.99.11"
 thiserror = "1.0.26"
 launchpad = { path = "../launchpad" }
 metrics = "0.18"
-futures = "0.3.16"
+futures = "0.3"
 maplit = "1.0.2"
 readyset-logging = { path = "../readyset-logging" }
 serde = "1.0.130"
@@ -43,7 +43,7 @@ tokio-stream = { version = "0.1.5", features = ["net"] }
 tracing-subscriber = "0.2.20"
 tracing-futures = "0.2.5"
 reqwest = { version = "0.11", features = ["json"] }
-prometheus-http-query = "0.3.0"
+prometheus-http-query = "0.3.3"
 
 [lib]
 path = "src/lib.rs"
