@@ -42,3 +42,12 @@ WHERE product_id IN (?, ?) AND score BETWEEN ? AND ?
 pretty good
 this is good too
 whatever
+
+query T rowsort
+SELECT review FROM reviews
+WHERE product_id = ? AND score > ?
+? = 1
+? = 3
+----
+pretty good
+very good
