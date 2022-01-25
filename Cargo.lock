@@ -1262,7 +1262,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "consulrs"
 version = "0.1.0"
-source = "git+https://github.com/readysettech/consulrs.git?branch=allow-disabling-rustls-tls#b19bd6fee267a58311f40acc62f72edc7593c0ee"
+source = "git+https://github.com/readysettech/consulrs.git?branch=allow-disabling-rustls-tls-2#177d1a5b86584e4ac76e54c26778a87f078c1a61"
 dependencies = [
  "async-trait",
  "base64",
@@ -1283,7 +1283,7 @@ dependencies = [
 [[package]]
 name = "consulrs_derive"
 version = "0.1.0"
-source = "git+https://github.com/readysettech/consulrs.git?branch=allow-disabling-rustls-tls#b19bd6fee267a58311f40acc62f72edc7593c0ee"
+source = "git+https://github.com/readysettech/consulrs.git?branch=allow-disabling-rustls-tls-2#177d1a5b86584e4ac76e54c26778a87f078c1a61"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5315,7 +5315,7 @@ dependencies = [
 [[package]]
 name = "rustify"
 version = "0.5.2"
-source = "git+https://github.com/jmgilman/rustify?rev=c86c80b#c86c80b04e18cebf706dad54a22fd56de449a5ad"
+source = "git+https://github.com/readysettech/rustify?branch=log-messages#f3c11081a5cc2f35e6ebd4700bfa5300171e58a1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5334,7 +5334,7 @@ dependencies = [
 [[package]]
 name = "rustify_derive"
 version = "0.5.2"
-source = "git+https://github.com/jmgilman/rustify?rev=c86c80b#c86c80b04e18cebf706dad54a22fd56de449a5ad"
+source = "git+https://github.com/readysettech/rustify?branch=log-messages#f3c11081a5cc2f35e6ebd4700bfa5300171e58a1"
 dependencies = [
  "proc-macro2",
  "quote",
