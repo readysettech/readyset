@@ -5,7 +5,7 @@ use common::SizeOf;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
 use rand::prelude::*;
-use reader_map::refs::Values;
+use reader_map::refs::{Values, ValuesIter};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ops::RangeBounds;
@@ -164,11 +164,11 @@ pub(crate) struct WriteHandleEntry<'a> {
 }
 
 impl<'a> WriteHandleEntry<'a> {
-    pub(crate) fn try_find_and<F, T>(self, mut then: F) -> LookupResult<T>
+    pub(crate) fn try_find_and<F, T>(self, then: F) -> LookupResult<T>
     where
-        F: FnMut(&reader_map::refs::Values<Vec<DataType>, RandomState>) -> T,
+        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
     {
-        self.handle.handle.read().meta_get_and(&self.key, &mut then)
+        self.handle.handle.read().meta_get_and(&self.key, then)
     }
 }
 
@@ -185,7 +185,7 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .handle
             .read()
-            .meta_get_and(&self.key, |rs| rs.is_empty())
+            .meta_get_and(&self.key, |rs| rs.len() == 0)
             .err()
             .iter()
             .any(LookupError::is_miss)
@@ -206,7 +206,7 @@ impl<'a> MutWriteHandleEntry<'a> {
             .handle
             .handle
             .read()
-            .meta_get_and(&self.key, |rs| rs.iter().map(SizeOf::deep_size_of).sum())
+            .meta_get_and(&self.key, |rs| rs.map(SizeOf::deep_size_of).sum())
             .map(|(size, _)| size)
             .unwrap_or(0);
         self.handle.mem_size = self
@@ -354,9 +354,7 @@ impl WriteHandle {
                 let size = self
                     .handle
                     .read()
-                    .meta_get_range_and(&range, |rs| {
-                        rs.iter().map(SizeOf::deep_size_of).sum::<u64>()
-                    })
+                    .meta_get_range_and(&range, |rs| rs.map(SizeOf::deep_size_of).sum::<u64>())
                     .map(|(sizes, _)| sizes.iter().sum())
                     .unwrap_or(0);
                 self.mem_size = self.mem_size.saturating_sub(size as usize);
@@ -449,13 +447,13 @@ impl SingleReadHandle {
     /// swapped in by the writer.
     ///
     /// Holes in partially materialized state are returned as `Ok((None, _))`.
-    pub fn try_find_and<F, T>(&self, key: &[DataType], mut then: F) -> Result<(T, i64), LookupError>
+    pub fn try_find_and<F, T>(&self, key: &[DataType], then: F) -> Result<(T, i64), LookupError>
     where
-        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
     {
-        match self.handle.meta_get_and(key, &mut then) {
+        match self.handle.meta_get_and(key, &then) {
             Err(e) if e.is_miss() && self.trigger.is_none() => {
-                Ok((then(&Values::default()), e.meta().unwrap()))
+                Ok((then(Values::default().iter()), e.meta().unwrap()))
             }
             r => r,
         }
@@ -465,15 +463,15 @@ impl SingleReadHandle {
     pub fn try_find_range_and<F, T, R>(
         &self,
         range: &R,
-        mut then: F,
+        then: F,
     ) -> Result<(Vec<T>, i64), LookupError>
     where
-        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
         R: RangeBounds<Vec<common::DataType>>,
     {
-        match self.handle.meta_get_range_and(range, &mut then) {
+        match self.handle.meta_get_range_and(range, &then) {
             Err(e) if e.is_miss() && self.trigger.is_none() => {
-                Ok((vec![then(&Values::default())], e.meta().unwrap()))
+                Ok((vec![then(Values::default().iter())], e.meta().unwrap()))
             }
             r => r,
         }
@@ -499,11 +497,10 @@ impl SingleReadHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
 
     #[test]
     fn store_works() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
 
@@ -512,7 +509,7 @@ mod tests {
         // after first swap, it is empty, but ready
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((0, -1)));
 
-        w.add(vec![Record::Positive(a.clone())]);
+        w.add(vec![Record::Positive(a.to_vec())]);
 
         // it is empty even after an add (we haven't swapped yet)
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()), Ok((0, -1)));
@@ -522,9 +519,7 @@ mod tests {
         // but after the swap, the record is there!
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == a[0] && r[1] == a[1]))
                 .unwrap()
                 .0
         );
@@ -561,19 +556,17 @@ mod tests {
 
     #[test]
     fn minimal_query() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
-        let b = vec![1.into(), "b".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
+        let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
-        w.add(vec![Record::Positive(a.clone())]);
+        w.add(vec![Record::Positive(a.to_vec())]);
         w.swap();
-        w.add(vec![Record::Positive(b)]);
+        w.add(vec![Record::Positive(b.to_vec())]);
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == a[0] && r[1] == a[1]))
                 .unwrap()
                 .0
         );
@@ -581,28 +574,24 @@ mod tests {
 
     #[test]
     fn non_minimal_query() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
-        let b = vec![1.into(), "b".try_into().unwrap()];
-        let c = vec![1.into(), "c".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
+        let b = vec![1i32.into(), "b".into()].into_boxed_slice();
+        let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
-        w.add(vec![Record::Positive(a.clone())]);
-        w.add(vec![Record::Positive(b.clone())]);
+        w.add(vec![Record::Positive(a.to_vec())]);
+        w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
-        w.add(vec![Record::Positive(c)]);
+        w.add(vec![Record::Positive(c.to_vec())]);
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 2);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == a[0] && r[1] == a[1]))
                 .unwrap()
                 .0
         );
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == b[0] && r[1] == b[1]))
                 .unwrap()
                 .0
         );
@@ -610,20 +599,18 @@ mod tests {
 
     #[test]
     fn absorb_negative_immediate() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
-        let b = vec![1.into(), "b".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
+        let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
-        w.add(vec![Record::Positive(a.clone())]);
-        w.add(vec![Record::Positive(b.clone())]);
-        w.add(vec![Record::Negative(a.clone())]);
+        w.add(vec![Record::Positive(a.to_vec())]);
+        w.add(vec![Record::Positive(b.to_vec())]);
+        w.add(vec![Record::Negative(a.to_vec())]);
         w.swap();
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == b[0] && r[1] == b[1]))
                 .unwrap()
                 .0
         );
@@ -631,21 +618,19 @@ mod tests {
 
     #[test]
     fn absorb_negative_later() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
-        let b = vec![1.into(), "b".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
+        let b = vec![1i32.into(), "b".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
-        w.add(vec![Record::Positive(a.clone())]);
-        w.add(vec![Record::Positive(b.clone())]);
+        w.add(vec![Record::Positive(a.to_vec())]);
+        w.add(vec![Record::Positive(b.to_vec())]);
         w.swap();
-        w.add(vec![Record::Negative(a.clone())]);
+        w.add(vec![Record::Negative(a.to_vec())]);
         w.swap();
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == b[0] && r[1] == b[1]))
                 .unwrap()
                 .0
         );
@@ -653,45 +638,39 @@ mod tests {
 
     #[test]
     fn absorb_multi() {
-        let a = vec![1.into(), "a".try_into().unwrap()];
-        let b = vec![1.into(), "b".try_into().unwrap()];
-        let c = vec![1.into(), "c".try_into().unwrap()];
+        let a = vec![1i32.into(), "a".into()].into_boxed_slice();
+        let b = vec![1i32.into(), "b".into()].into_boxed_slice();
+        let c = vec![1i32.into(), "c".into()].into_boxed_slice();
 
         let (r, mut w) = new(2, Index::hash_map(vec![0]));
         w.add(vec![
-            Record::Positive(a.clone()),
-            Record::Positive(b.clone()),
+            Record::Positive(a.to_vec()),
+            Record::Positive(b.to_vec()),
         ]);
         w.swap();
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 2);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == a[0] && r[1] == a[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == a[0] && r[1] == a[1]))
                 .unwrap()
                 .0
         );
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == b[0] && r[1] == b[1]))
                 .unwrap()
                 .0
         );
 
         w.add(vec![
-            Record::Negative(a.clone()),
-            Record::Positive(c.clone()),
-            Record::Negative(c),
+            Record::Negative(a.to_vec()),
+            Record::Positive(c.to_vec()),
+            Record::Negative(c.to_vec()),
         ]);
         w.swap();
 
         assert_eq!(r.try_find_and(&a[0..1], |rs| rs.len()).unwrap().0, 1);
         assert!(
-            r.try_find_and(&a[0..1], |rs| rs
-                .iter()
-                .any(|r| r[0] == b[0] && r[1] == b[1]))
+            r.try_find_and(&a[0..1], |mut rs| rs.any(|r| r[0] == b[0] && r[1] == b[1]))
                 .unwrap()
                 .0
         );

@@ -3,7 +3,7 @@ use common::DataType;
 use launchpad::intervals::BoundPair;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
-use reader_map::refs::{Miss, Values};
+use reader_map::refs::{Miss, ValuesIter};
 use serde::{Deserialize, Serialize};
 use std::convert::{TryFrom, TryInto};
 use std::ops::RangeBounds;
@@ -11,18 +11,24 @@ use vec1::{vec1, Vec1};
 
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
-    Single(reader_map::handles::ReadHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Single(reader_map::handles::ReadHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>),
     Double(
         reader_map::handles::ReadHandle<
             (DataType, DataType),
-            Vec<DataType>,
+            Box<[DataType]>,
             i64,
             Timestamp,
             RandomState,
         >,
     ),
     Many(
-        reader_map::handles::ReadHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>,
+        reader_map::handles::ReadHandle<
+            Vec<DataType>,
+            Box<[DataType]>,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
     ),
 }
 
@@ -157,7 +163,7 @@ impl Handle {
 
     pub(super) fn meta_get_and<F, T>(&self, key: &[DataType], then: F) -> LookupResult<T>
     where
-        F: FnOnce(&Values<Vec<DataType>, RandomState>) -> T,
+        F: FnOnce(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
     {
         use LookupError::*;
 
@@ -169,7 +175,7 @@ impl Handle {
                 let v = map
                     .get(&key[0])
                     .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
-                Ok((then(v), m))
+                Ok((then(v.iter()), m))
             }
             Handle::Double(ref h) => {
                 assert_eq!(key.len(), 2);
@@ -177,13 +183,13 @@ impl Handle {
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
                 let v = map.get(&tuple_key).ok_or(MissPointDouble(tuple_key, m))?;
-                Ok((then(v), m))
+                Ok((then(v.iter()), m))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let m = *map.meta();
                 let v = map.get(key).ok_or_else(|| MissPointMany(key.into(), m))?;
-                Ok((then(v), m))
+                Ok((then(v.iter()), m))
             }
         }
     }
@@ -220,9 +226,9 @@ impl Handle {
     ///
     /// Panics if the vectors in the bounds of `range` are a different size than the length of our
     /// keys.
-    pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, mut then: F) -> LookupResult<Vec<T>>
+    pub(super) fn meta_get_range_and<F, T, R>(&self, range: &R, then: F) -> LookupResult<Vec<T>>
     where
-        F: FnMut(&Values<Vec<DataType>, RandomState>) -> T,
+        F: Fn(ValuesIter<'_, Box<[DataType]>, RandomState>) -> T,
         R: RangeBounds<Vec<DataType>>,
     {
         use LookupError::*;
@@ -243,7 +249,7 @@ impl Handle {
                 let records = map
                     .range(&range)
                     .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
             }
             Handle::Double(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
@@ -260,7 +266,7 @@ impl Handle {
                 let records = map
                     .range(&range)
                     .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
             }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
@@ -269,7 +275,7 @@ impl Handle {
                 let records = map
                     .range(&range)
                     .map_err(|Miss(misses)| LookupError::MissRangeMany(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row)).collect(), meta))
+                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
             }
         }
     }
@@ -322,7 +328,7 @@ mod tests {
     use reader_map::handles::WriteHandle;
 
     fn make_single() -> (
-        WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>,
+        WriteHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
@@ -334,7 +340,7 @@ mod tests {
     }
 
     fn make_double() -> (
-        WriteHandle<(DataType, DataType), Vec<DataType>, i64, Timestamp, RandomState>,
+        WriteHandle<(DataType, DataType), Box<[DataType]>, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
@@ -347,12 +353,12 @@ mod tests {
 
     proptest! {
         #[test]
-        fn get_double(key: (DataType, DataType), val: Vec<DataType>) {
+        fn get_double(key: (DataType, DataType), val: Box<[DataType]>) {
             let (mut w, handle) = make_double();
             w.insert(key.clone(), val.clone());
             w.publish();
             handle.meta_get_and(&[key.0, key.1], |result| {
-                assert_eq!(result.into_iter().cloned().collect::<Vec<_>>(), vec![val]);
+                assert!(result.eq([&val]));
             }).unwrap();
         }
     }
@@ -361,22 +367,22 @@ mod tests {
     fn get_single_range() {
         let (mut w, handle) = make_single();
         w.insert_range(
-            (0..10)
-                .map(|n| ((n.into()), vec![n.into(), n.into()]))
+            (0i32..10)
+                .map(|n| ((n.into()), vec![n.into(), n.into()].into_boxed_slice()))
                 .collect(),
-            (DataType::from(0))..(DataType::from(10)),
+            (DataType::from(0i32))..(DataType::from(10i32)),
         );
         w.publish();
 
         let (res, meta) = handle
-            .meta_get_range_and(&(vec![2.into()]..=vec![3.into()]), |vals| {
+            .meta_get_range_and(&(vec![2i32.into()]..=vec![3i32.into()]), |vals| {
                 vals.into_iter().cloned().collect::<Vec<_>>()
             })
             .unwrap();
         assert_eq!(
             res,
-            (2..=3)
-                .map(|n| vec![vec![DataType::from(n), DataType::from(n)]])
+            (2i32..=3)
+                .map(|n| vec![vec![DataType::from(n), DataType::from(n)].into_boxed_slice()])
                 .collect::<Vec<_>>()
         );
         assert_eq!(meta, -1);
@@ -385,14 +391,14 @@ mod tests {
     #[test]
     fn contains_key_single() {
         let (mut w, handle) = make_single();
-        assert_eq!(handle.contains_key(&[1.into()]), None);
+        assert_eq!(handle.contains_key(&[1i32.into()]), None);
 
         w.publish();
-        assert_eq!(handle.contains_key(&[1.into()]), Some(false));
+        assert_eq!(handle.contains_key(&[1i32.into()]), Some(false));
 
-        w.insert(1.into(), vec![1.into()]);
+        w.insert(1i32.into(), vec![1i32.into()].into_boxed_slice());
         w.publish();
-        assert_eq!(handle.contains_key(&[1.into()]), Some(true));
+        assert_eq!(handle.contains_key(&[1i32.into()]), Some(true));
     }
 
     #[test]
@@ -400,22 +406,27 @@ mod tests {
         let (mut w, handle) = make_double();
         w.insert_range(
             (0..10)
-                .map(|n| ((n.into(), n.into()), vec![n.into(), n.into()]))
+                .map(|n: i32| {
+                    (
+                        (n.into(), n.into()),
+                        vec![n.into(), n.into()].into_boxed_slice(),
+                    )
+                })
                 .collect(),
-            (0.into(), 0.into())..(10.into(), 10.into()),
+            (0i32.into(), 0i32.into())..(10i32.into(), 10i32.into()),
         );
         w.publish();
 
         let (res, meta) = handle
             .meta_get_range_and(
-                &(vec![2.into(), 2.into()]..=vec![3.into(), 3.into()]),
+                &(vec![2i32.into(), 2i32.into()]..=vec![3i32.into(), 3i32.into()]),
                 |vals| vals.into_iter().cloned().collect::<Vec<_>>(),
             )
             .unwrap();
         assert_eq!(
             res,
-            (2..=3)
-                .map(|n| vec![vec![DataType::from(n), DataType::from(n)]])
+            (2i32..=3)
+                .map(|n: i32| vec![vec![DataType::from(n), DataType::from(n)].into_boxed_slice()])
                 .collect::<Vec<_>>()
         );
         assert_eq!(meta, -1);

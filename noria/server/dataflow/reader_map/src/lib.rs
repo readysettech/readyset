@@ -230,7 +230,7 @@ pub mod handles {
 /// Helper types that give access to values inside the read half of an `reader_map`.
 pub mod refs {
     // Same here, ::{..} won't work.
-    pub use super::values::Values;
+    pub use super::values::{Values, ValuesIter};
     pub use crate::read::MapReadRef;
     pub use crate::read::Miss;
     pub use crate::read::ReadGuardIter;
