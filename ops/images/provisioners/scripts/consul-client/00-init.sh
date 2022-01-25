@@ -9,7 +9,7 @@ echo \
 
 # Install Consul
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y consul
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y consul=1.11.2
 
 sudo install -o consul -g consul -m 644 /tmp/consul-client/etc_consul.d_consul.hcl /etc/consul.d/consul.hcl
 

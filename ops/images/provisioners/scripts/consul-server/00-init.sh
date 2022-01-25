@@ -9,8 +9,9 @@ echo \
 
 # Install Consul
 sudo DEBIAN_FRONTEND=noninteractive apt-get update
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y consul
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y consul=1.11.2
 
 sudo install -o consul -g consul -m 644 /tmp/consul-server/etc_consul.d_consul.hcl /etc/consul.d/consul.hcl
+sudo install -o root -g root -m 644 /tmp/consul-server/lib_systemd_system_consul.service /lib/systemd/system/consul.service
 
 sudo systemctl enable consul.service
