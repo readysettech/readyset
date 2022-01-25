@@ -1,9 +1,9 @@
 locals {
-  instance_types = [
-    "t3a.small",
-    "r5a.2xlarge",
-    "c5a.4xlarge",
-  ]
+  instance_types = {
+    "t3a.small"   = 10,
+    "r5a.2xlarge" = 3,
+    "c5a.4xlarge" = 3,
+  }
 
   extra_iam_policy_arns = [
     module.buildkite_queue_shared.packer_policy_arn,
@@ -45,7 +45,7 @@ module "buildkite_queue_shared" {
 }
 
 module "buildkite_queue" {
-  for_each = toset(local.instance_types)
+  for_each = local.instance_types
 
   source      = "../../../../../modules/buildkite-queue/regional"
   environment = "build"
@@ -60,7 +60,7 @@ module "buildkite_queue" {
   extra_iam_policy_arns = local.extra_iam_policy_arns
 
   instance_type = each.key
-  max_size      = 3
+  max_size      = each.value
 }
 
 resource "aws_s3_bucket" "ops-secrets" {
