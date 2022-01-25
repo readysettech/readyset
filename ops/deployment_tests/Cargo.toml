@@ -8,11 +8,11 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0.38"
 clap = { version = "3.0", features = ["derive","env"] }
-prometheus-http-query = "0.3.0"
 tokio = "1.15"
+prometheus-http-query = "0.3.3"
 mysql_async = "0.29.0"
 console = "0.15.0"
-indicatif = "0.16.2"
+indicatif = "0.16"
 
 noria = { path = "../../noria/noria" }
 

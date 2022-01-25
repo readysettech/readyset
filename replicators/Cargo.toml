@@ -14,7 +14,7 @@ tokio = { version = "1.15", features = ["full"] }
 futures = { version = "0.3" }
 bytes = "1.0"
 chrono = "0.4"
-itertools = "0.10.1"
+itertools = "0.10"
 metrics = "0.18"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-futures = "0.2.5"

@@ -18,7 +18,7 @@ mysql_async = "0.29"
 mysql_common = "0.28.0"
 byteorder = "1"
 chrono = "0.4"
-time = "0.2.27"
+time = "0.3"
 getrandom = "0.2.2"
 async-trait = "0.1"
 tokio = { version = "1.15", features = ["io-util", "net", "macros", "rt-multi-thread"] }
@@ -27,7 +27,7 @@ sha-1 = "0.9.6"
 mysql-time = { path = "../mysql-time" }
 
 [dev-dependencies]
-postgres = "0.19.1"
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git" }
 mysql = "22.0.0"
 
 slab = "0.4.2"

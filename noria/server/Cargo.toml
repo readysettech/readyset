@@ -32,16 +32,16 @@ jemallocator = "0.3"
 clap = { version = "3.0", features = ["derive","env"] }
 anyhow = "1.0"
 thiserror = "1.0.26"
-ahash = "0.3"
-futures = "0.3.14"
+ahash = "0.7"
+futures = "0.3"
 futures-core = "0.3.14"
 futures-util = "0.3.14"
 futures-sink = "0.3.14"
 futures-executor = "0.3.14"
-pin-project = "1.0.6"
+pin-project = "1.0"
 hyper = { version = "0.14.10", features = [ "stream", "server" ] }
 querystring = "1.1.0"
-itertools = "0.10.0"
+itertools = "0.10"
 maths = { path = "../../maths" }
 metrics = "0.18"
 metrics-util = "0.11"
@@ -74,7 +74,7 @@ fail = "0.5.0"
 timekeeper = { version = "0.3.2", default-features = false }
 vec_map = { version = "0.8.0", features = ["eders"] }
 serde = { version = "1.0.8", features = ["rc", "derive"] }
-zookeeper = "0.5.3"
+zookeeper = "0.6"
 tokio-tower = "0.5.1"
 tower = { version = "0.4.6", features = ["util"] }
 strawpoll = "0.2.2"

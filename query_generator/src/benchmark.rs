@@ -227,7 +227,8 @@ impl Benchmark {
         let pb = ProgressBar::new(queries.len() as _);
         pb.set_style(ProgressStyle::default_bar().template("{bar:50} {pos}/{len} {wide_msg}"));
         for seed in queries {
-            pb.set_message(&format!("{:?}", seed));
+            let msg = format!("{:?}", seed);
+            pb.set_message(msg);
             match self.repeatedly_benchmark_query(seed, self.samples).await {
                 Ok(result) => results.push(result),
                 Err(e) => eprintln!("\n\n{}\n\n", e),

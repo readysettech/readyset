@@ -18,7 +18,7 @@ maintenance = { status = "experimental" }
 nom-sql = { path = "../../../nom-sql" }
 regex = "1.0.0"
 petgraph = { version = "0.5", features = ["serde-1"] }
-itertools = "0.10.0"
+itertools = "0.10"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 noria = { path = "../../noria" }
 noria-errors = { path = "../../errors" }
