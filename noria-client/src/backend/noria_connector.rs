@@ -1467,7 +1467,14 @@ fn build_view_query(
                     match view_placeholder {
                         ViewPlaceholder::Generated => continue,
                         ViewPlaceholder::OneToOne(idx) => {
-                            let key_type = key_types[key_column_idx];
+                            let key_type = if let Some(key_type) = key_types.get(key_column_idx) {
+                                key_type
+                            } else {
+                                // if the key isn't in the list of key types, that means it was
+                                // removed during post-read filter construction (for LIKE/ILIKE)
+                                // above, so just skip it in the lookup key.
+                                continue;
+                            };
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             let value = key[*idx - 1].coerce_to(key_type)?.into_owned();
                             k.push(value);
@@ -1569,5 +1576,155 @@ mod tests {
         view_cache.remove_statement(name);
         let retrieved_statement = view_cache.select_statement_from_name(name);
         assert_eq!(None, retrieved_statement);
+    }
+
+    mod build_view_query {
+        use lazy_static::lazy_static;
+        use nom_sql::{parse_query, Column, ColumnSpecification, Dialect, SqlType};
+        use noria::ColumnBase;
+
+        use super::*;
+
+        lazy_static! {
+            static ref SCHEMA: ViewSchema = ViewSchema::new(
+                vec![
+                    ColumnSchema {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "x".to_owned(),
+                                table: Some("t".to_owned()),
+                                function: None,
+                            },
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        base: Some(ColumnBase {
+                            table: "t".to_owned(),
+                            column: "x".to_owned(),
+                        }),
+                    },
+                    ColumnSchema {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "y".to_owned(),
+                                table: Some("t".to_owned()),
+                                function: None,
+                            },
+                            sql_type: SqlType::Text,
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        base: Some(ColumnBase {
+                            table: "t".to_owned(),
+                            column: "y".to_owned(),
+                        }),
+                    }
+                ],
+                vec![
+                    ColumnSchema {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "x".to_owned(),
+                                table: Some("t".to_owned()),
+                                function: None,
+                            },
+                            sql_type: SqlType::Int(None),
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        base: Some(ColumnBase {
+                            table: "t".to_owned(),
+                            column: "x".to_owned(),
+                        }),
+                    },
+                    ColumnSchema {
+                        spec: ColumnSpecification {
+                            column: Column {
+                                name: "y".to_owned(),
+                                table: Some("t".to_owned()),
+                                function: None,
+                            },
+                            sql_type: SqlType::Text,
+                            constraints: vec![],
+                            comment: None,
+                        },
+                        base: Some(ColumnBase {
+                            table: "t".to_owned(),
+                            column: "y".to_owned(),
+                        }),
+                    }
+                ],
+            );
+        }
+
+        fn parse_select_statement(src: &str) -> SelectStatement {
+            match parse_query(Dialect::MySQL, src).unwrap() {
+                SqlQuery::Select(stmt) => stmt,
+                _ => panic!("Unexpected query type"),
+            }
+        }
+
+        #[test]
+        fn simple_point_lookup() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[(ViewPlaceholder::OneToOne(1), 0)],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1"),
+                vec![vec![DataType::from(1)].into()],
+                None,
+            )
+            .unwrap();
+
+            assert!(query.filters.is_empty());
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::from(vec1![DataType::from(1)])]
+            );
+        }
+
+        #[test]
+        fn single_between() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[(ViewPlaceholder::Between(1, 2), 0)],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2"),
+                vec![vec![DataType::from(1), DataType::from(2)].into()],
+                None,
+            )
+            .unwrap();
+
+            assert!(query.filters.is_empty());
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::from_range(
+                    &(vec1![DataType::from(1)]..=vec1![DataType::from(2)])
+                )]
+            );
+        }
+
+        #[test]
+        fn ilike_and_equality() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(1), 0),
+                    (ViewPlaceholder::OneToOne(2), 1),
+                ],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x = $1 AND t.y ILIKE $2"),
+                vec![vec![DataType::from(1), DataType::from("%a%")].into()],
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(
+                query.filters,
+                vec![ViewQueryFilter {
+                    column: 1,
+                    operator: ViewQueryOperator::ILike,
+                    value: DataType::from("%a%")
+                }]
+            );
+        }
     }
 }
