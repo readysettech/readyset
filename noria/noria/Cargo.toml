@@ -75,7 +75,7 @@ base64 = "0.13"
 # channel/
 bufstream = "0.1.3"
 byteorder = "1.0.0"
-net2 = "0.2"
+socket2 = "0.4"
 async-bincode = "0.6.1"
 regex = "1.4.3"
 lazy_static = "1.4.0"

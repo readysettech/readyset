@@ -13,6 +13,7 @@ use futures_util::{sink::Sink, stream::Stream};
 use noria_errors::ReadySetError;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -79,12 +80,13 @@ impl<T: Serialize> TcpSender<T> {
     }
 
     pub(crate) fn connect_from(sport: Option<u16>, addr: &SocketAddr) -> Result<Self, io::Error> {
-        let s = net2::TcpBuilder::new_v4()?
-            .reuse_address(true)?
-            .bind((Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0)))?
-            .connect(addr)?;
+        let bind_addr = std::net::SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, sport.unwrap_or(0));
+        let s = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
+        s.set_reuse_address(true)?;
+        s.bind(&SockAddr::from(bind_addr))?;
         s.set_nodelay(true)?;
-        Self::new(s)
+        s.connect(&SockAddr::from(*addr))?;
+        Self::new(std::net::TcpStream::from(s))
     }
 
     pub fn connect(addr: &SocketAddr) -> Result<Self, io::Error> {
