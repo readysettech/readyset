@@ -20,10 +20,13 @@ use benchmarks::benchmark_histogram;
 
 const PUSH_GATEWAY_PUSH_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Run ReadySet macrobenchmarks
+///
+/// The usage of this command is documented at <http://docs/benchmarking.html>
 #[derive(Parser)]
 #[clap(name = "benchmark_cmd_runner", global_setting = AppSettings::SubcommandsNegateReqs)]
 struct BenchmarkRunner {
-    /// Skips the setup setup when executing the `benchmark_cmd`.
+    /// Skips the setup step when executing the `benchmark_cmd`.
     #[clap(long)]
     skip_setup: bool,
 
@@ -42,8 +45,9 @@ struct BenchmarkRunner {
     #[clap(flatten)]
     deployment_params: DeploymentParameters,
 
-    /// Pass in the deployment parameters as a YAML formatted file. This overwrites
-    /// any deployment_params passed manually.
+    /// Pass in the deployment parameters as a YAML formatted file. This overrides
+    /// `--instance-label`, `--prometheus-push-gateway`, `--prometheus-endpoint`,
+    /// `--target-conn-str`, and `--setup-conn-str`.
     #[clap(long, value_hint = ValueHint::AnyPath)]
     deployment: Option<PathBuf>,
 
@@ -61,6 +65,8 @@ struct BenchmarkRunner {
     wait_for_snapshot: bool,
 
     /// A file to write the set of benchmark results to.
+    ///
+    /// Will overwite any existing data in the file.
     #[clap(long, value_hint = ValueHint::FilePath)]
     results_file: Option<PathBuf>,
 }
