@@ -470,6 +470,7 @@ impl TestScript {
 
             let mut builder = Builder::for_tests();
             builder.set_allow_topk(true);
+            builder.set_allow_mixed_comparisons(true);
 
             if run_opts.enable_reuse {
                 builder.set_reuse(Some(ReuseConfigType::Finkelstein))

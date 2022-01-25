@@ -1449,8 +1449,9 @@ fn build_view_query(
     let keys = if raw_keys.is_empty() {
         bogo
     } else {
-        let mut binops = binops.into_iter().map(|(_, b)| b).unique();
-        let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
+        let mut unique_binops = binops.iter().map(|(_, b)| *b).unique();
+        let binop_to_use = unique_binops.next().unwrap_or(BinaryOperator::Equal);
+        let mixed_binops = unique_binops.next().is_some();
 
         let key_types = key_map
             .iter()
@@ -1462,7 +1463,11 @@ fn build_view_query(
             .into_iter()
             .map(|key| {
                 let mut k = vec![];
-                let mut between: Option<(Vec<DataType>, Vec<DataType>)> = None;
+                let mut bounds: Option<(Vec<DataType>, Vec<DataType>)> = if mixed_binops {
+                    Some((vec![], vec![]))
+                } else {
+                    None
+                };
                 for (view_placeholder, key_column_idx) in key_map {
                     match view_placeholder {
                         ViewPlaceholder::Generated => continue,
@@ -1477,7 +1482,39 @@ fn build_view_query(
                             };
                             // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
                             let value = key[*idx - 1].coerce_to(key_type)?.into_owned();
-                            k.push(value);
+                            if let Some((lower_bound, upper_bound)) = &mut bounds {
+                                let binop = binops[*idx - 1].1;
+                                match binop {
+                                    BinaryOperator::Like
+                                    | BinaryOperator::NotLike
+                                    | BinaryOperator::ILike
+                                    | BinaryOperator::NotILike => {
+                                        internal!("Already should have matched on LIKE above")
+                                    }
+
+                                    BinaryOperator::Equal => {
+                                        lower_bound.push(value.clone());
+                                        upper_bound.push(value);
+                                    }
+                                    BinaryOperator::GreaterOrEqual => {
+                                        lower_bound.push(value);
+                                        upper_bound.push(DataType::Max);
+                                    }
+                                    BinaryOperator::LessOrEqual => {
+                                        lower_bound.push(DataType::None); // NULL is the minimum DataType
+                                        upper_bound.push(value);
+                                    }
+                                    BinaryOperator::Greater | BinaryOperator::Less => {
+                                        unsupported!("TODO: support exclusive bounds")
+                                    }
+                                    op => unsupported!(
+                                        "Unsupported binary operator in query: `{}`",
+                                        op
+                                    ),
+                                }
+                            } else {
+                                k.push(value);
+                            }
                         }
                         ViewPlaceholder::Between(lower_idx, upper_idx) => {
                             let key_type = key_types[key_column_idx];
@@ -1485,18 +1522,15 @@ fn build_view_query(
                             let lower_value = key[*lower_idx - 1].coerce_to(key_type)?.into_owned();
                             let upper_value = key[*upper_idx - 1].coerce_to(key_type)?.into_owned();
                             let (lower_key, upper_key) =
-                                between.get_or_insert_with(Default::default);
+                                bounds.get_or_insert_with(Default::default);
                             lower_key.push(lower_value);
                             upper_key.push(upper_value);
                         }
                     };
                 }
 
-                if let Some((lower, upper)) = between {
-                    if !k.is_empty() {
-                        unsupported!("Can't currently mix BETWEEN and regular parameters");
-                    }
-
+                if let Some((lower, upper)) = bounds {
+                    debug_assert!(k.is_empty());
                     Ok(KeyComparison::Range((
                         Bound::Included(lower.try_into()?),
                         Bound::Included(upper.try_into()?),
@@ -1724,6 +1758,56 @@ mod tests {
                     operator: ViewQueryOperator::ILike,
                     value: DataType::from("%a%")
                 }]
+            );
+        }
+
+        #[test]
+        fn mixed_equal_and_inclusive() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(2), 1),
+                    (ViewPlaceholder::OneToOne(1), 0),
+                ],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x >= $1 AND t.y = $2"),
+                vec![vec![DataType::from(1), DataType::from("a")].into()],
+                None,
+            )
+            .unwrap();
+
+            assert!(query.filters.is_empty());
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::from_range(
+                    &(vec1![DataType::from("a"), DataType::from(1)]
+                        ..=vec1![DataType::from("a"), DataType::Max])
+                )]
+            );
+        }
+
+        #[test]
+        fn mixed_equal_and_between() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(3), 1),
+                    (ViewPlaceholder::Between(1, 2), 0),
+                ],
+                &parse_select_statement(
+                    "SELECT t.x FROM t WHERE t.x BETWEEN $1 AND $2 AND t.y = $3",
+                ),
+                vec![vec![DataType::from(1), DataType::from(2), DataType::from("a")].into()],
+                None,
+            )
+            .unwrap();
+
+            assert!(query.filters.is_empty());
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::from_range(
+                    &(vec1![DataType::from("a"), DataType::from(1)]
+                        ..=vec1![DataType::from("a"), DataType::from(2)])
+                )]
             );
         }
     }
