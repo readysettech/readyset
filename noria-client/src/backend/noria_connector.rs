@@ -1401,7 +1401,7 @@ fn build_view_query(
     let bogo = vec![vec1![DataType::from(0i32)].into()];
     let mut binops = utils::get_select_statement_binops(q);
     let mut filter_op_idx = None;
-    let filters = binops
+    let mut filters = binops
         .iter()
         .enumerate()
         .filter_map(|(i, (col, binop))| {
@@ -1504,8 +1504,23 @@ fn build_view_query(
                                         lower_bound.push(DataType::None); // NULL is the minimum DataType
                                         upper_bound.push(value);
                                     }
-                                    BinaryOperator::Greater | BinaryOperator::Less => {
-                                        unsupported!("TODO: support exclusive bounds")
+                                    BinaryOperator::Greater => {
+                                        lower_bound.push(value.clone());
+                                        upper_bound.push(DataType::Max);
+                                        filters.push(ViewQueryFilter {
+                                            column: *key_column_idx,
+                                            operator: ViewQueryOperator::NotEqual,
+                                            value,
+                                        });
+                                    }
+                                    BinaryOperator::Less => {
+                                        lower_bound.push(DataType::None); // NULL is the minimum DataType
+                                        upper_bound.push(value.clone());
+                                        filters.push(ViewQueryFilter {
+                                            column: *key_column_idx,
+                                            operator: ViewQueryOperator::NotEqual,
+                                            value,
+                                        });
                                     }
                                     op => unsupported!(
                                         "Unsupported binary operator in query: `{}`",
@@ -1807,6 +1822,37 @@ mod tests {
                 vec![KeyComparison::from_range(
                     &(vec1![DataType::from("a"), DataType::from(1)]
                         ..=vec1![DataType::from("a"), DataType::from(2)])
+                )]
+            );
+        }
+
+        #[test]
+        fn mixed_equal_and_exclusive() {
+            let query = build_view_query(
+                &*SCHEMA,
+                &[
+                    (ViewPlaceholder::OneToOne(2), 1),
+                    (ViewPlaceholder::OneToOne(1), 0),
+                ],
+                &parse_select_statement("SELECT t.x FROM t WHERE t.x > $1 AND t.y = $2"),
+                vec![vec![DataType::from(1), DataType::from("a")].into()],
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(
+                query.filters,
+                vec![ViewQueryFilter {
+                    column: 0,
+                    operator: ViewQueryOperator::NotEqual,
+                    value: 1.into()
+                }]
+            );
+            assert_eq!(
+                query.key_comparisons,
+                vec![KeyComparison::from_range(
+                    &(vec1![DataType::from("a"), DataType::from(1)]
+                        ..=vec1![DataType::from("a"), DataType::Max])
                 )]
             );
         }
