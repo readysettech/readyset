@@ -24,7 +24,7 @@ use crate::utils;
 
 use crate::backend::SelectSchema;
 use itertools::Itertools;
-use noria::{ColumnSchema, KeyComparison, ViewPlaceholder};
+use noria::{ColumnSchema, KeyColumnIdx, KeyComparison, ViewPlaceholder, ViewSchema};
 use noria_errors::ReadySetError::PreparedStatementMissing;
 use noria_errors::{internal, internal_err, invariant_eq, table_err, unsupported, unsupported_err};
 use std::fmt;
@@ -1381,26 +1381,19 @@ impl NoriaConnector {
     }
 }
 
-/// Run the supplied [`SelectStatement`] on the supplied [`View`]
-/// Assumption: the [`View`] was created for that specific [`SelectStatement`]
-#[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
-async fn do_read<'a>(
-    getter: &'a mut View,
+/// Build a [`ViewQuery`] for performing a lookup of the given `q` with the given `raw_keys`,
+/// provided `getter_schema` and `key_map` from the [`View`] itself.
+fn build_view_query(
+    getter_schema: &ViewSchema,
+    key_map: &[(ViewPlaceholder, KeyColumnIdx)],
     q: &nom_sql::SelectStatement,
     mut raw_keys: Vec<Cow<'_, [DataType]>>,
     ticket: Option<Timestamp>,
-) -> ReadySetResult<QueryResult<'a>> {
-    trace!("select::access view");
-    let getter_schema = getter
-        .schema()
-        .ok_or_else(|| internal_err("No schema for view"))?;
+) -> ReadySetResult<ViewQuery> {
     let projected_schema = getter_schema.schema(SchemaType::ProjectedSchema);
 
     let mut key_types = getter_schema.col_types(
-        getter
-            .key_map()
-            .iter()
-            .map(|(_, key_column_idx)| *key_column_idx),
+        key_map.iter().map(|(_, key_column_idx)| *key_column_idx),
         SchemaType::ProjectedSchema,
     )?;
 
@@ -1453,15 +1446,13 @@ async fn do_read<'a>(
         binops.remove(filter_op_idx);
     }
 
-    let use_bogo = raw_keys.is_empty();
-    let keys = if use_bogo {
+    let keys = if raw_keys.is_empty() {
         bogo
     } else {
         let mut binops = binops.into_iter().map(|(_, b)| b).unique();
         let binop_to_use = binops.next().unwrap_or(BinaryOperator::Equal);
 
-        let key_types = getter
-            .key_map()
+        let key_types = key_map
             .iter()
             .zip(key_types)
             .map(|((_, key_column_idx), key_type)| (*key_column_idx, key_type))
@@ -1472,7 +1463,7 @@ async fn do_read<'a>(
             .map(|key| {
                 let mut k = vec![];
                 let mut between: Option<(Vec<DataType>, Vec<DataType>)> = None;
-                for (view_placeholder, key_column_idx) in getter.key_map() {
+                for (view_placeholder, key_column_idx) in key_map {
                     match view_placeholder {
                         ViewPlaceholder::Generated => continue,
                         ViewPlaceholder::OneToOne(idx) => {
@@ -1512,15 +1503,33 @@ async fn do_read<'a>(
             .collect::<ReadySetResult<Vec<_>>>()?
     };
 
-    let vq = ViewQuery {
+    Ok(ViewQuery {
         key_comparisons: keys,
         block: true,
         filters,
-        // TODO(andrew): Add a timestamp to views when RYW consistency
-        // is specified.
         timestamp: ticket,
-    };
+    })
+}
 
+/// Run the supplied [`SelectStatement`] on the supplied [`View`]
+/// Assumption: the [`View`] was created for that specific [`SelectStatement`]
+#[allow(clippy::needless_lifetimes)] // clippy erroneously thinks the timelife can be elided
+async fn do_read<'a>(
+    getter: &'a mut View,
+    q: &nom_sql::SelectStatement,
+    raw_keys: Vec<Cow<'_, [DataType]>>,
+    ticket: Option<Timestamp>,
+) -> ReadySetResult<QueryResult<'a>> {
+    let use_bogo = raw_keys.is_empty();
+    let vq = build_view_query(
+        getter
+            .schema()
+            .ok_or_else(|| internal_err("No schema for view"))?,
+        getter.key_map(),
+        q,
+        raw_keys,
+        ticket,
+    )?;
     let data = getter.raw_lookup(vq).await?;
     trace!("select::complete");
 
