@@ -61,6 +61,24 @@ impl SizeOf for Vec<DataType> {
     }
 }
 
+impl SizeOf for Box<[DataType]> {
+    fn deep_size_of(&self) -> u64 {
+        use std::mem::size_of_val;
+
+        size_of_val(self) as u64 + self.iter().fold(0u64, |acc, d| acc + d.deep_size_of()) + 8
+    }
+
+    fn size_of(&self) -> u64 {
+        use std::mem::{size_of, size_of_val};
+
+        size_of_val(self) as u64 + size_of::<DataType>() as u64 * self.len() as u64
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
 /// A reference to a node, and potentially a partial index on that node
 ///
 /// The index is only included if partial materialization is possible; if it's present, it

@@ -143,6 +143,7 @@ impl<'a, T, S> IntoIterator for &'a Values<T, S> {
     }
 }
 
+/// An iterator over Values
 pub struct ValuesIter<'a, T, S>(ValuesIterInner<'a, T, S>);
 
 #[non_exhaustive]

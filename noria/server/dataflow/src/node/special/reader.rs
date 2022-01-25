@@ -44,13 +44,13 @@ pub struct PostLookup {
 impl PostLookup {
     /// Apply this set of post-lookup operations, plus an optional [`ViewQueryFilter`], to the given
     /// set of results returned from a lookup
-    pub fn process<'a, I>(
+    pub fn process<'a, 'b: 'a, I>(
         &'a self,
         iter: I,
         filter: &Option<ViewQueryFilter>,
     ) -> Vec<Vec<&'a DataType>>
     where
-        I: Iterator<Item = &'a Vec<DataType>> + ExactSizeIterator,
+        I: Iterator<Item = &'b Box<[DataType]>> + ExactSizeIterator,
         Self: 'a,
     {
         let data = iter.map(|r| r.iter().collect::<Vec<_>>());

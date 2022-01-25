@@ -1975,10 +1975,7 @@ impl TryFrom<&'_ DataType> for f64 {
 
 impl From<String> for DataType {
     fn from(s: String) -> Self {
-        #[allow(clippy::unwrap_used)]
-        // The only way for this to fail is if the `String` is not a valid UTF-8 String,
-        // which can never happen since all Strings in Rust are valid UTF-8 encoded.
-        DataType::try_from(s.as_bytes()).unwrap()
+        DataType::from(s.as_str())
     }
 }
 

@@ -450,7 +450,7 @@ fn do_lookup(
     if let Some(equal) = &key.equal() {
         reader
             .try_find_and(*equal, |rs| {
-                let filtered = reader.post_lookup.process(rs.into_iter(), filter);
+                let filtered = reader.post_lookup.process(rs, filter);
                 serialize(filtered)
             })
             .map(|r| r.0)

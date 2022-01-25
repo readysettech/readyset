@@ -6,18 +6,26 @@ use ahash::RandomState;
 use noria::consistency::Timestamp;
 
 pub(super) enum Handle {
-    Single(reader_map::handles::WriteHandle<DataType, Vec<DataType>, i64, Timestamp, RandomState>),
+    Single(
+        reader_map::handles::WriteHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>,
+    ),
     Double(
         reader_map::handles::WriteHandle<
             (DataType, DataType),
-            Vec<DataType>,
+            Box<[DataType]>,
             i64,
             Timestamp,
             RandomState,
         >,
     ),
     Many(
-        reader_map::handles::WriteHandle<Vec<DataType>, Vec<DataType>, i64, Timestamp, RandomState>,
+        reader_map::handles::WriteHandle<
+            Vec<DataType>,
+            Box<[DataType]>,
+            i64,
+            Timestamp,
+            RandomState,
+        >,
     ),
 }
 
@@ -165,6 +173,7 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
+                            let r = r.into_boxed_slice();
                             memory_delta += r.deep_size_of() as isize;
                             h.insert(r[key[0]].clone(), r);
                         }
@@ -173,6 +182,7 @@ impl Handle {
                             // last record. this means that future lookups will fail, and cause a
                             // replay, which will produce an empty result. this will work, but is
                             // somewhat inefficient.
+                            let r = r.into_boxed_slice();
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove_value(r[key[0]].clone(), r);
                         }
@@ -185,10 +195,12 @@ impl Handle {
                     debug_assert!(r.len() >= cols);
                     match r {
                         Record::Positive(r) => {
+                            let r = r.into_boxed_slice();
                             memory_delta += r.deep_size_of() as isize;
                             h.insert((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
                         Record::Negative(r) => {
+                            let r = r.into_boxed_slice();
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove_value((r[key[0]].clone(), r[key[1]].clone()), r);
                         }
@@ -201,10 +213,12 @@ impl Handle {
                     let key = key.iter().map(|&k| &r[k]).cloned().collect();
                     match r {
                         Record::Positive(r) => {
+                            let r = r.into_boxed_slice();
                             memory_delta += r.deep_size_of() as isize;
                             h.insert(key, r);
                         }
                         Record::Negative(r) => {
+                            let r = r.into_boxed_slice();
                             memory_delta -= r.deep_size_of() as isize;
                             h.remove_value(key, r);
                         }
