@@ -180,15 +180,26 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    #{ name = "ansi_term", version = "=0.11.0" },
+    # Requires removing structopt from a binary.
+    { name = "heck", version = "0.3.3" }
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    { name = "clap", version = "2.33.3" },
-    { name = "time", version = "0.1.44" }
+    { name = "nom", version = "5.1.2" },
+    { name = "rusty-fork", version = "0.3.0" },
+    { name = "zookeeper", version = "0.6.1" },
+    { name = "prettytable-rs", version = "0.8.0" },
+    { name = "handlebars", version = "4.1" },
+    { name = "fail", version = "0.5.0" },
+    { name = "jemalloc-ctl", version = "0.3.3" },
+    { name = "rust_decimal", version = "1.17.0" },
+    { name = "prometheus-http-query", version = "0.3.0" },
+    { name = "mysql_common", version = "0.28.0" },
+    { name = "consulrs", version = "0.1.0" },
+    { name = "neon", version = "0.9.1" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -205,7 +216,9 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    "https://github.com/jmgilman/rustify"
+]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
