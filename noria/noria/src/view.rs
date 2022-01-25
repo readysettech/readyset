@@ -851,7 +851,7 @@ pub(crate) mod results;
 use self::results::{Results, Row};
 
 /// Binary predicate operator for a [`ViewQueryFilter`]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewQueryOperator {
     /// String matching with LIKE
     Like,
@@ -875,7 +875,7 @@ impl TryFrom<nom_sql::BinaryOperator> for ViewQueryOperator {
 }
 
 /// Filter the results of a view query after they're returned from the underlying reader
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ViewQueryFilter {
     /// Column in the record to filter against
     pub column: usize,
