@@ -253,6 +253,20 @@ async fn balance_base_table_domains() {
     deployment.teardown().await.unwrap();
 }
 
+async fn get_metric(
+    deployment: &mut DeploymentHandle,
+    address: Url,
+    name: &str,
+) -> Option<DumpedMetricValue> {
+    let metrics = deployment
+        .metrics()
+        .get_metrics_for_server(address)
+        .await
+        .unwrap()
+        .metrics;
+    get_metric!(metrics, name)
+}
+
 // Validate that, on promotion of a follower to leader, its
 // `CONTROLLER_IS_LEADER` metric changes from 0 (not leader) to 1 (leader)
 #[clustertest]
@@ -270,15 +284,14 @@ async fn new_leader_metrics() {
         .unwrap();
 
     // `new_server` should be reporting that it's a follower (0)
-    let metrics = deployment
-        .metrics()
-        .get_metrics_for_server(new_server.clone())
-        .await
-        .unwrap()
-        .metrics;
     assert_eq!(
-        get_metric!(metrics, recorded::CONTROLLER_IS_LEADER),
-        Some(DumpedMetricValue::Gauge(0f64))
+        get_metric(
+            &mut deployment,
+            new_server.clone(),
+            recorded::CONTROLLER_IS_LEADER
+        )
+        .await,
+        Some(DumpedMetricValue::Gauge(0f64)),
     );
 
     // Killing the original leader will result in `new_server` becoming leader
@@ -289,17 +302,56 @@ async fn new_leader_metrics() {
 
     // `new_server` should have received its promotion to leader now, and be
     // reporting that it's the leader (1)
-    let metrics = deployment
-        .metrics()
-        .get_metrics_for_server(new_server.clone())
-        .await
-        .unwrap()
-        .metrics;
-
     assert_eq!(
-        get_metric!(metrics, recorded::CONTROLLER_IS_LEADER),
-        Some(DumpedMetricValue::Gauge(1f64))
+        get_metric(
+            &mut deployment,
+            new_server.clone(),
+            recorded::CONTROLLER_IS_LEADER
+        )
+        .await,
+        Some(DumpedMetricValue::Gauge(1f64)),
     );
+
+    deployment.teardown().await.unwrap();
+}
+
+// Validate that `NORIA_STARTUP_TIMESTAMP` is being populated with a reasonably
+// plausible timestamp
+#[clustertest]
+async fn ensure_startup_timestamp_metric() {
+    // TODO: Move over to an integration test when metrics support is added to
+    // integration tests
+    // All received times must be at least this value
+    let test_start_timetsamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as f64;
+
+    let mut deployment = DeploymentBuilder::new("ct_ensure_startup_timestamp_metric")
+        .with_servers(2, ServerParams::default())
+        .deploy_mysql()
+        .deploy_mysql_adapter()
+        .start()
+        .await
+        .unwrap();
+
+    for address in deployment.server_addrs() {
+        let found_timestamp = match get_metric(&mut deployment, address.clone(), recorded::NORIA_STARTUP_TIMESTAMP).await {
+            Some(DumpedMetricValue::Counter(v)) => v,
+            err => panic!(
+                "For noria-server {}, expected a Some(DumpedMetricValue::Counter), but instead received {:?}",
+                address, err
+            ),
+        };
+
+        assert!(
+            test_start_timetsamp <= found_timestamp,
+            "noria-server {} has too early of a timestamp ({} but should be after {})",
+            address,
+            found_timestamp,
+            test_start_timetsamp
+        );
+    }
 
     deployment.teardown().await.unwrap();
 }
