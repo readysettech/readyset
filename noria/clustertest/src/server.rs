@@ -105,7 +105,11 @@ impl AdapterBuilder {
     pub fn new(binary: &Path) -> Self {
         Self {
             binary: binary.to_owned(),
-            args: vec!["--allow-unauthenticated-connections".to_string()],
+            args: vec![
+                "--allow-unauthenticated-connections".to_string(),
+                "--migration-request-timeout-ms".to_string(),
+                "1000".to_string(),
+            ],
         }
     }
 
