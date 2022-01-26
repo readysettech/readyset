@@ -2,13 +2,14 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use clap::Parser;
 use futures_util::future::{self, Either};
 use metrics_exporter_prometheus::PrometheusBuilder;
 
+use noria::metrics::recorded;
 use noria_server::consensus::AuthorityType;
 use noria_server::metrics::{install_global_recorder, CompositeMetricsRecorder, MetricsRecorder};
 use noria_server::{Builder, DurabilityMode, NoriaMetricsRecorder, ReuseConfigType, VolumeId};
@@ -221,6 +222,14 @@ fn main() -> anyhow::Result<()> {
         }
         install_global_recorder(CompositeMetricsRecorder::with_recorders(recs)).unwrap();
     }
+
+    metrics::counter!(
+        recorded::NORIA_STARTUP_TIMESTAMP,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    );
 
     let mut builder = Builder::default();
     builder.set_listen_addr(opts.address);
