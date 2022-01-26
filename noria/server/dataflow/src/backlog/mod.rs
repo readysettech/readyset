@@ -96,7 +96,6 @@ fn new_inner(
     let (w, r) = match index.len() {
         0 => unreachable!(),
         1 => make!(Single),
-        2 => make!(Double),
         _ => make!(Many),
     };
 
@@ -129,20 +128,6 @@ fn key_to_single(k: Key) -> Cow<DataType> {
         Cow::Borrowed(k) => Cow::Borrowed(&k[0]),
     }
 }
-
-fn key_to_double(k: Key) -> Cow<(DataType, DataType)> {
-    assert_eq!(k.len(), 2);
-    match k {
-        Cow::Owned(k) => {
-            let mut k = k.into_iter();
-            let k1 = k.next().unwrap();
-            let k2 = k.next().unwrap();
-            Cow::Owned((k1, k2))
-        }
-        Cow::Borrowed(k) => Cow::Owned((k[0].clone(), k[1].clone())),
-    }
-}
-
 pub(crate) struct WriteHandle {
     handle: multiw::Handle,
     partial: bool,

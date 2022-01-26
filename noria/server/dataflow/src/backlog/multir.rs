@@ -12,15 +12,6 @@ use vec1::{vec1, Vec1};
 #[derive(Clone, Debug)]
 pub(super) enum Handle {
     Single(reader_map::handles::ReadHandle<DataType, Box<[DataType]>, i64, Timestamp, RandomState>),
-    Double(
-        reader_map::handles::ReadHandle<
-            (DataType, DataType),
-            Box<[DataType]>,
-            i64,
-            Timestamp,
-            RandomState,
-        >,
-    ),
     Many(
         reader_map::handles::ReadHandle<
             Vec<DataType>,
@@ -43,11 +34,6 @@ pub enum LookupError {
     /// Second field contains the metadata of the handle
     MissPointSingle(DataType, i64),
 
-    /// A double-keyed point query missed
-    ///
-    /// Second field contains the metadata of the handle
-    MissPointDouble((DataType, DataType), i64),
-
     /// A many-keyed point query missed
     ///
     /// Second field contains the metadata of the handle
@@ -57,11 +43,6 @@ pub enum LookupError {
     ///
     /// Second field contains the metadata of the handle
     MissRangeSingle(Vec<BoundPair<DataType>>, i64),
-
-    /// A double-keyed range query missed
-    ///
-    /// Second field contains the metadata of the handle
-    MissRangeDouble(Vec<BoundPair<(DataType, DataType)>>, i64),
 
     /// A many-keyed range query missed
     ///
@@ -76,10 +57,8 @@ impl LookupError {
         matches!(
             self,
             Self::MissPointSingle(_, _)
-                | Self::MissPointDouble(_, _)
                 | Self::MissPointMany(_, _)
                 | Self::MissRangeSingle(_, _)
-                | Self::MissRangeDouble(_, _)
                 | Self::MissRangeMany(_, _)
         )
     }
@@ -88,10 +67,8 @@ impl LookupError {
     pub fn meta(&self) -> Option<i64> {
         match self {
             LookupError::MissPointSingle(_, meta)
-            | LookupError::MissPointDouble(_, meta)
             | LookupError::MissPointMany(_, meta)
             | LookupError::MissRangeSingle(_, meta)
-            | LookupError::MissRangeDouble(_, meta)
             | LookupError::MissRangeMany(_, meta) => Some(*meta),
             _ => None,
         }
@@ -103,21 +80,10 @@ impl LookupError {
         match self {
             LookupError::NotReady => vec![],
             LookupError::MissPointSingle(x, _) => vec![vec1![x].into()],
-            LookupError::MissPointDouble((x, y), _) => vec![vec1![x, y].into()],
             LookupError::MissPointMany(xs, _) => vec![xs.try_into().unwrap()],
             LookupError::MissRangeSingle(ranges, _) => ranges
                 .into_iter()
                 .map(|(lower, upper)| (lower.map(|x| vec1![x]), upper.map(|x| vec1![x])).into())
-                .collect(),
-            LookupError::MissRangeDouble(ranges, _) => ranges
-                .into_iter()
-                .map(|(lower, upper)| {
-                    (
-                        lower.map(|(x, y)| vec1![x, y]),
-                        upper.map(|(x, y)| vec1![x, y]),
-                    )
-                        .into()
-                })
                 .collect(),
             LookupError::MissRangeMany(ranges, _) => ranges
                 .into_iter()
@@ -140,7 +106,6 @@ impl Handle {
     pub(super) fn timestamp(&self) -> Option<Timestamp> {
         match *self {
             Handle::Single(ref h) => h.timestamp(),
-            Handle::Double(ref h) => h.timestamp(),
             Handle::Many(ref h) => h.timestamp(),
         }
     }
@@ -148,7 +113,6 @@ impl Handle {
     pub(super) fn len(&self) -> usize {
         match *self {
             Handle::Single(ref h) => h.len(),
-            Handle::Double(ref h) => h.len(),
             Handle::Many(ref h) => h.len(),
         }
     }
@@ -156,7 +120,6 @@ impl Handle {
     pub(super) fn keys(&self) -> Vec<Vec<DataType>> {
         match *self {
             Handle::Single(ref h) => h.map_into(|k, _| vec![k.clone()]),
-            Handle::Double(ref h) => h.map_into(|(k1, k2), _| vec![k1.clone(), k2.clone()]),
             Handle::Many(ref h) => h.map_into(|ks, _| ks.clone()),
         }
     }
@@ -175,14 +138,6 @@ impl Handle {
                 let v = map
                     .get(&key[0])
                     .ok_or_else(|| MissPointSingle(key[0].clone(), m))?;
-                Ok((then(v.iter()), m))
-            }
-            Handle::Double(ref h) => {
-                assert_eq!(key.len(), 2);
-                let tuple_key = (key[0].clone(), key[1].clone());
-                let map = h.enter().ok_or(NotReady)?;
-                let m = *map.meta();
-                let v = map.get(&tuple_key).ok_or(MissPointDouble(tuple_key, m))?;
                 Ok((then(v.iter()), m))
             }
             Handle::Many(ref h) => {
@@ -204,13 +159,6 @@ impl Handle {
                 assert_eq!(key.len(), 1);
                 let map = h.enter()?;
                 Some(map.contains_key(&key[0]))
-            }
-            Handle::Double(ref h) => {
-                assert_eq!(key.len(), 2);
-                let tuple_key = (key[0].clone(), key[1].clone());
-                let map = h.enter()?;
-                let res = map.contains_key(&tuple_key);
-                Some(res)
             }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
@@ -251,23 +199,6 @@ impl Handle {
                     .map_err(|Miss(misses)| LookupError::MissRangeSingle(misses, meta))?;
                 Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
             }
-            Handle::Double(ref h) => {
-                let map = h.enter().ok_or(NotReady)?;
-                let meta = *map.meta();
-                let start_bound = range.start_bound().map(|r| {
-                    assert_eq!(r.len(), 2);
-                    (r[0].clone(), r[1].clone())
-                });
-                let end_bound = range.end_bound().map(|r| {
-                    assert_eq!(r.len(), 2);
-                    (r[0].clone(), r[1].clone())
-                });
-                let range = (start_bound, end_bound);
-                let records = map
-                    .range(&range)
-                    .map_err(|Miss(misses)| LookupError::MissRangeDouble(misses, meta))?;
-                Ok((records.map(|(_, row)| then(row.iter())).collect(), meta))
-            }
             Handle::Many(ref h) => {
                 let map = h.enter().ok_or(NotReady)?;
                 let meta = *map.meta();
@@ -301,18 +232,6 @@ impl Handle {
                 });
                 Some(map.contains_range(&(start_bound, end_bound)))
             }
-            Handle::Double(ref h) => {
-                let map = h.enter()?;
-                let start_bound = range.start_bound().map(|r| {
-                    assert_eq!(r.len(), 2);
-                    (r[0].clone(), r[1].clone())
-                });
-                let end_bound = range.end_bound().map(|r| {
-                    assert_eq!(r.len(), 2);
-                    (r[0].clone(), r[1].clone())
-                });
-                Some(map.contains_range(&(start_bound, end_bound)))
-            }
             Handle::Many(ref h) => {
                 let map = h.enter()?;
                 Some(map.contains_range(&(range.start_bound(), range.end_bound())))
@@ -339,8 +258,8 @@ mod tests {
         (w, Handle::Single(r))
     }
 
-    fn make_double() -> (
-        WriteHandle<(DataType, DataType), Box<[DataType]>, i64, Timestamp, RandomState>,
+    fn make_many() -> (
+        WriteHandle<Vec<DataType>, Box<[DataType]>, i64, Timestamp, RandomState>,
         Handle,
     ) {
         let (w, r) = reader_map::Options::default()
@@ -348,16 +267,16 @@ mod tests {
             .with_timestamp(Timestamp::default())
             .with_hasher(RandomState::default())
             .construct();
-        (w, Handle::Double(r))
+        (w, Handle::Many(r))
     }
 
     proptest! {
         #[test]
-        fn get_double(key: (DataType, DataType), val: Box<[DataType]>) {
-            let (mut w, handle) = make_double();
-            w.insert(key.clone(), val.clone());
+        fn get_double(key: [DataType; 2], val: Box<[DataType]>) {
+            let (mut w, handle) = make_many();
+            w.insert(key.to_vec(), val.clone());
             w.publish();
-            handle.meta_get_and(&[key.0, key.1], |result| {
+            handle.meta_get_and(&key[..], |result| {
                 assert!(result.eq([&val]));
             }).unwrap();
         }
@@ -403,17 +322,17 @@ mod tests {
 
     #[test]
     fn get_double_range() {
-        let (mut w, handle) = make_double();
+        let (mut w, handle) = make_many();
         w.insert_range(
             (0..10)
                 .map(|n: i32| {
                     (
-                        (n.into(), n.into()),
+                        vec![n.into(), n.into()],
                         vec![n.into(), n.into()].into_boxed_slice(),
                     )
                 })
                 .collect(),
-            (0i32.into(), 0i32.into())..(10i32.into(), 10i32.into()),
+            vec![0i32.into(), 0i32.into()]..vec![10i32.into(), 10i32.into()],
         );
         w.publish();
 
