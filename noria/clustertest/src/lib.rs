@@ -12,18 +12,46 @@
 //!     a deployment can be queried for metrics separately via [`MetricsClient`]
 //!     which can be checked in clustertests.
 //!
+//! # Preparing to run clustertests
+//! Clustertests require external resources in order to run: a MySQL server, an authority (consul)
+//! and binaries for noria-server and noria-mysql. Clustertest defaults are set to match the
+//! developer docker-compose in `//readyset` and the default flags for noria-server and
+//! noria-mysql.
+//!
+//! ```bash
+//! # Build the binaries with the failure injection feature for most clustertests. Binaries built
+//! to //target/debug are used by default.
+//! cargo build --bin noria-server --bin noria-mysql --features failure_injection
+//!
+//! # Spin up the developer docker stack to start MySQL and a consul authority.
+//! cd //readyset
+//! cp docker-compose.override.yml.example docker-compose.override.yml
+//! docker-compose up -d
+//! ```
+//!
+//! See [Docs/Running ReadySet](http://docs/running-readyset.html#consul--mysql-docker-stack)
+//! for more information on the docker stack.
+//!
 //! # Running clustertests
 //!
 //! Clustertests are run through `cargo test`.
 //! ```bash
+//! # Running clustertests with the default arguments.
 //! cargo test -p clustertest
+//!
+//! # Modifying clustertests via environment arguments.
+//! MYSQL_PORT=3310 cargo test -p clustertest
+//!
+//! # Configuring noria-server logging via logging environment variables.
+//! LOG_LEVEL=debug cargo test -p clustertest
 //! ```
 //!
-//! Clustertests can be configured via environment variables. Since clustertests
-//! depend on external resources in order to run: a MySQL server,
-//! prebuilt binaries for noria-server and noria-mysql, and a running authority,
-//! a clustertest user should take care that these environment variables are set
-//! if the defaults are not sufficient.
+//! Clustertests can be configured via environment variables. Any environment variables are also
+//! passed to the child noria-server and noria-mysql processes, as a result, these processes can be
+//! futher configured through environment variables. This is helpful for configuring logging
+//! environment variables, such as `LOG_LEVEL`. See
+//! [Configuring Logging](http://docs/running-readyset.html#configuring-logging) for more
+//! information.
 //!
 //! * `AUTHORITY_ADDRESS`: The address of an authority, defaults to `127.0.0.1:8500`
 //!
@@ -33,8 +61,11 @@
 //! noria-mysql binaries, defaults to `$CARGO_MANIFEST_DIR/../../target/debug`,
 //! `readyset/target/debug`.
 //!
-//! * `MYSQL_HOST`: The host of the MySQL database to use as upstream, defaults to
+//! * `MYSQL_PORT`: The host of the MySQL database to use as upstream, defaults to
 //! `127.0.0.1`.
+//!
+//! * `MYSQL_PORT`: The port of the MySQL database to use as upstream, defaults to
+//! `3306`.
 //!
 //! * `MYSQL_ROOT_PASSWORD`: The password to use for the upstream MySQL database,
 //! defaults to `noria`.
@@ -191,6 +222,8 @@ struct Env {
     binary_path: PathBuf,
     #[serde(default = "default_mysql_host")]
     mysql_host: String,
+    #[serde(default = "default_mysql_port")]
+    mysql_port: String,
     #[serde(default = "default_root_password")]
     mysql_root_password: String,
 }
@@ -201,6 +234,10 @@ fn default_authority_address() -> String {
 
 fn default_mysql_host() -> String {
     "127.0.0.1".to_string()
+}
+
+fn default_mysql_port() -> String {
+    "3306".to_string()
 }
 
 fn default_authority() -> String {
@@ -284,8 +321,10 @@ pub struct DeploymentBuilder {
     authority: AuthorityType,
     /// The address of the authority.
     authority_address: String,
-    /// The address of the mysql host.
+    /// The host of the mysql db.
     mysql_host: String,
+    /// The port of the mysql db.
+    mysql_port: String,
     /// The root password for the mysql db.
     mysql_root_password: String,
     /// Are async migrations enabled on the adapter.
@@ -322,6 +361,7 @@ impl DeploymentBuilder {
             authority: AuthorityType::from_str(&env.authority).unwrap(),
             authority_address: env.authority_address,
             mysql_host: env.mysql_host,
+            mysql_port: env.mysql_port,
             mysql_root_password: env.mysql_root_password,
             async_migration_interval: None,
         }
@@ -423,10 +463,9 @@ impl DeploymentBuilder {
         // If this deployment includes binlog replication and a mysql instance.
         let mut upstream_mysql_addr = None;
         if self.mysql {
-            // TODO(justin): Parameterize port.
             let addr = format!(
-                "mysql://root:{}@{}:3306",
-                &self.mysql_root_password, &self.mysql_host
+                "mysql://root:{}@{}:{}",
+                &self.mysql_root_password, &self.mysql_host, &self.mysql_port
             );
             let opts = mysql_async::Opts::from_url(&addr).unwrap();
             let mut conn = mysql_async::Conn::new(opts).await.unwrap();
