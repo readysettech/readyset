@@ -17,6 +17,7 @@ use noria::metrics::recorded;
 use noria::{KeyComparison, ReadQuery, ReadReply, Tagged, ViewQuery, ViewQueryFilter};
 use pin_project::pin_project;
 use serde::ser::Serializer;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
@@ -421,7 +422,7 @@ pub(crate) async fn listen(
 
 fn serialize<'a, I>(rs: I) -> SerializedReadReplyBatch
 where
-    I: IntoIterator<Item = Vec<&'a DataType>>,
+    I: IntoIterator<Item = Vec<Cow<'a, DataType>>>,
     I::IntoIter: ExactSizeIterator,
 {
     let mut it = rs.into_iter().peekable();
@@ -627,6 +628,8 @@ impl BlockingRead {
 
 #[cfg(test)]
 mod readreply {
+    use std::borrow::Cow;
+
     use super::SerializedReadReplyBatch;
     use noria::{ReadReply, Tagged};
     use noria_data::DataType;
@@ -637,7 +640,12 @@ mod readreply {
                 tag: 32,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
                     .iter()
-                    .map(|d| super::serialize(d.iter().map(|v| v.iter().collect::<Vec<_>>())))
+                    .map(|d| {
+                        super::serialize(
+                            d.iter()
+                                .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
+                        )
+                    })
                     .collect())),
             })
             .unwrap(),
@@ -770,7 +778,12 @@ mod readreply {
                 tag,
                 v: ReadReply::Normal::<SerializedReadReplyBatch>(Ok(data
                     .iter()
-                    .map(|d| super::serialize(d.iter().map(|v| v.iter().collect::<Vec<_>>())))
+                    .map(|d| {
+                        super::serialize(
+                            d.iter()
+                                .map(|v| v.iter().map(Cow::Borrowed).collect::<Vec<_>>()),
+                        )
+                    })
                     .collect())),
             })
             .await

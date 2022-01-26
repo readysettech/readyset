@@ -1140,6 +1140,7 @@ fn make_post_lookup(
         limit,
         returned_cols,
         default_row,
+        aggregates: None, // TODO
     })
 }
 
