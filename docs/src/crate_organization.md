@@ -102,5 +102,48 @@ cargo upgrade [FLAGS] [OPTIONS] [dependency]...
 See [`cargo-edit`](https://crates.io/crates/cargo-edit) for other
 commands, options, and flags.
 
+## Cargo deny and duplicate crates
+`cargo deny check` is run on every changelist that modifies Cargo.lock.
+Among other things, it checks that the CL has not introduced any
+duplicate dependencies for crates. Duplicate crates will be built for every
+[SemVer incompatible](https://doc.rust-lang.org/cargo/reference/resolver.html)
+version of the crate, this can inflate the size of the ReadySet binary
+and will slow down compilation times. 
+
+> ```
+> /noria-server
+>   - zookeeper = "0.5"
+>       - reqwest = "0.10"
+>   - ...
+> 
+> /noria-psql
+>   - zookeeper = **"0.6"**
+>       - reqwest = **"0.11"**
+> ```
+>
+> The zookeeper dependencies specified by noria-server are not SemVer
+> compatible, as a result both versions of zookeeper will be built.
+> This problem is exacerbated by the dependencies of zookeeper also
+> being incompatible. **Dependencies of dependencies can also introduce
+> duplicate crates**.
+
+**Tips:** Prefer versions of crates that we already use. If these crates
+require an update, we can update them all at the same time. 
+
+### What if there is no alternative?
+If crate compatibility with the rest of the tree is not possible when
+changing or introducing dependencies, the `deny.toml` file can be used
+to skip crates/versions/dependency trees from our `cargo deny check`.
+This can be done by adding a dependency to `skip`. If a dependency has
+many incompatible dependant crates and is unlikely to get updated, the
+crate should be added to `skip-tree`, which skips the entire dependency
+tree originating from the crate. See
+[cargo-deny](https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html)
+for more information.
+
+
+
+
+
 
 
