@@ -54,8 +54,10 @@ steps:
       - echo "BENCHMARK_DATADIR_S3_KEY=readyset-devops-assets-build-us-east-2/benchmark-datadir-1.4.tgz" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO=${BUILDKITE_BUILD_CHECKOUT_PATH}/benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - echo "BENCHMARK_DATADIR_ARCHIVE_SAVE_AS=${BUILDKITE_BUILD_CHECKOUT_PATH}/tmp-benchmark-mysql-datadir-${BUILDKITE_COMMIT:0:7}.tgz" >> ./.buildkite/benchmark.env
+      - echo "BENCHMARK_ARTIFACT_DIR=${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" >> ./.buildkite/benchmark.env
       - 'echo +++ :stopwatch: Benchmark Execution'
       - ./.buildkite/orchestrate-benchmarks.sh
+      - cd "${BUILDKITE_BUILD_CHECKOUT_PATH}/artifacts-${BUILDKITE_COMMIT:0:7}" && buildkite-agent artifact upload *.log
     agents:
       queue: benchmarks
     depends_on:

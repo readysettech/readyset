@@ -20,11 +20,14 @@ BENCH_LOG_FAILURE_MSG='Benchmark failed to execute!'
 BENCHMARK_FILE_DIR=${BENCHMARK_FILE_DIR:-/usr/src/app/src/yaml/benchmarks/test}
 BENCHMARK_EAGER_EXIT="${BENCHMARK_EAGER_EXIT:-'enabled'}"
 REPL_AWAIT_SLEEP_DURATION=${REPL_AWAIT_SLEEP_DURATION:-120}
+
 # Benchmark duration controls, overridable from env vars in calling code
 FASTLY_READ_BENCHMARK_DURATION=${FASTLY_READ_BENCHMARK_DURATION:-120}
-
 # Used to calculate total duration
 BENCHMARK_START_TIME=$(date +%s)
+
+# Location to pass to benchmark binary as --results-file
+REPORT_SAVE_DIR=${REPORT_SAVE_DIR:-/tmp/artifacts}
 
 # ----------- [Functions] ----------------------------------- #
 
@@ -79,7 +82,8 @@ log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
 benchmarks \
     --skip-setup \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file"
+    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -98,7 +102,9 @@ bench_file='cache_hit_fastly_small.yaml'
 project='Fastly'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
-benchmarks --benchmark "$BENCHMARK_FILE_DIR/$bench_file"
+benchmarks \
+    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -112,7 +118,8 @@ log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 benchmarks \
     --run-for "${FASTLY_READ_BENCHMARK_DURATION}" \
     --skip-setup \
-    --benchmark "$BENCHMARK_FILE_DIR/$bench_file"
+    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -123,7 +130,9 @@ bench_file="scale_connections_small.yaml"
 project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}"  "1"
 
-benchmarks --benchmark "$BENCHMARK_FILE_DIR/$bench_file"
+benchmarks \
+    --benchmark "$BENCHMARK_FILE_DIR/$bench_file" \
+    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 
@@ -133,7 +142,9 @@ bench_file='scale_views_small.yaml'
 project='Internal'
 log_benchmark "${project}" "${bench_file}" "${BENCH_LOG_START_MSG}" "1"
 
-benchmarks --benchmark "${BENCHMARK_FILE_DIR}/$bench_file"
+benchmarks \
+    --benchmark "${BENCHMARK_FILE_DIR}/$bench_file" \
+    --results-file "${REPORT_SAVE_DIR}/$bench_file.log"
 
 check_benchmark_exit_code $? "${project}" "${bench_file}"
 

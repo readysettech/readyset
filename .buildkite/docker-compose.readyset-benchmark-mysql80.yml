@@ -110,11 +110,12 @@ services:
       REPL_AWAIT_SLEEP_DURATION: 60
       IRL_BENCHMARK_DURATION: 60
       FASTLY_READ_BENCHMARK_DURATION: 60
+      REPORT_SAVE_DIR: /tmp/artifacts
       # V2.0 - we'll set these
       # PROMETHEUS_PUSH_GATEWAY: ""
       # PROMETHEUS_SERVER: ""
-    # volumes:
-    #   - ../scripts:/usr/src/app/scripts
+    volumes:
+      - ${HOST_ARTIFACT_PATH}:/tmp/artifacts:rw
     links:
       - readyset-adapter
     entrypoint: ["/bin/bash"]

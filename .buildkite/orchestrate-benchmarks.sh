@@ -33,6 +33,8 @@ BENCHMARK_DATADIR_S3_KEY=${BENCHMARK_DATADIR_S3_KEY:-"readyset-devops-assets-bui
 BENCHMARK_DATADIR_ARCHIVE_SAVE_AS=${BENCHMARK_DATADIR_ARCHIVE_SAVE_AS:-"/tmp/mysql-datadir.tgz"}
 # Where the automation should dump the downloaded MySQL datadir archive for mounting into docker-compose later
 BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO=${BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO:-"/tmp/mysqldatadir"}
+# Where benchmark report files should be saved to
+BENCHMARK_ARTIFACT_DIR=${BENCHMARK_ARTIFACT_DIR:-"/tmp/artifacts"}
 # If set to 'enabled' and BENCHMARK_DATADIR_ARCHIVE_EXTRACT_TO already exists, datadir will not be replaced
 BENCHMARK_DATADIR_CACHING=${BENCHMARK_DATADIR_CACHING:-"disabled"}
 # Name of the docker-compose project to run benchmarks within the context of
