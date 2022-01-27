@@ -1327,7 +1327,7 @@ where
                 if noria_err.caused_by_view_not_found() {
                     self.query_status_cache
                         .update_query_migration_state(&rewritten, MigrationState::Pending);
-                } else {
+                } else if noria_err.caused_by_unsupported() {
                     self.query_status_cache
                         .update_query_migration_state(&rewritten, MigrationState::Unsupported);
                 }
