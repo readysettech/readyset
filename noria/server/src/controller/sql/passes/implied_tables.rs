@@ -6,6 +6,7 @@ use nom_sql::{
 use noria_errors::{internal, ReadySetResult};
 use std::collections::HashMap;
 use std::mem;
+use tracing::warn;
 
 pub trait ImpliedTableExpansion {
     fn expand_implied_tables(
@@ -175,7 +176,7 @@ fn rewrite_selection(
             })
             .collect::<Vec<String>>();
         if matches.len() > 1 {
-            println!(
+            warn!(
                 "Ambiguous column {} exists in tables: {} -- picking a random one",
                 f.name,
                 matches.as_slice().join(", ")
