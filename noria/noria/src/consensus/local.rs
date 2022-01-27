@@ -30,6 +30,10 @@ use noria_errors::internal_err;
 pub const CONTROLLER_KEY: &str = "/controller";
 pub const STATE_KEY: &str = "/state";
 pub const WORKER_PATH: &str = "/workers";
+/// The format used by yazi for compression and decompression of controller state.
+const COMPRESSION_FORMAT: yazi::Format = yazi::Format::Zlib;
+/// The compression level used for compression of controller state.
+const COMPRESSION_LEVEL: yazi::CompressionLevel = yazi::CompressionLevel::Default;
 
 struct LocalAuthorityStoreInner {
     keys: BTreeMap<String, Vec<u8>>,
@@ -323,13 +327,26 @@ impl AuthorityControl for LocalAuthority {
         Ok(r)
     }
 
-    async fn update_controller_state<F, P, E>(&self, f: F) -> Result<Result<P, E>, Error>
+    // The controller state, unlike other keys, is serialized using MessagePack and compressed.
+    async fn update_controller_state<F, P, E>(&self, mut f: F) -> Result<Result<P, E>, Error>
     where
         F: Send + FnMut(Option<P>) -> Result<P, E>,
         P: Send + Serialize + DeserializeOwned,
         E: Send,
     {
-        self.read_modify_write(STATE_KEY, f).await
+        let mut store_inner = self.store.inner_lock()?;
+
+        let r = f(store_inner.keys.get(STATE_KEY).and_then(|data| {
+            let compr = yazi::decompress(data, COMPRESSION_FORMAT).ok();
+            compr.and_then(|(data, _)| rmp_serde::from_slice(&data).ok())
+        }));
+
+        if let Ok(ref p) = r {
+            let val = rmp_serde::to_vec(&p)?;
+            let compressed = yazi::compress(&val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+            store_inner.keys.insert(STATE_KEY.to_owned(), compressed);
+        }
+        Ok(r)
     }
 
     async fn try_read_raw(&self, path: &str) -> Result<Option<Vec<u8>>, Error> {
