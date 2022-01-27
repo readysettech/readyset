@@ -446,74 +446,76 @@ impl Leader {
 
     pub(super) async fn handle_register_from_authority(
         &mut self,
-        desc: WorkerDescriptor,
+        workers: Vec<WorkerDescriptor>,
     ) -> ReadySetResult<()> {
-        let WorkerDescriptor {
-            worker_uri,
-            reader_addr,
-            region,
-            reader_only,
-            volume_id,
-        } = desc;
-
-        info!(%worker_uri, %reader_addr, "received registration payload from worker");
-
         let mut writer = self.dataflow_state_handle.write().await;
         let ds = writer.as_mut();
 
-        let ws = Worker::new(
-            worker_uri.clone(),
-            region,
-            reader_only,
-            volume_id,
-            self.worker_request_timeout,
-        );
+        for desc in workers {
+            let WorkerDescriptor {
+                worker_uri,
+                reader_addr,
+                region,
+                reader_only,
+                volume_id,
+            } = desc;
 
-        let mut domain_addresses = Vec::new();
-        for (index, handle) in &ds.domains {
-            for i in 0..handle.shards.len() {
-                let socket_addr =
-                    ds.channel_coordinator
-                        .get_addr(&(*index, i))
-                        .ok_or_else(|| ReadySetError::NoSuchDomain {
-                            domain_index: index.index(),
-                            shard: i,
-                        })?;
+            info!(%worker_uri, %reader_addr, "received registration payload from worker");
 
-                domain_addresses.push(DomainDescriptor::new(*index, i, socket_addr));
+            let ws = Worker::new(
+                worker_uri.clone(),
+                region,
+                reader_only,
+                volume_id,
+                self.worker_request_timeout,
+            );
+
+            let mut domain_addresses = Vec::new();
+            for (index, handle) in &ds.domains {
+                for i in 0..handle.shards.len() {
+                    let socket_addr =
+                        ds.channel_coordinator
+                            .get_addr(&(*index, i))
+                            .ok_or_else(|| ReadySetError::NoSuchDomain {
+                                domain_index: index.index(),
+                                shard: i,
+                            })?;
+
+                    domain_addresses.push(DomainDescriptor::new(*index, i, socket_addr));
+                }
             }
-        }
 
-        // We currently require that any worker that enters the system has no domains.
-        // If a worker has domains we are unaware of, we may try to perform a duplicate
-        // operation during a migration.
-        if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
-            error!(
-                %worker_uri,
-                %e,
-                "Worker could not be reached to clear its domain.",
+            // We currently require that any worker that enters the system has no domains.
+            // If a worker has domains we are unaware of, we may try to perform a duplicate
+            // operation during a migration.
+            if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
+                error!(
+                    %worker_uri,
+                    %e,
+                    "Worker could not be reached to clear its domain.",
+                );
+            }
+
+            if let Err(e) = ws
+                .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
+                .await
+            {
+                error!(
+                    %worker_uri,
+                    %e,
+                    "Worker could not be reached and was not updated on domain information",
+                );
+            }
+
+            ds.workers.insert(worker_uri.clone(), ws);
+            ds.read_addrs.insert(worker_uri, reader_addr);
+
+            info!(
+                "now have {} of {} required workers",
+                ds.workers.len(),
+                self.quorum
             );
         }
-
-        if let Err(e) = ws
-            .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
-            .await
-        {
-            error!(
-                %worker_uri,
-                %e,
-                "Worker could not be reached and was not updated on domain information",
-            );
-        }
-
-        ds.workers.insert(worker_uri.clone(), ws);
-        ds.read_addrs.insert(worker_uri, reader_addr);
-
-        info!(
-            "now have {} of {} required workers",
-            ds.workers.len(),
-            self.quorum
-        );
 
         if ds.workers.len() >= self.quorum && self.pending_recovery {
             self.pending_recovery = false;

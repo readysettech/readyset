@@ -419,9 +419,7 @@ impl Controller {
             AuthorityUpdate::NewWorkers(w) => {
                 let mut guard = self.inner.write().await;
                 if let Some(ref mut inner) = *guard {
-                    for worker in w {
-                        inner.handle_register_from_authority(worker).await?;
-                    }
+                    inner.handle_register_from_authority(w).await?;
                 } else {
                     return Err(ReadySetError::NotLeader);
                 }
