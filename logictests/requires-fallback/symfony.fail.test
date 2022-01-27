@@ -1,0 +1,112 @@
+statement ok
+CREATE TABLE `symfony_demo_user` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `full_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `username` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `roles` json NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UNIQ_8FB094A1F85E0677` (`username`),
+  UNIQUE KEY `UNIQ_8FB094A1E7927C74` (`email`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+statement ok
+CREATE TABLE `symfony_demo_post` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `author_id` int NOT NULL,
+  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `slug` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `summary` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `published_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `IDX_58A92E65F675F31B` (`author_id`),
+  CONSTRAINT `FK_58A92E65F675F31B` FOREIGN KEY (`author_id`) REFERENCES `symfony_demo_user` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=31 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+statement ok
+CREATE TABLE `symfony_demo_comment` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `post_id` int NOT NULL,
+  `author_id` int NOT NULL,
+  `content` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `published_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `IDX_53AD8F834B89032C` (`post_id`),
+  KEY `IDX_53AD8F83F675F31B` (`author_id`),
+  CONSTRAINT `FK_53AD8F834B89032C` FOREIGN KEY (`post_id`) REFERENCES `symfony_demo_post` (`id`),
+  CONSTRAINT `FK_53AD8F83F675F31B` FOREIGN KEY (`author_id`) REFERENCES `symfony_demo_user` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=151 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+statement ok
+CREATE TABLE `symfony_demo_tag` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UNIQ_4D5855405E237E06` (`name`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+statement ok
+CREATE TABLE `symfony_demo_post_tag` (
+  `post_id` int NOT NULL,
+  `tag_id` int NOT NULL,
+  PRIMARY KEY (`post_id`,`tag_id`),
+  KEY `IDX_6ABC1CC44B89032C` (`post_id`),
+  KEY `IDX_6ABC1CC4BAD26311` (`tag_id`),
+  CONSTRAINT `FK_6ABC1CC44B89032C` FOREIGN KEY (`post_id`) REFERENCES `symfony_demo_post` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `FK_6ABC1CC4BAD26311` FOREIGN KEY (`tag_id`) REFERENCES `symfony_demo_tag` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+query nosort
+SELECT DISTINCT
+    `s0_`.`id` AS `id_0`,
+    `s0_`.`published_at` AS `published_at_1`
+FROM `symfony_demo_post` AS `s0_`
+INNER JOIN `symfony_demo_user` AS `s1_`
+ON (`s0_`.`author_id` = `s1_`.`id`)
+LEFT JOIN `symfony_demo_post_tag` AS `s3_`
+ON (`s0_`.`id` = `s3_`.`post_id`)
+LEFT JOIN `symfony_demo_tag` AS `s2_`
+ON (`s2_`.`id` = `s3_`.`tag_id`)
+WHERE (`s0_`.`published_at` <= '2022-01-27 04:11:19')
+ORDER BY `s0_`.`published_at` DESC LIMIT 10
+----
+
+query nosort
+SELECT
+    `s0_`.`id` AS `id_0`,
+    `s0_`.`title` AS `title_1`,
+    `s0_`.`slug` AS `slug_2`,
+    `s0_`.`summary` AS `summary_3`,
+    `s0_`.`content` AS `content_4`,
+    `s0_`.`published_at` AS `published_at_5`,
+    `s1_`.`id` AS `id_6`,
+    `s1_`.`full_name` AS `full_name_7`,
+    `s1_`.`username` AS `username_8`,
+    `s1_`.`email` AS `email_9`,
+    `s1_`.`password` AS `password_10`,
+    `s1_`.`roles` AS `roles_11`,
+    `s2_`.`id` AS `id_12`,
+    `s2_`.`name` AS `name_13`,
+    `s0_`.`author_id` AS `author_id_14`
+FROM `symfony_demo_post` AS `s0_`
+INNER JOIN `symfony_demo_user` AS `s1_` ON (`s0_`.`author_id` = `s1_`.`id`)
+LEFT JOIN `symfony_demo_post_tag` AS `s3_` ON (`s0_`.`id` = `s3_`.`post_id`)
+LEFT JOIN `symfony_demo_tag` AS `s2_` ON (`s2_`.`id` = `s3_`.`tag_id`)
+WHERE ((`s0_`.`published_at` <= '2022-01-27 04:14:57') AND (`s0_`.`id` = 0))
+ORDER BY `s0_`.`published_at` DESC, `s2_`.`name` ASC
+----
+
+query nosort
+SELECT
+    count(distinct `s0_`.`id`) AS `sclr_0`
+FROM `symfony_demo_post` AS `s0_`
+INNER JOIN `symfony_demo_user` AS `s1_`
+ON (`s0_`.`author_id` = `s1_`.`id`)
+LEFT JOIN `symfony_demo_post_tag` AS `s3_`
+ON (`s0_`.`id` = `s3_`.`post_id`)
+LEFT JOIN `symfony_demo_tag` AS `s2_`
+ON (`s2_`.`id` = `s3_`.`tag_id`)
+WHERE (`s0_`.`published_at` <= '2022-01-27 04:11:19')
+----
