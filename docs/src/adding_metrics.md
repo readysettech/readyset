@@ -1,4 +1,4 @@
-# Metrics
+# Adding Metrics
 
 Throughout the noria-server and noria adapter code we collect runtime metris. Some
 examples include:
