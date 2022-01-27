@@ -1,10 +1,11 @@
 #![deny(macro_use_extern_crate)]
 
+use std::collections::HashMap;
 use std::marker::Send;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
-use std::{collections::HashMap, time::Duration};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{io, net::IpAddr};
 
 use anyhow::anyhow;
@@ -33,6 +34,7 @@ use tracing_futures::Instrument;
 
 use nom_sql::{Dialect, SelectStatement, SqlQuery};
 use noria::consensus::{AuthorityControl, AuthorityType, ConsulAuthority};
+use noria::metrics::recorded;
 use noria::{ControllerHandle, ReadySetError};
 use noria_client::backend::noria_connector::NoriaConnector;
 use noria_client::backend::MigrationMode;
@@ -309,6 +311,14 @@ where
         } else {
             None
         };
+
+        metrics::counter!(
+            recorded::NORIA_STARTUP_TIMESTAMP,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+        );
 
         let (shutdown_sender, shutdown_recv) = tokio::sync::broadcast::channel(1);
 
