@@ -38,12 +38,14 @@ steps:
     command:
     - 'echo +++ Running noria-logictest'
     - cargo run --bin noria-logictest --release -- verify logictests/generated/mysql -t 4 --database-type mysql
+    timeout_in_minutes: 1080
     depends_on:
     - build-image
     plugins:
       - docker-compose#v3.7.0:
           run: app
           env:
+          - AUTHORITY=local
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
@@ -63,12 +65,14 @@ steps:
     command:
     - 'echo +++ Running noria-logictest'
     - cargo run --bin noria-logictest --release -- verify logictests/generated/psql -t 4 --database-type postgresql
+    timeout_in_minutes: 1080
     depends_on:
     - build-image
     plugins:
       - docker-compose#v3.7.0:
           run: app
           env:
+          - AUTHORITY=local
           - CACHEPOT_BUCKET=readysettech-build-sccache-us-east-2
           - CACHEPOT_REGION=us-east-2
           - CARGO_INCREMENTAL=0
