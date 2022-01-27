@@ -122,7 +122,9 @@ impl DbConnection {
     async fn connect(url: &str) -> ReadySetResult<Self> {
         if url.starts_with("mysql") {
             let opts: mysql_async::Opts = url.parse().unwrap();
-            let client = mysql_async::Conn::new(opts).await?;
+            let mut client = mysql_async::Conn::new(opts).await?;
+            // Set very low execution time, to make sure we override it later on
+            client.query_drop("SET GLOBAL MAX_EXECUTION_TIME=1").await?;
             Ok(DbConnection::MySQL(client))
         } else if url.starts_with("postgresql") {
             let (client, conn) = tokio_postgres::connect(&pgsql_url(), tokio_postgres::NoTls)
@@ -354,6 +356,18 @@ async fn mysql_replication_many_tables() -> ReadySetResult<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+async fn pgsql_replication_big_tables() -> ReadySetResult<()> {
+    replication_big_tables_inner(&pgsql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn mysql_replication_big_tables() -> ReadySetResult<()> {
+    replication_big_tables_inner(&mysql_url()).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
 async fn mysql_datetime_replication() -> ReadySetResult<()> {
     mysql_datetime_replication_inner().await
 }
@@ -476,6 +490,49 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
                 tbl_name
             ))
             .await?;
+    }
+
+    let ctx = TestHandle::start_noria(url.to_string()).await?;
+    ctx.ready_notify.as_ref().unwrap().notified().await;
+
+    for t in 0..TOTAL_TABLES {
+        // Just check that all of the tables are really there
+        let tbl_name = format!("t{}", t);
+        ctx.controller().await.table(&tbl_name).await.unwrap();
+    }
+
+    ctx.stop().await;
+
+    for t in 0..TOTAL_TABLES {
+        client
+            .query(&format!("DROP TABLE IF EXISTS t{} CASCADE;", t))
+            .await?;
+    }
+
+    client.stop().await;
+
+    Ok(())
+}
+
+// This test will definitely trigger the global timeout if a session one is not set
+async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
+    const TOTAL_TABLES: usize = 2;
+    const TOTAL_ROWS: usize = 10_000;
+
+    let mut client = DbConnection::connect(url).await?;
+
+    for t in 0..TOTAL_TABLES {
+        let tbl_name = format!("t{}", t);
+        client
+            .query(&format!(
+                "DROP TABLE IF EXISTS {tbl_name} CASCADE; CREATE TABLE {tbl_name} (id int);",
+            ))
+            .await?;
+        for r in 0..TOTAL_ROWS {
+            client
+                .query(&format!("INSERT INTO {tbl_name} VALUES ({r})"))
+                .await?;
+        }
     }
 
     let ctx = TestHandle::start_noria(url.to_string()).await?;

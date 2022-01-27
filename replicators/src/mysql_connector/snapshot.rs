@@ -82,6 +82,11 @@ impl MySqlReplicator {
     ) -> ReadySetResult<Transaction<'static>> {
         let mut tx = self.pool.start_transaction(tx_opts()).await?;
 
+        let _ = tx
+            .query_drop("SET SESSION MAX_EXECUTION_TIME=0")
+            .await
+            .map_err(log_err);
+
         if self.tables.is_none() {
             self.tables = Some(load_table_list(&mut tx, TableKind::BaseTable).await?);
         }
@@ -148,11 +153,17 @@ impl MySqlReplicator {
     /// it may seem inefficient but apparently that is the correct way to
     /// replicate a table, and `mysqldump` and `debezium` do just that
     pub async fn dump_table(&self, table: &str) -> mysql::Result<TableDumper> {
-        let tx = self
+        let mut tx = self
             .pool
             .start_transaction(tx_opts())
             .await
             .map_err(log_err)?;
+
+        let _ = tx
+            .query_drop("SET SESSION MAX_EXECUTION_TIME=0")
+            .await
+            .map_err(log_err);
+
         let query_count = format!("select count(*) from `{}`", table);
         let query = format!("select * from `{}`", table);
         Ok(TableDumper {
