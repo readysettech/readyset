@@ -925,8 +925,7 @@ impl SqlIncorporator {
                                     is_name_required,
                                     false,
                                     mig,
-                                )
-                                .expect("failed to add subquery in join");
+                                )?;
                             JoinRightSide::Table(Table {
                                 name: qfp.name.clone(),
                                 alias: None,
