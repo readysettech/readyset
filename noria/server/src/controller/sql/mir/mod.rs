@@ -1604,7 +1604,6 @@ impl SqlToMirConverter {
                 &node_for_rel,
                 new_node_count,
                 &mut prev_node,
-                false,
                 &expressions_above_grouped,
             )?;
 

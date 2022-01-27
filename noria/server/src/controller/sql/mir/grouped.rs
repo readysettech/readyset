@@ -5,10 +5,9 @@ use crate::ReadySetResult;
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{self, Expression, FunctionExpression, FunctionExpression::*};
-use noria_errors::{internal, invariant, unsupported, ReadySetError};
+use nom_sql::{self, Expression};
+use noria_errors::{internal, invariant, ReadySetError};
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
 
 // Move predicates above grouped_by nodes
 pub(super) fn make_predicates_above_grouped<'a>(
@@ -119,7 +118,6 @@ pub(super) fn make_grouped(
     node_for_rel: &HashMap<&str, MirNodeRef>,
     node_count: usize,
     prev_node: &mut Option<MirNodeRef>,
-    is_reconcile: bool,
     projected_exprs: &HashMap<Expression, String>,
 ) -> ReadySetResult<Vec<MirNodeRef>> {
     let mut agg_nodes: Vec<MirNodeRef> = Vec::new();
@@ -132,59 +130,7 @@ pub(super) fn make_grouped(
             .filter(|e| matches!(e, QueryGraphEdge::GroupBy(_)))
             .collect();
 
-        for computed_col in computed_cols_cgn.columns.iter() {
-            let computed_col = if is_reconcile {
-                let func = computed_col.function.as_ref().unwrap();
-                let new_func = match *func.deref() {
-                    Sum {
-                        expr: box Expression::Column(ref col),
-                        distinct,
-                    } => {
-                        let colname = format!("{}.sum({})", col.table.as_ref().unwrap(), col.name);
-                        FunctionExpression::Sum {
-                            expr: Box::new(Expression::Column(nom_sql::Column::from(
-                                colname.as_ref(),
-                            ))),
-                            distinct,
-                        }
-                    }
-                    Count {
-                        expr: box Expression::Column(ref col),
-                        distinct,
-                        ..
-                    } => {
-                        let colname = format!("{}.count({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Sum {
-                            expr: Box::new(Expression::Column(nom_sql::Column::from(
-                                colname.as_ref(),
-                            ))),
-                            distinct,
-                        }
-                    }
-                    Max(box Expression::Column(ref col)) => {
-                        let colname = format!("{}.max({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Max(Box::new(Expression::Column(
-                            nom_sql::Column::from(colname.as_ref()),
-                        )))
-                    }
-                    Min(box Expression::Column(ref col)) => {
-                        let colname = format!("{}.min({})", col.clone().table.unwrap(), col.name);
-                        FunctionExpression::Min(Box::new(Expression::Column(
-                            nom_sql::Column::from(colname.as_ref()),
-                        )))
-                    }
-                    ref x => unsupported!("unknown function expression: {:?}", x),
-                };
-
-                nom_sql::Column {
-                    function: Some(Box::new(new_func)),
-                    name: computed_col.name.clone(),
-                    table: computed_col.table.clone(),
-                }
-            } else {
-                computed_col.clone()
-            };
-
+        for computed_col in computed_cols_cgn.columns.iter().cloned() {
             // We must also push parameter columns through the group by
             let call_expr = Expression::Call(computed_col.function.as_deref().unwrap().clone());
             let mut over_cols = call_expr.referred_columns().peekable();
