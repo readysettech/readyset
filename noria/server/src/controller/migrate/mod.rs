@@ -31,8 +31,9 @@
 //!
 //! Beware, Here be slightly smaller dragons™
 
+use dataflow::post_lookup::PostLookup;
+use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
-use dataflow::{prelude::*, PostLookup};
 use metrics::counter;
 use metrics::histogram;
 use noria::metrics::recorded;

@@ -1,5 +1,4 @@
 pub use self::multir::{LookupError, LookupResult};
-use crate::{prelude::*, PostLookup};
 use ahash::RandomState;
 use common::SizeOf;
 use noria::consistency::Timestamp;
@@ -11,6 +10,9 @@ use std::cmp::Ordering;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 use vec1::Vec1;
+
+use crate::post_lookup::PostLookup;
+use crate::prelude::*;
 
 pub(crate) trait Trigger =
     Fn(&mut dyn Iterator<Item = &KeyComparison>) -> bool + 'static + Send + Sync;
