@@ -4,7 +4,7 @@ use noria::ReadySetResult;
 
 use tokio::select;
 
-use tracing::{error, info, instrument};
+use tracing::{info, instrument, warn};
 
 use std::sync::Arc;
 
@@ -53,7 +53,7 @@ impl OutputsSynchronizer {
                             }
                         }
                         Err(e) => {
-                            error!(error = %e, "Could not get outputs from Leader");
+                            warn!(error = %e, "Could not get outputs from Leader");
                         }
                     }
 
