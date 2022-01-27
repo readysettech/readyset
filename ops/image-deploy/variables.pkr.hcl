@@ -10,10 +10,10 @@ variable "create_ami" {
   default     = env("PACKER_CREATE_AMI") == "true"
 }
 
-variable "release_name" {
+variable "buildkite_commit" {
   type        = string
-  description = "Name to give this release. Used to tag images."
-  default     = env("RELEASE_NAME")
+  description = "Git commit ID from Buildkite. Used to tag images made in Buildkite appropriately"
+  default     = env("BUILDKITE_COMMIT")
 }
 
 variable "readyset_authority_consul_region_ami_id" {

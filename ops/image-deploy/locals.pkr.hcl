@@ -5,8 +5,8 @@ locals {
 
   timestamp = timestamp()
 
-  destination_ami_version = var.release_name != "" ? var.release_name : "release-test"
-  destination_ami_suffix  = var.production ? formatdate("YYYYMMDD", local.timestamp) : formatdate("YYYYMMDDhhmmss", local.timestamp)
+  destination_ami_version = var.production ? substr(var.buildkite_commit, 0, 7) : "release"
+  destination_ami_suffix  = formatdate("YYYYMMDDhhmmss", local.timestamp)
 
   ami_virtualization_type = "hvm"
   ssh_username            = "ubuntu"

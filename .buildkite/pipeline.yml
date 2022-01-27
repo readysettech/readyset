@@ -238,20 +238,13 @@ steps:
       message: ":rocket: Internal AMIs for ${BUILDKITE_COMMIT}"
     async: true
 
-  - trigger: "external-amis"
-    branches: refs/heads/main
-    label: ":rocket: External AMIs"
-    build:
-      branch: refs/heads/main
-      commit: ${BUILDKITE_COMMIT}
-      message: ":rocket: External AMIs for ${BUILDKITE_COMMIT}"
-    async: true
+  # If you update any steps below this line, please update docs/src/release-process.md
 
-  - block: "Build :amazon-ec2: AMIs and :cloud: CFN templates"
+  - block: "Build :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation templates"
     key: block-ami-cfn
-    prompt: "Build AMIs and CFN templates?"
+    prompt: "Build AMIs and CloudFormation templates?"
 
-  - label: ':rust: Build readyset release binaries'
+  - label: ':rust: Build ReadySet release binaries'
     key: build-binaries
     depends_on:
       - block-ami-cfn
@@ -279,7 +272,7 @@ steps:
           login: true
           retries: 3
 
-  - label: ":packer: Run build for internal images"
+  - label: ":packer: Create ReadySet :amazon-ec2: AMIs with release binaries"
     key: packer-build
     depends_on:
     - build-binaries
@@ -304,7 +297,7 @@ steps:
           login: true
           retries: 3
 
-  - label: ":python: :yaml: build CFN templates locally"
+  - label: ":python: :yaml: Build CloudFormation templates with updated :amazon-ec2: AMI references"
     key: packer-cfn-template-ytt
     depends_on:
     - packer-build
@@ -322,7 +315,7 @@ steps:
           login: true
           retries: 3
 
-  - label: ":rain_cloud: Lint CFN templates"
+  - label: ":rain_cloud: Format and Lint CloudFormation templates"
     key: packer-cfn-template-lint
     depends_on:
     - packer-cfn-template-ytt
@@ -341,11 +334,12 @@ steps:
           login: true
           retries: 3
 
-  - label: ":aws: Copy CFN Templates to internal storage"
+  - label: ":aws: Upload CloudFormation templates for internal use"
     key: packer-cfn-template-copy
     depends_on:
     - packer-cfn-template-lint
     commands:
+      - export TEMPLATE_ARTIFACT_STEP_NAME=packer-cfn-template-ytt
       - export S3_BUCKET=readysettech-cfn-internal-us-east-2
       - export S3_PREFIX=${BUILDKITE_COMMIT}
       - .buildkite/upload-cfn-templates-artifacts-to-s3.sh
@@ -363,7 +357,7 @@ steps:
     agents:
       queue: ops
 
-  - label: ":aws: :cloud: CFN Deployment Smoke Test. :chart_with_upwards_trend:"
+  - label: ":aws: :cloud: CloudFormation deployment Smoke Test. :chart_with_upwards_trend:"
     key: test-cfn-stack
     depends_on:
       - packer-cfn-template-copy
@@ -380,5 +374,111 @@ steps:
       - cultureamp/aws-assume-role#v0.2.0
     env:
       AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/InternalCloudFormationCI
+    agents:
+      queue: ops
+
+  - block: "Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation alpha release"
+    key: block-public-alpha
+    prompt: "Copy AMIs and CloudFormation templates to public visibility?"
+    branches: '!refs/heads/main'
+
+  - block: "Deploy :amazon-ec2: AMIs and :aws-cloudformation: CloudFormation release"
+    key: block-public-release
+    prompt: "Copy AMIs and CloudFormation templates to public visibility?"
+    fields:
+      - key: release-name
+        required: true
+        text: Release Name (This name WILL be seen by customers)
+    branches: 'refs/heads/main'
+
+  - label: ":packer: Run copy production images to deploy account"
+    key: packer-deploy-external
+    depends_on:
+    - block-public-alpha
+    - block-public-release
+    - packer-build
+    commands:
+    - cd /workdir/ops/image-deploy
+    - buildkite-agent artifact download packer-manifest.json .
+    - mv packer-manifest.json source-packer-manifest.json
+    - packer init .
+    - ./run-with-manifest-as-env.sh source-packer-manifest.json packer build -only=amazon-ebs.readyset-* .
+    - buildkite-agent artifact upload packer-manifest.json
+    plugins:
+    - docker#v3.9.0:
+        image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+        propagate-environment: true
+        propagate-aws-auth-tokens: true
+        environment:
+          - PACKER_CREATE_AMI=true
+          - PACKER_PRODUCTION=true
+    - ecr#v2.5.0:
+        login: true
+        retries: 3
+    - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::888984949675:role/Packer
+    agents:
+      queue: ops
+
+  - label: ":python: :yaml: Build CloudFormation templates with updated :amazon-ec2: AMI references"
+    key: packer-cfn-template-ytt-external
+    depends_on: packer-deploy-external
+    commands:
+      - buildkite-agent artifact download packer-manifest.json --step packer-deploy-external ./ops/image-deploy
+      - cd ops/cfn/templates
+      - ytt_apply.sh -i ../ytt_templates -m ../../image-deploy/packer-manifest.json -o ./
+      - buildkite-agent artifact upload "./*.yaml"
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":rain_cloud: Format and Lint CloudFormation templates"
+    key: packer-cfn-template-lint-external
+    depends_on: packer-cfn-template-ytt-external
+    commands:
+      - cd ops/cfn
+      - mkdir ./rendered_templates
+      - buildkite-agent artifact download "*.yaml" --step packer-cfn-template-ytt-external ./rendered_templates
+      - rain fmt --verify rendered_templates/*
+      - cfn-lint rendered_templates/*.yaml
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+
+  - label: ":aws: Upload CloudFormation templates for external use"
+    key: packer-cfn-template-copy-external
+    depends_on: packer-cfn-template-lint-external
+    commands:
+      - export TEMPLATE_ARTIFACT_STEP_NAME=packer-cfn-template-ytt-external
+      - export S3_BUCKET=readysettech-cfn-public-us-east-2
+      - release_name=$(buildkite-agent meta-data get release-name)
+      - if [ -n "$$release_name" ]; then
+      -   export S3_PREFIX="$$release_name"
+      - else
+      -   export S3_PREFIX="alpha/${BUILDKITE_COMMIT}"
+      - fi
+      - .buildkite/upload-cfn-templates-artifacts-to-s3.sh
+    plugins:
+      - docker#v3.9.0:
+          image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-ops:${BUILDKITE_COMMIT}
+          propagate-environment: true
+          propagate-aws-auth-tokens: true
+      - ecr#v2.5.0:
+          login: true
+          retries: 3
+      - cultureamp/aws-assume-role#v0.2.0
+    env:
+      AWS_ASSUME_ROLE_ARN: arn:aws:iam::305232526136:role/DeployCustomerArtifactsWrite
     agents:
       queue: ops

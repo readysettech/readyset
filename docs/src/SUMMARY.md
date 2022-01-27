@@ -18,8 +18,10 @@
 - [Benchmarking Code in CI](./benchmarking/ci_execution_mysql.md)
   - [Building a Test DB for CI Benchmarking](./benchmarking/data_generation.md)
 
-# Ops
+# DevOps
+
 - [DevOps Concerns](./ops.md)
+- [Release Process](./release-process.md)
 
 # ReadySet Internals
 
