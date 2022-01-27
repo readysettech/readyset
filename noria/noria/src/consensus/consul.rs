@@ -199,8 +199,12 @@ enum ConsulAuthorityError {
     RequestFailed(String),
 
     /// The Consul API failed to perform serialization/deserialization.
-    #[error("Error during serialization {0}")]
+    #[error("Error during (de)serialization {0}")]
     SerializationFailed(String),
+
+    /// The Consul API failed to perform compression/decompression.
+    #[error("Error during (de)compression")]
+    CompressionFailed,
 }
 
 impl From<ClientError> for ConsulAuthorityError {
@@ -500,7 +504,8 @@ impl ConsulAuthority {
         }
 
         let new_val = rmp_serde::to_vec(&input)?;
-        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL)
+            .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
 
         match kv::set(
             &self.consul,
@@ -552,7 +557,7 @@ impl ConsulAuthority {
             StateValue::Data(d) => (d, None),
         };
         let (data, _) = yazi::decompress(&state_bytes, COMPRESSION_FORMAT)
-            .map_err(|_| anyhow!("Failure during decompress"))?;
+            .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
         Ok((rmp_serde::from_slice(&data)?, value))
     }
 
@@ -569,7 +574,8 @@ impl ConsulAuthority {
         let my_session = Some(self.get_session()?);
 
         let new_val = rmp_serde::to_vec(&controller_state)?;
-        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL).unwrap();
+        let compressed = yazi::compress(&new_val, COMPRESSION_FORMAT, COMPRESSION_LEVEL)
+            .map_err(|_| ConsulAuthorityError::CompressionFailed)?;
         gauge!(recorded::DATAFLOW_STATE_SERIALIZED, compressed.len() as f64);
 
         let chunked = ChunkedState::from(compressed);
