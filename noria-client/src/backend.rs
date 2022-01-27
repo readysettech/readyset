@@ -330,7 +330,7 @@ where
     migration_state: MigrationState,
     /// If query was succesfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
-    /// If statment was succesfully rewritten, will store the rewritten statement
+    /// If statement was succesfully rewritten, will store the rewritten statement
     rewritten: Option<SelectStatement>,
 }
 
