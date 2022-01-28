@@ -78,7 +78,7 @@ impl PostLookupAggregates {
     // misses get reported - we should fix that at some point, but for now the only choice we have
     // is unwrapping and indexing-slicing. Fortunately all of the unwrapping/panicking we're doing
     // will only happen if we get rows that're the wrong length or contain the wrong types.
-    fn process<'a, I>(&self, iter: I) -> Vec<Vec<Cow<'a, DataType>>>
+    fn process<'a, I>(&self, iter: I) -> impl Iterator<Item = Vec<Cow<'a, DataType>>>
     where
         I: Iterator<Item = Vec<Cow<'a, DataType>>>,
     {
@@ -98,7 +98,7 @@ impl PostLookupAggregates {
                 }
             }
         }
-        groups.into_values().collect()
+        groups.into_values()
     }
 }
 
@@ -163,7 +163,6 @@ impl PostLookup {
             }
         }
 
-        let ordered_limited = do_order_limit(data, self.order_by.as_deref(), self.limit);
         let compiled_filters = filters
             .iter()
             .map(
@@ -196,7 +195,7 @@ impl PostLookup {
                 },
             )
             .collect::<Vec<_>>();
-        let filtered = ordered_limited.filter(move |rec| {
+        let filtered = data.filter(move |rec| {
             compiled_filters.iter().all(|filter| {
                 match filter {
                     Either::Left((pattern, column)) => pattern.matches(
@@ -224,14 +223,21 @@ impl PostLookup {
             })
         });
 
-        let (aggregated, returned_cols) = match (&self.aggregates, &self.returned_cols) {
-            (Some(aggs), Some(c)) => (Either::Left(aggs.process(filtered).into_iter()), c),
-            (None, Some(c)) => (Either::Right(filtered), c),
-            (Some(aggs), None) => return aggs.process(filtered),
-            (None, None) => return filtered.collect::<Vec<_>>(),
+        let aggregated = if let Some(aggs) = &self.aggregates {
+            Either::Left(aggs.process(filtered))
+        } else {
+            Either::Right(filtered)
         };
 
-        aggregated
+        let ordered_limited = do_order_limit(aggregated, self.order_by.as_deref(), self.limit);
+
+        let returned_cols = if let Some(c) = &self.returned_cols {
+            c
+        } else {
+            return ordered_limited.collect();
+        };
+
+        ordered_limited
             .map(|row| {
                 returned_cols
                     .iter()
@@ -326,9 +332,9 @@ fn do_order_limit<'a, I>(
     iter: I,
     order_by: Option<&[(usize, OrderType)]>,
     limit: Option<usize>,
-) -> impl Iterator<Item = Vec<Cow<'a, DataType>>> + ExactSizeIterator
+) -> impl Iterator<Item = Vec<Cow<'a, DataType>>>
 where
-    I: Iterator<Item = Vec<Cow<'a, DataType>>> + ExactSizeIterator,
+    I: Iterator<Item = Vec<Cow<'a, DataType>>>,
 {
     match (order_by, limit) {
         (None, None) => OrderedLimitedIter::Original(iter),
@@ -473,6 +479,86 @@ mod tests {
                     vec![Cow::Owned(3.into()), Cow::Owned(2.into())],
                     vec![Cow::Owned(3.into()), Cow::Owned(3.into())],
                 ]
+            );
+        }
+
+        #[test]
+        fn filter_and_order_limit() {
+            let records: Vec<Box<[DataType]>> = vec![
+                vec![1.into(), 3.into()].into_boxed_slice(),
+                vec![1.into(), 2.into()].into_boxed_slice(),
+                vec![1.into(), 1.into()].into_boxed_slice(),
+                vec![2.into(), 3.into()].into_boxed_slice(),
+                vec![2.into(), 2.into()].into_boxed_slice(),
+                vec![2.into(), 1.into()].into_boxed_slice(),
+            ];
+
+            let post_lookup = PostLookup {
+                order_by: Some(vec![(1, OrderType::OrderAscending)]),
+                limit: Some(3),
+                ..Default::default()
+            };
+
+            let filter = ViewQueryFilter {
+                column: 0,
+                operator: ViewQueryOperator::NotEqual,
+                value: 1.into(),
+            };
+
+            let result = post_lookup.process(records.iter(), &[filter]);
+
+            assert_eq!(result.len(), 3);
+            assert_eq!(
+                result,
+                vec![
+                    vec![Cow::Owned(2.into()), Cow::Owned(1.into())],
+                    vec![Cow::Owned(2.into()), Cow::Owned(2.into())],
+                    vec![Cow::Owned(2.into()), Cow::Owned(3.into())],
+                ]
+            );
+        }
+
+        #[test]
+        fn filter_aggregate_order_limit() {
+            let records: Vec<Box<[DataType]>> = vec![
+                vec![1.into(), 3.into()].into_boxed_slice(),
+                vec![1.into(), 2.into()].into_boxed_slice(),
+                vec![1.into(), 1.into()].into_boxed_slice(),
+                vec![2.into(), 3.into()].into_boxed_slice(),
+                vec![2.into(), 2.into()].into_boxed_slice(),
+                vec![2.into(), 1.into()].into_boxed_slice(),
+                vec![3.into(), 3.into()].into_boxed_slice(),
+                vec![3.into(), 2.into()].into_boxed_slice(),
+                vec![3.into(), 1.into()].into_boxed_slice(),
+            ];
+
+            // MIN(c1) WHERE c1 != 3 GROUP BY c0 ORDER BY c0 ASC LIMIT 1
+
+            let filter = ViewQueryFilter {
+                column: 1,
+                operator: ViewQueryOperator::NotEqual,
+                value: 3.into(),
+            };
+
+            let post_lookup = PostLookup {
+                aggregates: Some(PostLookupAggregates {
+                    group_by: vec![0],
+                    aggregates: vec![PostLookupAggregate {
+                        column: 1,
+                        function: PostLookupAggregateFunction::Min,
+                    }],
+                }),
+                order_by: Some(vec![(0, OrderType::OrderAscending)]),
+                limit: Some(1),
+                ..Default::default()
+            };
+
+            let result = post_lookup.process(records.iter(), &[filter]);
+
+            assert_eq!(result.len(), 1);
+            assert_eq!(
+                result,
+                vec![vec![Cow::Owned(1.into()), Cow::Owned(1.into())],]
             );
         }
     }
