@@ -8,7 +8,9 @@ use std::{fmt, iter};
 
 use async_bincode::{AsyncBincodeStream, AsyncDestination};
 use derive_more::TryInto;
-use noria_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
+use noria_errors::{
+    internal, internal_err, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult,
+};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -26,7 +28,6 @@ use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
-use tower::timeout::Timeout;
 use tower_service::Service;
 use vec_map::VecMap;
 
@@ -230,7 +231,7 @@ type Discover = impl tower::discover::Discover<Key = usize, Service = InnerServi
     + Send;
 
 pub(crate) type TableRpc = Buffer<
-    ConcurrencyLimit<Timeout<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>>,
+    ConcurrencyLimit<Balance<Discover, Tagged<LocalOrNot<PacketData>>>>,
     Tagged<LocalOrNot<PacketData>>,
 >;
 
@@ -313,10 +314,7 @@ impl TableBuilder {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
                         ConcurrencyLimit::new(
-                            Timeout::new(
-                                Balance::new(make_table_discover(addr, self.table_request_timeout)),
-                                self.table_request_timeout,
-                            ),
+                            Balance::new(make_table_discover(addr, self.table_request_timeout)),
                             crate::PENDING_LIMIT,
                         ),
                         crate::BUFFER_TO_POOL,
@@ -347,6 +345,7 @@ impl TableBuilder {
             shard_addrs: addrs,
             shards: conns,
             last_trace_sample: Instant::now(),
+            request_timeout: self.table_request_timeout,
         }
     }
 }
@@ -372,6 +371,7 @@ pub struct Table {
     shards: Vec<TableRpc>,
     shard_addrs: Vec<SocketAddr>,
     last_trace_sample: Instant,
+    request_timeout: Duration,
 }
 
 impl fmt::Debug for Table {
@@ -824,6 +824,14 @@ impl Table {
         Ok(self.call(r).await?.v)
     }
 
+    async fn quick_n_dirty_with_timeout(&mut self, r: TableRequest) -> ReadySetResult<()> {
+        Ok(
+            tokio::time::timeout(self.request_timeout, self.quick_n_dirty(r))
+                .await
+                .map_err(|_| internal_err("Timeout during table request"))??,
+        )
+    }
+
     /// Insert a single row of data into this base table.
     pub async fn insert<V>(&mut self, u: V) -> ReadySetResult<()>
     where
@@ -841,7 +849,7 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableRequest::TableOperations(
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(
             rows.into_iter()
                 .map(|row| TableOperation::Insert(row.into()))
                 .collect::<Vec<_>>(),
@@ -855,7 +863,7 @@ impl Table {
         I: IntoIterator<Item = V>,
         V: Into<TableOperation>,
     {
-        self.quick_n_dirty(TableRequest::TableOperations(
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(
             i.into_iter().map(Into::into).collect::<Vec<_>>(),
         ))
         .await
@@ -866,7 +874,7 @@ impl Table {
     where
         I: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteByKey { key: key.into() },
         ]))
         .await
@@ -878,7 +886,7 @@ impl Table {
     where
         I: Into<Vec<DataType>>,
     {
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::DeleteRow { row: row.into() },
         ]))
         .await
@@ -909,7 +917,7 @@ impl Table {
             }
         }
 
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::Update { key, update },
         ]))
         .await
@@ -944,7 +952,7 @@ impl Table {
             }
         }
 
-        self.quick_n_dirty(TableRequest::TableOperations(vec![
+        self.quick_n_dirty_with_timeout(TableRequest::TableOperations(vec![
             TableOperation::InsertOrUpdate {
                 row: insert,
                 update: set,
@@ -955,7 +963,8 @@ impl Table {
 
     /// Updates the timestamp of the base table in the data flow graph.
     pub async fn update_timestamp(&mut self, t: consistency::Timestamp) -> ReadySetResult<()> {
-        self.quick_n_dirty(TableRequest::Timestamp(t)).await
+        self.quick_n_dirty_with_timeout(TableRequest::Timestamp(t))
+            .await
     }
 
     /// Set the replication offset for this table to the given value.
