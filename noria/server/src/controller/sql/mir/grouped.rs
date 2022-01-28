@@ -2,11 +2,14 @@ use crate::controller::sql::mir::{join::make_joins_for_aggregates, SqlToMirConve
 use crate::controller::sql::query_graph::{QueryGraph, QueryGraphEdge};
 use crate::controller::sql::query_utils::is_aggregate;
 use crate::ReadySetResult;
+use dataflow::post_lookup::{
+    PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
+};
 use mir::node::node_inner::MirNodeInner;
 use mir::{Column, MirNodeRef};
 use nom_sql::analysis::ReferredColumns;
-use nom_sql::{self, Expression};
-use noria_errors::{internal, invariant, ReadySetError};
+use nom_sql::{self, Expression, FunctionExpression::*};
+use noria_errors::{internal, invariant, unsupported, ReadySetError};
 use std::collections::{HashMap, HashSet};
 
 // Move predicates above grouped_by nodes
@@ -299,4 +302,61 @@ fn joinable_aggregate_nodes(agg_nodes: &[MirNodeRef]) -> Vec<MirNodeRef> {
             _ => None,
         })
         .collect()
+}
+
+/// Build up the set of [`PostLookupAggregates`] for the given query, given as both the query
+/// graph itself and the select statement that the query is built from.
+///
+/// This function is *not* responsible for determining whether the query *requires* post-lookup
+/// aggregation - that's the responsibility of the caller. This function will only return [`None`]
+/// if the query contains no aggregates.
+pub(super) fn post_lookup_aggregates(
+    qg: &QueryGraph,
+) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
+    let columns = if let Some(qgn) = qg.relations.get("computed_columns") {
+        if qgn.columns.is_empty() {
+            return Ok(None);
+        } else {
+            &qgn.columns
+        }
+    } else {
+        return Ok(None);
+    };
+
+    let group_by = qg
+        .edges
+        .values()
+        .flat_map(|e| match e {
+            QueryGraphEdge::GroupBy(cols) => cols.clone(),
+            _ => vec![],
+        })
+        .map(|col| col.into())
+        .collect::<Vec<_>>();
+
+    let mut aggregates = vec![];
+    for col in columns {
+        aggregates.push(PostLookupAggregate {
+            column: col.clone().into(),
+            function: match col.function.as_deref() {
+                Some(Avg { .. }) => {
+                    unsupported!("Average is not supported as a post-lookup aggregate")
+                }
+                // Count and sum are handled the same way, as re-aggregating counts is
+                // done by just summing the numbers together
+                Some(Count { .. } | CountStar | Sum { .. }) => PostLookupAggregateFunction::Sum,
+                Some(Max(_)) => PostLookupAggregateFunction::Max,
+                Some(Min(_)) => PostLookupAggregateFunction::Min,
+                Some(GroupConcat { separator, .. }) => PostLookupAggregateFunction::GroupConcat {
+                    separator: separator.clone(),
+                },
+                Some(Call { .. }) => continue,
+                None => continue,
+            },
+        });
+    }
+
+    Ok(Some(PostLookupAggregates {
+        group_by,
+        aggregates,
+    }))
 }

@@ -6881,21 +6881,6 @@ async fn range_query_through_union() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn aggregate_ranges_not_supported() {
-    let mut g = start_simple("straddled_join_range_query").await;
-
-    g.install_recipe("CREATE TABLE t (a int, b int)")
-        .await
-        .unwrap();
-
-    let res = g
-        .extend_recipe("QUERY q: SELECT max(a) FROM t WHERE b > ?")
-        .await;
-    assert!(res.is_err());
-    assert!(res.err().unwrap().caused_by_unsupported());
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn mixed_inclusive_range_and_equality() {
     readyset_logging::init_test_logging();
 

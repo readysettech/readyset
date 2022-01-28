@@ -251,14 +251,6 @@ impl QueryGraph {
         s.finish()
     }
 
-    /// Returns true if the query that this query graph represents has any aggregates
-    pub fn has_aggregates(&self) -> bool {
-        self.relations
-            .get("computed_columns")
-            .iter()
-            .any(|rel| !rel.columns.is_empty())
-    }
-
     /// Construct a representation of the lookup key of a view for this query graph, based on the
     /// parameters in this query.
     pub(crate) fn view_key(&self, config: &mir::Config) -> ReadySetResult<ViewKey> {
@@ -271,7 +263,6 @@ impl QueryGraph {
                 index_type: IndexType::HashMap,
             })
         } else {
-            let has_aggregates = self.has_aggregates();
             let mut parameters = self.parameters();
 
             // Sort the parameters to put equal comparisons first, to take advantage of
@@ -295,13 +286,6 @@ impl QueryGraph {
             let mut columns: Vec<(mir::Column, ViewPlaceholder)> = vec![];
             let mut last_op = None;
             for param in parameters {
-                // Aggregates don't currently work with range queries (since we don't
-                // re-aggregate at the reader), so check here and return an error if the
-                // query has both aggregates and range params
-                if has_aggregates && param.op != BinaryOperator::Equal {
-                    unsupported!("Aggregates are not currently supported with non-equal parameters")
-                }
-
                 let new_index_type = Some(IndexType::for_operator(param.op).ok_or_else(|| {
                     unsupported_err(format!("Unsupported binary operator `{}`", param.op))
                 })?);

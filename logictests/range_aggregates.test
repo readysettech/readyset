@@ -1,0 +1,56 @@
+statement ok
+create table t1 (id int, val1 int, val2 int);
+
+statement ok
+insert into t1 (id, val1, val2) values
+(1, 1, 1),
+(1, 2, 1),
+(1, 2, 3),
+(2, 2, 1),
+(2, 3, 4),
+(3, 4, 6);
+
+statement ok
+create cached query as select max(val2) from t1
+where id <= ?
+
+graphviz
+
+query I nosort
+select max(val2) from t1
+where id <= ?
+? = 2
+----
+4
+
+query I nosort
+select sum(val2) from t1
+where id <= ?
+? = 2
+----
+10
+
+query II nosort
+select max(val2), sum(val2) from t1
+where id <= ?
+? = 2
+----
+4
+10
+
+query II nosort
+select sum(val1), sum(val2) from t1
+where id <= ?
+? = 2
+----
+10
+10
+
+
+query II nosort
+select sum(val1), sum(val2) from t1
+where id < ?
+? = 3
+----
+10
+10

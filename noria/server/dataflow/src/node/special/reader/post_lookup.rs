@@ -53,22 +53,35 @@ impl PostLookupAggregateFunction {
 
 /// Representation of a single aggregate function to be performed on a column post-lookup
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct PostLookupAggregate {
+pub struct PostLookupAggregate<Column = usize> {
     /// The column index in the result set containing the already-aggregated values
-    pub column: usize,
+    pub column: Column,
     /// The aggregate function to perform
     pub function: PostLookupAggregateFunction,
+}
+
+impl<Column> PostLookupAggregate<Column> {
+    /// Transform all column references in self by applying a function
+    pub fn map_columns<F, C2, E>(self, mut f: F) -> Result<PostLookupAggregate<C2>, E>
+    where
+        F: FnMut(Column) -> Result<C2, E>,
+    {
+        Ok(PostLookupAggregate {
+            column: f(self.column)?,
+            function: self.function,
+        })
+    }
 }
 
 /// Representation of a set of multiple aggregate functions to be performed post-lookup
 ///
 /// This is used for range queries, where lookups cover multiple grouped keys
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
-pub struct PostLookupAggregates {
+pub struct PostLookupAggregates<Column = usize> {
     /// The set of column indices to group the aggregate by
-    pub group_by: Vec<usize>,
+    pub group_by: Vec<Column>,
     /// The aggregate functions to perform
-    pub aggregates: Vec<PostLookupAggregate>,
+    pub aggregates: Vec<PostLookupAggregate<Column>>,
 }
 
 impl PostLookupAggregates {
@@ -99,6 +112,27 @@ impl PostLookupAggregates {
             }
         }
         groups.into_values()
+    }
+}
+
+impl<Column> PostLookupAggregates<Column> {
+    /// Transform all column references in self by applying a function
+    pub fn map_columns<F, C2, E>(self, mut f: F) -> Result<PostLookupAggregates<C2>, E>
+    where
+        F: FnMut(Column) -> Result<C2, E>,
+    {
+        Ok(PostLookupAggregates {
+            group_by: self
+                .group_by
+                .into_iter()
+                .map(&mut f)
+                .collect::<Result<_, E>>()?,
+            aggregates: self
+                .aggregates
+                .into_iter()
+                .map(|agg| agg.map_columns(&mut f))
+                .collect::<Result<_, E>>()?,
+        })
     }
 }
 
