@@ -3650,9 +3650,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "msql-srv",
+ "mysql",
  "nom-sql",
  "noria",
  "noria-client",
+ "noria-mysql",
  "noria-server",
  "readyset-logging",
  "tokio",

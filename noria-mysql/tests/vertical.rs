@@ -34,8 +34,6 @@ use test_strategy::proptest;
 
 use noria_data::DataType;
 
-mod common;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Operation<const K: usize> {
     Query {
@@ -543,7 +541,7 @@ where
 
 impl<const K: usize> Operations<K> {
     fn run(self, query: &'static str, tables: &HashMap<&'static str, Table>) -> TestCaseResult {
-        common::recreate_database("vertical");
+        noria_client_test_helpers::mysql_helpers::recreate_database("vertical");
         let mut mysql = mysql::Conn::new(
             mysql::OptsBuilder::default()
                 .user(Some("root"))
@@ -560,7 +558,8 @@ impl<const K: usize> Operations<K> {
                 .db_name(Some("vertical")),
         )
         .unwrap();
-        let mut noria = mysql::Conn::new(common::setup(true)).unwrap();
+        let mut noria =
+            mysql::Conn::new(noria_client_test_helpers::mysql_helpers::setup(true)).unwrap();
 
         for table in tables.values() {
             mysql.query_drop(table.create_statement).unwrap();

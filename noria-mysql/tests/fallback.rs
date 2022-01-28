@@ -1,10 +1,9 @@
 use mysql::prelude::*;
 use noria_client::BackendBuilder;
+use noria_client_test_helpers::mysql_helpers::MySQLAdapter;
 use noria_client_test_helpers::{self, sleep};
-use serial_test::serial;
 
-mod common;
-use common::MySQLAdapter;
+use serial_test::serial;
 
 fn setup() -> mysql::Opts {
     noria_client_test_helpers::setup::<MySQLAdapter>(

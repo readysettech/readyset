@@ -4,12 +4,11 @@ use noria_client::backend::MigrationMode;
 use noria_client::backend::QueryInfo;
 use noria_client::query_status_cache::QueryStatusCache;
 use noria_client_metrics::QueryDestination;
+use noria_client_test_helpers::mysql_helpers::query_cache_setup;
 use noria_client_test_helpers::sleep;
 use serial_test::serial;
 use std::convert::TryFrom;
 use std::sync::Arc;
-mod common;
-use common::query_cache_setup;
 
 /// Retrieves where the query executed by parsing the row returned by
 /// EXPLAIN LAST STATEMENT.
