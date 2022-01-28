@@ -686,6 +686,7 @@ impl AuthorityLeaderElectionState {
                                     "Config in authority different than our config, changing to our config"
                                 );
                                 }
+                                state.dataflow_state.domain_config = self.config.domain_config.clone();
                                 state.config = self.config.clone();
                                 Ok(state)
                             }

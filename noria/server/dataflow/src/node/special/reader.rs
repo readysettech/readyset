@@ -143,8 +143,7 @@ impl Reader {
     pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
         let mut bytes_freed = 0;
         if let Some(ref mut handle) = self.writer {
-            let mut rng = rand::thread_rng();
-            bytes_freed = handle.evict_bytes(&mut rng, bytes);
+            bytes_freed = handle.evict_bytes(bytes);
             handle.swap();
         }
         bytes_freed

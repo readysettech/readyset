@@ -502,6 +502,7 @@ impl Default for Config {
                 // high concurrency during snapshotting. We set this to the migration timeout for
                 // now.
                 table_request_timeout: Duration::from_millis(1800000),
+                eviction_kind: dataflow::EvictionKind::Random,
             },
             persistence: Default::default(),
             quorum: 1,

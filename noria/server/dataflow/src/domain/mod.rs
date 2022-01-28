@@ -48,6 +48,9 @@ pub struct Config {
 
     /// The amount of time to wait before timing out a table request to the domain.
     pub table_request_timeout: time::Duration,
+
+    #[serde(default)]
+    pub eviction_kind: crate::EvictionKind,
 }
 
 const BATCH_SIZE: usize = 256;
@@ -384,6 +387,8 @@ impl DomainBuilder {
             active_remaps: Default::default(),
 
             metrics: domain_metrics::DomainMetrics::new(self.index, self.shard.unwrap_or(0)),
+
+            eviction_kind: self.config.eviction_kind,
         }
     }
 }
@@ -502,6 +507,7 @@ pub struct Domain {
     replay_completed: bool,
 
     metrics: domain_metrics::DomainMetrics,
+    eviction_kind: crate::EvictionKind,
 }
 
 impl Domain {
@@ -1524,6 +1530,7 @@ impl Domain {
                                     })
                                 }
                             },
+                            self.eviction_kind,
                         );
 
                         #[allow(clippy::indexing_slicing)] // checked node exists above

@@ -429,52 +429,6 @@ fn empty() {
 }
 
 #[test]
-fn empty_random() {
-    let (mut w, r) = reader_map::new();
-    w.insert(1, "a");
-    w.insert(1, "b");
-    w.insert(2, "c");
-
-    let mut rng = rand::thread_rng();
-    let removed: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
-    w.publish();
-
-    // should only have one value set left
-    assert_eq!(removed.len(), 1);
-    let kept = 3 - removed[0];
-    // one of them must have gone away
-    assert_eq!(r.len(), 1);
-    assert!(!r.contains_key(&removed[0]));
-    assert!(r.contains_key(&kept));
-
-    // remove the other one
-    let removed: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
-    w.publish();
-
-    assert_eq!(removed.len(), 1);
-    assert_eq!(removed[0], kept);
-    assert!(r.is_empty());
-}
-
-#[test]
-fn empty_random_multiple() {
-    let (mut w, r) = reader_map::new();
-    w.insert(1, "a");
-    w.insert(1, "b");
-    w.insert(2, "c");
-
-    let mut rng = rand::thread_rng();
-    let removed1: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
-    let removed2: Vec<_> = w.empty_random(&mut rng, 0.33).map(|(&k, _)| k).collect();
-    w.publish();
-
-    assert_eq!(removed1.len(), 1);
-    assert_eq!(removed2.len(), 1);
-    assert_ne!(removed1[0], removed2[0]);
-    assert!(r.is_empty());
-}
-
-#[test]
 fn empty_post_refresh() {
     let (mut w, r) = reader_map::new();
     w.insert(1, "a");
@@ -943,5 +897,170 @@ fn contains_key_respects_ranges() {
     {
         let m = r.enter().unwrap();
         assert!(m.contains_key(&3));
+    }
+}
+
+#[test]
+fn eviction_lru() {
+    let x = ('x', 42);
+    let y = ('y', 43);
+    let z = ('z', 44);
+
+    let (mut w, r) = reader_map::Options::default()
+        .with_eviction_strategy(reader_map::EvictionStrategy::new_lru())
+        .construct();
+
+    w.insert(x.0, x);
+    w.insert(x.0, x);
+
+    w.publish();
+
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 1);
+
+    w.publish();
+    w.insert(x.0, x);
+
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 2);
+
+    w.insert(y.0, y);
+    w.publish();
+
+    assert_match!(r.get_one(&y.0).as_deref(), Some(('y', 43)));
+    assert_match!(r.get_one(&y.0).as_deref(), Some(('y', 43)));
+    assert_match!(r.get_one(&y.0).as_deref(), Some(('y', 43)));
+
+    assert_eq!(r.get(&y.0).unwrap().eviction_meta().value(), 7);
+    {
+        // Test via handle too
+        let handle = r.enter().unwrap();
+        assert_eq!(handle.get(&y.0).unwrap().eviction_meta().value(), 8);
+        assert_eq!(handle.get(&y.0).unwrap().eviction_meta().value(), 9);
+        assert_eq!(handle.get(&y.0).unwrap().eviction_meta().value(), 10);
+        assert_eq!(handle.get(&y.0).unwrap().eviction_meta().value(), 11);
+        assert_eq!(handle.get(&x.0).unwrap().eviction_meta().value(), 12);
+        assert_eq!(handle.get(&x.0).unwrap().eviction_meta().value(), 13);
+        assert_eq!(handle.get(&x.0).unwrap().eviction_meta().value(), 14);
+    }
+
+    w.insert(z.0, z);
+    w.publish();
+
+    assert_eq!(r.get(&z.0).unwrap().eviction_meta().value(), 16);
+    assert_eq!(r.get(&y.0).unwrap().eviction_meta().value(), 17);
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 18);
+
+    // Check that if we evict one third of the keys, the evicted key would be z, which we used the
+    // longest time ago
+    let to_evict = w.evict_keys(0.33).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 1);
+    assert_eq!(to_evict[0].0, &'z');
+
+    w.publish();
+    assert!(r.get(&z.0).is_none());
+    assert_eq!(r.get(&y.0).unwrap().eviction_meta().value(), 19);
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 20);
+
+    // Check that if we evict the remaining half of the keys, the evicted key would be y, which we
+    // used the longest time ago
+    let to_evict = w.evict_keys(0.49).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 1);
+    assert_eq!(to_evict[0].0, &'y');
+
+    w.publish();
+    assert!(r.get(&y.0).is_none());
+}
+
+#[test]
+fn eviction_generational() {
+    let a = ('a', 30);
+    let b = ('b', 31);
+    let c = ('c', 32);
+
+    let x = ('x', 42);
+    let y = ('y', 43);
+    let z = ('z', 44);
+
+    let (mut w, r) = reader_map::Options::default()
+        .with_eviction_strategy(reader_map::EvictionStrategy::new_generational())
+        .construct();
+
+    w.insert(x.0, x);
+    w.insert(y.0, y);
+    w.insert(z.0, z);
+
+    w.publish();
+
+    // All of the keys are generation 0 before first eviction
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 0);
+    assert_eq!(r.get(&y.0).unwrap().eviction_meta().value(), 0);
+    assert_eq!(r.get(&z.0).unwrap().eviction_meta().value(), 0);
+
+    assert_match!(r.get_one(&x.0).as_deref(), Some(('x', 42)));
+    assert_match!(r.get_one(&y.0).as_deref(), Some(('y', 43)));
+    assert_match!(r.get_one(&z.0).as_deref(), Some(('z', 44)));
+
+    let to_evict = w.evict_keys(0.0).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 0);
+
+    w.insert(a.0, a);
+    w.insert(b.0, b);
+    w.insert(c.0, c);
+
+    w.publish();
+
+    // Now reads and inserts are added to generation 1
+    assert_eq!(r.get(&a.0).unwrap().eviction_meta().value(), 1);
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 1);
+
+    // Evict 2 of the 6 keys (1/3rd), those should be y and z
+    let to_evict = w.evict_keys(0.34).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 2);
+
+    assert!(to_evict.iter().find(|(k, _)| **k == 'y').is_some());
+    assert!(to_evict.iter().find(|(k, _)| **k == 'z').is_some());
+
+    w.insert(y.0, y);
+    w.insert(z.0, z);
+    w.publish();
+
+    assert_eq!(r.get(&x.0).unwrap().eviction_meta().value(), 2);
+
+    // Evict 4 of the 6 keys (1/2rd), those should be a, b and c
+    let to_evict = w.evict_keys(0.5).collect::<Vec<_>>();
+    assert_eq!(to_evict.len(), 3);
+
+    assert!(to_evict.iter().find(|(k, _)| **k == 'a').is_some());
+    assert!(to_evict.iter().find(|(k, _)| **k == 'b').is_some());
+    assert!(to_evict.iter().find(|(k, _)| **k == 'c').is_some());
+}
+
+#[test]
+fn eviction_random() {
+    let (mut w, r) = reader_map::new();
+    w.insert(1, "a");
+    w.insert(2, "b");
+    w.insert(2, "d");
+    w.insert(3, "c");
+
+    let mut rng = rand::thread_rng();
+    let removed = loop {
+        // Since random eviction is non deterministric it may very well not evict anything on the
+        // first try
+        let removed: Vec<_> = w.evict_keys(0.5).map(|(&k, _)| k).collect();
+        if !removed.is_empty() {
+            break removed;
+        }
+    };
+
+    w.publish();
+
+    for k in &removed {
+        // Check all of the removed keys are indeed gone
+        assert!(!r.contains_key(k));
+    }
+
+    for k in &[1, 2, 3] {
+        // Check that everything that was not removed is still present
+        assert!(removed.contains(k) || r.contains_key(k));
     }
 }

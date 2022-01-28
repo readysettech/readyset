@@ -122,7 +122,13 @@ where
             return None;
         }
 
-        ReadGuard::try_map(inner, |inner| inner.data.get(key).map(AsRef::as_ref))
+        ReadGuard::try_map(inner, |inner| {
+            let v = inner.data.get(key).map(AsRef::as_ref);
+            if let Some(v) = v {
+                inner.eviction_strategy.on_read(v.eviction_meta());
+            }
+            v
+        })
     }
 
     /// Returns a guarded reference to the values corresponding to the key.

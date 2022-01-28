@@ -82,7 +82,7 @@ pub struct DataflowState {
     pub(super) ndomains: usize,
     pub(super) sharding: Option<usize>,
 
-    domain_config: DomainConfig,
+    pub(super) domain_config: DomainConfig,
 
     /// Controls the persistence mode, and parameters related to persistence.
     ///

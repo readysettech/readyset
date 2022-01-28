@@ -201,6 +201,12 @@ impl Builder {
         self.config.domain_config.table_request_timeout = value;
     }
 
+    /// Sets the value of [`Config::domain_config::eviction_kind`]. See documentation of
+    /// that field for more information.
+    pub fn set_eviction_kind(&mut self, value: dataflow::EvictionKind) {
+        self.config.domain_config.eviction_kind = value;
+    }
+
     /// Start a server instance and return a handle to it.
     pub fn start(
         self,
