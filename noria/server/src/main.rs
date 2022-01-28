@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use clap::Parser;
+use clap::{ArgEnum, Parser};
 use futures_util::future::{self, Either};
 use launchpad::redacted_string::RedactedString;
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -112,6 +112,10 @@ struct Opts {
     /// Frequency at which to check the state size against the memory limit (in seconds)
     #[clap(long = "memory-check-every", default_value = "1")]
     memory_check_freq: u64,
+
+    /// The strategy to use when memory is freed from reader nodes
+    #[clap(long = "eviction-policy", arg_enum, default_value_t = dataflow::EvictionKind::Random)]
+    eviction_kind: dataflow::EvictionKind,
 
     /// Enable query graph node reuse
     #[clap(long)]
@@ -238,6 +242,8 @@ fn main() -> anyhow::Result<()> {
     if opts.memory > 0 {
         builder.set_memory_limit(opts.memory, Duration::from_secs(opts.memory_check_freq));
     }
+    builder.set_eviction_kind(opts.eviction_kind);
+
     builder.set_sharding(sharding);
     builder.set_quorum(opts.quorum);
     if opts.no_partial {

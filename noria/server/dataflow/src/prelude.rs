@@ -40,7 +40,7 @@ pub use vec1::vec1;
 
 pub use crate::processing::{ColumnRef, ColumnSource};
 use crate::state::MaterializedNodeState;
-pub use crate::{DurabilityMode, PersistenceParameters};
+pub use crate::{DurabilityMode, EvictionKind, PersistenceParameters};
 
 /// Channel coordinator type specialized for domains
 pub type ChannelCoordinator = noria::channel::ChannelCoordinator<(DomainIndex, usize), Box<Packet>>;

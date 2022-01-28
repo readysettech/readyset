@@ -128,7 +128,10 @@ where
         K: Borrow<Q>,
         Q: Ord + Hash,
     {
-        self.guard.data.get(key).map(AsRef::as_ref)
+        self.guard.data.get(key).map(AsRef::as_ref).map(|v| {
+            self.guard.eviction_strategy.on_read(v.eviction_meta());
+            v
+        })
     }
 
     /// Returns a guarded reference to _one_ value corresponding to the key.

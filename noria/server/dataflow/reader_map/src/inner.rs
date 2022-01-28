@@ -9,6 +9,7 @@ use left_right::aliasing::DropBehavior;
 use noria::internal::IndexType;
 use partial_map::PartialMap;
 
+use crate::eviction::EvictionStrategy;
 use crate::values::ValuesInner;
 
 /// Represents a miss when looking up a range.
@@ -144,13 +145,6 @@ where
         }
     }
 
-    pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
-        match self {
-            Self::BTreeMap { map, .. } => Either::Left(map.keys()),
-            Self::HashMap { map } => Either::Right(map.keys()),
-        }
-    }
-
     pub(crate) fn clear(&mut self) {
         match self {
             Self::BTreeMap { map, .. } => {
@@ -237,13 +231,6 @@ where
         Q: ?Sized + Hash + Ord + ToOwned<Owned = K>,
     {
         with_map!(self, |map| map.remove(k))
-    }
-
-    pub(crate) fn get_key_value<'a>(
-        &'a self,
-        k: &'a K,
-    ) -> Option<(&'a K, &'a ValuesInner<V, S, D>)> {
-        with_map!(self, |map| map.get_key_value(k))
     }
 
     pub(crate) fn contains_key<Q>(&self, k: &Q) -> bool
@@ -360,6 +347,8 @@ where
     pub(crate) timestamp: T,
     pub(crate) ready: bool,
     pub(crate) hasher: S,
+
+    pub(crate) eviction_strategy: EvictionStrategy,
 }
 
 impl<K, V, M, T, S> fmt::Debug for Inner<K, V, M, T, S>
@@ -395,6 +384,7 @@ where
             timestamp: self.timestamp.clone(),
             ready: self.ready,
             hasher: self.hasher.clone(),
+            eviction_strategy: self.eviction_strategy.clone(),
         }
     }
 }
@@ -410,6 +400,7 @@ where
         meta: M,
         timestamp: T,
         hasher: S,
+        eviction_strategy: EvictionStrategy,
     ) -> Self {
         Inner {
             data: Data::with_index_type_and_hasher(index_type, hasher.clone()),
@@ -417,6 +408,7 @@ where
             timestamp,
             ready: false,
             hasher,
+            eviction_strategy,
         }
     }
 }

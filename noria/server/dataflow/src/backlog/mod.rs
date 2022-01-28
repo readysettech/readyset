@@ -7,8 +7,8 @@ use ahash::RandomState;
 use common::SizeOf;
 use noria::consistency::Timestamp;
 use noria::KeyComparison;
-use rand::prelude::*;
 use reader_map::refs::{Values, ValuesIter};
+use reader_map::EvictionStrategy;
 use vec1::Vec1;
 
 pub use self::multir::{LookupError, LookupResult};
@@ -24,7 +24,7 @@ pub(crate) trait Trigger =
 ///
 /// * index must be non-empty, or we hit an unimplemented!
 pub(crate) fn new(cols: usize, index: Index) -> (SingleReadHandle, WriteHandle) {
-    new_inner(cols, index, None)
+    new_inner(cols, index, None, EvictionKind::Random)
 }
 
 /// Allocate a new partially materialized end-user facing result table.
@@ -44,11 +44,12 @@ pub(crate) fn new_partial<F>(
     cols: usize,
     index: Index,
     trigger: F,
+    eviction_kind: EvictionKind,
 ) -> (SingleReadHandle, WriteHandle)
 where
     F: Trigger,
 {
-    new_inner(cols, index, Some(Arc::new(trigger)))
+    new_inner(cols, index, Some(Arc::new(trigger)), eviction_kind)
 }
 
 // # Invariants:
@@ -58,6 +59,7 @@ fn new_inner(
     cols: usize,
     index: Index,
     trigger: Option<Arc<dyn Trigger>>,
+    eviction_kind: EvictionKind,
 ) -> (SingleReadHandle, WriteHandle) {
     let contiguous = {
         let mut contiguous = true;
@@ -74,6 +76,12 @@ fn new_inner(
         contiguous
     };
 
+    let eviction_strategy = match eviction_kind {
+        EvictionKind::Random => EvictionStrategy::new_random(),
+        EvictionKind::LRU => EvictionStrategy::new_lru(),
+        EvictionKind::Generational => EvictionStrategy::new_generational(),
+    };
+
     macro_rules! make {
         ($variant:tt) => {{
             use reader_map;
@@ -82,6 +90,7 @@ fn new_inner(
                 .with_timestamp(Timestamp::default())
                 .with_hasher(RandomState::default())
                 .with_index_type(index.index_type)
+                .with_eviction_strategy(eviction_strategy)
                 .construct();
             // If we're fully materialized, we never miss, so we can insert a single interval to
             // cover the full range of keys
@@ -313,7 +322,7 @@ impl WriteHandle {
 
     /// Attempt to evict `bytes` from state. This approximates the number of keys to evict,
     /// these keys may not have exactly `bytes` worth of state.
-    pub(crate) fn evict_bytes(&mut self, rng: &mut ThreadRng, bytes: usize) -> u64 {
+    pub(crate) fn evict_bytes(&mut self, bytes: usize) -> u64 {
         let mut bytes_to_be_freed = 0;
         if self.mem_size > 0 {
             debug_assert!(
@@ -322,9 +331,7 @@ impl WriteHandle {
                 self.mem_size
             );
 
-            bytes_to_be_freed += self
-                .handle
-                .empty_random(rng, bytes as f64 / self.mem_size as f64);
+            bytes_to_be_freed += self.handle.evict(bytes as f64 / self.mem_size as f64);
         }
 
         self.mem_size = self.mem_size.saturating_sub(bytes_to_be_freed as usize);
@@ -694,6 +701,7 @@ mod tests {
             1,
             Index::hash_map(vec![0]),
             |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+            EvictionKind::Random,
         );
         w.swap();
 
@@ -714,6 +722,7 @@ mod tests {
                 1,
                 Index::hash_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                EvictionKind::Random,
             );
             w.swap();
 
@@ -731,6 +740,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                EvictionKind::Random,
             );
             w.swap();
 
@@ -761,6 +771,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                EvictionKind::Random,
             );
             w.swap();
 
@@ -780,6 +791,7 @@ mod tests {
                 1,
                 Index::btree_map(vec![0]),
                 |_: &mut dyn Iterator<Item = &KeyComparison>| true,
+                EvictionKind::Random,
             );
             w.swap();
 

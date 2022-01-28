@@ -3748,6 +3748,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "bincode",
+ "clap 3.0.4",
  "criterion",
  "dataflow_expression",
  "derivative",

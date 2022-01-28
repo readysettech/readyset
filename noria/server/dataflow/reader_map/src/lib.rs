@@ -231,6 +231,7 @@ use std::collections::hash_map::RandomState;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 
+pub use eviction::EvictionStrategy;
 use left_right::aliasing::Aliased;
 use noria::internal::IndexType;
 
@@ -238,6 +239,7 @@ use crate::inner::Inner;
 use crate::read::ReadHandle;
 use crate::write::WriteHandle;
 
+mod eviction;
 mod inner;
 mod read;
 mod values;
@@ -279,6 +281,7 @@ where
     hasher: S,
     index_type: IndexType,
     capacity: Option<usize>,
+    eviction_strategy: EvictionStrategy,
 }
 
 impl<M, T, S> fmt::Debug for Options<M, T, S>
@@ -304,6 +307,7 @@ impl Default for Options<(), (), RandomState> {
             hasher: RandomState::default(),
             index_type: IndexType::BTreeMap,
             capacity: None,
+            eviction_strategy: Default::default(),
         }
     }
 }
@@ -320,6 +324,7 @@ where
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
+            eviction_strategy: self.eviction_strategy,
         }
     }
 
@@ -334,6 +339,7 @@ where
             index_type: self.index_type,
             hasher: hash_builder,
             capacity: self.capacity,
+            eviction_strategy: self.eviction_strategy,
         }
     }
 
@@ -345,6 +351,7 @@ where
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: Some(capacity),
+            eviction_strategy: self.eviction_strategy,
         }
     }
 
@@ -356,12 +363,19 @@ where
             index_type: self.index_type,
             hasher: self.hasher,
             capacity: self.capacity,
+            eviction_strategy: self.eviction_strategy,
         }
     }
 
     /// Sets the index type of the map.
     pub fn with_index_type(mut self, index_type: IndexType) -> Self {
         self.index_type = index_type;
+        self
+    }
+
+    /// Sets the eviction strategy for the map.
+    pub fn with_eviction_strategy(mut self, eviction_strategy: EvictionStrategy) -> Self {
+        self.eviction_strategy = eviction_strategy;
         self
     }
 
@@ -380,6 +394,7 @@ where
             self.meta,
             self.timestamp,
             self.hasher,
+            self.eviction_strategy,
         );
 
         let (mut w, r) = left_right::new_from_empty(inner);

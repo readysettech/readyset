@@ -105,6 +105,19 @@ impl FromStr for DurabilityMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, clap::ArgEnum)]
+pub enum EvictionKind {
+    Random,
+    LRU,
+    Generational,
+}
+
+impl Default for EvictionKind {
+    fn default() -> Self {
+        EvictionKind::Random
+    }
+}
+
 /// Parameters to control the operation of GroupCommitQueue.
 #[derive(Clone, Debug, Serialize, Deserialize, Derivative)]
 #[derivative(PartialEq)]

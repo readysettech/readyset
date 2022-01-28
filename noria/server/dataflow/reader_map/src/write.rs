@@ -5,8 +5,8 @@ use std::ops::{Bound, RangeBounds};
 
 use left_right::aliasing::Aliased;
 use left_right::Absorb;
-use rand::prelude::IteratorRandom;
 
+use crate::eviction::EvictionMeta;
 use crate::inner::{Entry, Inner};
 use crate::read::ReadHandle;
 use crate::values::ValuesInner;
@@ -176,7 +176,7 @@ where
     /// The updated value-bag will only be visible to readers after the next call to
     /// [`publish`](Self::publish).
     pub fn insert(&mut self, k: K, v: V) -> &mut Self {
-        self.add_op(Operation::Add(k, Aliased::from(v)))
+        self.add_op(Operation::Add(k, Aliased::from(v), None))
     }
 
     /// Add the list of `records` to the value-set, which are assumed to have a key part of the
@@ -194,6 +194,7 @@ where
                 .map(|(k, v)| (k, Aliased::from(v)))
                 .collect(),
             (range.start_bound().cloned(), range.end_bound().cloned()),
+            None,
         ))
     }
 
@@ -208,7 +209,7 @@ where
     /// The new value will only be visible to readers after the next call to
     /// [`publish`](Self::publish).
     pub fn update(&mut self, k: K, v: V) -> &mut Self {
-        self.add_op(Operation::Replace(k, Aliased::from(v)))
+        self.add_op(Operation::Replace(k, Aliased::from(v), None))
     }
 
     /// Clear the value-bag of the given key, without removing it.
@@ -220,7 +221,7 @@ where
     /// The new value will only be visible to readers after the next call to
     /// [`publish`](Self::publish).
     pub fn clear(&mut self, k: K) -> &mut Self {
-        self.add_op(Operation::Clear(k))
+        self.add_op(Operation::Clear(k, None))
     }
 
     /// Remove the given value from the value-bag of the given key.
@@ -343,19 +344,13 @@ where
     ///
     /// This method immediately calls [`publish`](Self::publish) to ensure that the keys and values
     /// it returns match the elements that will be emptied on the next call to
-    /// [`publish`](Self::publish). The value-bags will only disappear from readers after the next
-    /// call to [`publish`](Self::publish).
-    pub fn empty_random<'a>(
+    /// [`publish`](Self::publish).
+    /// The values will only be submitted for eviction once the returned iterator has been consumed,
+    /// and a following call to publish is made.
+    pub fn evict_keys<'a>(
         &'a mut self,
-        rng: &mut impl rand::Rng,
         ratio: f64,
-    ) -> impl ExactSizeIterator<Item = (&'a K, &'a crate::values::Values<V, S>)> {
-        // force a publish so that our view into self.r_handle matches the indices we choose.
-        // if we didn't do this, the `i`th element of r_handle may be a completely different
-        // element than the one that _will_ be evicted when `EmptyAt([.. i ..])` is applied.
-        // this would be bad since we are telling the caller which elements we are evicting!
-        // note also that we _must_ use `r_handle`, not `w_handle`, since `w_handle` may have
-        // pending operations even after a publish!
+    ) -> impl Iterator<Item = (&'a K, &'a crate::values::Values<V, S>)> {
         self.publish();
 
         let inner = self
@@ -367,18 +362,15 @@ where
         // map is safe for the duration of 'a.
         let inner: &'a Inner<K, V, M, T, S> =
             unsafe { std::mem::transmute::<&Inner<K, V, M, T, S>, _>(inner.as_ref()) };
-        let inner = &inner.data;
 
-        let num_keys = (inner.len() as f64 * ratio) as usize + 1;
-        let n = num_keys.min(inner.len());
-        // let's pick some (distinct) indices to evict!
-        let keys: Vec<&K> = inner.keys().choose_multiple(rng, n);
+        let nkeys_to_evict = ((inner.data.len() as f64 * ratio) as usize).min(inner.data.len());
+        let kvs = inner
+            .eviction_strategy
+            .pick_keys_to_evict(&inner.data, nkeys_to_evict);
 
-        self.add_ops(keys.iter().map(|k| Operation::RemoveEntry((*k).clone())));
-
-        keys.into_iter().map(move |k| {
-            let (k, vs) = inner.get_key_value(k).expect("yielded by keys()");
-            (k, vs.as_ref())
+        kvs.map(move |(k, v)| {
+            self.add_op(Operation::RemoveEntry(k.clone()));
+            (k, v.as_ref())
         })
     }
 }
@@ -401,13 +393,24 @@ where
         //   _after_ absorb_second is called on this operation, so leaving an alias in the oplog is
         //   also safe.
 
+        let Self {
+            data,
+            eviction_strategy,
+            ..
+        } = self;
+
         let hasher = &other.hasher;
-        match *op {
-            Operation::Replace(ref key, ref mut value) => {
-                let vs = self
-                    .data
-                    .entry(key.clone())
-                    .or_insert_with(ValuesInner::new);
+        match op {
+            Operation::Replace(key, value, eviction_meta) => {
+                let vs = data.entry(key.clone()).or_insert_with(|| {
+                    // When a replace operation takes place after a call to `update` we really only
+                    // want to create a fresh metadata for the key if it didn't already exist,
+                    // otherwise cold updates will keep refreshing the metadata, preventing eviction
+                    // of cold but frequently updated keys
+                    let meta = eviction_strategy.new_meta();
+                    eviction_meta.replace(meta.clone());
+                    ValuesInner::new(meta)
+                });
 
                 // truncate vector
                 vs.clear();
@@ -418,44 +421,53 @@ where
 
                 vs.push(unsafe { value.alias() }, hasher);
             }
-            Operation::Clear(ref key) => {
-                self.data
-                    .entry(key.clone())
-                    .or_insert_with(ValuesInner::new)
+            Operation::Clear(key, eviction_meta) => {
+                data.entry(key.clone())
+                    .or_insert_with(|| {
+                        let meta = eviction_strategy.new_meta();
+                        eviction_meta.replace(meta.clone());
+                        ValuesInner::new(meta)
+                    })
                     .clear();
             }
-            Operation::Add(ref key, ref mut value) => {
-                self.data
-                    .entry(key.clone())
-                    .or_insert_with(ValuesInner::new)
+            Operation::Add(key, value, eviction_meta) => {
+                data.entry(key.clone())
+                    .or_insert_with(|| {
+                        let meta = eviction_strategy.new_meta();
+                        eviction_meta.replace(meta.clone());
+                        ValuesInner::new(meta)
+                    })
                     .push(unsafe { value.alias() }, hasher);
             }
-            Operation::AddRange(ref mut records, ref range) => {
-                for (ref key, value) in records {
-                    self.data
-                        .entry(key.clone())
-                        .or_insert_with(ValuesInner::new)
+            Operation::AddRange(records, range, eviction_meta) => {
+                for (key, value) in records {
+                    data.entry(key.clone())
+                        .or_insert_with(|| {
+                            let meta = eviction_strategy.new_meta();
+                            eviction_meta.replace(meta.clone());
+                            ValuesInner::new(meta)
+                        })
                         .push(unsafe { value.alias() }, hasher);
                 }
 
-                self.data.add_range(range.clone());
+                data.add_range(range.clone());
             }
-            Operation::RemoveEntry(ref key) => {
-                self.data.remove(key);
+            Operation::RemoveEntry(key) => {
+                data.remove(key);
             }
             Operation::Purge => {
-                self.data.clear();
+                data.clear();
             }
-            Operation::RemoveValue(ref key, ref value) => {
-                if let Some(e) = self.data.get_mut(key) {
+            Operation::RemoveValue(key, value) => {
+                if let Some(e) = data.get_mut(key) {
                     e.swap_remove(value);
                 }
             }
-            Operation::RemoveRange(ref range) => {
-                self.data.remove_range(range);
+            Operation::RemoveRange(range) => {
+                data.remove_range(range);
             }
-            Operation::Retain(ref key, ref mut predicate) => {
-                if let Some(e) = self.data.get_mut(key) {
+            Operation::Retain(key, predicate) => {
+                if let Some(e) = data.get_mut(key) {
                     let mut first = true;
                     e.retain(move |v| {
                         let retain = predicate.eval(v, first);
@@ -464,33 +476,33 @@ where
                     });
                 }
             }
-            Operation::Fit(ref key) => match key {
-                Some(ref key) => {
-                    if let Some(e) = self.data.get_mut(key) {
+            Operation::Fit(key) => match key {
+                Some(key) => {
+                    if let Some(e) = data.get_mut(key) {
                         e.shrink_to_fit();
                     }
                 }
                 None => {
-                    for value_set in self.data.values_mut() {
+                    for value_set in data.values_mut() {
                         value_set.shrink_to_fit();
                     }
                 }
             },
-            Operation::Reserve(ref key, additional) => match self.data.entry(key.clone()) {
+            Operation::Reserve(key, additional) => match data.entry(key.clone()) {
                 Entry::Occupied(entry) => {
-                    entry.into_mut().reserve(additional, hasher);
+                    entry.into_mut().reserve(*additional, hasher);
                 }
                 Entry::Vacant(entry) => {
-                    entry.insert(ValuesInner::with_capacity_and_hasher(additional, hasher));
+                    entry.insert(ValuesInner::with_capacity_and_hasher(*additional, hasher));
                 }
             },
             Operation::MarkReady => {
                 self.ready = true;
             }
-            Operation::SetMeta(ref m) => {
+            Operation::SetMeta(m) => {
                 self.meta = m.clone();
             }
-            Operation::SetTimestamp(ref t) => {
+            Operation::SetTimestamp(t) => {
                 self.timestamp = t.clone();
             }
             Operation::JustCloneRHandle => {
@@ -525,21 +537,29 @@ where
         //   and at the end of scope we revert to `NoDrop`, so all is well.
         let hasher = &other.hasher;
         match op {
-            Operation::Replace(key, value) => {
-                let v = inner.data.entry(key).or_insert_with(ValuesInner::new);
+            Operation::Replace(key, value, eviction_meta) => {
+                let v = inner.data.entry(key).or_insert_with(|| {
+                    ValuesInner::new(
+                        eviction_meta.unwrap_or_else(|| self.eviction_strategy.new_meta()),
+                    )
+                });
                 v.clear();
                 v.shrink_to_fit();
 
                 v.push(unsafe { value.change_drop() }, hasher);
             }
-            Operation::Clear(key) => {
+            Operation::Clear(key, eviction_meta) => {
                 inner
                     .data
                     .entry(key)
-                    .or_insert_with(ValuesInner::new)
+                    .or_insert_with(|| {
+                        ValuesInner::new(
+                            eviction_meta.unwrap_or_else(|| self.eviction_strategy.new_meta()),
+                        )
+                    })
                     .clear();
             }
-            Operation::Add(key, value) => {
+            Operation::Add(key, value, eviction_meta) => {
                 // safety (below):
                 //   we're turning a NoDrop into DoDrop, so we must be prepared for a drop.
                 //   if absorb_first dropped the value, then `value` is the only alias
@@ -548,15 +568,25 @@ where
                 inner
                     .data
                     .entry(key)
-                    .or_insert_with(ValuesInner::new)
+                    .or_insert_with(|| {
+                        ValuesInner::new(
+                            eviction_meta.unwrap_or_else(|| self.eviction_strategy.new_meta()),
+                        )
+                    })
                     .push(unsafe { value.change_drop() }, hasher);
             }
-            Operation::AddRange(records, range) => {
+            Operation::AddRange(records, range, mut eviction_meta) => {
                 for (key, value) in records {
                     inner
                         .data
                         .entry(key)
-                        .or_insert_with(ValuesInner::new)
+                        .or_insert_with(|| {
+                            ValuesInner::new(
+                                eviction_meta
+                                    .get_or_insert_with(|| self.eviction_strategy.new_meta())
+                                    .clone(),
+                            )
+                        })
                         .push(unsafe { value.change_drop() }, hasher);
                 }
 
@@ -588,8 +618,8 @@ where
                 }
             }
             Operation::Fit(key) => match key {
-                Some(ref key) => {
-                    if let Some(e) = inner.data.get_mut(key) {
+                Some(key) => {
+                    if let Some(e) = inner.data.get_mut(&key) {
                         e.shrink_to_fit();
                     }
                 }
@@ -699,13 +729,14 @@ where
 #[non_exhaustive]
 pub(super) enum Operation<K, V, M, T> {
     /// Replace the set of entries for this key with this value.
-    Replace(K, Aliased<V, crate::aliasing::NoDrop>),
+    Replace(K, Aliased<V, crate::aliasing::NoDrop>, Option<EvictionMeta>),
     /// Add this value to the set of entries for this key.
-    Add(K, Aliased<V, crate::aliasing::NoDrop>),
+    Add(K, Aliased<V, crate::aliasing::NoDrop>, Option<EvictionMeta>),
     /// Add a list of values for the given range of keys.
     AddRange(
         Vec<(K, Aliased<V, crate::aliasing::NoDrop>)>,
         (Bound<K>, Bound<K>),
+        Option<EvictionMeta>,
     ),
     /// Remove this value from the set of entries for this key.
     RemoveValue(K, V),
@@ -714,7 +745,7 @@ pub(super) enum Operation<K, V, M, T> {
     /// Remove all entries in the given range
     RemoveRange((Bound<K>, Bound<K>)),
     /// Remove all values in the value set for this key.
-    Clear(K),
+    Clear(K, Option<EvictionMeta>),
     /// Remove all values for all keys.
     ///
     /// Note that this will iterate once over all the keys internally.
@@ -750,25 +781,21 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Operation::Replace(ref a, ref b) => f.debug_tuple("Replace").field(a).field(b).finish(),
-            Operation::Add(ref a, ref b) => f.debug_tuple("Add").field(a).field(b).finish(),
-            Operation::AddRange(ref a, ref b) => {
-                f.debug_tuple("AddRange").field(a).field(b).finish()
-            }
-            Operation::RemoveValue(ref a, ref b) => {
-                f.debug_tuple("RemoveValue").field(a).field(b).finish()
-            }
-            Operation::RemoveRange(ref range) => f.debug_tuple("RemoveRange").field(range).finish(),
-            Operation::RemoveEntry(ref a) => f.debug_tuple("RemoveEntry").field(a).finish(),
-            Operation::Clear(ref a) => f.debug_tuple("Clear").field(a).finish(),
+        match self {
+            Operation::Replace(a, b, _) => f.debug_tuple("Replace").field(a).field(b).finish(),
+            Operation::Add(a, b, c) => f.debug_tuple("Add").field(a).field(b).field(c).finish(),
+            Operation::AddRange(a, b, _) => f.debug_tuple("AddRange").field(a).field(b).finish(),
+            Operation::RemoveValue(a, b) => f.debug_tuple("RemoveValue").field(a).field(b).finish(),
+            Operation::RemoveRange(range) => f.debug_tuple("RemoveRange").field(range).finish(),
+            Operation::RemoveEntry(a) => f.debug_tuple("RemoveEntry").field(a).finish(),
+            Operation::Clear(a, _) => f.debug_tuple("Clear").field(a).finish(),
             Operation::Purge => f.debug_tuple("Purge").finish(),
-            Operation::Retain(ref a, ref b) => f.debug_tuple("Retain").field(a).field(b).finish(),
-            Operation::Fit(ref a) => f.debug_tuple("Fit").field(a).finish(),
-            Operation::Reserve(ref a, ref b) => f.debug_tuple("Reserve").field(a).field(b).finish(),
+            Operation::Retain(a, b) => f.debug_tuple("Retain").field(a).field(b).finish(),
+            Operation::Fit(a) => f.debug_tuple("Fit").field(a).finish(),
+            Operation::Reserve(a, b) => f.debug_tuple("Reserve").field(a).field(b).finish(),
             Operation::MarkReady => f.debug_tuple("MarkReady").finish(),
-            Operation::SetMeta(ref a) => f.debug_tuple("SetMeta").field(a).finish(),
-            Operation::SetTimestamp(ref a) => f.debug_tuple("SetTimestamp").field(a).finish(),
+            Operation::SetMeta(a) => f.debug_tuple("SetMeta").field(a).finish(),
+            Operation::SetTimestamp(a) => f.debug_tuple("SetTimestamp").field(a).finish(),
             Operation::JustCloneRHandle => f.debug_tuple("JustCloneRHandle").finish(),
         }
     }
