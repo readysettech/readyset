@@ -4,10 +4,9 @@ use std::env;
 use std::fmt::Display;
 use tokio::net::TcpStream;
 
+use crate::Adapter;
 use msql_srv::MysqlIntermediary;
 use noria_client::backend::{BackendBuilder, MigrationMode};
-use noria_client_test_helpers;
-
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 
 pub fn recreate_database<N>(dbname: N)
@@ -39,7 +38,7 @@ where
 
 pub struct MySQLAdapter;
 #[async_trait]
-impl noria_client_test_helpers::Adapter for MySQLAdapter {
+impl Adapter for MySQLAdapter {
     type ConnectionOpts = mysql::Opts;
     type Upstream = MySqlUpstream;
     type Handler = MySqlQueryHandler;
@@ -76,7 +75,7 @@ impl noria_client_test_helpers::Adapter for MySQLAdapter {
 // If `partial` is `false`, disables partial queries.
 #[allow(dead_code)] // not all test files use this function
 pub fn setup(partial: bool) -> mysql::Opts {
-    noria_client_test_helpers::setup::<MySQLAdapter>(
+    crate::setup::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)
             .explain_last_statement(true),
@@ -92,7 +91,7 @@ pub fn query_cache_setup(
     fallback: bool,
     migration_mode: MigrationMode,
 ) -> mysql::Opts {
-    noria_client_test_helpers::setup_inner::<MySQLAdapter>(
+    crate::setup_inner::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)
             .explain_last_statement(true),

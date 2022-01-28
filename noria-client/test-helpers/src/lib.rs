@@ -19,6 +19,8 @@ use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, LocalAuthority};
 use tokio::net::TcpStream;
 
+pub mod mysql_helpers;
+
 pub fn sleep() {
     thread::sleep(Duration::from_millis(200));
 }

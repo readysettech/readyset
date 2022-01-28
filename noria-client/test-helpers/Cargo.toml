@@ -9,10 +9,14 @@ edition = "2018"
 
 [dependencies]
 async-trait = "0.1.49"
+tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
+chrono = "0.4"
+mysql = "22.0"
+
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../../noria/noria/" }
 noria-client = { path = "../" }
 noria-server = { path = "../../noria/server/" }
 readyset-logging = { path = "../../readyset-logging" }
-tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
-chrono = "0.4"
+noria-mysql = { path = "../../noria-mysql" }
+msql-srv = { path = "../../msql-srv" }

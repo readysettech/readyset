@@ -1,11 +1,10 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql::prelude::*;
 use noria::status::ReadySetStatus;
-use noria_client_test_helpers::sleep;
 use std::convert::TryFrom;
 
-mod common;
-use common::setup;
+use noria_client_test_helpers::mysql_helpers::setup;
+use noria_client_test_helpers::sleep;
 
 #[test]
 fn delete_basic() {
