@@ -12,6 +12,7 @@ use petgraph::graph::NodeIndex;
 use std::convert::TryFrom;
 use tracing::{debug, error, trace, warn};
 
+use crate::controller::sql::mir::grouped::post_lookup_aggregates;
 use crate::controller::sql::query_graph::{OutputColumn, QueryGraph};
 use crate::controller::sql::query_signature::Signature;
 use crate::controller::sql::query_utils::extract_limit;
@@ -1794,6 +1795,12 @@ impl SqlToMirConverter {
                     })
                     .collect();
 
+                let aggregates = if view_key.index_type != IndexType::HashMap {
+                    post_lookup_aggregates(qg)?
+                } else {
+                    None
+                };
+
                 let leaf_node = MirNode::new(
                     name,
                     self.schema_version,
@@ -1841,6 +1848,7 @@ impl SqlToMirConverter {
                             cols
                         }),
                         default_row: default_row_for_select(st),
+                        aggregates,
                     },
                     vec![MirNodeRef::downgrade(&leaf_project_node)],
                     vec![],

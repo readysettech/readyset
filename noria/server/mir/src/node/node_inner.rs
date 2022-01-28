@@ -4,6 +4,7 @@ use common::{DataType, IndexType};
 use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::grouped::extremum::Extremum;
 use dataflow::ops::union;
+use dataflow::post_lookup::PostLookupAggregates;
 use itertools::Itertools;
 use nom_sql::{ColumnSpecification, Expression, OrderType};
 use noria::ViewPlaceholder;
@@ -110,6 +111,8 @@ pub enum MirNodeInner {
         returned_cols: Option<Vec<Column>>,
         /// Row of default values to send back, for example if we're aggregating and no rows are found
         default_row: Option<Vec<DataType>>,
+        /// Aggregates to perform in the reader on result sets for keys after performing the lookup
+        aggregates: Option<PostLookupAggregates<Column>>,
     },
 }
 
@@ -129,6 +132,7 @@ impl MirNodeInner {
             limit: None,
             returned_cols: None,
             default_row: None,
+            aggregates: None,
         }
     }
 

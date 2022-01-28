@@ -239,6 +239,8 @@ where
                     // index for a range replay, meaning we'd miss in the lookup even though we're
                     // processing a replay, since the hole is only marked filled in the BTreeMap
                     // index (the index matching the replay's key)!
+                    //
+                    // The issue this fixes is covered by //logictests/range_aggregates.test
                     let lookup_result = match (replay.tag(), replay.key()) {
                         (Some(tag), Some(key)) if key == this.out_key => {
                             db.lookup_in_tag(tag, &lookup_key)

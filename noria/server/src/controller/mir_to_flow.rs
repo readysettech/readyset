@@ -22,7 +22,7 @@ use common::DataType;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::latest::Latest;
 use dataflow::ops::project::Project;
-use dataflow::post_lookup::PostLookup;
+use dataflow::post_lookup::{PostLookup, PostLookupAggregates};
 use dataflow::{node, ops, BuiltinFunction, Expression as DataflowExpression};
 use mir::node::node_inner::MirNodeInner;
 use mir::node::{GroupedNodeType, MirNode};
@@ -234,6 +234,7 @@ fn mir_node_to_flow_parts(
                     limit,
                     ref returned_cols,
                     ref default_row,
+                    ref aggregates,
                     ..
                 } => {
                     invariant_eq!(mir_node.ancestors.len(), 1);
@@ -245,6 +246,7 @@ fn mir_node_to_flow_parts(
                         limit,
                         returned_cols,
                         default_row.clone(),
+                        aggregates,
                     )?;
                     materialize_leaf_node(&parent, name, keys, index_type, post_lookup, mig)?;
                     // TODO(malte): below is yucky, but required to satisfy the type system:
@@ -1111,6 +1113,7 @@ fn make_post_lookup(
     limit: Option<usize>,
     returned_cols: &Option<Vec<Column>>,
     default_row: Option<Vec<DataType>>,
+    aggregates: &Option<PostLookupAggregates<Column>>,
 ) -> ReadySetResult<PostLookup> {
     let order_by = if let Some(order) = order_by.as_ref() {
         Some(
@@ -1136,12 +1139,18 @@ fn make_post_lookup(
     } else {
         None
     };
+
+    let aggregates = aggregates
+        .clone()
+        .map(|aggs| aggs.map_columns(|col| parent.borrow().column_id_for_column(&col)))
+        .transpose()?;
+
     Ok(PostLookup {
         order_by,
         limit,
         returned_cols,
         default_row,
-        aggregates: None, // TODO
+        aggregates,
     })
 }
 
