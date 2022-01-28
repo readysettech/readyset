@@ -137,6 +137,9 @@ fn flatten_request_reader_replay(
 impl Replica {
     fn span(&self) -> Span {
         info_span!(
+            // Target noria_dataflow::domain rather than noria_server::worker::replica so that a log
+            // level of `noria_dataflow=trace` still logs the domain index
+            target: "noria_dataflow::domain",
             "domain",
             domain_index = self.domain.index().index(),
             shard = self.domain.shard()
