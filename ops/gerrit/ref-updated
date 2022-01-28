@@ -59,6 +59,19 @@ fi
 if [[ "$refname" == refs/changes/* ]]; then
     # This is a change to a CL, so kick off a CL build
 
+    # The ref-updated hook gets called for CLs that have just been merged, but
+    # we don't want to trigger a build for those (since the commit also gets
+    # built on refs/heads/main) - check for that here
+    if git \
+        -C /srv/gerrit/git/readyset.git \
+        branch main \
+        --contains "$refname" \
+        | grep main > /dev/null
+    then
+        echo "Ignoring merged CL"
+        exit 0
+    fi
+
     # Strip the patchset off the name of the CL so multiple builds of the same
     # CL show up next to each other in Buildkite (and cancel each other)
     branch=$(dirname "$refname") # refs/changes/28/28/1 -> refs/changes/28/28
