@@ -158,7 +158,7 @@ pub struct Options {
 
     /// Enable logging queries and execution metrics in prometheus. This creates a
     /// histogram per unique query.
-    #[clap(long, requires = "prometheus-metrics")]
+    #[clap(long, env = "QUERY_LOG", requires = "prometheus-metrics")]
     query_log: bool,
 
     /// Enables logging ad-hoc queries in the query log. Useful for testing.
