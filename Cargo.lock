@@ -3651,14 +3651,17 @@ dependencies = [
  "async-trait",
  "chrono",
  "msql-srv",
- "mysql",
+ "mysql_async",
  "nom-sql",
  "noria",
  "noria-client",
  "noria-mysql",
+ "noria-psql",
  "noria-server",
+ "psql-srv",
  "readyset-logging",
  "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -3904,7 +3907,6 @@ dependencies = [
  "noria-data",
  "noria-errors",
  "noria-server",
- "postgres 0.19.2 (git+https://github.com/readysettech/rust-postgres.git)",
  "postgres-native-tls",
  "proptest",
  "psql-srv",

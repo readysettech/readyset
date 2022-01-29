@@ -24,7 +24,7 @@ use std::ops::Range;
 
 use itertools::Itertools;
 use maplit::hashmap;
-use mysql::prelude::Queryable;
+use mysql_async::prelude::Queryable;
 use mysql_common::value::Value;
 use paste::paste;
 use proptest::prelude::*;
@@ -329,8 +329,8 @@ impl Table {
 /// The result of running a single [`Operation`] against either mysql or noria.
 #[derive(Debug)]
 pub enum OperationResult {
-    Err(mysql::Error),
-    Rows(Vec<mysql::Row>),
+    Err(mysql_async::Error),
+    Rows(Vec<mysql_async::Row>),
     NoResults,
 }
 
@@ -342,7 +342,7 @@ impl OperationResult {
         matches!(self, Self::Err(..))
     }
 
-    pub fn err(&self) -> Option<&mysql::Error> {
+    pub fn err(&self) -> Option<&mysql_async::Error> {
         match self {
             Self::Err(v) => Some(v),
             _ => None,
@@ -350,7 +350,7 @@ impl OperationResult {
     }
 }
 
-fn compare_rows(r1: &mysql::Row, r2: &mysql::Row) -> Ordering {
+fn compare_rows(r1: &mysql_async::Row, r2: &mysql::Row) -> Ordering {
     let l = cmp::min(r1.len(), r2.len());
     for i in 0..l {
         match r1.as_ref(i).unwrap().partial_cmp(r2.as_ref(i).unwrap()) {
@@ -385,8 +385,8 @@ impl PartialEq for OperationResult {
     }
 }
 
-impl From<mysql::Result<Vec<mysql::Row>>> for OperationResult {
-    fn from(res: mysql::Result<Vec<mysql::Row>>) -> Self {
+impl From<mysql_async::Result<Vec<mysql::Row>>> for OperationResult {
+    fn from(res: mysql_async::Result<Vec<mysql::Row>>) -> Self {
         match res {
             Ok(rows) => Self::Rows(rows),
             Err(e) => Self::Err(e),
@@ -394,8 +394,8 @@ impl From<mysql::Result<Vec<mysql::Row>>> for OperationResult {
     }
 }
 
-impl From<mysql::Result<()>> for OperationResult {
-    fn from(res: mysql::Result<()>) -> Self {
+impl From<mysql_async::Result<()>> for OperationResult {
+    fn from(res: mysql_async::Result<()>) -> Self {
         match res {
             Ok(()) => Self::NoResults,
             Err(e) => Self::Err(e),
@@ -404,11 +404,11 @@ impl From<mysql::Result<()>> for OperationResult {
 }
 
 impl<const K: usize> Operation<K> {
-    fn run(
+    async fn run(
         &self,
-        conn: &mut mysql::Conn,
-        query: &'static str,
-        tables: &HashMap<&'static str, Table>,
+        conn: &mut mysql_async::Conn,
+        query: &str,
+        tables: &HashMap<&str, Table>,
     ) -> Result<OperationResult, TestCaseError> {
         fn to_values(dts: &[DataType]) -> Result<Vec<Value>, TestCaseError> {
             dts.iter()
@@ -425,7 +425,8 @@ impl<const K: usize> Operation<K> {
 
         match self {
             Operation::Query { key } => Ok(conn
-                .exec::<mysql::Row, _, _>(query, mysql::Params::Positional(to_values(key)?))
+                .exec::<mysql_async::Row, _, _>(query, mysql::Params::Positional(to_values(key)?))
+                .await
                 .into()),
             Operation::Insert { table, row } => Ok(conn
                 .exec_drop(
@@ -436,6 +437,7 @@ impl<const K: usize> Operation<K> {
                     ),
                     to_values(row)?,
                 )
+                .await
                 .into()),
             Operation::Update {
                 table: table_name,
@@ -471,6 +473,7 @@ impl<const K: usize> Operation<K> {
                         ),
                         params,
                     )
+                    .await
                     .into())
             }
             Operation::Delete {
@@ -487,6 +490,7 @@ impl<const K: usize> Operation<K> {
                         ),
                         (Value::try_from(row[table.primary_key].clone()).unwrap(),),
                     )
+                    .await
                     .into())
             }
         }
@@ -540,15 +544,13 @@ where
 }
 
 impl<const K: usize> Operations<K> {
-    fn run(self, query: &'static str, tables: &HashMap<&'static str, Table>) -> TestCaseResult {
-        noria_client_test_helpers::mysql_helpers::recreate_database("vertical");
-        let mut mysql = mysql::Conn::new(
-            mysql::OptsBuilder::default()
+    async fn run(self, query: &str, tables: &HashMap<&str, Table>) -> TestCaseResult {
+        noria_client_test_helpers::mysql_helpers::recreate_database("vertical").await;
+        let mut mysql = mysql_async::Conn::new(
+            mysql_async::OptsBuilder::default()
                 .user(Some("root"))
                 .pass(Some("noria"))
-                .ip_or_hostname(Some(
-                    env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-                ))
+                .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
                 .tcp_port(
                     env::var("MYSQL_TCP_PORT")
                         .unwrap_or_else(|_| "3306".into())
@@ -557,17 +559,20 @@ impl<const K: usize> Operations<K> {
                 )
                 .db_name(Some("vertical")),
         )
+        .await
         .unwrap();
         let mut noria =
-            mysql::Conn::new(noria_client_test_helpers::mysql_helpers::setup(true)).unwrap();
+            mysql_async::Conn::new(noria_client_test_helpers::mysql_helpers::setup(true).await)
+                .await
+                .unwrap();
 
         for table in tables.values() {
-            mysql.query_drop(table.create_statement).unwrap();
-            noria.query_drop(table.create_statement).unwrap();
+            mysql.query_drop(table.create_statement).await.unwrap();
+            noria.query_drop(table.create_statement).await.unwrap();
         }
 
         for op in self.0 {
-            let mysql_res = op.run(&mut mysql, query, tables)?;
+            let mysql_res = op.run(&mut mysql, query, tables).await?;
             // skip tests where mysql returns an error for the operations
             prop_assume!(
                 !mysql_res.is_err(),
@@ -575,7 +580,7 @@ impl<const K: usize> Operations<K> {
                 mysql_res.err().unwrap()
             );
 
-            let noria_res = op.run(&mut noria, query, tables)?;
+            let noria_res = op.run(&mut noria, query, tables).await?;
             assert_eq!(mysql_res, noria_res);
         }
 
@@ -621,7 +626,11 @@ macro_rules! vertical_tests {
             operations: Operations<{vertical_tests!(@key_len $($tables)*)}>
         ) {
             let tables = vertical_tests!(@tables $($tables)*);
-            operations.run($query, &tables)?;
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(operations.run($query, &tables))?;
         }
         }
     };

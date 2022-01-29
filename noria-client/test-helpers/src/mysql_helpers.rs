@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use mysql::prelude::Queryable;
+use mysql_async::prelude::Queryable;
 use std::env;
 use std::fmt::Display;
 use tokio::net::TcpStream;
@@ -9,17 +9,15 @@ use msql_srv::MysqlIntermediary;
 use noria_client::backend::{BackendBuilder, MigrationMode};
 use noria_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 
-pub fn recreate_database<N>(dbname: N)
+pub async fn recreate_database<N>(dbname: N)
 where
     N: Display,
 {
-    let mut management_db = mysql::Conn::new(
-        mysql::OptsBuilder::default()
+    let mut management_db = mysql_async::Conn::new(
+        mysql_async::OptsBuilder::default()
             .user(Some("root"))
             .pass(Some("noria"))
-            .ip_or_hostname(Some(
-                env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-            ))
+            .ip_or_hostname(env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()))
             .tcp_port(
                 env::var("MYSQL_TCP_PORT")
                     .unwrap_or_else(|_| "3306".into())
@@ -27,38 +25,49 @@ where
                     .unwrap(),
             ),
     )
+    .await
     .unwrap();
     management_db
         .query_drop(format!("DROP DATABASE IF EXISTS {}", dbname))
+        .await
         .unwrap();
     management_db
         .query_drop(format!("CREATE DATABASE {}", dbname))
+        .await
         .unwrap();
 }
 
 pub struct MySQLAdapter;
+
+impl MySQLAdapter {
+    pub fn url_with_db(db: &str) -> String {
+        format!(
+            "mysql://root:noria@{}:{}/{}",
+            env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+            env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
+            db
+        )
+    }
+}
+
 #[async_trait]
 impl Adapter for MySQLAdapter {
-    type ConnectionOpts = mysql::Opts;
+    type ConnectionOpts = mysql_async::Opts;
     type Upstream = MySqlUpstream;
     type Handler = MySqlQueryHandler;
 
     const DIALECT: nom_sql::Dialect = nom_sql::Dialect::MySQL;
 
     fn connection_opts_with_port(port: u16) -> Self::ConnectionOpts {
-        mysql::OptsBuilder::default().tcp_port(port).into()
+        mysql_async::OptsBuilder::default().tcp_port(port).into()
     }
 
     fn url() -> String {
-        format!(
-            "mysql://root:noria@{}:{}/noria",
-            env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-            env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into()),
-        )
+        MySQLAdapter::url_with_db("noria")
     }
 
-    fn recreate_database() {
-        recreate_database("noria");
+    async fn recreate_database() {
+        recreate_database("noria").await;
     }
 
     async fn run_backend(
@@ -73,8 +82,7 @@ impl Adapter for MySQLAdapter {
 
 // Initializes a Noria worker and starts processing MySQL queries against it.
 // If `partial` is `false`, disables partial queries.
-#[allow(dead_code)] // not all test files use this function
-pub fn setup(partial: bool) -> mysql::Opts {
+pub async fn setup(partial: bool) -> mysql_async::Opts {
     crate::setup::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)
@@ -83,14 +91,14 @@ pub fn setup(partial: bool) -> mysql::Opts {
         partial,
         true,
     )
+    .await
 }
 
-#[allow(dead_code)]
-pub fn query_cache_setup(
+pub async fn query_cache_setup(
     query_status_cache: std::sync::Arc<noria_client::query_status_cache::QueryStatusCache>,
     fallback: bool,
     migration_mode: MigrationMode,
-) -> mysql::Opts {
+) -> mysql_async::Opts {
     crate::setup_inner::<MySQLAdapter>(
         BackendBuilder::new()
             .require_authentication(false)
@@ -101,4 +109,5 @@ pub fn query_cache_setup(
         query_status_cache,
         migration_mode,
     )
+    .await
 }
