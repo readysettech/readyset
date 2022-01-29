@@ -104,7 +104,11 @@ pub async fn query_cache_setup(
         BackendBuilder::new()
             .require_authentication(false)
             .explain_last_statement(true),
-        fallback,
+        if fallback {
+            Some(MySQLAdapter::url())
+        } else {
+            None
+        },
         true,
         true,
         query_status_cache,
