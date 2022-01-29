@@ -5,7 +5,6 @@ use std::env;
 use std::net::TcpListener;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
-use std::thread;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -19,10 +18,13 @@ use noria_client::{Backend, QueryHandler, UpstreamDatabase};
 use noria_server::{Builder, ControllerHandle, LocalAuthority};
 use tokio::net::TcpStream;
 
+#[cfg(feature = "mysql")]
 pub mod mysql_helpers;
+#[cfg(feature = "postgres")]
+pub mod psql_helpers;
 
-pub fn sleep() {
-    thread::sleep(Duration::from_millis(200));
+pub async fn sleep() {
+    tokio::time::sleep(Duration::from_millis(200)).await;
 }
 
 #[async_trait]
@@ -42,12 +44,12 @@ pub trait Adapter: Send {
         Self::Upstream::connect(Self::url()).await.unwrap()
     }
 
-    fn recreate_database();
+    async fn recreate_database();
 
     async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
 }
 
-pub fn setup<A>(
+pub async fn setup<A>(
     backend_builder: BackendBuilder,
     fallback: bool,
     partial: bool,
@@ -65,9 +67,10 @@ where
         query_status_cache,
         MigrationMode::InRequestPath,
     )
+    .await
 }
 
-pub fn setup_inner<A>(
+pub async fn setup_inner<A>(
     backend_builder: BackendBuilder,
     fallback: bool,
     partial: bool,
@@ -84,35 +87,28 @@ where
     }
 
     if fallback {
-        A::recreate_database();
+        A::recreate_database().await;
     }
 
     let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::new(
         LocalAuthorityStore::new(),
     ))));
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-
     let mut noria_handle = {
         let authority = Arc::clone(&authority);
-        rt.block_on(async move {
-            let mut builder = Builder::for_tests();
-            builder.set_allow_topk(true);
-            if !partial {
-                builder.disable_partial();
-            }
-            if fallback {
-                builder.set_replicator_url(A::url());
-            }
-            let mut handle = builder.start(authority).await.unwrap();
-            if wait_for_backend {
-                handle.backend_ready().await;
-            }
-            handle
-        })
+        let mut builder = Builder::for_tests();
+        builder.set_allow_topk(true);
+        if !partial {
+            builder.disable_partial();
+        }
+        if fallback {
+            builder.set_replicator_url(A::url());
+        }
+        let mut handle = builder.start(authority).await.unwrap();
+        if wait_for_backend {
+            handle.backend_ready().await;
+        }
+        handle
     };
 
     let auto_increments: Arc<RwLock<HashMap<String, AtomicUsize>>> = Arc::default();
@@ -120,10 +116,10 @@ where
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
 
-    thread::spawn(move || {
+    tokio::spawn(async move {
         let (s, _) = listener.accept().unwrap();
 
-        rt.block_on(async move {
+        let fut = async move {
             let s = TcpStream::from_std(s).unwrap();
 
             let ch = ControllerHandle::new(authority).await;
@@ -144,7 +140,8 @@ where
             A::run_backend(backend, s).await;
             noria_handle.shutdown();
             noria_handle.wait_done().await;
-        });
+        };
+        tokio::spawn(fut);
     });
 
     A::connection_opts_with_port(addr.port())

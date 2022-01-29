@@ -1,17 +1,18 @@
 use noria_client::backend::BackendBuilder;
-use noria_client_test_helpers::{self};
+use noria_client_test_helpers;
+use noria_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 
 mod common;
-use common::PostgreSQLAdapter;
-use postgres::NoTls;
+use common::connect;
 
-fn setup() -> postgres::Config {
+async fn setup() -> tokio_postgres::Config {
     noria_client_test_helpers::setup::<PostgreSQLAdapter>(
         BackendBuilder::new().require_authentication(false),
         true,
         true,
         true,
     )
+    .await
 }
 
 mod types {
@@ -25,36 +26,38 @@ mod types {
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
     use noria_client_test_helpers::sleep;
-    use postgres::types::{FromSql, ToSql};
     use proptest::prelude::ProptestConfig;
     use rust_decimal::Decimal;
+    use tokio_postgres::types::{FromSql, ToSql};
     use uuid::Uuid;
 
-    fn test_type_roundtrip<T, V>(type_name: T, val: V)
+    async fn test_type_roundtrip<T, V>(type_name: T, val: V)
     where
         T: Display,
         V: ToSql + Sync + PartialEq,
         for<'a> V: FromSql<'a>,
     {
-        let config = setup();
-        let mut client = config.connect(NoTls).unwrap();
+        let config = setup().await;
+        let client = connect(config).await;
 
-        sleep();
+        sleep().await;
 
         client
             .simple_query(&format!("CREATE TABLE t (x {})", type_name))
+            .await
             .unwrap();
 
         // check writes (going to fallback)
         client
             .execute("INSERT INTO t (x) VALUES ($1)", &[&val])
+            .await
             .unwrap();
 
-        sleep();
-        sleep();
+        sleep().await;
+        sleep().await;
 
         // check values coming out of noria
-        let star_results = client.query("SELECT * FROM t", &[]).unwrap();
+        let star_results = client.query("SELECT * FROM t", &[]).await.unwrap();
 
         assert_eq!(star_results.len(), 1);
         assert_eq!(star_results[0].get::<_, V>(0), val);
@@ -63,6 +66,7 @@ mod types {
         if format!("{}", type_name).as_str() != "json" {
             let count_where_result = client
                 .query_one("SELECT count(*) FROM t WHERE x = $1", &[&val])
+                .await
                 .unwrap()
                 .get::<_, i64>(0);
             assert_eq!(count_where_result, 1);
@@ -92,7 +96,11 @@ mod types {
             #[serial_test::serial]
             $(#[$meta])*
             fn $test_name($(#[$strategy])* val: $rust_type) {
-                test_type_roundtrip($pg_type_name, val);
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                rt.block_on(test_type_roundtrip($pg_type_name, val));
             }
         };
     }

@@ -11,12 +11,20 @@ edition = "2018"
 async-trait = "0.1.49"
 tokio = { version = "1.15", features = ["signal", "rt-multi-thread", "time"] }
 chrono = "0.4"
-mysql = "22.0"
+mysql_async = { version = "0.29.0", optional = true }
+tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", features = ["with-chrono-0_4", "with-eui48-1", "with-uuid-0_8", "with-serde_json-1", "with-bit-vec-0_6"], optional = true }
 
 nom-sql = { path = "../../nom-sql" }
 noria = { path = "../../noria/noria/" }
 noria-client = { path = "../" }
 noria-server = { path = "../../noria/server/" }
 readyset-logging = { path = "../../readyset-logging" }
-noria-mysql = { path = "../../noria-mysql" }
-msql-srv = { path = "../../msql-srv" }
+noria-mysql = { path = "../../noria-mysql", optional = true }
+noria-psql = { path = "../../noria-psql", optional = true }
+msql-srv = { path = "../../msql-srv", optional = true }
+psql-srv = { path = "../../psql-srv", optional = true }
+
+[features]
+default = []
+mysql = ["mysql_async", "noria-mysql", "msql-srv"]
+postgres = ["tokio-postgres", "noria-psql", "psql-srv"]
